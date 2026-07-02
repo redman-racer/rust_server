@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -40,10 +41,12 @@ internal class DiscordWipe : CovalencePlugin
     private const string MapAttachment = AttachmentBase + MapFilename;
     private const string MapFilename = "map.jpg";
     private const int MaxImageSize = 8 * 1024 * 1024;
+    private const string SecretsConfigName = "Secrets.local";
         
     private string _protocol;
     private string _previousProtocol;
     private bool _hasStarted;
+    private Dictionary<string, string> _secrets;
 
     private readonly StringBuilder _parser = new();
     private Action<IPlayer, StringBuilder, bool> _replacer;
@@ -89,6 +92,7 @@ internal class DiscordWipe : CovalencePlugin
         }
 
 #if RUST
+        _pluginConfig.ImageSettings.RustMaps.ApiKey = ResolveSecretValue(_pluginConfig.ImageSettings.RustMaps.ApiKey);
         _rustMapGenerateHeaders["X-API-Key"] = _pluginConfig.ImageSettings.RustMaps.ApiKey;
         _rustMapGetHeaders["X-API-Key"] = _pluginConfig.ImageSettings.RustMaps.ApiKey;
 #endif
@@ -97,7 +101,79 @@ internal class DiscordWipe : CovalencePlugin
 
     public string UpdateWebhookUrl(string url)
     {
+        url = ResolveSecretValue(url);
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return url;
+        }
+
         return url.Replace("/api/webhooks", "/api/v10/webhooks").Replace("https://discordapp.com/", "https://discord.com/");
+    }
+
+    private string ResolveSecretValue(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        string trimmed = value.Trim();
+
+        if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return string.Empty;
+        }
+
+        string secret;
+
+        if (LoadSecrets().TryGetValue(key, out secret))
+        {
+            return secret;
+        }
+
+        PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+        return string.Empty;
+    }
+
+    private Dictionary<string, string> LoadSecrets()
+    {
+        if (_secrets != null)
+        {
+            return _secrets;
+        }
+
+        _secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+
+        if (!File.Exists(path))
+        {
+            PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+            return _secrets;
+        }
+
+        try
+        {
+            Dictionary<string, string> loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+            if (loadedSecrets != null)
+            {
+                _secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        catch (Exception ex)
+        {
+            PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+        }
+
+        return _secrets;
     }
         
     protected override void LoadDefaultMessages()

@@ -4,7 +4,7 @@
   "Rust Map Image Settings": {
     "Map Image Source (None, RustMaps, RustMapApi)": "RustMapApi",
     "RustMaps.com Settings": {
-      "RustMap.com API Key": "20167995e2d64e5bb73c5f6e1d57c7e1",
+      "RustMap.com API Key": "${RUSTMAPS_API_KEY}",
       "Generate Staging Map": false
     },
     "RustMapApi Settings": {
@@ -14,9 +14,9 @@
     }
   },
   "Send wipe message when server wipes": true,
-  "Wipe Webhook url": "https://discord.com/api/webhooks/1521140356538961977/uaeKn0IHOdAzNA131duTikMVF_MEowfOs8L1mahyh_aZ99PedTuNBH5UvNSR8oS4c6em",
+  "Wipe Webhook url": "${DISCORD_WIPE_WEBHOOK_URL}",
   "Send protocol message when server protocol changes": true,
-  "Protocol Webhook url": "https://discord.com/api/webhooks/1521140356538961977/uaeKn0IHOdAzNA131duTikMVF_MEowfOs8L1mahyh_aZ99PedTuNBH5UvNSR8oS4c6em",
+  "Protocol Webhook url": "${DISCORD_WIPE_WEBHOOK_URL}",
   "Wipe messages": [
     {
       "Content": "@everyone",

@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Text.RegularExpressions;
 using System.Text;
 
 using Newtonsoft.Json;
+using Oxide.Core;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Libraries;
 using Oxide.Core.Plugins;
@@ -38,6 +40,8 @@ namespace Oxide.Plugins
         private ulong _entityID;
         private Vector3 _locationLargeOilRig;
         private Vector3 _locationOilRig;
+        private Dictionary<string, string> _secrets;
+        private const string SecretsConfigName = "Secrets.local";
 
         private readonly List<Regex> _regexTags = new()
 
@@ -1965,10 +1969,75 @@ namespace Oxide.Plugins
         {
             if (string.IsNullOrEmpty(url))
             {
-                return _configData.GlobalSettings.DefaultWebhookURL;
+                return ResolveSecretValue(_configData.GlobalSettings.DefaultWebhookURL);
             }
 
-            return url;
+            return ResolveSecretValue(url);
+        }
+
+        private string ResolveSecretValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            var trimmed = value.Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return "";
+            }
+
+            string secret;
+
+            if (LoadSecrets().TryGetValue(key, out secret))
+            {
+                return secret;
+            }
+
+            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            return "";
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (_secrets != null)
+            {
+                return _secrets;
+            }
+
+            _secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                return _secrets;
+            }
+
+            try
+            {
+                var loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+                if (loadedSecrets != null)
+                {
+                    _secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+            }
+
+            return _secrets;
         }
 
         public string GetGridPosition(Vector3 position) => MapHelper.PositionToString(position);

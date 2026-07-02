@@ -21,6 +21,8 @@ namespace Oxide.Plugins
         private Timer statsTimer;
         private Timer pendingStatsTimer;
         private long cursor;
+        private Dictionary<string, string> secrets;
+        private const string SecretsConfigName = "Secrets.local";
 
         private class Configuration
         {
@@ -370,6 +372,7 @@ namespace Oxide.Plugins
         private StatsSnapshot BuildStatsSnapshot()
         {
             var playersById = new Dictionary<string, StatsPlayer>();
+            var wipeStartedAt = ResolveSecretValue(config.WipeStartedAt);
 
             AddKdrStats(playersById);
             AddPlaytimeStats(playersById);
@@ -379,7 +382,7 @@ namespace Oxide.Plugins
             return new StatsSnapshot
             {
                 wipe_key = ResolveWipeKey(),
-                wipe_started_at = string.IsNullOrWhiteSpace(config.WipeStartedAt) ? null : config.WipeStartedAt,
+                wipe_started_at = string.IsNullOrWhiteSpace(wipeStartedAt) ? null : wipeStartedAt,
                 generated_at = DateTime.UtcNow.ToString("o"),
                 players = playersById.Values
                     .OrderByDescending(player => player.kills)
@@ -523,9 +526,11 @@ namespace Oxide.Plugins
 
         private string ResolveWipeKey()
         {
-            if (!string.IsNullOrWhiteSpace(config.WipeKey))
+            var wipeKey = ResolveSecretValue(config.WipeKey);
+
+            if (!string.IsNullOrWhiteSpace(wipeKey))
             {
-                return config.WipeKey.Trim();
+                return wipeKey.Trim();
             }
 
             return $"{config.ServerId}-current";
@@ -943,7 +948,7 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(config.SharedSecret))
+            if (string.IsNullOrWhiteSpace(ResolveSecretValue(config.SharedSecret)))
             {
                 PrintWarning("SharedSecret is not configured.");
                 return false;
@@ -971,7 +976,7 @@ namespace Oxide.Plugins
             var pathAndQuery = new Uri(url).PathAndQuery;
             var bodyHash = Sha256(body ?? "");
             var payload = $"{method.ToUpperInvariant()}\n{pathAndQuery}\n{timestamp}\n{bodyHash}";
-            var signature = HmacSha256(payload, config.SharedSecret);
+            var signature = HmacSha256(payload, ResolveSecretValue(config.SharedSecret));
 
             return new Dictionary<string, string>
             {
@@ -980,6 +985,71 @@ namespace Oxide.Plugins
                 ["X-Raidlands-Signature"] = signature,
                 ["Accept"] = "application/json"
             };
+        }
+
+        private string ResolveSecretValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            var trimmed = value.Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return "";
+            }
+
+            string secret;
+
+            if (LoadSecrets().TryGetValue(key, out secret))
+            {
+                return secret;
+            }
+
+            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            return "";
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (secrets != null)
+            {
+                return secrets;
+            }
+
+            secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                return secrets;
+            }
+
+            try
+            {
+                var loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+                if (loadedSecrets != null)
+                {
+                    secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+            }
+
+            return secrets;
         }
 
         private void ApplyDesiredGroups(string steamId, List<string> desiredGroups, List<string> apiManagedGroups)

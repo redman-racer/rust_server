@@ -8,7 +8,7 @@
     "Replacement string for tags": "`",
     "Queue interval (1 message per ? seconds)": 1.0,
     "Queue cooldown if connection error (seconds)": 60.0,
-    "Default WebhookURL": "",
+    "Default WebhookURL": "${DISCORD_DEFAULT_WEBHOOK_URL}",
     "RCON command blacklist": [
       "playerlist",
       "status"

@@ -1515,19 +1515,20 @@ namespace Oxide.Plugins
         {
             foreach (KeyValuePair<string, Clan.MemberInvite> invite in clan.MemberInvites.ToList())
             {
+                string inviteName = invite.Value?.DisplayName ?? string.Empty;
                 bool idMatches = !string.IsNullOrWhiteSpace(targetId) && invite.Key.Equals(targetId);
-                bool nameMatches = !string.IsNullOrWhiteSpace(targetName) && invite.Value.DisplayName.Contains(targetName, CompareOptions.OrdinalIgnoreCase);
+                bool nameMatches = !string.IsNullOrWhiteSpace(targetName) && inviteName.Contains(targetName, CompareOptions.OrdinalIgnoreCase);
 
                 if (!idMatches && !nameMatches)
                     continue;
 
                 clan.MemberInvites.Remove(invite.Key);
                 storedData.RevokePlayerInvite(invite.Key, clan.Tag);
-                clan.Broadcast("Notification.WithdrawInvite.Success", actorName, invite.Value.DisplayName);
+                clan.Broadcast("Notification.WithdrawInvite.Success", actorName, inviteName);
                 clan.MarkDirty();
 
                 if (configData.Options.LogChanges)
-                    LogToFile(Title, $"{actorName} withdrew {invite.Value.DisplayName}'s invite to [{clan.Tag}] via Raidlands API", this);
+                    LogToFile(Title, $"{actorName} withdrew {inviteName}'s invite to [{clan.Tag}] via Raidlands API", this);
 
                 return RaidlandsClanResult(true, "withdraw_invite", "", clan.Tag, actorRole, invite.Key);
             }

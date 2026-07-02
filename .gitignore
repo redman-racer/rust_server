@@ -42,6 +42,8 @@
 !/oxide/plugins/**
 !/oxide/config/
 !/oxide/config/**
+!/oxide/config/Secrets.example.json
+/oxide/config/Secrets.local.json
 !/oxide/lang/
 !/oxide/lang/**
 !/oxide/discord/

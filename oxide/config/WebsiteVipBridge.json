@@ -17,14 +17,14 @@
     "StatsIcon": "/assets/media/feature-icons/stats.png"
   },
   "ServerId": "raidlands-main",
-  "SharedSecret": "jhdsjkh4jh5kjhjshfjkhrkjhjshfejkhrkjhwkjhfjkhekjhskjfhkjhjhsd",
+  "SharedSecret": "${WEBSITE_VIP_SHARED_SECRET}",
   "SyncIntervalSeconds": 120,
   "FailMode": "log_only",
   "StatsEnabled": true,
   "StatsSyncIntervalSeconds": 300,
   "StatsDebounceSeconds": 30,
-  "WipeKey": "",
-  "WipeStartedAt": "",
+  "WipeKey": "${WEBSITE_VIP_WIPE_KEY}",
+  "WipeStartedAt": "${WEBSITE_VIP_WIPE_STARTED_AT}",
   "ManagedGroups": [
     "vip_bronze",
     "vip_gold",

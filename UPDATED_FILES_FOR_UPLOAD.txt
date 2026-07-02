@@ -1,30 +1,51 @@
-Clan management API files to upload
+Rust server files to update
 Generated: 2026-07-02
 
 Rust server files:
 
 oxide/plugins/Clans.cs
-oxide/plugins/WebsiteClanBridge.cs
 
-Website files:
+Why:
 
-api/clans/action.php
-api/server/clan-actions.php
-api/server/clan-action-result.php
-api/server/clan-snapshot.php
-database/migrations/004_clan_management.sql
-includes/clans.php
+Fixes Raidlands API invite withdrawal handling so a missing invite DisplayName
+does not break matching, broadcasting, or logging.
 
 After upload:
 
-1. Run database/migrations/004_clan_management.sql on the Raidlands website database.
-2. Upload the Rust plugin files to the same relative paths on the live Rust server.
-3. Reload Clans and load the new bridge from the server console:
+1. Upload the file to the same relative path on the live Rust server.
+2. Reload the plugin from the server console:
 
 oxide.reload Clans
-oxide.load WebsiteClanBridge
 
-4. After WebsiteClanBridge generates oxide/config/WebsiteClanBridge.json, set ApiBaseUrl, ServerId, and SharedSecret to match the website bridge settings.
-5. Reload the bridge:
+---
 
-oxide.reload WebsiteClanBridge
+Secret variable support files:
+
+oxide/plugins/WebsiteVipBridge.cs
+oxide/plugins/DiscordLogger.cs
+oxide/plugins/DiscordWipe.cs
+oxide/config/WebsiteVipBridge.json
+oxide/config/DiscordLogger.json
+oxide/config/DiscordWipe.json
+oxide/config/Secrets.example.json
+
+Do not upload from Git:
+
+oxide/config/Secrets.local.json
+
+Why:
+
+Adds centralized plugin secret variables. Tracked plugin configs can reference
+`${VARIABLE_NAME}` while the real values live in the ignored local secrets file.
+
+After upload:
+
+1. Upload the listed plugin/config/example files to the same relative paths on
+   the live Rust server.
+2. Create or update `oxide/config/Secrets.local.json` directly on the live
+   server with the real values.
+3. Reload the affected plugins from the server console:
+
+oxide.reload WebsiteVipBridge
+oxide.reload DiscordLogger
+oxide.reload DiscordWipe
