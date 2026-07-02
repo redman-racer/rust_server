@@ -1,0 +1,100 @@
+{
+  "Anti Hack": {
+    "Ignore Cheat Detected": true
+  },
+  "Auto Kick": {
+    "Account Trust": {
+      "Kick when account trust tier rank is at least (0 disables, 1 elevated, 2 high, 3 critical)": 0
+    },
+    "Alts that have active bans on your servers": false,
+    "Bans from your server ip": false,
+    "Bans on your network": true,
+    "Combat Anomaly Guidance": {
+      "Kick when recommendation rank is at least (0 disables, 1 monitor, 2 manual review, 3 escalate)": 0
+    },
+    "Enable Total bans (server + game + vac) kick": false,
+    "Enabled": true,
+    "Max allowed previous bans": 3,
+    "Max allowed total bans (server + game + vac)": 30,
+    "Ping": {
+      "Limit players ONLY to this country ISO code, kick rest": "",
+      "Max Ping Allowed": 250
+    },
+    "Steam": {
+      "Family share accounts": false,
+      "Family share accounts that are dirty": false,
+      "Max allowed Game bans": 2,
+      "Max allowed VAC bans": 1,
+      "Min age of VAC ban allowed": 90,
+      "Min Allowed Steam Level (-1 disables)": -1,
+      "Private Steam Profiles": false,
+      "Profiles that do no conform to the Steam64 IDs (Highly recommended)": true,
+      "When Steam Level Hidden": false
+    },
+    "Users that have been banned on rusthackreport": false,
+    "VPN": {
+      "Enabled": true,
+      "Ignore nVidia Cloud Gaming": true
+    }
+  },
+  "Better Chat: Tag for dirty users": "",
+  "Broadcast": {
+    "Kicks": false,
+    "New bans": true,
+    "Player Reports": true,
+    "RCON": false,
+    "When VAC is younger than": 120
+  },
+  "Clan Ban": {
+    "Ban Native Team Members": true,
+    "Reason Prefix": "Assoc Ban -> {playerId}: {reason}"
+  },
+  "Discord": {
+    "Bans Webhook URL": "https://support.discordapp.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+    "Notify when a player has received a game ban": true,
+    "Send Ban Report": true,
+    "Send Join Player Reports": true,
+    "Send Kick Report": true,
+    "Send Only Dirty Player Reports": true,
+    "Send Ping Kick to Discord": true,
+    "Show Quick Connect On report": true,
+    "Webhook URL": "https://support.discordapp.com/hc/en-us/articles/228383668-Intro-to-Webhooks"
+  },
+  "General": {
+    "Debug: Show additional debug console logs": false,
+    "Ignore Admins": true,
+    "SteamID for message icon": "76561199044451528"
+  },
+  "io.serverarmour.com": {
+    "Owner Email": "",
+    "Owner Real Name": "",
+    "Owner Steam64 ID": "",
+    "Server Key": "9cefd95179c570efd8ea07477c.1782417038463",
+    "Share details with other server owners": true,
+    "Steam API Key": "",
+    "Submit Arkan Data": true
+  },
+  "Plugin": {
+    "Combat Logs": {
+      "Batch Size": 250,
+      "Flush Seconds": 1.0,
+      "Payload Target KB": 256,
+      "Queue Max Entries": 5000,
+      "Retry Base Seconds": 1
+    },
+    "Map Upload": {
+      "Enable automatic upload to SA map endpoint": true,
+      "Initial Delay Seconds": 30.0,
+      "Initial JPEG quality (1-100)": 78,
+      "Max upload bytes before auto-downscale": 950000,
+      "Native renderer scale override (0 = auto)": 0.0,
+      "Resolution (0 = auto)": 0,
+      "Retry Delay Seconds": 30.0
+    },
+    "Use ELO system?": true
+  },
+  "Server Info": {
+    "Your Server IP": ""
+  },
+  "Show Protected MSG": true
+}

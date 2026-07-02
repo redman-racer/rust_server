@@ -1,0 +1,32 @@
+{
+  "Settings": {
+    "Bot Token": "MTUyMTEwNTg3OTQ3NzI1NjIzNA.G7tjK9.77dyYoB6qkI7wLgQLinWwKphpv6AEDVeGUilRA",
+    "Discord Server ID (Optional if bot only in 1 guild)": "",
+    "Auth Commands": [
+      "auth",
+      "authenticate"
+    ],
+    "Deauth Commands": [
+      "deauth",
+      "deauthenticate"
+    ],
+    "Oxide Groups to Assign": [
+      "discord"
+    ],
+    "Discord Roles to Assign": [
+      "⟬👥⟭ 𝗠𝗲𝗺𝗯𝗲𝗿𝘀"
+    ],
+    "Revoke Oxide Groups on Deauthenticate": true,
+    "Revoke Discord Roles on Deauthenticate": true,
+    "Automatically Reauthenticate on Leaving and Rejoining the Discord Server": true,
+    "Automatically Deauthenticate Non Active Players": false,
+    "Player Considered Non Active After (Days)": 30.0,
+    "Discord Extension Log Level (Verbose, Debug, Info, Warning, Error, Exception, Off)": "Info"
+  },
+  "Authentication Code": {
+    "Code Lifetime (minutes)": 60,
+    "Code Length": 5,
+    "Code Case Insensitive Match": true,
+    "Code Characters": "ABCDEFGHJKMNPQRSTUVWXYZ"
+  }
+}

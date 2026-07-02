@@ -1,0 +1,26 @@
+{
+  "Template": {
+    "Message Content": "",
+    "Message Embeds": [
+      {
+        "Show Embed": true,
+        "Embed Title": "",
+        "Embed Title URL": "",
+        "Embed Description": "You have successfully deleted application command {command.name}",
+        "Embed Hex Color": "#57F287",
+        "Embed Image URL": "",
+        "Embed Thumbnail URL": "",
+        "Embed Video Url": "",
+        "Show Embed TimeStamp": false,
+        "Embed Fields": [],
+        "Embed Footer": {
+          "Show Footer": false,
+          "Footer Text": "",
+          "Footer Icon URL": ""
+        }
+      }
+    ],
+    "Message Components": []
+  },
+  "Template Version": "1.0.0"
+}

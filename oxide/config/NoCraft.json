@@ -1,0 +1,19 @@
+{
+  "BlockedItems": {
+    "ammo.rocket.fire": true,
+    "firework.boomer.blue": true,
+    "firework.boomer.green": true,
+    "firework.boomer.orange": true,
+    "firework.boomer.purple": true,
+    "firework.boomer.red": true,
+    "firework.romancandle.blue": true,
+    "firework.romancandle.green": true,
+    "firework.romancandle.purple": true,
+    "firework.romancandle.red": true,
+    "firework.volcano": true
+  },
+  "BlockAll": {
+    "Enabled": false,
+    "SendMessage": true
+  }
+}

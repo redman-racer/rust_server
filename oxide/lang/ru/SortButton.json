@@ -1,0 +1,12 @@
+{
+  "Error.NoPermission": "У вас нет разрешения на использование этой команды",
+  "Format.ButtonText": "Сортировать",
+  "Format.Category": "<color=#D2691E>Категория</color>",
+  "Format.Disabled": "<color=#B22222>Отключена</color>",
+  "Format.Enabled": "<color=#228B22>Включена</color>",
+  "Format.Name": "<color=#00BFFF>Имя</color>",
+  "Format.Prefix": "<color=#00FF00>[Sort Button]</color>: ",
+  "Info.ButtonStatus": "Кнопка сортировки теперь {0}",
+  "Info.SortType": "Тип сортировки теперь {0}",
+  "Info.Help": "Список команд:\n<color=#FFFF00>/{0}</color> - Включить/Отключить кнопку сортировки.\n<color=#FFFF00>/{0} <sort | type></color> - изменить тип сортировки."
+}

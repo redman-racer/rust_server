@@ -1,0 +1,7 @@
+{
+  "LimitBuilding": "You reached limit at that building! Used: {used}, Limit: {limit}",
+  "LimitGlobal": "You reached global limit! Used: {used}, Limit: {limit}",
+  "LimitBuildingWarning": "You used {used} that type of building parts in that building, {left} available...",
+  "LimitGlobalWarning": "You used {used} that type of building parts in whole world, {left} available...",
+  "LimitsList": "Your global limits:\n{global}\nYour building limits:\n{building}"
+}

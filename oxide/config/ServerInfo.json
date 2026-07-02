@@ -1,0 +1,147 @@
+{
+  "settings": {
+    "Tabs": [
+      {
+        "ButtonText": "Briefing",
+        "HeaderText": "RAIDLANDS OPERATION BRIEFING",
+        "Pages": [
+          {
+            "TextLines": [
+              "<color=#ff3b3b><b>WELCOME OPERATIONAL BRIEF</b></color>",
+              "",
+              "<color=#d0d0d0>Welcome to Raidlands, a high-intensity Rust combat environment.</color>",
+              "<color=#b0b0b0>Expect fast progression, constant pressure, and direct player conflict.</color>",
+              "",
+              "<color=#ff3b3b><b>MISSION PARAMETERS</b></color>",
+              "<color=#d0d0d0>- High-risk PvP environment</color>",
+              "<color=#d0d0d0>- Accelerated resource gathering</color>",
+              "<color=#d0d0d0>- Rapid crafting and deployment systems</color>",
+              "<color=#d0d0d0>- Clan-based warfare enabled</color>",
+              "",
+              "<color=#ff3b3b><b>OBJECTIVE</b></color>",
+              "<color=#ffffff>Build fast. Raid smart. Hold your ground.</color>"
+            ],
+            "ImageSettings": []
+          }
+        ],
+        "TabButtonAnchor": 4,
+        "TabButtonFontSize": 16,
+        "HeaderAnchor": 0,
+        "HeaderFontSize": 30,
+        "TextFontSize": 15,
+        "TextAnchor": 3,
+        "OxideGroup": ""
+      },
+      {
+        "ButtonText": "Systems",
+        "HeaderText": "ACTIVE SERVER SYSTEMS",
+        "Pages": [
+          {
+            "TextLines": [
+              "<color=#ff3b3b><b>SERVER SYSTEMS ONLINE</b></color>",
+              "",
+              "<color=#d0d0d0>Raidlands runs a fast, combat-focused ruleset with quality-of-life systems.</color>",
+              "",
+              "<color=#ff3b3b><b>CORE SYSTEMS</b></color>",
+              "<color=#d0d0d0>- Instant crafting</color>",
+              "<color=#d0d0d0>- Starter kit access</color>",
+              "<color=#d0d0d0>- Teleportation network</color>",
+              "<color=#d0d0d0>- Clan warfare tools</color>",
+              "<color=#d0d0d0>- Skin and loadout customization</color>",
+              "",
+              "<color=#ff3b3b><b>COMBAT ENVIRONMENT</b></color>",
+              "<color=#d0d0d0>- PvP enabled</color>",
+              "<color=#d0d0d0>- Raiding unrestricted</color>",
+              "<color=#d0d0d0>- Staff support active</color>"
+            ],
+            "ImageSettings": []
+          }
+        ],
+        "TabButtonAnchor": 4,
+        "TabButtonFontSize": 16,
+        "HeaderAnchor": 0,
+        "HeaderFontSize": 30,
+        "TextFontSize": 15,
+        "TextAnchor": 3,
+        "OxideGroup": ""
+      },
+      {
+        "ButtonText": "Orders",
+        "HeaderText": "FIELD COMMANDS",
+        "Pages": [
+          {
+            "TextLines": [
+              "<color=#ff3b3b><b>AUTHORIZED COMMANDS</b></color>",
+              "",
+              "<color=#ffd166>/bgrade 0-4</color> - Upgrade structures automatically",
+              "<color=#ffd166>/mymini</color> - Deploy personal air transport",
+              "<color=#ffd166>/fmini</color> - Recall deployed air unit",
+              "<color=#ffd166>/nomini</color> - Decommission air unit",
+              "<color=#ffd166>/outpost</color> - Teleport to safe trading zone",
+              "<color=#ffd166>/bandit</color> - Teleport to hostile trading zone",
+              "<color=#ffd166>/tpr</color> - Start a player teleport request",
+              "<color=#ffd166>/kit</color> - Access equipment loadouts",
+              "<color=#ffd166>/skins</color> - Modify equipment appearance",
+              "<color=#ffd166>/remove</color> - Deconstruct placed structures",
+              "<color=#ffd166>/clanhelp</color> - View clan system help",
+              "<color=#ffd166>/s</color> - Access the supply marketplace",
+              "<color=#ffd166>/bskin</color> - Configure building skins",
+              "<color=#ffd166>/stats</color> - View combat performance",
+              "<color=#ffd166>/auth</color> - Begin Discord account linking"
+            ],
+            "ImageSettings": []
+          }
+        ],
+        "TabButtonAnchor": 4,
+        "TabButtonFontSize": 16,
+        "HeaderAnchor": 0,
+        "HeaderFontSize": 30,
+        "TextFontSize": 15,
+        "TextAnchor": 3,
+        "OxideGroup": ""
+      }
+    ],
+    "ShowInfoOnPlayerInit": true,
+    "ShowInfoOnlyOncePerRuntime": true,
+    "TabToOpenByDefault": 0,
+    "Position": {
+      "MinX": 0.15,
+      "MaxX": 0.9,
+      "MinY": 0.2,
+      "MaxY": 0.9
+    },
+    "BackgroundImage": {
+      "Enabled": true,
+      "Position": {
+        "MinX": 0.0,
+        "MaxX": 1.0,
+        "MinY": 0.0,
+        "MaxY": 1.0
+      },
+      "Url": "https://raidlands.net/assets/media/header-bg-rust-v2.png",
+      "TransparencyInPercent": 40
+    },
+    "ActiveButtonColor": "#ff3b3b",
+    "InactiveButtonColor": "#3a3d3f",
+    "CloseButtonColor": "#ff3b3b",
+    "CloseButtonText": "DISMISS",
+    "NextPageButtonColor": "#ff3b3b",
+    "NextPageText": "NEXT",
+    "PrevPageButtonColor": "#ff3b3b",
+    "PrevPageText": "BACK",
+    "BackgroundColor": "#1b1e1f",
+    "HelpButton": {
+      "IsEnabled": false,
+      "Text": "HELP",
+      "Position": {
+        "MinX": 0.0,
+        "MaxX": 0.05,
+        "MinY": 0.1,
+        "MaxY": 0.14
+      },
+      "Color": "#ff3b3b",
+      "FontSize": 18
+    },
+    "UpgradedConfig": false
+  }
+}

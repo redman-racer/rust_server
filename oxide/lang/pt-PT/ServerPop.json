@@ -1,0 +1,14 @@
+{
+  "Online": "{0} / {1} jogadores online",
+  "Sleeping": "{0} jogadores dormindo",
+  "Joining": "{0} jogadores conectando",
+  "Queued": "{0} jogadores na fila",
+  "WelcomeMessage": "Bem-vindo ao servidor {0}!",
+  "CooldownMessage": "Você deve esperar {0} segundos antes de usar o comando novamente.",
+  "WipeMessage": "Próximo wipe em: {0}",
+  "DiscordMessage": "Junte-se ao discord @ {0}",
+  "OneLine": "0} / {1} jogadores com {2} conectando! {3} na fila",
+  "BPWipeMessage": "Próximo wipe de blueprint em: {0}",
+  "PurgeMessage": "PVP começa em: {0}",
+  "SkillMessage": "Próximo wipe de habilidades em: {0}"
+}

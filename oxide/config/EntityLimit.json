@@ -1,0 +1,59 @@
+{
+  "Commands": [
+    "buildinglimits",
+    "limits",
+    "limit",
+    "blimit"
+  ],
+  "Permission cache time (seconds)": 700,
+  "Warn about limits every X entities": 50,
+  "Permissions": [
+    {
+      "Permission": "EntityLimit.default",
+      "Priority": 0,
+      "Limits Global": {
+        "foundation": 500,
+        "assets/prefabs/building core/roof/roof.prefab": 500,
+        "assets/prefabs/deployable/furnace/furnace.prefab": 25,
+        "*": 4000
+      },
+      "Limits Building": {
+        "foundation": 25,
+        "foundation.triangle": 25,
+        "assets/prefabs/npc/autoturret/autoturret_deployed.prefab": 10
+      }
+    },
+    {
+      "Permission": "EntityLimit.vip",
+      "Priority": 1,
+      "Limits Global": {
+        "foundation": 200,
+        "assets/prefabs/building core/roof/roof.prefab": 200,
+        "*": 2000
+      },
+      "Limits Building": {
+        "foundation": 200,
+        "foundation.triangle": 200,
+        "assets/prefabs/npc/autoturret/autoturret_deployed.prefab": 200
+      }
+    },
+    {
+      "Permission": "EntityLimit.nolimit",
+      "Priority": 999,
+      "Limits Global": {},
+      "Limits Building": {}
+    },
+    {
+      "Permission": "EntityLimit.debug",
+      "Priority": 9999,
+      "Limits Global": {
+        "foundation": 3,
+        "*": 15
+      },
+      "Limits Building": {
+        "foundation": 2,
+        "*": 5
+      }
+    }
+  ]
+}

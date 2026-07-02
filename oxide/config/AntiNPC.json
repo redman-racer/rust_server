@@ -1,0 +1,11 @@
+{
+  "Whitelisted NPCS (Prefab)": [
+    "assets/prefabs/npc/scientist/scientist.prefab",
+    "assets/prefabs/npc/scientist/scientistpeacekeeper.prefab",
+    "assets/prefabs/npc/scientist/scientist_heavy.prefab",
+    "assets/prefabs/npc/scientist/oilrigscientist.prefab",
+    "assets/prefabs/npc/scientist/underwaterlabscientist.prefab",
+    "assets/prefabs/npc/scientist/cargo_scientist.prefab",
+    "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_excavator.prefab"
+  ]
+}

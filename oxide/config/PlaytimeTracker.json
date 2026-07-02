@@ -1,0 +1,29 @@
+{
+  "General Options": {
+    "Data save interval (seconds)": 900,
+    "Track player AFK time": false,
+    "Number of entries to display in the top playtime list": 10
+  },
+  "Reward Options": {
+    "Reward plugin (ServerRewards, Economics)": "ServerRewards",
+    "Playtime rewards": {
+      "Issue rewards for playtime": true,
+      "Reward interval (seconds)": 300,
+      "Reward amount": 5
+    },
+    "Referral rewards": {
+      "Issue rewards for player referrals": true,
+      "Referrer reward amount": 5,
+      "Referee reward amount": 3
+    },
+    "Custom reward multipliers (permission / multiplier)": {
+      "playtimetracker.examplevip1": 1.0,
+      "playtimetracker.examplevip2": 2.0
+    }
+  },
+  "Version": {
+    "Major": 0,
+    "Minor": 2,
+    "Patch": 2
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "Debug Level (None, Error, Warning, Info)": "Warning",
+  "Command": "dw",
+  "Rust Map Image Settings": {
+    "Map Image Source (None, RustMaps, RustMapApi)": "RustMapApi",
+    "RustMaps.com Settings": {
+      "RustMap.com API Key": "20167995e2d64e5bb73c5f6e1d57c7e1",
+      "Generate Staging Map": false
+    },
+    "RustMapApi Settings": {
+      "Render Name": "Icons",
+      "Image Resolution Scale": 0.5,
+      "File Type (Jpg, Png": "Jpg"
+    }
+  },
+  "Send wipe message when server wipes": true,
+  "Wipe Webhook url": "https://discord.com/api/webhooks/1521140356538961977/uaeKn0IHOdAzNA131duTikMVF_MEowfOs8L1mahyh_aZ99PedTuNBH5UvNSR8oS4c6em",
+  "Send protocol message when server protocol changes": true,
+  "Protocol Webhook url": "https://discord.com/api/webhooks/1521140356538961977/uaeKn0IHOdAzNA131duTikMVF_MEowfOs8L1mahyh_aZ99PedTuNBH5UvNSR8oS4c6em",
+  "Wipe messages": [
+    {
+      "Content": "@everyone",
+      "Webhook Override (Overrides the default webhook for this message)": "https://support.discordapp.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+      "Send Mode (Always, Random)": "Always",
+      "Embed": {
+        "Enabled": true,
+        "Title": "{server.name}",
+        "Description": "Raidlands has wiped. Drop in, build fast, and claim the map.",
+        "Url": "https://raidlands.net",
+        "Embed Color": "#ff3b3b",
+        "Image Url": "attachment://map.jpg",
+        "Thumbnail Url": "https://raidlands.net/assets/media/raidlands-logo.png",
+        "Fields": [
+          {
+            "Title": "Seed",
+            "Value": "[{world.seed}](https://rustmaps.com/map/{world.size}_{world.seed})",
+            "Inline": true,
+            "Enabled": true
+          },
+          {
+            "Title": "Size",
+            "Value": "{world.size}M ({world.size!km^2}km^2)",
+            "Inline": true,
+            "Enabled": true
+          },
+          {
+            "Title": "Protocol",
+            "Value": "{server.protocol.network}",
+            "Inline": true,
+            "Enabled": true
+          },
+          {
+            "Title": "Click & Connect",
+            "Value": "steam://connect/{server.address}:{server.port}",
+            "Inline": false,
+            "Enabled": true
+          }
+        ],
+        "Footer": {
+          "Icon Url": "https://raidlands.net/assets/media/raidlands-logo.png",
+          "Text": "Raidlands",
+          "Enabled": true
+        }
+      }
+    }
+  ],
+  "Protocol messages": [
+    {
+      "Content": "@everyone",
+      "Webhook Override (Overrides the default webhook for this message)": "https://support.discordapp.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
+      "Send Mode (Always, Random)": "Always",
+      "Embed": {
+        "Enabled": true,
+        "Title": "{server.name}",
+        "Description": "Raidlands server protocol changed. Update Rust before reconnecting.",
+        "Url": "https://raidlands.net",
+        "Embed Color": "#ff3b3b",
+        "Image Url": "",
+        "Thumbnail Url": "https://raidlands.net/assets/media/raidlands-logo.png",
+        "Fields": [
+          {
+            "Title": "Protocol",
+            "Value": "{server.protocol.network}",
+            "Inline": true,
+            "Enabled": true
+          },
+          {
+            "Title": "Previous Protocol",
+            "Value": "{server.protocol.previous}",
+            "Inline": true,
+            "Enabled": true
+          },
+          {
+            "Title": "Mandatory Client Update",
+            "Value": "This update requires a mandatory client update in order to be able to play on the server",
+            "Inline": false,
+            "Enabled": true
+          },
+          {
+            "Title": "Click & Connect",
+            "Value": "steam://connect/{server.address}:{server.port}",
+            "Inline": false,
+            "Enabled": true
+          }
+        ],
+        "Footer": {
+          "Icon Url": "https://raidlands.net/assets/media/raidlands-logo.png",
+          "Text": "Raidlands",
+          "Enabled": true
+        }
+      }
+    }
+  ]
+}

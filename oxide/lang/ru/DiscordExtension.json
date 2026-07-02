@@ -1,0 +1,11 @@
+{
+  "TimeSpan.Infinity": "∞",
+  "TimeSpan.Day": "день ",
+  "TimeSpan.Days": "дней ",
+  "TimeSpan.Hour": "час ",
+  "TimeSpan.Hours": "часов ",
+  "TimeSpan.Minute": "минуту ",
+  "TimeSpan.Minutes": "минут ",
+  "TimeSpan.Second": "секунду",
+  "TimeSpan.Seconds": "секунд"
+}

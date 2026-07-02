@@ -1,0 +1,9 @@
+{
+  "TurretsToggled": "You have toggled {0} turrets.",
+  "NoPermission": "You do not have permission to use this command.",
+  "InvalidEntity": "This is not a valid entity.",
+  "NoTurretsFound": "There are no valid turrets in your area.",
+  "NoPermThisTurret": "You do not have permission to toggle this turret.",
+  "BuildingBlocked": "You do not have building privilege.",
+  "Syntax": "Invalid syntax."
+}

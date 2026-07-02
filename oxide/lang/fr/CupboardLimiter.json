@@ -1,0 +1,14 @@
+{
+  "MaxLimitDefault": "Vous avez atteint la limite par defaut de {0} pour les armoires a outils.",
+  "MaxLimitVip": "Vous avez atteint la limite VIP de {0} pour les armoires a outils.",
+  "MaxLimit": "Vous avez atteint la limite de {0} pour les armoires a outils.",
+  "Remaining": "Il vous reste {0} armoires a outils a placer.",
+  "NoPermission": "Vous n'avez pas la permission",
+  "cInspect": "Le joueur {0} a {1} TCs.",
+  "cInspectOwn": "Vous avez {0} TC(s) et {1} restant a poser.",
+  "cInspectNotFound": "Erreur: Le joueur n'a pas ete trouve.",
+  "TeamOvercount": "Vous ne pouvez pas inviter ce joueur actuellement, il a {0} armoires a outils en trop.",
+  "TeamOvercountTarget": "Vous ne pouvez pas etre invite par ce joueur actuellement, vous avez {0} armoires a outils en trop.",
+  "cInspectUsage": "Usage: tc <pseudoPartielOuId> ...",
+  "Error": "Une erreur inattendue s'est produite."
+}

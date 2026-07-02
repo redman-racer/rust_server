@@ -1,0 +1,11 @@
+{
+  "Enabled": false,
+  "ServerUrl": "",
+  "AuthToken": null,
+  "EncryptPackets": false,
+  "FakePlayer": false,
+  "RPCFilterMode": 0,
+  "RPCWhitelist": [],
+  "EnableVoiceData": false,
+  "EnableConsoleData": true
+}

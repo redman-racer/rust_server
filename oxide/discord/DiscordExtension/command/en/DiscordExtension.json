@@ -1,0 +1,27 @@
+{
+  "Template": {
+    "Command Localization": {
+      "Command Name": "de",
+      "Command Description": "Discord Extension Commands",
+      "Command Options": {
+        "commands": {
+          "Command Name": "commands",
+          "Command Description": "Application Commands",
+          "Command Options": {
+            "delete": {
+              "Command Name": "delete",
+              "Command Description": "Delete a registered application command",
+              "Argument Localization": {
+                "command": {
+                  "Argument Name": "command",
+                  "Argument Description": "Application Command To Delete"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "Template Version": "1.0.0"
+}

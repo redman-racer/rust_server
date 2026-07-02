@@ -1,0 +1,1523 @@
+{
+  "Translations": {
+    "Death Messages": [
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Generic",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} died due to damage deflection while attempting to murder {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Bullet",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} shot {victim} using their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Arrow",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was shot by {killer} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Heat",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} inflamed {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} killed {victim} using their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Slash",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} slashed {victim} into pieces with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Animal",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} killed a {victim} using their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Shark",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "The waters are a tad safer now that {killer} killed a {victim} using their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Animal",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} shot a {victim} using their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Animal",
+        "DamageType": "Arrow",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} shot a {victim} using their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "ZombieNPC",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} fought off a spooky {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "ZombieNPC",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} killed {victim} and ate their brains!"
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "ZombieNPC",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} shot a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "ScarecrowNPC",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} fought off a spooky {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "ScarecrowNPC",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} scared {victim} to death!"
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "ScarecrowNPC",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did some scaring of their own against a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "GingerbreadNPC",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} fought off a deliciously deadly {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "GingerbreadNPC",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "Death was sweet for {victim}, who was killed by a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "GingerbreadNPC",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} took a bite out of a deliciously deadly {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Scientist",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did not want to be a part of the {victim}'s experiments, and did some science of their own with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Scientist",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did some research of their own against a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Scientist",
+        "DamageType": "Arrow",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did some research of their own against a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "NPCShopKeeper",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} was not interested in {victim}'s inventory, and sold them pain with their {weapon} instead."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "CustomNPC",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} demonstrated NPC superiority to {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "CustomNPC",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} conveyed their opinion of NPCs to {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "NPCShopKeeper",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} became unhappy enough to end {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "HeavyScientist",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did not want to be a part of the {victim}'s experiments, and did some science of their own with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "HeavyScientist",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did some research of their own against a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "HeavyScientist",
+        "DamageType": "Arrow",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} did some research of their own against a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Bradley",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} blew up the {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Helicopter",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "The {victim} was destroyed. Good riddance."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Helicopter",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "The world is a safer place now that {killer} shot down the {victim} with their {weapon}. Good riddance."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "SAM",
+        "VictimType": "Helicopter",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} brought down {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Cactus",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} got in a sticky situation with a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "SAM",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} brought down {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Animal",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} couldn't run away from the {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Shark",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "Baby {killer}, doo-doo, doo-doo, doo-doo ate {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "BeeSwarm",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} just reminded {victim} that they are allergic to bee stings."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "BeeSwarm",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} just swatted a {victim} out of existence."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Bradley",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was blasted by the {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Helicopter",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} had no chance against the {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Trap",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was reckless and ran into a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Trap",
+        "VictimType": "Scientist",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} fell victim to {owner}'s well placed {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Trap",
+        "VictimType": "HeavyScientist",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} fell victim to {owner}'s well placed {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Barricade",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was impaled by a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Turret",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{owner}'s {killer} did its job, killing intruder {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Turret",
+        "VictimType": "Scientist",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{owner}'s {killer} did its job, killing a {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Turret",
+        "VictimType": "HeavyScientist",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{owner}'s {killer} did its job, killing a {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Murderer",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} haunted down {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "TunnelDweller",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was taken out by a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "TunnelDweller",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} took out a {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "TunnelDweller",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} took out a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "UnderwaterDweller",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was taken out by an {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "UnderwaterDweller",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} took out an {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "UnderwaterDweller",
+        "DamageType": "Bullet",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} took out a {victim} with their {weapon} over a distance of {distance}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "ExcavatorArm",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} excavated {victim} for trace amounts of precious materials. None were found."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Elevator",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "We all have our ups and downs, but {victim} was just squashed by an {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "HotAirBalloon",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} learned the hard way that a {killer} can come down as well."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "BatteringRam",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} forgot to dodge the {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Tugboat",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} forgot that a {killer} is not, in fact, friendly."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "CargoShip",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was suddently introduced to industrial tonnage by the {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "CarShredder",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was torn to pieces in a {killer}. It turns out they consisted of 40% recyclable materials and 60% regret."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "MagnetCrane",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was magnetized and traumatized by a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Scientist",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} shot down {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Scientist",
+        "VictimType": "*",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} shot down a {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "HeavyScientist",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} shot down {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "HeavyScientist",
+        "VictimType": "*",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} shot down a {victim}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Sentry",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} broke the rules in a safezone and was killed by a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "-",
+        "VictimType": "Player",
+        "DamageType": "Fall",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} fell to their death. Splat!"
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "HeatSource",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was grilled on a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Lock",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was electrocuted by {owner}'s {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Player",
+        "DamageType": "Heat",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} burned to death."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Player",
+        "DamageType": "Hunger",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} forgot to eat and hungers for life."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Player",
+        "DamageType": "Thirst",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} died of immense thirst."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Player",
+        "DamageType": "Radiation",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} had a cheery, radioactive glow. Fatal, but cheery nonetheless."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Player",
+        "DamageType": "Cold",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} turned into an ice statue."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Player",
+        "DamageType": "Drowned",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "As {victim} just found out, breathing underwater is rather difficult."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "*",
+        "VictimType": "Animal",
+        "DamageType": "Drowned",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "As the {victim} just found out, breathing underwater is rather difficult."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Bleeding",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} bled out after being attacked by {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Animal",
+        "DamageType": "Collision",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} ran over a {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Collision",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{killer} ran over {victim} with their {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Train",
+        "VictimType": "Player",
+        "DamageType": "Collision",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} was stopped in their tracks as they were run over by a {killer}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Minicopter",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} tragically perished in a {killer} crash."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "ScrapTransportHelicopter",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} tragically perished in a {killer} crash."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "AttackHelicopter",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} tragically perished in a {killer} crash."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Drone",
+        "VictimType": "Player",
+        "DamageType": "*",
+        "Enabled": true,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "A {killer} killed {victim} with its {weapon}."
+        ]
+      },
+      {
+        "Display Permissions (Display For All Players If Empty)": [],
+        "KillerType": "Player",
+        "VictimType": "Player",
+        "DamageType": "Suicide",
+        "Enabled": false,
+        "Show Kills in Console": true,
+        "Show Kills in Chat": true,
+        "Show Kills in Notify": false,
+        "Show Kills in UINotify": false,
+        "Messages": [
+          "{victim} had enough of life."
+        ]
+      }
+    ],
+    "Names": {
+      "Chicken": "Chicken",
+      "Boar": "Boar",
+      "Stag": "Stag",
+      "Bear": "Bear",
+      "Wolf": "Wolf",
+      "Simple Shark": "Shark",
+      "Scientist": "Scientist",
+      "Heavy Scientist": "Heavy Scientist",
+      "HeavyScientist": "Heavy Scientist",
+      "scientistnpc_heavy": "Heavy Scientist",
+      "Helicopter": "Patrol Helicopter",
+      "Bradley APC": "Bradley APC",
+      "Polarbear": "Polar Bear",
+      "Code Lock": "Code Lock",
+      "Fire": "Fire",
+      "Sentry": "Sentry",
+      "Sam Site": "SAM Site",
+      "ScarecrowNPC": "Scarecrow",
+      "Tunnel Dweller": "Tunnel Dweller",
+      "Barbed Wooden Barricade": "Barbed Wooden Barricade",
+      "Barricade": "Barricade",
+      "Auto Turret": "Auto Turret",
+      "Patrol Helicopter": "Patrol Helicopter",
+      "GRAF": "GRAF",
+      "Underwater Dweller": "Underwater Dweller",
+      "Campfire": "Campfire",
+      "Wolf2": "Wolf",
+      "Horse": "Horse",
+      "Landmine": "Landmine",
+      "Tesla Coil": "Tesla Coil",
+      "Gun Trap": "Shotgun Trap",
+      "Flame Turret": "Flame Turret",
+      "GingerbreadNPC": "Gingerbread Man",
+      "ScrapTransportHelicopter": "Scrap Transport Helicopter",
+      "AttackHelicopter": "Attack Helicopter",
+      "Minicopter": "Minicopter",
+      "Metal Barricade": "Metal Barricade",
+      "ZombieNPC": "Zombie",
+      "Bear Trap": "Bear Trap",
+      "Custom Bradley": "Custom Bradley",
+      "Farmable Animal": "Farm Animal",
+      "BeeSwarm": "Bee Swarm",
+      "Custom Animal Npc": "Custom Animal NPC",
+      "Zombie": "Zombie",
+      "Shark": "Shark",
+      "Wooden Floor Spike Cluster": "Wooden Floor Spike Cluster",
+      "Crocodile": "Crocodile",
+      "Snake Hazard": "Snake",
+      "Panther": "Panther",
+      "Tiger": "Tiger",
+      "Ridable Horse": "Horse",
+      "NPCShopKeeper": "Waterwell Shopkeeper",
+      "Giant Excavator Arm": "Giant Excavator Arm",
+      "Drone": "Drone"
+    },
+    "Bodyparts": {
+      "Body": "Body",
+      "Leg": "Leg",
+      "Chest": "Chest",
+      "Stomach": "Stomach",
+      "Head": "Head",
+      "Arm": "Arm",
+      "Hand": "Hand",
+      "Foot": "Foot"
+    },
+    "Weapons": {
+      "Salvaged Sword": "Salvaged Sword",
+      "Revolver": "Revolver",
+      "Salvaged Cleaver": "Salvaged Cleaver",
+      "Mace": "Mace",
+      "Assault Rifle": "Assault Rifle",
+      "Double Barrel Shotgun": "Double Barrel Shotgun",
+      "Bolt Action Rifle": "Bolt Action Rifle",
+      "M92 Pistol": "M92 Pistol",
+      "Custom SMG": "Custom SMG",
+      "LR-300 Assault Rifle": "LR-300 Assault Rifle",
+      "Timed Explosive Charge": "Timed Explosive Charge (C4)",
+      "Pump Shotgun": "Pump Shotgun",
+      "Prototype 17": "Prototype 17",
+      "Hunting Bow": "Hunting Bow",
+      "Thompson": "Thompson",
+      "M39 Rifle": "M39 Rifle",
+      "Hatchet": "Hatchet",
+      "hatchet.entity": "Hatchet",
+      "M4 Shotgun": "M4 Shotgun",
+      "HMLMG": "HMLMG",
+      "l96.entity": "L96 Rifle",
+      "L96 Rifle": "L96 Rifle",
+      "m249.entity": "M249",
+      "M249": "M249",
+      "Pickaxe": "Pickaxe",
+      "Bone Knife": "Bone Knife",
+      "Semi-Automatic Pistol": "Semi-Automatic Pistol",
+      "Stone Hatchet": "Stone Hatchet",
+      "stonehatchet.entity": "Stone Hatchet",
+      "Rock": "Rock",
+      "Skinning Knife": "Skinning Knife",
+      "Crossbow": "Crossbow",
+      "Combat Knife": "Combat Knife",
+      "Semi-Automatic Rifle": "Semi-Automatic Rifle",
+      "MP5A4": "MP5A4",
+      "Jackhammer": "Jackhammer",
+      "SKS": "SKS",
+      "militaryflamethrower.entity": "Military Flamethrower",
+      "High Velocity Rocket": "High Velocity Rocket",
+      "Spas-12 Shotgun": "Spas-12 Shotgun",
+      "knife.combat.entity": "Combat Knife",
+      "2module_car_spawned.entity": "2-module Vehicle",
+      "car_chassis_2module.entity": "2-module Vehicle",
+      "car_2mod_01": "2-module Vehicle",
+      "car_2mod_02": "2-module Vehicle",
+      "car_2mod_03": "2-module Vehicle",
+      "car_2mod_04": "2-module Vehicle",
+      "car_2mod_05": "2-module Vehicle",
+      "car_2mod_06": "2-module Vehicle",
+      "car_2mod_07": "2-module Vehicle",
+      "car_2mod_08": "2-module Vehicle",
+      "3module_car_spawned.entity": "3-module Vehicle",
+      "car_chassis_3module.entity": "3-module Vehicle",
+      "car_3mod_01": "3-module Vehicle",
+      "car_3mod_02": "3-module Vehicle",
+      "car_3mod_03": "3-module Vehicle",
+      "car_3mod_04": "3-module Vehicle",
+      "car_3mod_05": "3-module Vehicle",
+      "car_3mod_06": "3-module Vehicle",
+      "car_3mod_07": "3-module Vehicle",
+      "car_3mod_08": "3-module Vehicle",
+      "car_3mod_09": "3-module Vehicle",
+      "car_3mod_10": "3-module Vehicle",
+      "car_3mod_11": "3-module Vehicle",
+      "car_3mod_12": "3-module Vehicle",
+      "4module_car_spawned.entity": "4-module Vehicle",
+      "car_chassis_4module.entity": "4-module Vehicle",
+      "car_4mod_01": "4-module Vehicle",
+      "car_4mod_02": "4-module Vehicle",
+      "car_4mod_03": "4-module Vehicle",
+      "car_4mod_04": "4-module Vehicle",
+      "car_4mod_05": "4-module Vehicle",
+      "car_4mod_06": "4-module Vehicle",
+      "car_4mod_07": "4-module Vehicle",
+      "car_4mod_08": "4-module Vehicle",
+      "car_4mod_09": "4-module Vehicle",
+      "car_4mod_10": "4-module Vehicle",
+      "car_4mod_11": "4-module Vehicle",
+      "motorbike": "Motorbike",
+      "motorbike_sidecar": "Motorbike with Sidecar",
+      "pedalbike": "Bicycle",
+      "pedaltrike": "Tricycle",
+      "snowmobile": "Snowmobile",
+      "F1 Grenade": "F1 Grenade",
+      "Satchel Charge": "Satchel Charge",
+      "Wooden Spear": "Wooden Spear",
+      "Stone Spear": "Stone Spear",
+      "Compound Bow": "Compound Bow",
+      "Machete": "Machete",
+      "Pitchfork": "Pitchfork",
+      "Stone Pickaxe": "Stone Pickaxe",
+      "stone_pickaxe.entity": "Stone Pickaxe",
+      "Legacy bow": "Legacy Bow",
+      "Rocket": "Rocket",
+      "Incendiary Rocket": "Incendiary Rocket",
+      "Salvaged Axe": "Salvaged Axe",
+      "Torch": "Torch",
+      "pickaxe.entity": "Pickaxe",
+      "Salvaged Hammer": "Salvaged Hammer",
+      "40mm_grenade_he": "40mm HE Grenade",
+      "Minigun": "Minigun",
+      "Assault Rifle - ICE": "Ice Assault Rifle",
+      "Python Revolver": "Python Revolver",
+      "Nailgun": "Nailgun",
+      "Salvaged Icepick": "Salvaged Icepick",
+      "Longsword": "Longsword",
+      "Waterpipe Shotgun": "Waterpipe Shotgun",
+      "Chainsaw": "Chainsaw",
+      "workcart.entity": "Work Cart",
+      "locomotive.entity": "Locomotive",
+      "workcart_aboveground.entity": "Above Ground Work Cart",
+      "Paddle": "Paddle",
+      "workcart_aboveground2.entity": "Above Ground Work Cart",
+      "hammer_salvaged.entity": "Salvaged Hammer",
+      "Multiple Grenade Launcher": "Multiple Grenade Launcher",
+      "minigun.entity": "Minigun",
+      "rocket_mlrs": "MLRS Rocket",
+      "Eoka Pistol": "Eoka Pistol",
+      "High Caliber Revolver": "High Caliber Revolver",
+      "Abyss Assault Rifle": "Abyss Assault Rifle",
+      "Blunderbuss": "Blunderbuss",
+      "Sickle": "Sickle",
+      "Butcher Knife": "Butcher Knife",
+      "pitchfork.entity": "Pitchfork",
+      "Snowball Gun": "Snowball Gun",
+      "vampirestake.entity": "Vampire Stake",
+      "Baseball Bat": "Baseball Bat",
+      "Handmade SMG": "Handmade SMG",
+      "Beancan Grenade": "Beancan Grenade",
+      "Candy Cane Club": "Candy Cane Club",
+      "Snowball": "Snowball",
+      "Flashlight": "Flashlight",
+      "Speargun": "Speargun",
+      "double_shotgun.entity": "Double Barrel Shotgun",
+      "Skull": "Skull",
+      "Mini Crossbow": "Mini Crossbow",
+      "Ice Assault Rifle": "Ice Assault Rifle",
+      "Frontier Hatchet": "Frontier Hatchet",
+      "Medieval Assault Rifle": "Medieval Assault Rifle",
+      "boulder_explosive_deployed": "Propane Explosive Bomb",
+      "Ballista": "Ballista",
+      "boulder_explosive": "Propane Explosive Bomb",
+      "boulder_mid": "Scattershot",
+      "boulder_incendiary": "Firebomb",
+      "Flame Thrower": "Flame Thrower",
+      "grenade.molotov.deployed": "Molotov Cocktail",
+      "Concrete Pickaxe": "Concrete Pickaxe",
+      "Bone Club": "Bone Club",
+      "scraptransporthelicopter": "Scrap Transport Helicopter",
+      "grenade.bee.deployed": "Bee Grenade",
+      "grenade.flashbang.deployed": "Flashbang Grenade",
+      "Lunar New Year Spear": "Lunar New Year Spear",
+      "boulder": "Boulder",
+      "Prototype Hatchet": "Prototype Hatchet",
+      "Concrete Hatchet": "Concrete Hatchet",
+      "Blow Pipe": "Blow Pipe",
+      "boomerang.thrown.entity": "Boomerang",
+      "Obsidian Bone Knife": "Obsidian Bone Knife",
+      "Jungle Relic Assault Rifle": "Jungle Relic Assault Rifle",
+      "Abyss Metal Pickaxe": "Abyss Metal Pickaxe",
+      "Abyss Metal Hatchet": "Abyss Metal Hatchet",
+      "Cultist Deer Torch": "Cultist Deer Torch",
+      "Jungle Rock": "Jungle Rock",
+      "ak47u.entity": "Assault Rifle",
+      "hmlmg.entity": "HMLMG",
+      "M15 Semi-Automatic Pistol": "M15 Semi-Automatic Pistol",
+      "icepick_salvaged.entity": "Salvaged Icepick",
+      "rocket_hv_rpg": "High-Velocity RPG",
+      "Krieg Shotgun": "Krieg Shotgun",
+      "Krieg chainsword": "Krieg Chainsword",
+      "Medieval AR": "Medieval AR",
+      "Boomerang": "Boomerang",
+      "Space LR-300 Assault Rifle": "Space LR-300 Assault Rifle",
+      "rocket_basic_rpg": "RPG",
+      "rocket_fire_rpg": "Incendiary RPG",
+      "Prototype Pickaxe": "Prototype Pickaxe",
+      "Sunken Combat Knife": "Sunken Combat Knife",
+      "spas12.entity": "Spas-12 Shotgun"
+    },
+    "Attachments": {
+      "Weapon flashlight": "Weapon Flashlight",
+      "Extended Magazine": "Extended Magazine",
+      "16x Zoom Scope": "16x Zoom Scope",
+      "Weapon Lasersight": "Weapon Lasersight",
+      "Silencer": "Silencer",
+      "8x Zoom Scope": "8x Zoom Scope",
+      "Holosight": "Holosight",
+      "Muzzle Boost": "Muzzle Boost",
+      "Muzzle Brake": "Muzzle Brake",
+      "Simple Handmade Sight": "Simple Handmade Sight",
+      "Gas Compression Overdrive": "Gas Compression Overdrive",
+      "Burst Module": "Burst Module",
+      "Variable Zoom Scope": "Variable Zoom Scope",
+      "Military Silencer": "Military Silencer",
+      "Oil Filter Silencer": "Oil Filter Silencer",
+      "Targeting Attachment": "Targeting Attachment",
+      "Soda Can Silencer": "Soda Can Silencer"
+    }
+  },
+  "Variable Formats": {
+    "attachments": " ({value})"
+  },
+  "Variable Colors": {
+    "killer": "#C4FF00",
+    "victim": "#C4FF00",
+    "weapon": "#C4FF00",
+    "attachments": "#C4FF00",
+    "distance": "#C4FF00",
+    "owner": "#C4FF00",
+    "position": "#C4FF00",
+    "mapgrid": "#C4FF00"
+  },
+  "Chat Format": "<color=#838383>[<color=#80D000>DeathNotes</color>] {message}</color>",
+  "Chat Icon (SteamID)": "76561198077847390",
+  "Debug Mode Enabled": false,
+  "Notify Message Type": 0,
+  "UINotify Message Type": 0,
+  "Can Player Use /dn Command": true,
+  "Patrol Heli Tags Display Permissions (Display For All Players If Empty)": [],
+  "Show Patrol Heli Tags in Console": false,
+  "Show Patrol Heli Tags in Chat": false,
+  "Show Patrol Heli Tags in Notify": false,
+  "Show Patrol Heli Tags in UINotify": false,
+  "Patrol Helicopter Tag Message": "{killer} has tagged the {victim} with their {weapon} over a distance of {distance}.",
+  "Bradley APC Tags Display Permissions (Display For All Players If Empty)": [],
+  "Show Bradley APC Tags in Console": false,
+  "Show Bradley APC Tags in Chat": false,
+  "Show Bradley APC Tags in Notify": false,
+  "Show Bradley APC Tags in UINotify": false,
+  "Bradley Tag Message": "{killer} has tagged the {victim} with their {weapon} over a distance of {distance}.",
+  "Message Broadcast Radius (in meters)": -1,
+  "Use Metric Distance": true,
+  "Require Permission (deathnotes.cansee)": false
+}

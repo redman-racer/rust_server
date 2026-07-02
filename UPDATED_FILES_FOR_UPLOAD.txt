@@ -1,0 +1,13 @@
+Rust server files to upload
+Generated: 2026-07-02
+
+Upload these files to the same relative paths on the live Rust server:
+
+oxide/data/ServerRewards/products.json
+oxide/data/Kits/kits_data.json
+oxide/config/ServerRewards.json
+
+After upload, reload the affected plugins from the server console:
+
+oxide.reload Kits
+oxide.reload ServerRewards

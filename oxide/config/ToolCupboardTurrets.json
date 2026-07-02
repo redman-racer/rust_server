@@ -1,0 +1,8 @@
+{
+  "Auto-turrets affected": true,
+  "shotgun traps affected": true,
+  "flame traps affected": true,
+  "Sam sites affected": true,
+  "Launch site sams affected": false,
+  "Outpost turrets affected": false
+}

@@ -1,0 +1,52 @@
+{
+  "Cooldown Settings": {
+    "Cooldown (seconds)": 60
+  },
+  "Chat Settings": {
+    "Chat Prefix": "<size=16><color=#ff3b3b>| Raidlands |</color></size>",
+    "Chat Icon SteamID": 76561199216745239
+  },
+  "Messgae Settings": {
+    "Global Response (true = global response, false = player response)": true,
+    "Use Chat Response": true,
+    "Use Game Tip Response": false,
+    "Use Single Line Chat Pop Response": true,
+    "Value Color (HEX)": "#ffd166"
+  },
+  "Response Settings": {
+    "Show Online Players": true,
+    "Show Sleeping Players": false,
+    "Show Joining Players": false,
+    "Show Queued Players": false
+  },
+  "Connect Settings": {
+    "Show Pop On Connect": false,
+    "Show Welcome Message": false,
+    "Show Wipe On Connect": false
+  },
+  "Wipe Response Settings": {
+    "Wipe Timer Enabled": false,
+    "Wipe Timer (epoch)": 0
+  },
+  "Blueprint Wipe Response Settings": {
+    "Blueprint Wipe Timer Enabled": false,
+    "Blueprint Wipe Timer (epoch)": 0
+  },
+  "Purge Response Settings": {
+    "Purge Timer Enabled": false,
+    "Purge Timer (epoch)": 0
+  },
+  "Skill Tree Wipe Response Settings": {
+    "Skill Tree Timer Enabled": false,
+    "Skill Tree Wipe Timer (epoch)": 0
+  },
+  "Discord Response Settings": {
+    "Discord Enabled": false,
+    "Discord Invite Link": ""
+  },
+  "Version": {
+    "Major": 1,
+    "Minor": 1,
+    "Patch": 5
+  }
+}

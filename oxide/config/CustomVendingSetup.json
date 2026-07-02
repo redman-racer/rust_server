@@ -1,0 +1,14 @@
+{
+  "Enable liquid currency": false,
+  "Economics integration": {
+    "Enabled": false,
+    "Item short name": null,
+    "Item skin ID": 0
+  },
+  "Server Rewards integration": {
+    "Enabled": false,
+    "Item short name": null,
+    "Item skin ID": 0
+  },
+  "Override item max stack sizes (shortname: amount)": {}
+}

@@ -1,0 +1,12 @@
+{
+  "Number of entities to repair per server frame": 10,
+  "Default Enabled": false,
+  "Allow Repairing Bases Without A Tool Cupboard": false,
+  "Repair Cost Multiplier": 1.0,
+  "How long after an entity is damaged before it can be repaired (Seconds)": 600.0,
+  "Chat Commands": [
+    "br"
+  ],
+  "Enable Repairs Using A Skinned Hammer": false,
+  "Repair Hammer Skin ID": 2902701361
+}

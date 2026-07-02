@@ -1,0 +1,9 @@
+{
+  "TooManyRockets": "You have attempted to fire too many rockets, you can only fire {0} at once!",
+  "RocketsFired": "You have launched {0} rockets",
+  "NoPermission": "You have no permission!",
+  "InvalidArgs": "/fr <amount of rockets to fire>",
+  "InvalidNumber": "That is not a valid number!",
+  "InvalidPrefab": "Please fix the rocket type in the configuration file, that is not a valid rocket type!",
+  "PlayerOnlyCommand": "This command is only accessible by players."
+}

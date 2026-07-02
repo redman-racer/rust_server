@@ -1,0 +1,15 @@
+{
+  "GodmodeDisabled": "Ai <color=#FF4500>dezactivat</color> godmode",
+  "GodmodeDisabledBy": "Godmode-ul tău a fost <color=#FF4500>dezactivat</color> de către {0}",
+  "GodmodeDisabledFor": "Ai <color=#FF4500>dezactivat</color> godmode pentru {0}",
+  "GodmodeEnabled": "Ai <color=#FF4500>activat</color> godmode",
+  "GodmodeEnabledBy": "Godmode-ul tău a fost <color=#FF4500>activat</color> de către {0}",
+  "GodmodeEnabledFor": "Ai <color=#FF4500>activat</color> godmode pentru {0}",
+  "InformAttacker": "{0} este în godmode și nu poate primi daune",
+  "InformVictim": "{0} a încercat să-ți provoace daune",
+  "CantAttack": "Ești în godmode și nu-l poți ataca pe {0}",
+  "NoGods": "Momentan nu există jucători cu godmode activat",
+  "NoLooting": "Nu ai permisiunea de a fura de la un jucător cu godmode",
+  "NotAllowed": "Nu ai permisiunea de a utiliza comanda '{0}'",
+  "PlayerNotFound": "Jucătorul '{0}' nu a fost găsit"
+}

@@ -1,0 +1,12 @@
+{
+  "Chat": "[#BEBEBE][[#de8732]Discord Roles[/#]] {0}[/#]",
+  "ClanTag": "[{0}] {1}",
+  "ServerMessageGroupAdded": "{player.name} has been added to server group {group.name}",
+  "ServerMessageGroupRemoved": "{player.name} has been removed to server group {group.name}",
+  "ServerMessageRoleAdded": "{player.name} has been added to discord role {role.name}",
+  "ServerMessageRoleRemoved": "{player.name} has been removed to discord role {role.name}",
+  "DiscordMessageGroupAdded": "{discord.name} has been added to server group {group.name}",
+  "DiscordMessageGroupRemoved": "{discord.name} has been removed to server group {group.name}",
+  "DiscordMessageRoleAdded": "{discord.name} has been added to discord role {role.name}",
+  "DiscordMessageRoleRemoved": "{discord.name} has been removed to discord role {role.name}"
+}

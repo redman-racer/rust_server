@@ -1,0 +1,12 @@
+{
+  "NoFriendlyFire": "You cannot damage your friends! (<color=#7FFF00>/ff on</color>)",
+  "OtherNoFriendlyFire": "{0} has friendly fire disabled!",
+  "FriendAttack": "Your friend {0} tried to attack you!",
+  "FFOn": "Friendly Fire turned <color=#7FFF00>on</color>!",
+  "FFOff": "Friendly Fire turned <color=#FF0000>off</color>!",
+  "AlreadyStateOn": "Friendly Fire is already turned <color=#7FFF00>on</color>!",
+  "AlreadyStateOff": "Friendly Fire is already turned <color=#FF0000>off</color>!",
+  "FFHelp": "Friendly Fire:\n/ff on - to turn on friendly fire\n/ff off - to turn off friendly fire",
+  "CommandArguments": "You have to use <color=#7FFF00>on</color> or <color=#FF0000>off</color> as arguments!",
+  "NoPermission": "You don't have access to use this command"
+}

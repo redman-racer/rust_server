@@ -1,0 +1,612 @@
+[
+    {
+        "plugin_id": "gather-manager",
+        "provider": "umod",
+        "version_id": "gather-manager",
+        "plugin_name": "Gather Manager",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b57e1dd5389c.png",
+        "plugin_author": "Ryan",
+        "file_name": "GatherManager.cs",
+        "installed_at": "2026-06-21T12:58:49+00:00"
+    },
+    {
+        "plugin_id": "rust-kits",
+        "provider": "umod",
+        "version_id": "rust-kits",
+        "plugin_name": "Rust Kits",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b910ab50f5d1.png",
+        "plugin_author": "k1lly0u",
+        "file_name": "Kits.cs",
+        "installed_at": "2026-06-21T12:59:17+00:00"
+    },
+    {
+        "plugin_id": "backpacks",
+        "provider": "umod",
+        "version_id": "backpacks",
+        "plugin_name": "Backpacks",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b8b28ea9b4fd.png",
+        "plugin_author": "WhiteThunder",
+        "file_name": "Backpacks.cs",
+        "installed_at": "2026-06-21T12:59:49+00:00"
+    },
+    {
+        "plugin_id": "quick-smelt",
+        "provider": "umod",
+        "version_id": "quick-smelt",
+        "plugin_name": "Quick Smelt",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5c2cb15c67ee0.png",
+        "plugin_author": "misticos",
+        "file_name": "QuickSmelt.cs",
+        "installed_at": "2026-06-21T13:00:08+00:00"
+    },
+    {
+        "plugin_id": "skins",
+        "provider": "umod",
+        "version_id": "skins",
+        "plugin_name": "Skins",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d36d041410f2.png",
+        "plugin_author": "misticos",
+        "file_name": "Skins.cs",
+        "installed_at": "2026-06-21T13:05:31+00:00"
+    },
+    {
+        "plugin_id": "nteleportation",
+        "provider": "umod",
+        "version_id": "nteleportation",
+        "plugin_name": "NTeleportation",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b67729bb22f6.jpg",
+        "plugin_author": "nivex",
+        "file_name": "NTeleportation.cs",
+        "installed_at": "2026-06-21T13:05:55+00:00"
+    },
+    {
+        "plugin_id": "auto-doors",
+        "provider": "umod",
+        "version_id": "auto-doors",
+        "plugin_name": "Auto Doors",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5c4d3c4f674bb.png",
+        "plugin_author": "bushhy",
+        "file_name": "AutoDoors.cs",
+        "installed_at": "2026-06-21T13:06:17+00:00"
+    },
+    {
+        "plugin_id": "trade",
+        "provider": "umod",
+        "version_id": "trade",
+        "plugin_name": "Trade",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5c2ea1c3b10c2.png",
+        "plugin_author": "Calytic",
+        "file_name": "Trade.cs",
+        "installed_at": "2026-06-21T13:06:47+00:00"
+    },
+    {
+        "plugin_id": "server-info",
+        "provider": "umod",
+        "version_id": "server-info",
+        "plugin_name": "Server Info",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b677c63df99b.jpg",
+        "plugin_author": "FastBurst",
+        "file_name": "ServerInfo.cs",
+        "installed_at": "2026-06-21T13:07:16+00:00"
+    },
+    {
+        "plugin_id": "server-armour",
+        "provider": "umod",
+        "version_id": "server-armour",
+        "plugin_name": "Server Armour",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5ed56b991f52d.png",
+        "plugin_author": "Pho3niX90",
+        "file_name": "ServerArmour.cs",
+        "installed_at": "2026-06-21T13:07:31+00:00"
+    },
+    {
+        "plugin_id": "base-repair",
+        "provider": "umod",
+        "version_id": "base-repair",
+        "plugin_name": "Base Repair",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5dd69c18e0122.png",
+        "plugin_author": "MJSU",
+        "file_name": "BaseRepair.cs",
+        "installed_at": "2026-06-21T13:07:56+00:00"
+    },
+    {
+        "plugin_id": "auto-lock",
+        "provider": "umod",
+        "version_id": "auto-lock",
+        "plugin_name": "Auto Lock",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5ccc172f3816f.png",
+        "plugin_author": "AdsDev",
+        "file_name": "AutoLock.cs",
+        "installed_at": "2026-06-21T13:08:12+00:00"
+    },
+    {
+        "plugin_id": "automatic-authorization",
+        "provider": "umod",
+        "version_id": "automatic-authorization",
+        "plugin_name": "Automatic Authorization",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5db022c268a84.jpg",
+        "plugin_author": "AdsDev",
+        "file_name": "AutomaticAuthorization.cs",
+        "installed_at": "2026-06-21T13:08:44+00:00"
+    },
+    {
+        "plugin_id": "building-skins",
+        "provider": "umod",
+        "version_id": "building-skins",
+        "plugin_name": "Building Skins",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/6455cd685b574.png",
+        "plugin_author": "Marat",
+        "file_name": "BuildingSkins.cs",
+        "installed_at": "2026-06-21T13:09:29+00:00"
+    },
+    {
+        "plugin_id": "time-of-day",
+        "provider": "umod",
+        "version_id": "time-of-day",
+        "plugin_name": "Time Of Day",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b678992c9078.jpg",
+        "plugin_author": "misticos",
+        "file_name": "TimeOfDay.cs",
+        "installed_at": "2026-06-21T13:58:06+00:00"
+    },
+    {
+        "plugin_id": "spawn-heli",
+        "provider": "umod",
+        "version_id": "spawn-heli",
+        "plugin_name": "Spawn Heli",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5c5d2768b66c7.png",
+        "plugin_author": "SpooksAU",
+        "file_name": "SpawnHeli.cs",
+        "installed_at": "2026-06-21T13:58:41+00:00"
+    },
+    {
+        "plugin_id": "better-loot",
+        "provider": "umod",
+        "version_id": "better-loot",
+        "plugin_name": "Better Loot",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/681cf8ac1ad5b.png",
+        "plugin_author": "MagicServices",
+        "file_name": "BetterLoot.cs",
+        "installed_at": "2026-06-22T13:01:42+00:00"
+    },
+    {
+        "plugin_id": "remover-tool",
+        "provider": "umod",
+        "version_id": "remover-tool",
+        "plugin_name": "Remover Tool",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5f69e0b028169.png",
+        "plugin_author": "Tryhard",
+        "file_name": "RemoverTool.cs",
+        "installed_at": "2026-06-22T13:03:14+00:00"
+    },
+    {
+        "plugin_id": "recycler-speed",
+        "provider": "umod",
+        "version_id": "recycler-speed",
+        "plugin_name": "Recycler Speed",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d7713e817a87.png",
+        "plugin_author": "yetzt",
+        "file_name": "RecyclerSpeed.cs",
+        "installed_at": "2026-06-22T13:04:04+00:00"
+    },
+    {
+        "plugin_id": "arkan",
+        "provider": "umod",
+        "version_id": "arkan",
+        "plugin_name": "Arkan",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d5581bacd0ed.png",
+        "plugin_author": "Antidote",
+        "file_name": "Arkan.cs",
+        "installed_at": "2026-06-22T13:05:36+00:00"
+    },
+    {
+        "plugin_id": "admin-no-loot",
+        "provider": "umod",
+        "version_id": "admin-no-loot",
+        "plugin_name": "Admin No Loot",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5fb3b12ee68d9.png",
+        "plugin_author": "VisEntities",
+        "file_name": "AdminNoLoot.cs",
+        "installed_at": "2026-06-22T13:08:15+00:00"
+    },
+    {
+        "plugin_id": "auto-turret-authorization",
+        "provider": "umod",
+        "version_id": "auto-turret-authorization",
+        "plugin_name": "Auto Turret Authorization",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d8684ac7e8eb.jpg",
+        "plugin_author": "haggbart",
+        "file_name": "AutoTurretAuth.cs",
+        "installed_at": "2026-06-22T13:08:30+00:00"
+    },
+    {
+        "plugin_id": "stack-size-controller",
+        "provider": "umod",
+        "version_id": "stack-size-controller",
+        "plugin_name": "Stack Size Controller",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5c5df50e8179b.png",
+        "plugin_author": "AnExiledDev",
+        "file_name": "StackSizeController.cs",
+        "installed_at": "2026-06-22T13:34:18+00:00"
+    },
+    {
+        "plugin_id": "player-dlc-api",
+        "provider": "umod",
+        "version_id": "player-dlc-api",
+        "plugin_name": "Player DLC API",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/6879cc322d19f.png",
+        "plugin_author": "k1lly0u",
+        "file_name": "PlayerDLCAPI.cs",
+        "installed_at": "2026-06-22T14:33:49+00:00"
+    },
+    {
+        "plugin_id": "simple-no-vehicle-fuel",
+        "provider": "umod",
+        "version_id": "simple-no-vehicle-fuel",
+        "plugin_name": "Simple No Vehicle Fuel",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/66a63cf34f6b5.png",
+        "plugin_author": "",
+        "file_name": "SimpleNoVehicleFuel.cs",
+        "installed_at": "2026-06-22T14:41:58+00:00"
+    },
+    {
+        "plugin_id": "auto-pickup-barrel",
+        "provider": "umod",
+        "version_id": "auto-pickup-barrel",
+        "plugin_name": "Auto Pickup Barrel",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/652ff3cce4f26.png",
+        "plugin_author": "l3rady",
+        "file_name": "AutoPickupBarrel.cs",
+        "installed_at": "2026-06-22T14:45:59+00:00"
+    },
+    {
+        "plugin_id": "bgrade",
+        "provider": "umod",
+        "version_id": "bgrade",
+        "plugin_name": "BGrade",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b57e1d5c2c75.png",
+        "plugin_author": "Ryan",
+        "file_name": "BGrade.cs",
+        "installed_at": "2026-06-22T23:53:22+00:00"
+    },
+    {
+        "plugin_id": "no-workbench",
+        "provider": "umod",
+        "version_id": "no-workbench",
+        "plugin_name": "No Workbench",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b63bee76f768.jpg",
+        "plugin_author": "k1lly0u",
+        "file_name": "NoWorkbench.cs",
+        "installed_at": "2026-06-22T23:56:47+00:00"
+    },
+    {
+        "plugin_id": "blueprint-manager",
+        "provider": "umod",
+        "version_id": "blueprint-manager",
+        "plugin_name": "Blueprint Manager",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/633eed2e8b4d0.png",
+        "plugin_author": "Whispers88",
+        "file_name": "BlueprintManager.cs",
+        "installed_at": "2026-06-23T00:02:11+00:00"
+    },
+    {
+        "plugin_id": "death-notes",
+        "provider": "umod",
+        "version_id": "death-notes",
+        "plugin_name": "Death Notes",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5c238b58799f7.png",
+        "plugin_author": "MrBlue",
+        "file_name": "DeathNotes.cs",
+        "installed_at": "2026-06-23T00:08:45+00:00"
+    },
+    {
+        "plugin_id": "tool-cupboard-turrets",
+        "provider": "umod",
+        "version_id": "tool-cupboard-turrets",
+        "plugin_name": "Tool Cupboard Turrets",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5f83702f7dcfb.png",
+        "plugin_author": "0x89A",
+        "file_name": "ToolCupboardTurrets.cs",
+        "installed_at": "2026-06-23T02:26:26+00:00"
+    },
+    {
+        "plugin_id": "sort-button",
+        "provider": "umod",
+        "version_id": "sort-button",
+        "plugin_name": "Sort Button",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/612c9cdfdb1d3.png",
+        "plugin_author": "WhiteThunder",
+        "file_name": "SortButton.cs",
+        "installed_at": "2026-06-23T02:26:33+00:00"
+    },
+    {
+        "plugin_id": "shared-doors",
+        "provider": "umod",
+        "version_id": "shared-doors",
+        "plugin_name": "Shared Doors",
+        "plugin_icon": "",
+        "plugin_author": "dbteku",
+        "file_name": "SharedDoors.cs",
+        "installed_at": "2026-06-23T02:27:35+00:00"
+    },
+    {
+        "plugin_id": "server-rewards-wipe",
+        "provider": "umod",
+        "version_id": "server-rewards-wipe",
+        "plugin_name": "Server Rewards Wipe",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/63572c66e151f.png",
+        "plugin_author": "ZEODE",
+        "file_name": "ServerRewardsWipe.cs",
+        "installed_at": "2026-06-23T04:27:15+00:00"
+    },
+    {
+        "plugin_id": "powerless-turrets",
+        "provider": "umod",
+        "version_id": "powerless-turrets",
+        "plugin_name": "Powerless Turrets",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d3472cc3f782.png",
+        "plugin_author": "August",
+        "file_name": "PowerlessTurrets.cs",
+        "installed_at": "2026-06-23T04:39:35+00:00"
+    },
+    {
+        "plugin_id": "turret-switches",
+        "provider": "umod",
+        "version_id": "turret-switches",
+        "plugin_name": "Turret Switches",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/6459fbe7b5f2d.png",
+        "plugin_author": "ziptie",
+        "file_name": "TurretSwitches.cs",
+        "installed_at": "2026-06-23T04:40:10+00:00"
+    },
+    {
+        "plugin_id": "random-respawner",
+        "provider": "umod",
+        "version_id": "random-respawner",
+        "plugin_name": "Random Respawner",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5ce716fe0808c.png",
+        "plugin_author": "Tryhard",
+        "file_name": "RandomRespawner.cs",
+        "installed_at": "2026-06-23T05:54:41+00:00"
+    },
+    {
+        "plugin_id": "image-library",
+        "provider": "umod",
+        "version_id": "image-library",
+        "plugin_name": "Image Library",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b5b288d7e21d.png",
+        "plugin_author": "k1lly0u",
+        "file_name": "ImageLibrary.cs",
+        "installed_at": "2026-06-23T13:16:49+00:00"
+    },
+    {
+        "plugin_id": "server-rewards",
+        "provider": "umod",
+        "version_id": "server-rewards",
+        "plugin_name": "Server Rewards",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b63be585b337.jpg",
+        "plugin_author": "k1lly0u",
+        "file_name": "ServerRewards.cs",
+        "installed_at": "2026-06-23T13:23:47+00:00"
+    },
+    {
+        "plugin_id": "ban-delete-by",
+        "provider": "umod",
+        "version_id": "ban-delete-by",
+        "plugin_name": "Ban Delete By",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b57e1d691524.png",
+        "plugin_author": "Ryan",
+        "file_name": "BanDeleteBy.cs",
+        "installed_at": "2026-06-25T19:01:39+00:00"
+    },
+    {
+        "plugin_id": "cupboard-limiter",
+        "provider": "umod",
+        "version_id": "cupboard-limiter",
+        "plugin_name": "Cupboard Limiter",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/60147bcd20514.png",
+        "plugin_author": "Spiikesan",
+        "file_name": "CupboardLimiter.cs",
+        "installed_at": "2026-06-25T19:08:50+00:00"
+    },
+    {
+        "plugin_id": "guardian",
+        "provider": "umod",
+        "version_id": "guardian",
+        "plugin_name": "Guardian",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/602a812b6f9a8.png",
+        "plugin_author": "WhiteDragon",
+        "file_name": "Guardian.cs",
+        "installed_at": "2026-06-25T19:11:41+00:00"
+    },
+    {
+        "plugin_id": "entity-limit",
+        "provider": "umod",
+        "version_id": "entity-limit",
+        "plugin_name": "Entity Limit",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d5c458698118.png",
+        "plugin_author": "TheFriendlyChap",
+        "file_name": "EntityLimit.cs",
+        "installed_at": "2026-06-25T19:12:35+00:00"
+    },
+    {
+        "plugin_id": "simple-logo",
+        "provider": "umod",
+        "version_id": "simple-logo",
+        "plugin_name": "Simple Logo",
+        "plugin_icon": "",
+        "plugin_author": "sami37",
+        "file_name": "SimpleLogo.cs",
+        "installed_at": "2026-06-25T19:13:27+00:00"
+    },
+    {
+        "plugin_id": "kdr-scoreboard",
+        "provider": "umod",
+        "version_id": "kdr-scoreboard",
+        "plugin_name": "KDR Scoreboard",
+        "plugin_icon": "",
+        "plugin_author": "Ankawi",
+        "file_name": "KDRScoreboard.cs",
+        "installed_at": "2026-06-25T20:11:48+00:00"
+    },
+    {
+        "plugin_id": "disable-cold-damage",
+        "provider": "umod",
+        "version_id": "disable-cold-damage",
+        "plugin_name": "Disable Cold Damage",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5cb2fecb296a6.png",
+        "plugin_author": "Talha",
+        "file_name": "DisableColdDamage.cs",
+        "installed_at": "2026-06-25T20:56:25+00:00"
+    },
+    {
+        "plugin_id": "disable-wet",
+        "provider": "umod",
+        "version_id": "disable-wet",
+        "plugin_name": "Disable Wet",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5dc02aacbc776.png",
+        "plugin_author": "SwenenzY",
+        "file_name": "DisableWet.cs",
+        "installed_at": "2026-06-25T20:56:38+00:00"
+    },
+    {
+        "plugin_id": "disable-temperature-functions",
+        "provider": "umod",
+        "version_id": "disable-temperature-functions",
+        "plugin_name": "Disable Temperature Functions",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5ce1cce644d74.png",
+        "plugin_author": "TheFriendlyChap",
+        "file_name": "DisableTemperatureFunctions.cs",
+        "installed_at": "2026-06-25T20:57:36+00:00"
+    },
+    {
+        "plugin_id": "instant-smelt",
+        "provider": "umod",
+        "version_id": "instant-smelt",
+        "plugin_name": "Instant Smelt",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/693fe459e6647.png",
+        "plugin_author": "KrunghCrow",
+        "file_name": "InstantSmelt.cs",
+        "installed_at": "2026-06-25T21:00:12+00:00"
+    },
+    {
+        "plugin_id": "custom-vending-setup",
+        "provider": "umod",
+        "version_id": "custom-vending-setup",
+        "plugin_name": "Custom Vending Setup",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5ea8021e1e177.png",
+        "plugin_author": "WhiteThunder",
+        "file_name": "CustomVendingSetup.cs",
+        "installed_at": "2026-06-25T21:01:32+00:00"
+    },
+    {
+        "plugin_id": "no-weapon-drop",
+        "provider": "umod",
+        "version_id": "no-weapon-drop",
+        "plugin_name": "No Weapon Drop",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5fe8bd4f5429a.png",
+        "plugin_author": "",
+        "file_name": "NoWeaponDrop.cs",
+        "installed_at": "2026-06-25T21:06:54+00:00"
+    },
+    {
+        "plugin_id": "instant-craft",
+        "provider": "umod",
+        "version_id": "instant-craft",
+        "plugin_name": "Instant Craft",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5bedc9fe1d378.png",
+        "plugin_author": "rostov114",
+        "file_name": "InstantCraft.cs",
+        "installed_at": "2026-06-25T21:35:21+00:00"
+    },
+    {
+        "plugin_id": "monuments-recycler",
+        "provider": "umod",
+        "version_id": "monuments-recycler",
+        "plugin_name": "Monuments Recycler",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5f85a56dc4099.png",
+        "plugin_author": "VisEntities",
+        "file_name": "MonumentsRecycler.cs",
+        "installed_at": "2026-06-25T21:38:58+00:00"
+    },
+    {
+        "plugin_id": "discord-status",
+        "provider": "umod",
+        "version_id": "discord-status",
+        "plugin_name": "Discord Status",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5d20e5b64e078.png",
+        "plugin_author": "DevGonzi",
+        "file_name": "DiscordStatus.cs",
+        "installed_at": "2026-06-25T22:26:42+00:00"
+    },
+    {
+        "plugin_id": "discord-logger",
+        "provider": "umod",
+        "version_id": "discord-logger",
+        "plugin_name": "Discord Logger",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/616854668f326.png",
+        "plugin_author": "MONaH",
+        "file_name": "DiscordLogger.cs",
+        "installed_at": "2026-06-25T22:27:09+00:00"
+    },
+    {
+        "plugin_id": "instant-gather",
+        "provider": "umod",
+        "version_id": "instant-gather",
+        "plugin_name": "Instant Gather",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5daadea6a08a5.png",
+        "plugin_author": "supreme",
+        "file_name": "InstantGather.cs",
+        "installed_at": "2026-06-26T22:56:31+00:00"
+    },
+    {
+        "plugin_id": "rocket-fire",
+        "provider": "umod",
+        "version_id": "rocket-fire",
+        "plugin_name": "Rocket Fire",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5da1c84995560.png",
+        "plugin_author": "",
+        "file_name": "RocketFire.cs",
+        "installed_at": "2026-06-28T15:00:38+00:00"
+    },
+    {
+        "plugin_id": "infinite-vending-stock",
+        "provider": "umod",
+        "version_id": "infinite-vending-stock",
+        "plugin_name": "Infinite Vending Stock",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/6469585cabbbd.png",
+        "plugin_author": "Rustic0",
+        "file_name": "InfiniteVendingStock.cs",
+        "installed_at": "2026-06-28T17:13:39+00:00"
+    },
+    {
+        "plugin_id": "instant-buy",
+        "provider": "umod",
+        "version_id": "instant-buy",
+        "plugin_name": "Instant Buy",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b67711eb33dc.jpg",
+        "plugin_author": "bushhy",
+        "file_name": "InstantBuy.cs",
+        "installed_at": "2026-06-28T17:18:55+00:00"
+    },
+    {
+        "plugin_id": "fancy-drop",
+        "provider": "umod",
+        "version_id": "fancy-drop",
+        "plugin_name": "Fancy Drop",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5b6771f8b2a32.jpg",
+        "plugin_author": "FastBurst",
+        "file_name": "FancyDrop.cs",
+        "installed_at": "2026-06-28T22:56:06+00:00"
+    },
+    {
+        "plugin_id": "smart-chat-bot",
+        "provider": "umod",
+        "version_id": "smart-chat-bot",
+        "plugin_name": "Smart Chat Bot",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/5ba3bfbab6bae.png",
+        "plugin_author": "misticos",
+        "file_name": "SmartChatBot.cs",
+        "installed_at": "2026-07-01T16:47:33+00:00"
+    }
+]

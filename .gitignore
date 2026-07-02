@@ -1,0 +1,50 @@
+# This repo is for managing Rust/Oxide plugins and related config, not a full
+# checked-in Rust dedicated server install. Git ignore rules are path/name based,
+# not size based, so broad runtime directories are ignored below.
+
+# Local Codex/agent state
+/.agents/
+/.codex/
+
+# Steam/Rust dedicated server runtime and downloaded game assets
+/.config/
+/.steam/
+/Bundles/
+/RustDedicated
+/RustDedicated_Data/
+/Steam/
+/steamapps/
+/steamcmd/
+/Oxide.Compiler
+/UnityPlayer.so
+/steamclient.so
+/libsteam_api.so
+/libdecor-0.so.0
+/libdecor-cairo.so
+/harmony_log.txt
+/steam_appid.txt
+
+# Root Rust runtime config/cache that is not part of plugin management
+/cfg/
+
+# Server identity runtime data: saves, player DBs, maps, logs, and generated files.
+# Keep only checked-in server cfg files.
+/server/*
+!/server/rust/
+/server/rust/*
+!/server/rust/cfg/
+!/server/rust/cfg/**
+
+# Oxide runtime-generated data. Keep plugin source, plugin configs, language files,
+# and Discord extension config assets under version control.
+/oxide/*
+!/oxide/plugins/
+!/oxide/plugins/**
+!/oxide/config/
+!/oxide/config/**
+!/oxide/lang/
+!/oxide/lang/**
+!/oxide/discord/
+!/oxide/discord/**
+!/oxide/oxide.config.json
+!/oxide/discord.config.json

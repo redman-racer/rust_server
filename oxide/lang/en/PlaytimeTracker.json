@@ -1,0 +1,19 @@
+{
+  "Playtime.Both": "[#45b6fe]Playtime[/#] : [#ffd479]{0}[/#]\n[#45b6fe]AFK Time[/#] : [#ffd479]{1}[/#]",
+  "Playtime.Single": "[#45b6fe]Playtime[/#] : [#ffd479]{0}[/#]",
+  "Playtime.Help": "You can see the top scoring playtimes by typing [#a1ff46]/playtime top[/#]",
+  "Top.Title": "[#45b6fe]Top Playtimes:[/#]",
+  "Top.Format": "\n[#a1ff46]{0}[/#] - [#ffd479]{1}[/#]",
+  "Referral.Disabled": "The referral system is disabled",
+  "Referral.Help": "[#ffd479]/refer <name or ID>[/#] - Add a referral for the specified player",
+  "Referral.Submitted": "You have already submitted your referral",
+  "Referral.Self": "You can not refer yourself",
+  "Referral.Accepted": "Your referral has been accepted",
+  "Referral.Acknowledged": "[#a1ff46]{0}[/#] has acknowledged a referral from you",
+  "Reward.Given.ServerRewards": "You have received [#a1ff46]{0} RP[/#] for playing on our server!",
+  "Reward.Given.Economics": "You have received [#a1ff46]{0}[/#] coins for playing on our server!",
+  "Error.NoPlaytimeStored": "No playtime has been stored for you yet",
+  "Error.NoPlayerFound": "No player found with the name [#a1ff46]{0}[/#]",
+  "Error.NoTimeStored": "No time stored for the specified player",
+  "Error.InvalidSyntax": "Invalid syntax"
+}

@@ -1,0 +1,17 @@
+{
+  "Chat Format": "[#1874CD](Auth)[/#]: {0}",
+  "Code Generation": "Here is your code: [#1874CD]{0}[/#]\nJoin our [#EE3B3B]Discord[/#] and PM the code to the Discord Bot",
+  "Code Expired": "Your code has [#EE3B3B]Expired![/#]",
+  "Authenticated": "Thank you for authenticating your account",
+  "Game-Deauthenticated": "Successfully deauthenticated your account",
+  "Discord-Deauthenticated": "You have been deauthenticated from {0}",
+  "Discord-Deauthenticated-NonActive": "You have been deauthenticated from {0} because you haven't been active on the game server for {1} days",
+  "Already Authenticated": "You have already [#1874CD]authenticated[/#] your account, no need to do it again",
+  "Not Authenticated": "You are not authenticated",
+  "Group Revoked": "Your '{0}' Server Group(s) have been revoked! Reauthenticate to receive it",
+  "Roles Revoked": "Your '{0}' Discord Role(s) have been revoked! Reauthenticate to receive it",
+  "Join Granted": "Granted '{0}' Group(s) and '{1}' Discord Role(s)",
+  "Rejoin Granted": "Granted '{0}' Group(s) and '{1}' Discord Role(s) for joining {2} back",
+  "Unable to find code": "Sorry, we couldn't find your code, please try to authenticate again, If you haven't generated a code, please type /auth in-game",
+  "No Permission": "You dont have permission to use this command"
+}

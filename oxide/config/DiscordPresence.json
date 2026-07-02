@@ -1,0 +1,18 @@
+{
+  "Discord Application Bot Token": "MTUyMTEwNTg3OTQ3NzI1NjIzNA.G7tjK9.77dyYoB6qkI7wLgQLinWwKphpv6AEDVeGUilRA",
+  "Enable Sending Message Per Update Rate": true,
+  "Enable Sending Message On Player Leave/Join": true,
+  "Enable Sending Server Loading Message": true,
+  "Update Rate (Seconds)": 15.0,
+  "Status Messages": [
+    {
+      "Message": "{server.players}/{server.players.max} Online",
+      "Type": "Custom"
+    }
+  ],
+  "Server Loading Message": {
+    "Message": "Server is booting",
+    "Type": "Playing"
+  },
+  "Discord Extension Log Level (Verbose, Debug, Info, Warning, Error, Exception, Off)": "Info"
+}

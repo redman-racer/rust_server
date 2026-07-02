@@ -1,0 +1,5 @@
+{
+  "NeedsBuildingPrivilegeToUseSwitch": true,
+  "PlaySoundEffects": true,
+  "RequiresPermission": false
+}

@@ -1,0 +1,9 @@
+{
+  "Command": "ismelt",
+  "Resource (true/false)": {
+    "wood": false,
+    "metal.ore": true,
+    "hq.metal.ore": true,
+    "sulfur.ore": true
+  }
+}

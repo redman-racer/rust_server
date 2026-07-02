@@ -1,0 +1,337 @@
+{
+  "Map Colors Version": "Current",
+  "Default Image Encoding (Jpg, Png)": "Jpg",
+  "Starting Splits (Rows x Columns)": [
+    "2x2"
+  ],
+  "IconSettings": {
+    "Harbor": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/ND4c70v.png",
+      "Show": true
+    },
+    "Giant Excavator Pit": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/hmUKFwS.png",
+      "Show": true
+    },
+    "Junkyard": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/V8D4ZGc.png",
+      "Show": true
+    },
+    "Launch Site": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/gjdynsc.png",
+      "Show": true
+    },
+    "Water Treatment Plant": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/5L2Gdag.png",
+      "Show": true
+    },
+    "Military Tunnel": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/6RwXvC2.png",
+      "Show": true
+    },
+    "Airfield": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/KhQXhIs.png",
+      "Show": true
+    },
+    "Power Plant": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/ZxqiBc6.png",
+      "Show": true
+    },
+    "Train Yard": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/wVifXqr.png",
+      "Show": true
+    },
+    "Outpost": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/hb7JZ9i.png",
+      "Show": true
+    },
+    "Bandit Camp": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/cIR4YOt.png",
+      "Show": true
+    },
+    "Sewer Branch": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/PbKZQdZ.png",
+      "Show": true
+    },
+    "HQM Quarry": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/bGFogbM.png",
+      "Show": true
+    },
+    "Satellite Dish": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/XwSpCJY.png",
+      "Show": true
+    },
+    "The Dome": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/mPRgBF2.png",
+      "Show": true
+    },
+    "Sulfur Quarry": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/bGFogbM.png",
+      "Show": true
+    },
+    "Stone Quarry": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/bGFogbM.png",
+      "Show": true
+    },
+    "Power Sub Station": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/LQUknms.png",
+      "Show": false
+    },
+    "Water Well": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/TASWRD0.png",
+      "Show": true
+    },
+    "Abandoned Cabins": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/xigwDcW.png",
+      "Show": true
+    },
+    "Wild Swamp": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/2tcTYKA.png",
+      "Show": true
+    },
+    "Abandoned Supermarket": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/ZyP2W9F.png",
+      "Show": true
+    },
+    "Mining Outpost": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/C0acqvj.png",
+      "Show": true
+    },
+    "Oxum's Gas Station": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/oW1bDdF.png",
+      "Show": true
+    },
+    "Cave": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/ByKJj9C.png",
+      "Show": true
+    },
+    "Lighthouse": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/r5vbzhm.png",
+      "Show": true
+    },
+    "Large Oil Rig": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/AAhZO7k.png",
+      "Show": true
+    },
+    "Oil Rig": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/AAhZO7k.png",
+      "Show": true
+    },
+    "Fishing Village": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/7UCs5BO.png",
+      "Show": true
+    },
+    "Large Fishing Village": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/7UCs5BO.png",
+      "Show": true
+    },
+    "Ranch": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/VQjSjzA.png",
+      "Show": true
+    },
+    "Large Barn": {
+      "Width": 60,
+      "Height": 60,
+      "ImageUrl": "https://i.imgur.com/VQjSjzA.png",
+      "Show": true
+    },
+    "Canyon B": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "jungle swamp": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Lake A": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Oasis A": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Oasis B": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Ferry Terminal": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Abandoned Military Base": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Arctic Research Base": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Missile Silo": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Train Tunnel": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Train Tunnel Link": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Jungle Ziggurat": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Jungle Ruin": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Jungle ruin": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Ice Lake": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Radtown": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Substation": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Underground Cave": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Underwater Lab": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": true
+    },
+    "Canyon A": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": false
+    },
+    "Oasis C": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": false
+    }
+  },
+  "Custom Icons": [
+    {
+      "XPos": 0.0,
+      "ZPos": 0.0,
+      "Width": 200,
+      "Height": 200,
+      "ImageUrl": "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",
+      "Show": false
+    }
+  ]
+}

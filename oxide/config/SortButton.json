@@ -1,0 +1,217 @@
+
+
+{
+  "Default enabled": true,
+  "Default sort by category": true,
+  "Check ownership": true,
+  "Use Clans": true,
+  "Use Friends": false,
+  "Use Teams": true,
+  "Chat steamID icon": 0,
+  "Chat command": [
+    "sortbutton"
+  ],
+  "Containers by short prefab name": {
+    "assets/content/vehicles/boats/rhib/subents/rhib_storage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/content/vehicles/boats/rowboat/subents/rowboat_storage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/content/vehicles/horse/ridablehorse.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/content/vehicles/modularcar/subents/modular_car_1mod_storage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/content/vehicles/modularcar/subents/modular_car_camper_storage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/content/vehicles/snowmobiles/subents/snowmobileitemstorage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/content/vehicles/submarine/subents/submarineitemstorage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/composter/composter.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/dropbox/dropbox.deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/fridge/fridge.deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/hitch & trough/hitchtrough.deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/hot air balloon/subents/hab_storage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/abyss_dlc_large_wood_box/abyss_dlc_storage_horizontal/abyss_barrel_horizontal.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/abyss_dlc_large_wood_box/abyss_dlc_storage_vertical/abyss_barrel_vertical.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/jungle_dlc_large_wood_box/jungle_dlc_storage_horizontal/wicker_barrel.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/jungle_dlc_large_wood_box/jungle_dlc_storage_vertical/bamboo_barrel.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/medieval_large_wood_box/medieval.box.wooden.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/warhammer_dlc_large_wood_box/krieg_storage_horizontal/krieg_storage_horizontal.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/warhammer_dlc_large_wood_box/krieg_storage_vertical/krieg_storage_vertical.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/minifridge/minifridge.deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/small stash/small_stash_deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/tool cupboard/cupboard.tool.deployed.prefab": {
+      "Enabled": false,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/tool cupboard/retro/cupboard.tool.retro.deployed.prefab": {
+      "Enabled": false,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/tool cupboard/shockbyte/cupboard.tool.shockbyte.deployed.prefab": {
+      "Enabled": false,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/vendingmachine/vendingmachine.deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/wall cabinet/electric.wallcabinet.deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/woodenbox/skins/pilot_hazmat_wooden_box/pilot_hazmat_woodbox_deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/woodenbox/woodbox_deployed.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/misc/decor_dlc/storagebarrel/storage_barrel_b.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/misc/decor_dlc/storagebarrel/storage_barrel_c.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/misc/halloween/coffin/coffinstorage.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_ammo/component.box.ammo.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_armor/component.box.armor.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_charcoal/component.box.charcoal.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_clothing/component.box.clothing.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_comps/component.box.comps.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_explosives/component.box.explosives.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_food/component.box.food.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_guns/component.box.guns.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_meds/component.box.meds.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_metal/component.box.metal.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_ore/component.box.ore.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_scrap/component.box.scrap.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_stone/component.box.stone.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_sulfur/component.box.sulfur.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_tools/component.box.tools.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/component_storage_boxes_dlc/box_wood/component.box.wood.large.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/industrial_dlc/industrial_storage_horizontal/industrial_storage_horizontal.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    },
+    "assets/prefabs/deployable/large wood storage/skins/industrial_dlc/industrial_storage_vertical/industrial_storage_vertical.prefab": {
+      "Enabled": true,
+      "OffsetX": 476.5
+    }
+  },
+  "Containers by skin ID": {}
+}

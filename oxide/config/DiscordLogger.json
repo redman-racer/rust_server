@@ -1,0 +1,181 @@
+{
+  "Global settings": {
+    "Log to console?": false,
+    "Use AntiSpam plugin on chat messages": false,
+    "Use UFilter plugin on chat messages": false,
+    "Hide admin connect/disconnect messages": false,
+    "Hide NPC death messages": false,
+    "Replacement string for tags": "`",
+    "Queue interval (1 message per ? seconds)": 1.0,
+    "Queue cooldown if connection error (seconds)": 60.0,
+    "Default WebhookURL": "",
+    "RCON command blacklist": [
+      "playerlist",
+      "status"
+    ]
+  },
+  "Admin Hammer settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Admin Radar settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Bradley settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Cargo Ship settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Cargo Plane settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Chat settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Chat (Team) settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "CH47 Helicopter settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Christmas settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Clan settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Dangerous Treasures settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Duel settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Godmode settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Easter settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Error settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Hackable Locked Crate settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Halloween settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Helicopter settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "NTeleportation settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Permissions settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Player death settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Player DeathNotes settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Player connect advanced info settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Player connect settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Player disconnect settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Player Respawned settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Private Messages settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Raidable Bases settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Rcon command settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Rcon connection settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Rust Kits settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "SantaSleigh settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Server messages settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Server state settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Supply Drop settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Teams settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "User Banned settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "User Kicked settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "User Muted settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "User Name Updated settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  },
+  "Vanish settings": {
+    "WebhookURL": "",
+    "Enabled?": false
+  }
+}

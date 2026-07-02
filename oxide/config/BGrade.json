@@ -1,0 +1,31 @@
+
+{
+  "Building Attack Settings": {
+    "Cooldown Time": 30,
+    "Enabled": true
+  },
+  "Command Settings": {
+    "Chat Commands": [
+      "bgrade",
+      "grade"
+    ],
+    "Console Commands": [
+      "bgrade.up"
+    ]
+  },
+  "Destroy Data on Player Disconnect (for high pop servers)": false,
+  "Placement Fix Settings": {
+    "Delay Upgrade One Tick": false,
+    "Reset Skin Before Upgrade": false,
+    "Start Being Rotatable After Upgrade": false,
+    "Update Surrounding Entities After Upgrade": false
+  },
+  "Refund Settings": {
+    "Refund on Block": true
+  },
+  "Timer Settings": {
+    "Default Timer": 30,
+    "Enabled": true,
+    "Max Timer": 180
+  }
+}

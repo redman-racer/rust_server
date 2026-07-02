@@ -1,0 +1,8 @@
+
+{
+  "Max amount of rockets to fire at once": 2,
+  "Delay in between multiple rocket shots": 0.2,
+  "Rockets fire at same position": false,
+  "The rocket velocity": 22.0,
+  "The rocket type": "rocket_basic"
+}

@@ -1,0 +1,11 @@
+{
+  "UI": {
+    "BackgroundMainColor": "0 0 0 0",
+    "BackgroundMainURL": [
+      "https://raidlands.net/assets/media/nav-logo.png"
+    ],
+    "GUIAnchorMax": "0.15 0.1",
+    "GUIAnchorMin": "0.01 0.02",
+    "IntervalBetweenImage": 30
+  }
+}

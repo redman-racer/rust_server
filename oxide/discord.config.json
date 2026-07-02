@@ -1,0 +1,35 @@
+{
+  "Commands": {
+    "Command Prefixes": [
+      "/",
+      "!"
+    ]
+  },
+  "Rest": {
+    "API Error Request Retries": 3,
+    "API Rate Limit Request Retries": 6
+  },
+  "Logging": {
+    "Server Console Log Level": "Info",
+    "File Log Level": "Off",
+    "Hide Discord Error Codes": [],
+    "File DateTime Format": "HH:mm:ss.ff"
+  },
+  "Users": {
+    "Direct Message Blocked Duration (Hours)": 24.0
+  },
+  "Search": {
+    "Enable Player Name Trie Search (High Performance / High Memory Usage)": true
+  },
+  "Validation": {
+    "Enable Request Validation": true
+  },
+  "Bot": {
+    "Automatically Apply Gateway Intents": true
+  },
+  "Ip": {
+    "Enabled": true,
+    "Save IP Data Duration (Days)": 30.0,
+    "Unknown Country Emoji": ":signal_strength:"
+  }
+}
