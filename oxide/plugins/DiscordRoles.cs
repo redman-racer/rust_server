@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
+using Oxide.Core;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using Oxide.Ext.Discord.Clients;
@@ -34,8 +36,10 @@ namespace Oxide.Plugins
         private Timer _playerChecker;
         private DiscordGuild _guild;
         private BotConnection _discordSettings;
+        private Dictionary<string, string> _secrets;
 
         private const string AccentColor = "#de8732";
+        private const string SecretsConfigName = "Secrets.local";
 
         private readonly List<string> _added = new List<string>();
         private readonly List<string> _removed = new List<string>();
@@ -78,7 +82,7 @@ namespace Oxide.Plugins
         {
             _discordSettings = new BotConnection
             {
-                ApiToken = _pluginConfig.DiscordApiKey,
+                ApiToken = ResolveSecretValue(_pluginConfig.DiscordApiKey),
                 LogLevel = _pluginConfig.ExtensionDebugging,
                 Intents = GatewayIntents.Guilds | GatewayIntents.GuildMembers
             };
@@ -137,7 +141,7 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            if (string.IsNullOrEmpty(_pluginConfig.DiscordApiKey))
+            if (string.IsNullOrEmpty(ResolveSecretValue(_pluginConfig.DiscordApiKey)))
             {
                 PrintWarning("Please enter your bot token in the config and reload the plugin.");
                 return;
@@ -151,6 +155,71 @@ namespace Oxide.Plugins
             }
             
             Client.Connect(_discordSettings);
+        }
+
+        private string ResolveSecretValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            string trimmed = value.Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return string.Empty;
+            }
+
+            string secret;
+
+            if (LoadSecrets().TryGetValue(key, out secret))
+            {
+                return secret;
+            }
+
+            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            return string.Empty;
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (_secrets != null)
+            {
+                return _secrets;
+            }
+
+            _secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                return _secrets;
+            }
+
+            try
+            {
+                Dictionary<string, string> loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+                if (loadedSecrets != null)
+                {
+                    _secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+            }
+
+            return _secrets;
         }
         #endregion
 

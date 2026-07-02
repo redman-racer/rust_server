@@ -24,9 +24,15 @@ Secret variable support files:
 oxide/plugins/WebsiteVipBridge.cs
 oxide/plugins/DiscordLogger.cs
 oxide/plugins/DiscordWipe.cs
+oxide/plugins/DiscordAuth.cs
+oxide/plugins/DiscordPresence.cs
+oxide/plugins/DiscordRoles.cs
 oxide/config/WebsiteVipBridge.json
 oxide/config/DiscordLogger.json
 oxide/config/DiscordWipe.json
+oxide/config/DiscordAuth.json
+oxide/config/DiscordPresence.json
+oxide/config/DiscordRoles.json
 oxide/config/Secrets.example.json
 
 Do not upload from Git:
@@ -49,3 +55,6 @@ After upload:
 oxide.reload WebsiteVipBridge
 oxide.reload DiscordLogger
 oxide.reload DiscordWipe
+oxide.reload DiscordAuth
+oxide.reload DiscordPresence
+oxide.reload DiscordRoles

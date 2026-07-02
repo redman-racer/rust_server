@@ -1,5 +1,5 @@
 {
-  "Discord Application Bot Token": "MTUyMTEwNTg3OTQ3NzI1NjIzNA.G7tjK9.77dyYoB6qkI7wLgQLinWwKphpv6AEDVeGUilRA",
+  "Discord Application Bot Token": "${DISCORD_BOT_TOKEN}",
   "Enable Sending Message Per Update Rate": true,
   "Enable Sending Message On Player Leave/Join": true,
   "Enable Sending Server Loading Message": true,

@@ -1,6 +1,6 @@
 {
   "Settings": {
-    "Bot Token": "MTUyMTEwNTg3OTQ3NzI1NjIzNA.G7tjK9.77dyYoB6qkI7wLgQLinWwKphpv6AEDVeGUilRA",
+    "Bot Token": "${DISCORD_BOT_TOKEN}",
     "Discord Server ID (Optional if bot only in 1 guild)": "",
     "Auth Commands": [
       "auth",

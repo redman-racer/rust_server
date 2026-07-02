@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Text;
 using System.Linq;
 using Newtonsoft.Json;
@@ -53,6 +54,8 @@ namespace Oxide.Plugins
         
         private const string AuthPerm = "discordauth.auth";
         private const string DeauthPerm = "discordauth.deauth";
+        private const string SecretsConfigName = "Secrets.local";
+        private Dictionary<string, string> _secrets;
         #endregion
 
         #region Config
@@ -209,15 +212,82 @@ namespace Oxide.Plugins
         [HookMethod(DiscordExtHooks.OnDiscordClientCreated)]
         private void OnDiscordClientCreated()
         {
-            if (string.IsNullOrEmpty(_pluginConfig.Info.BotToken))
+            string botToken = ResolveSecretValue(_pluginConfig.Info.BotToken);
+
+            if (string.IsNullOrEmpty(botToken))
             {
                 PrintWarning("Please set the Discord Bot Token and reload the plugin");
                 return;
             }
 
-            _settings.ApiToken = _pluginConfig.Info.BotToken;
+            _settings.ApiToken = botToken;
             _settings.LogLevel = _pluginConfig.Info.ExtensionDebugging;
             Client.Connect(_settings);
+        }
+
+        private string ResolveSecretValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            string trimmed = value.Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return value;
+            }
+
+            string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return string.Empty;
+            }
+
+            string secret;
+
+            if (LoadSecrets().TryGetValue(key, out secret))
+            {
+                return secret;
+            }
+
+            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            return string.Empty;
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (_secrets != null)
+            {
+                return _secrets;
+            }
+
+            _secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            string path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                return _secrets;
+            }
+
+            try
+            {
+                Dictionary<string, string> loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+                if (loadedSecrets != null)
+                {
+                    _secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+            }
+
+            return _secrets;
         }
         
         // Called when the client is created, and the plugin can use it
