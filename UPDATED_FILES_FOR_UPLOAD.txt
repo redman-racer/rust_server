@@ -1,13 +1,30 @@
-Rust server files to upload
+Clan management API files to upload
 Generated: 2026-07-02
 
-Upload these files to the same relative paths on the live Rust server:
+Rust server files:
 
-oxide/data/ServerRewards/products.json
-oxide/data/Kits/kits_data.json
-oxide/config/ServerRewards.json
+oxide/plugins/Clans.cs
+oxide/plugins/WebsiteClanBridge.cs
 
-After upload, reload the affected plugins from the server console:
+Website files:
 
-oxide.reload Kits
-oxide.reload ServerRewards
+api/clans/action.php
+api/server/clan-actions.php
+api/server/clan-action-result.php
+api/server/clan-snapshot.php
+database/migrations/004_clan_management.sql
+includes/clans.php
+
+After upload:
+
+1. Run database/migrations/004_clan_management.sql on the Raidlands website database.
+2. Upload the Rust plugin files to the same relative paths on the live Rust server.
+3. Reload Clans and load the new bridge from the server console:
+
+oxide.reload Clans
+oxide.load WebsiteClanBridge
+
+4. After WebsiteClanBridge generates oxide/config/WebsiteClanBridge.json, set ApiBaseUrl, ServerId, and SharedSecret to match the website bridge settings.
+5. Reload the bridge:
+
+oxide.reload WebsiteClanBridge
