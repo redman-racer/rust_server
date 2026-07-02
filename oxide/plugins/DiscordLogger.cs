@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Discord Logger", "MON@H", "2.0.20")]
+    [Info("Discord Logger", "MON@H", "2.0.21")]
     [Description("Logs events to Discord channels using webhooks")]
     public class DiscordLogger : RustPlugin
     {
@@ -41,7 +41,9 @@ namespace Oxide.Plugins
         private Vector3 _locationLargeOilRig;
         private Vector3 _locationOilRig;
         private Dictionary<string, string> _secrets;
+        private readonly HashSet<string> _loggedSecretSources = new(StringComparer.OrdinalIgnoreCase);
         private const string SecretsConfigName = "Secrets.local";
+        private const string SecretsConfigPath = "oxide/config/Secrets.local.json";
 
         private readonly List<Regex> _regexTags = new()
 
@@ -1986,7 +1988,7 @@ namespace Oxide.Plugins
 
             if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
             {
-                return value;
+                return trimmed;
             }
 
             var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
@@ -2000,11 +2002,24 @@ namespace Oxide.Plugins
 
             if (LoadSecrets().TryGetValue(key, out secret))
             {
-                return secret;
+                var resolved = (secret ?? "").Trim();
+                LogSecretResolution(key, resolved);
+                return resolved;
             }
 
-            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            PrintWarning($"Secret variable {key} is not configured in {SecretsConfigPath}.");
             return "";
+        }
+
+        private void LogSecretResolution(string key, string resolvedValue)
+        {
+            if (!_loggedSecretSources.Add(key))
+            {
+                return;
+            }
+
+            var state = string.IsNullOrWhiteSpace(resolvedValue) ? "empty" : $"length {resolvedValue.Length}";
+            Puts($"Discord Logger secret {key} source: {key} in {SecretsConfigPath}; resolved {state}.");
         }
 
         private Dictionary<string, string> LoadSecrets()
@@ -2019,7 +2034,7 @@ namespace Oxide.Plugins
 
             if (!File.Exists(path))
             {
-                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                PrintWarning($"Optional secrets file not found: {SecretsConfigPath}.");
                 return _secrets;
             }
 
@@ -2034,7 +2049,7 @@ namespace Oxide.Plugins
             }
             catch (Exception ex)
             {
-                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+                PrintWarning($"Could not read {SecretsConfigPath}: {ex.Message}");
             }
 
             return _secrets;

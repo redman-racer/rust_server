@@ -43,6 +43,20 @@ Why:
 
 Adds centralized plugin secret variables. Tracked plugin configs can reference
 `${VARIABLE_NAME}` while the real values live in the ignored local secrets file.
+The Discord plugin files are now self-identifying and log non-secret source
+diagnostics so the live console proves the patched code is running:
+
+DiscordLogger v2.0.21
+DiscordWipe v2.4.4
+DiscordAuth v1.4.1
+DiscordPresence v3.0.2
+DiscordRoles v2.1.1
+
+Expected reload lines include:
+
+Discord Wipe wipe webhook source: DISCORD_WIPE_WEBHOOK_URL in oxide/config/Secrets.local.json; resolved length ...
+Discord Auth bot token source: DISCORD_BOT_TOKEN in oxide/config/Secrets.local.json; resolved length ...
+Discord Presence bot token source: DISCORD_BOT_TOKEN in oxide/config/Secrets.local.json; resolved length ...
 
 After upload:
 
@@ -50,7 +64,19 @@ After upload:
    the live Rust server.
 2. Create or update `oxide/config/Secrets.local.json` directly on the live
    server with the real values.
-3. Reload the affected plugins from the server console:
+3. Keep the tracked configs using variables, for example:
+
+DiscordWipe.json:
+"Wipe Webhook url": "${DISCORD_WIPE_WEBHOOK_URL}"
+"Protocol Webhook url": "${DISCORD_WIPE_WEBHOOK_URL}"
+
+DiscordAuth.json:
+"Bot Token": "${DISCORD_BOT_TOKEN}"
+
+DiscordPresence.json:
+"Discord Application Bot Token": "${DISCORD_BOT_TOKEN}"
+
+4. Reload the affected plugins from the server console:
 
 oxide.reload WebsiteVipBridge
 oxide.reload DiscordLogger
@@ -58,3 +84,34 @@ oxide.reload DiscordWipe
 oxide.reload DiscordAuth
 oxide.reload DiscordPresence
 oxide.reload DiscordRoles
+
+5. Test:
+
+dw protocol
+dw wipe
+
+---
+
+Bridge 401 follow-up:
+
+Game server file:
+
+oxide/plugins/WebsiteVipBridge.cs
+
+Website file:
+
+C:\wamp64\www\raidlands\includes\config.php
+
+Why:
+
+Normalizes the bridge shared secret before HMAC signing/verification and logs a
+non-secret fingerprint on `oxide.reload WebsiteVipBridge` so the game server and
+website values can be compared safely.
+
+After upload:
+
+1. Upload `oxide/plugins/WebsiteVipBridge.cs` to the live Rust server.
+2. Upload `includes/config.php` to the live website.
+3. Reload the game plugin:
+
+oxide.reload WebsiteVipBridge

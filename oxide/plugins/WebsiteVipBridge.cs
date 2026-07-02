@@ -12,7 +12,7 @@ using Oxide.Core.Libraries.Covalence;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.2.0")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.2.1")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -23,6 +23,7 @@ namespace Oxide.Plugins
         private long cursor;
         private Dictionary<string, string> secrets;
         private const string SecretsConfigName = "Secrets.local";
+        private string secretsConfigSource;
 
         private class Configuration
         {
@@ -203,6 +204,7 @@ namespace Oxide.Plugins
         {
             EnsureManagedGroups(config.ManagedGroups);
             SyncBrandConfigs();
+            LogBridgeSecretDiagnostics();
             SyncChanges();
 
             var interval = Math.Max(30, config.SyncIntervalSeconds);
@@ -957,6 +959,19 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private void LogBridgeSecretDiagnostics()
+        {
+            var sharedSecret = ResolveSecretValue(config.SharedSecret);
+
+            if (string.IsNullOrWhiteSpace(sharedSecret))
+            {
+                PrintWarning("Bridge SharedSecret is empty after resolving secrets.");
+                return;
+            }
+
+            Puts($"Bridge SharedSecret source: {DescribeSecretSource(config.SharedSecret)}; length: {sharedSecret.Length}; fingerprint: {SecretFingerprint(sharedSecret)}");
+        }
+
         private void SendGet(string url, Action<int, string> callback)
         {
             var headers = BuildHeaders("GET", url, "");
@@ -998,7 +1013,7 @@ namespace Oxide.Plugins
 
             if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
             {
-                return value;
+                return trimmed;
             }
 
             var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
@@ -1012,11 +1027,26 @@ namespace Oxide.Plugins
 
             if (LoadSecrets().TryGetValue(key, out secret))
             {
-                return secret;
+                return (secret ?? "").Trim();
             }
 
             PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
             return "";
+        }
+
+        private string DescribeSecretSource(string value)
+        {
+            var trimmed = (value ?? "").Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return "oxide/config/WebsiteVipBridge.json";
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+            var source = string.IsNullOrWhiteSpace(secretsConfigSource) ? $"oxide/config/{SecretsConfigName}.json" : secretsConfigSource;
+
+            return $"{key} in {source}";
         }
 
         private Dictionary<string, string> LoadSecrets()
@@ -1028,6 +1058,7 @@ namespace Oxide.Plugins
 
             secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+            secretsConfigSource = $"oxide/config/{SecretsConfigName}.json";
 
             if (!File.Exists(path))
             {
@@ -1212,6 +1243,12 @@ namespace Oxide.Plugins
             }
 
             return builder.ToString();
+        }
+
+        private static string SecretFingerprint(string value)
+        {
+            var hash = Sha256(value ?? "");
+            return hash.Length <= 12 ? hash : hash.Substring(0, 12);
         }
     }
 }

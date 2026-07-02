@@ -22,7 +22,7 @@ using Random = Oxide.Core.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("Discord Auth", "OuTSMoKE", "1.4.0")]
+    [Info("Discord Auth", "OuTSMoKE", "1.4.1")]
     [Description("Allows players to connect their discord account with steam")]
     public class DiscordAuth : CovalencePlugin, IDiscordPlugin, IDiscordLink
     {
@@ -55,6 +55,7 @@ namespace Oxide.Plugins
         private const string AuthPerm = "discordauth.auth";
         private const string DeauthPerm = "discordauth.deauth";
         private const string SecretsConfigName = "Secrets.local";
+        private const string SecretsConfigPath = "oxide/config/Secrets.local.json";
         private Dictionary<string, string> _secrets;
         #endregion
 
@@ -212,7 +213,9 @@ namespace Oxide.Plugins
         [HookMethod(DiscordExtHooks.OnDiscordClientCreated)]
         private void OnDiscordClientCreated()
         {
-            string botToken = ResolveSecretValue(_pluginConfig.Info.BotToken);
+            string botTokenSource = _pluginConfig.Info.BotToken;
+            string botToken = ResolveSecretValue(botTokenSource);
+            LogSecretResolution("Discord Auth bot token", botTokenSource, botToken);
 
             if (string.IsNullOrEmpty(botToken))
             {
@@ -236,7 +239,7 @@ namespace Oxide.Plugins
 
             if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
             {
-                return value;
+                return trimmed;
             }
 
             string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
@@ -250,11 +253,30 @@ namespace Oxide.Plugins
 
             if (LoadSecrets().TryGetValue(key, out secret))
             {
-                return secret;
+                return (secret ?? string.Empty).Trim();
             }
 
-            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            PrintWarning($"Secret variable {key} is not configured in {SecretsConfigPath}.");
             return string.Empty;
+        }
+
+        private void LogSecretResolution(string label, string configuredValue, string resolvedValue)
+        {
+            string state = string.IsNullOrWhiteSpace(resolvedValue) ? "empty" : $"length {resolvedValue.Length}";
+            Puts($"{label} source: {DescribeSecretSource(configuredValue)}; resolved {state}.");
+        }
+
+        private string DescribeSecretSource(string value)
+        {
+            string trimmed = (value ?? string.Empty).Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return $"oxide/config/{Name}.json";
+            }
+
+            string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+            return string.IsNullOrWhiteSpace(key) ? SecretsConfigPath : $"{key} in {SecretsConfigPath}";
         }
 
         private Dictionary<string, string> LoadSecrets()
@@ -269,7 +291,7 @@ namespace Oxide.Plugins
 
             if (!File.Exists(path))
             {
-                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                PrintWarning($"Optional secrets file not found: {SecretsConfigPath}.");
                 return _secrets;
             }
 
@@ -284,7 +306,7 @@ namespace Oxide.Plugins
             }
             catch (Exception ex)
             {
-                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+                PrintWarning($"Could not read {SecretsConfigPath}: {ex.Message}");
             }
 
             return _secrets;

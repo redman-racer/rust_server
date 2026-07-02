@@ -20,7 +20,7 @@ using Oxide.Ext.Discord.Logging;
 
 namespace Oxide.Plugins
 {
-    [Info("Discord Roles", "MJSU", "2.1.0")]
+    [Info("Discord Roles", "MJSU", "2.1.1")]
     [Description("Syncs players oxide group with discord roles")]
     class DiscordRoles : CovalencePlugin, IDiscordPlugin
     {
@@ -40,6 +40,7 @@ namespace Oxide.Plugins
 
         private const string AccentColor = "#de8732";
         private const string SecretsConfigName = "Secrets.local";
+        private const string SecretsConfigPath = "oxide/config/Secrets.local.json";
 
         private readonly List<string> _added = new List<string>();
         private readonly List<string> _removed = new List<string>();
@@ -80,9 +81,13 @@ namespace Oxide.Plugins
         #region Setup & Loading
         private void Init()
         {
+            string botTokenSource = _pluginConfig.DiscordApiKey;
+            string botToken = ResolveSecretValue(botTokenSource);
+            LogSecretResolution("Discord Roles bot token", botTokenSource, botToken);
+
             _discordSettings = new BotConnection
             {
-                ApiToken = ResolveSecretValue(_pluginConfig.DiscordApiKey),
+                ApiToken = botToken,
                 LogLevel = _pluginConfig.ExtensionDebugging,
                 Intents = GatewayIntents.Guilds | GatewayIntents.GuildMembers
             };
@@ -141,7 +146,7 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
-            if (string.IsNullOrEmpty(ResolveSecretValue(_pluginConfig.DiscordApiKey)))
+            if (string.IsNullOrEmpty(_discordSettings.ApiToken))
             {
                 PrintWarning("Please enter your bot token in the config and reload the plugin.");
                 return;
@@ -168,7 +173,7 @@ namespace Oxide.Plugins
 
             if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
             {
-                return value;
+                return trimmed;
             }
 
             string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
@@ -182,11 +187,30 @@ namespace Oxide.Plugins
 
             if (LoadSecrets().TryGetValue(key, out secret))
             {
-                return secret;
+                return (secret ?? string.Empty).Trim();
             }
 
-            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            PrintWarning($"Secret variable {key} is not configured in {SecretsConfigPath}.");
             return string.Empty;
+        }
+
+        private void LogSecretResolution(string label, string configuredValue, string resolvedValue)
+        {
+            string state = string.IsNullOrWhiteSpace(resolvedValue) ? "empty" : $"length {resolvedValue.Length}";
+            Puts($"{label} source: {DescribeSecretSource(configuredValue)}; resolved {state}.");
+        }
+
+        private string DescribeSecretSource(string value)
+        {
+            string trimmed = (value ?? string.Empty).Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return $"oxide/config/{Name}.json";
+            }
+
+            string key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+            return string.IsNullOrWhiteSpace(key) ? SecretsConfigPath : $"{key} in {SecretsConfigPath}";
         }
 
         private Dictionary<string, string> LoadSecrets()
@@ -201,7 +225,7 @@ namespace Oxide.Plugins
 
             if (!File.Exists(path))
             {
-                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                PrintWarning($"Optional secrets file not found: {SecretsConfigPath}.");
                 return _secrets;
             }
 
@@ -216,7 +240,7 @@ namespace Oxide.Plugins
             }
             catch (Exception ex)
             {
-                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+                PrintWarning($"Could not read {SecretsConfigPath}: {ex.Message}");
             }
 
             return _secrets;
