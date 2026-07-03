@@ -22,7 +22,7 @@ using CompanionServer;
 
 namespace Oxide.Plugins
 {
-    [Info("Better Chat", "LaserHydra", "5.2.15")]
+    [Info("Better Chat", "LaserHydra", "5.2.17")]
     [Description("Allows to manage chat groups, customize colors and add titles.")]
     internal class BetterChat : CovalencePlugin
     {
@@ -72,6 +72,8 @@ namespace Oxide.Plugins
             if (_chatGroups.Count == 0)
                 _chatGroups.Add(new ChatGroup("default"));
 
+            NormalizeDefaultGroup();
+
             foreach (ChatGroup group in _chatGroups)
             {
                 if (!permission.GroupExists(group.GroupName))
@@ -79,6 +81,58 @@ namespace Oxide.Plugins
             }
 
             SaveData(_chatGroups);
+        }
+
+        private void NormalizeDefaultGroup()
+        {
+            ChatGroup defaultGroup = _chatGroups.Find(g => string.Equals(g.GroupName, "default", StringComparison.OrdinalIgnoreCase));
+
+            if (defaultGroup == null)
+            {
+                _chatGroups.Add(new ChatGroup("default"));
+                return;
+            }
+
+            bool changed = false;
+
+            if (defaultGroup.Title == null)
+            {
+                defaultGroup.Title = new ChatGroup.TitleSettings();
+                changed = true;
+            }
+
+            if (defaultGroup.Format == null)
+            {
+                defaultGroup.Format = new ChatGroup.FormatSettings();
+                changed = true;
+            }
+
+            if (defaultGroup.Title.Text != string.Empty)
+            {
+                defaultGroup.Title.Text = string.Empty;
+                changed = true;
+            }
+
+            if (!defaultGroup.Title.Hidden)
+            {
+                defaultGroup.Title.Hidden = true;
+                changed = true;
+            }
+
+            if (defaultGroup.Format.Chat != "{Title} {Username}: {Message}")
+            {
+                defaultGroup.Format.Chat = "{Title} {Username}: {Message}";
+                changed = true;
+            }
+
+            if (defaultGroup.Format.Console != "{Title} {Username}: {Message}")
+            {
+                defaultGroup.Format.Console = "{Title} {Username}: {Message}";
+                changed = true;
+            }
+
+            if (changed)
+                Puts("Default group normalized: normal players keep clan tags without the default player title.");
         }
 
         private void OnPluginUnloaded(Plugin plugin)
@@ -713,7 +767,7 @@ namespace Oxide.Plugins
 
                 Dictionary<string, string> replacements = new Dictionary<string, string>
                 {
-                    ["Title"] = string.Join(" ", Titles.ToArray()),
+                    ["Title"] = string.Join(" ", Titles.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray()),
                     ["Username"] = $"[#{UsernameSettings.GetUniversalColor()}][+{UsernameSettings.Size}]{Username}[/+][/#]",
                     ["Group"] = PrimaryGroup,
                     ["Message"] = $"[#{MessageSettings.GetUniversalColor()}][+{MessageSettings.Size}]{Message}[/+][/#]",
@@ -835,6 +889,14 @@ namespace Oxide.Plugins
             {
                 GroupName = name;
                 Title = new TitleSettings(name);
+
+                if (string.Equals(name, "default", StringComparison.OrdinalIgnoreCase))
+                {
+                    Title.Text = string.Empty;
+                    Title.Hidden = true;
+                    Format.Chat = "{Title} {Username}: {Message}";
+                    Format.Console = "{Title} {Username}: {Message}";
+                }
             }
 
             public static readonly Dictionary<string, Field> Fields = new Dictionary<string, Field>(StringComparer.InvariantCultureIgnoreCase)

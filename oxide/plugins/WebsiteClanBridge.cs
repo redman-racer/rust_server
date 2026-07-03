@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json;
@@ -21,6 +22,11 @@ namespace Oxide.Plugins
         private Timer pollTimer;
         private Timer snapshotTimer;
         private Timer pendingSnapshotTimer;
+        private Dictionary<string, string> secrets;
+        private const string SecretsConfigName = "Secrets.local";
+        private const string VipBridgeConfigName = "WebsiteVipBridge";
+        private string secretsConfigSource;
+        private string vipBridgeSharedSecretSetting;
 
         private class Configuration
         {
@@ -133,6 +139,8 @@ namespace Oxide.Plugins
             {
                 return;
             }
+
+            LogBridgeSecretDiagnostics();
 
             if (config.ClanActionsEnabled)
             {
@@ -387,13 +395,26 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(config.SharedSecret))
+            if (string.IsNullOrWhiteSpace(ResolveBridgeSharedSecret()))
             {
-                PrintWarning("SharedSecret is not configured.");
+                PrintWarning("SharedSecret is not configured. Leave WebsiteClanBridge SharedSecret blank to reuse WebsiteVipBridge, and configure WebsiteVipBridge SharedSecret normally.");
                 return false;
             }
 
             return true;
+        }
+
+        private void LogBridgeSecretDiagnostics()
+        {
+            var sharedSecret = ResolveBridgeSharedSecret();
+
+            if (string.IsNullOrWhiteSpace(sharedSecret))
+            {
+                PrintWarning("Clan bridge SharedSecret is empty after resolving secrets.");
+                return;
+            }
+
+            Puts($"Clan bridge SharedSecret source: {DescribeBridgeSecretSource()}; length: {sharedSecret.Length}; fingerprint: {SecretFingerprint(sharedSecret)}");
         }
 
         private void SendGet(string url, Action<int, string> callback)
@@ -415,7 +436,7 @@ namespace Oxide.Plugins
             var pathAndQuery = new Uri(url).PathAndQuery;
             var bodyHash = Sha256(body ?? "");
             var payload = $"{method.ToUpperInvariant()}\n{pathAndQuery}\n{timestamp}\n{bodyHash}";
-            var signature = HmacSha256(payload, config.SharedSecret);
+            var signature = HmacSha256(payload, ResolveBridgeSharedSecret());
 
             return new Dictionary<string, string>
             {
@@ -424,6 +445,147 @@ namespace Oxide.Plugins
                 ["X-Raidlands-Signature"] = signature,
                 ["Accept"] = "application/json"
             };
+        }
+
+        private string ResolveBridgeSharedSecret()
+        {
+            var configuredSecret = ResolveSecretValue(config.SharedSecret);
+
+            if (!string.IsNullOrWhiteSpace(configuredSecret))
+            {
+                return configuredSecret;
+            }
+
+            return ResolveSecretValue(LoadVipBridgeSharedSecretSetting());
+        }
+
+        private string DescribeBridgeSecretSource()
+        {
+            var configuredSecret = ResolveSecretValue(config.SharedSecret);
+
+            if (!string.IsNullOrWhiteSpace(configuredSecret))
+            {
+                return DescribeSecretSource(config.SharedSecret);
+            }
+
+            var vipSetting = LoadVipBridgeSharedSecretSetting();
+
+            if (string.IsNullOrWhiteSpace(vipSetting))
+            {
+                return $"oxide/config/{VipBridgeConfigName}.json";
+            }
+
+            return $"{DescribeSecretSource(vipSetting)} via oxide/config/{VipBridgeConfigName}.json";
+        }
+
+        private string ResolveSecretValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            var trimmed = value.Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return trimmed;
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return "";
+            }
+
+            string secret;
+
+            if (LoadSecrets().TryGetValue(key, out secret))
+            {
+                return (secret ?? "").Trim();
+            }
+
+            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            return "";
+        }
+
+        private string DescribeSecretSource(string value)
+        {
+            var trimmed = (value ?? "").Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return "oxide/config/WebsiteClanBridge.json";
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+            var source = string.IsNullOrWhiteSpace(secretsConfigSource) ? $"oxide/config/{SecretsConfigName}.json" : secretsConfigSource;
+
+            return $"{key} in {source}";
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (secrets != null)
+            {
+                return secrets;
+            }
+
+            secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+            secretsConfigSource = $"oxide/config/{SecretsConfigName}.json";
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                return secrets;
+            }
+
+            try
+            {
+                var loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+                if (loadedSecrets != null)
+                {
+                    secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+            }
+
+            return secrets;
+        }
+
+        private string LoadVipBridgeSharedSecretSetting()
+        {
+            if (vipBridgeSharedSecretSetting != null)
+            {
+                return vipBridgeSharedSecretSetting;
+            }
+
+            vipBridgeSharedSecretSetting = "";
+            var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{VipBridgeConfigName}.json");
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"VIP bridge config not found: oxide/config/{VipBridgeConfigName}.json.");
+                return vipBridgeSharedSecretSetting;
+            }
+
+            try
+            {
+                var json = JObject.Parse(File.ReadAllText(path));
+                vipBridgeSharedSecretSetting = (json.Value<string>("SharedSecret") ?? "").Trim();
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{VipBridgeConfigName}.json SharedSecret: {ex.Message}");
+            }
+
+            return vipBridgeSharedSecretSetting;
         }
 
         private bool IsSuccess(int code, string response, out string error)
@@ -455,6 +617,13 @@ namespace Oxide.Plugins
                 var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""));
                 return ToHex(bytes);
             }
+        }
+
+        private static string SecretFingerprint(string value)
+        {
+            var hash = Sha256(value ?? "");
+
+            return hash.Length > 12 ? hash.Substring(0, 12) : hash;
         }
 
         private static string HmacSha256(string value, string secret)

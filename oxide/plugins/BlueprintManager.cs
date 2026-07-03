@@ -9,7 +9,7 @@ using Facepunch;
 
 namespace Oxide.Plugins
 {
-    [Info("Blueprint Manager", "Whispers88", "2.1.4")]
+    [Info("Blueprint Manager", "Whispers88", "2.1.5")]
     [Description("Allows you to manage and modify blueprints")]
 
     public class BlueprintManager : RustPlugin
@@ -496,7 +496,7 @@ namespace Oxide.Plugins
             persistantPlayerInfo.unlockedItems.Clear();
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPC(RpcTarget.Player("UnlockedBlueprint", player), 0);
         }
 
         private void RemoveBPs(BasePlayer player, List<int> bps)
@@ -509,7 +509,7 @@ namespace Oxide.Plugins
             }
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPC(RpcTarget.Player("UnlockedBlueprint", player), 0);
             Pool.FreeUnmanaged(ref bps);
         }
 
@@ -524,7 +524,7 @@ namespace Oxide.Plugins
             }
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPC(RpcTarget.Player("UnlockedBlueprint", player), 0);
             Pool.FreeUnmanaged(ref bps);
         }
 
@@ -539,7 +539,7 @@ namespace Oxide.Plugins
             }
             player.PersistantPlayerInfo = persistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPC(RpcTarget.Player("UnlockedBlueprint", player), 0);
         }
 
         private void UpdatePlayerBPs(BasePlayer player, bool defaultOnly = false)
@@ -574,7 +574,7 @@ namespace Oxide.Plugins
 
             player.PersistantPlayerInfo = PersistantPlayerInfo;
             player.SendNetworkUpdateImmediate();
-            player.ClientRPC<int>(RpcTarget.Player("UnlockedBlueprint", player), 0);
+            player.ClientRPC(RpcTarget.Player("UnlockedBlueprint", player), 0);
             Pool.FreeUnmanaged(ref bpsToUnlock);
         }
 

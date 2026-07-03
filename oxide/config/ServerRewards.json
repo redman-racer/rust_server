@@ -1,14 +1,17 @@
 ﻿{
     "Categories":  {
                        "Show items tab":  true,
-                       "Show kits tab":  false,
-                       "Show commands tab":  true,
+                       "Show kits tab":  true,
+                       "Show commands tab":  false,
                        "Show exchange tab":  false,
                        "Show transfer tab":  false,
                        "Show seller tab":  false
                    },
     "Options":  {
                     "Open Store Command":  "s",
+                    "Open Store Command Aliases":  [
+                                                       "shop"
+                                                   ],
                     "Admin RP Command":  "xp",
                     "Only allow players to purchase DLC/Skins that they are allowed to use (requires PlayerDLCAPI)":  true,
                     "Hide DLC items in the store":  false,

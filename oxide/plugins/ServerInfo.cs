@@ -10,13 +10,15 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Server Info", "FastBurst", "0.5.9")]
+    [Info("Server Info", "FastBurst", "0.6.2")]
     [Description("UI customizable server info with multiple tabs")]
     public sealed class ServerInfo : RustPlugin
     {
         private static Settings _settings;
         private static readonly Dictionary<ulong, PlayerInfoState> PlayerActiveTabs = new Dictionary<ulong, PlayerInfoState>();
         private static readonly Permission Permission = Interface.GetMod().GetLibrary<Permission>();
+        private const string CommandsTabButtonText = "/commands";
+        private const int CommandRowsPerPage = 15;
 
         protected override void LoadDefaultConfig()
         {
@@ -93,7 +95,8 @@ namespace Oxide.Plugins
             if (!PlayerActiveTabs.ContainsKey(player.userID.Get()))
                 return;
 
-            var previousTabIndex = PlayerActiveTabs[player.userID.Get()].ActiveTabIndex;
+            var state = PlayerActiveTabs[player.userID.Get()];
+            var previousTabIndex = state.ActiveTabIndex;
             var tabToChangeTo = arg.GetInt(0, 65535);
 
             if (previousTabIndex == tabToChangeTo)
@@ -104,25 +107,67 @@ namespace Oxide.Plugins
             var tabToSelectButtonName = arg.GetString(2);
             var mainPanelName = arg.GetString(3);
 
+            var allowedTabs = GetAllowedTabs(player);
+            if (tabToSelectIndex < 0 || tabToSelectIndex >= allowedTabs.Count)
+                return;
+
             CuiHelper.DestroyUi(player, PlayerActiveTabs[player.userID.Get()].ActiveTabContentPanelName);
             CuiHelper.DestroyUi(player, activeButtonName);
             CuiHelper.DestroyUi(player, tabToSelectButtonName);
 
-            var allowedTabs = _settings.Tabs
-                .Where((tab, tabIndex) => string.IsNullOrEmpty(tab.OxideGroup) ||
-                    tab.OxideGroup.Split(',')
-                        .Any(group => Permission.UserHasGroup(player.userID.ToString(), group)))
-                .ToList();
             var tabToSelect = allowedTabs[tabToSelectIndex];
-            PlayerActiveTabs[player.userID.Get()].ActiveTabIndex = tabToSelectIndex;
-            PlayerActiveTabs[player.userID.Get()].PageIndex = 0;
+            state.ActiveTabIndex = tabToSelectIndex;
+            state.ActiveSubTabIndex = 0;
+            state.PageIndex = 0;
 
             var container = new CuiElementContainer();
-            var tabContentPanelName = CreateTabContent(tabToSelect, container, mainPanelName);
+            var tabContentPanelName = CreateTabContent(tabToSelect, container, mainPanelName, 0, state.ActiveSubTabIndex);
             var newActiveButtonName = AddActiveButton(tabToSelectIndex, tabToSelect, container, mainPanelName);
-            AddNonActiveButton(previousTabIndex, container, _settings.Tabs[previousTabIndex], mainPanelName, newActiveButtonName);
+            if (previousTabIndex >= 0 && previousTabIndex < allowedTabs.Count)
+                AddNonActiveButton(previousTabIndex, container, allowedTabs[previousTabIndex], mainPanelName, newActiveButtonName);
 
             PlayerActiveTabs[player.userID.Get()].ActiveTabContentPanelName = tabContentPanelName;
+
+            SendUI(player, container);
+        }
+
+        [ConsoleCommand("changesubtab")]
+        private void ChangeSubTab(ConsoleSystem.Arg arg)
+        {
+            if (arg.Connection == null || arg.Connection.player == null || !arg.HasArgs(2) || _settings == null)
+                return;
+
+            var player = arg.Connection.player as BasePlayer;
+            if (player == null)
+                return;
+
+            PlayerInfoState playerInfoState;
+            if (!PlayerActiveTabs.TryGetValue(player.userID.Get(), out playerInfoState) || playerInfoState == null)
+                return;
+
+            var allowedTabs = GetAllowedTabs(player);
+            if (playerInfoState.ActiveTabIndex < 0 || playerInfoState.ActiveTabIndex >= allowedTabs.Count)
+                return;
+
+            var currentTab = allowedTabs[playerInfoState.ActiveTabIndex];
+            if (!HasSubTabs(currentTab))
+                return;
+
+            var subTabToSelectIndex = arg.GetInt(0, 65535);
+            if (subTabToSelectIndex < 0 || subTabToSelectIndex >= currentTab.SubTabs.Count)
+                return;
+
+            var currentTabContentPanelName = playerInfoState.ActiveTabContentPanelName;
+            var mainPanelName = arg.GetString(1);
+
+            CuiHelper.DestroyUi(player, currentTabContentPanelName);
+
+            playerInfoState.ActiveSubTabIndex = subTabToSelectIndex;
+            playerInfoState.PageIndex = 0;
+
+            var container = new CuiElementContainer();
+            var tabContentPanelName = CreateTabContent(currentTab, container, mainPanelName, 0, subTabToSelectIndex);
+            playerInfoState.ActiveTabContentPanelName = tabContentPanelName;
 
             SendUI(player, container);
         }
@@ -141,7 +186,12 @@ namespace Oxide.Plugins
                 return;
 
             var playerInfoState = PlayerActiveTabs[player.userID.Get()];
-            var currentTab = _settings.Tabs[playerInfoState.ActiveTabIndex];
+            var allowedTabs = GetAllowedTabs(player);
+            if (playerInfoState.ActiveTabIndex < 0 || playerInfoState.ActiveTabIndex >= allowedTabs.Count)
+                return;
+
+            var currentTab = allowedTabs[playerInfoState.ActiveTabIndex];
+            var currentContentTab = GetActiveContentTab(currentTab, playerInfoState.ActiveSubTabIndex);
             var currentPageIndex = playerInfoState.PageIndex;
 
             var pageToChangeTo = arg.GetInt(0, 65535);
@@ -150,13 +200,15 @@ namespace Oxide.Plugins
 
             if (pageToChangeTo == currentPageIndex)
                 return;
+            if (pageToChangeTo < 0 || pageToChangeTo >= currentContentTab.Pages.Count)
+                return;
 
             CuiHelper.DestroyUi(player, currentTabContentPanelName);
 
             playerInfoState.PageIndex = pageToChangeTo;
 
             var container = new CuiElementContainer();
-            var tabContentPanelName = CreateTabContent(currentTab, container, mainPanelName, pageToChangeTo);
+            var tabContentPanelName = CreateTabContent(currentTab, container, mainPanelName, pageToChangeTo, playerInfoState.ActiveSubTabIndex);
             PlayerActiveTabs[player.userID.Get()].ActiveTabContentPanelName = tabContentPanelName;
 
             SendUI(player, container);
@@ -190,6 +242,7 @@ namespace Oxide.Plugins
 
             state.ActiveTabIndex = _settings.TabToOpenByDefault;
             state.MainPanelName = string.Empty;
+            state.ActiveSubTabIndex = 0;
             state.PageIndex = 0;
         }
 
@@ -240,6 +293,7 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, state.MainPanelName);
 
             state.ActiveTabIndex = _settings.TabToOpenByDefault;
+            state.ActiveSubTabIndex = 0;
             state.MainPanelName = string.Empty;
             state.PageIndex = 0;
         }
@@ -268,48 +322,74 @@ namespace Oxide.Plugins
             var player = arg.Connection.player as BasePlayer;
             if (player == null)
                 return;
-            if (string.IsNullOrEmpty(PlayerActiveTabs[player.userID.Get()].MainPanelName))
-                ShowInfo(player, string.Empty, null);
+            OpenInfo(player);
         }
 
         [ChatCommand("info")]
         private void ShowInfo(BasePlayer player, string command, string[] args)
         {
+            OpenInfo(player, GetRequestedTabIndex(args));
+        }
+
+        [ChatCommand("help")]
+        private void ShowHelp(BasePlayer player, string command, string[] args)
+        {
+            OpenInfo(player);
+        }
+
+        [ChatCommand("commands")]
+        private void ShowCommands(BasePlayer player, string command, string[] args)
+        {
+            OpenInfo(player, null, CommandsTabButtonText);
+        }
+
+        private void OpenInfo(BasePlayer player, int? requestedTabIndex = null, string requestedTabButtonText = null)
+        {
             if (player == null || _settings == null)
                 return;
 
-            if (!PlayerActiveTabs.ContainsKey(player.userID.Get()))
-                PlayerActiveTabs.Add(player.userID.Get(), new PlayerInfoState(_settings));
-
-            var container = new CuiElementContainer();
-            var mainPanelName = AddMainPanel(container);
-            PlayerActiveTabs[player.userID.Get()].MainPanelName = mainPanelName;
-
-            var tabFirstIndex = _settings.TabToOpenByDefault;
-            var tabToSelectIndex = tabFirstIndex;
-            int tabtoSelectArgumentIndex = 0;
-            if (args.Count() == 1)
+            PlayerInfoState state;
+            if (!PlayerActiveTabs.TryGetValue(player.userID.Get(), out state) || state == null)
             {
-                if (int.TryParse(args[0], out tabtoSelectArgumentIndex))
-                {
-                    tabToSelectIndex = tabtoSelectArgumentIndex;
-                    PlayerActiveTabs[player.userID.Get()].ActiveTabIndex = tabtoSelectArgumentIndex;
-                }
+                state = new PlayerInfoState(_settings);
+                PlayerActiveTabs[player.userID.Get()] = state;
             }
 
-            var allowedTabs = _settings.Tabs
-                .Where((tab, tabIndex) => string.IsNullOrEmpty(tab.OxideGroup) ||
-                    tab.OxideGroup.Split(',')
-                        .Any(group => Permission.UserHasGroup(player.userID.ToString(), group)))
-                .ToList();
+            if (!string.IsNullOrEmpty(state.MainPanelName))
+            {
+                CuiHelper.DestroyUi(player, state.MainPanelName);
+                state.MainPanelName = string.Empty;
+                state.ActiveTabContentPanelName = string.Empty;
+            }
+
+            var allowedTabs = GetAllowedTabs(player);
             if (allowedTabs.Count <= 0)
             {
                 SendReply(player, "[GUI Help] You don't have permissions to see info.");
                 return;
             }
 
+            var tabToSelectIndex = requestedTabIndex.HasValue ? requestedTabIndex.Value : _settings.TabToOpenByDefault;
+            if (!string.IsNullOrEmpty(requestedTabButtonText))
+            {
+                var namedTabIndex = allowedTabs.FindIndex(tab =>
+                    string.Equals(tab.ButtonText, requestedTabButtonText, StringComparison.OrdinalIgnoreCase));
+                if (namedTabIndex >= 0)
+                    tabToSelectIndex = namedTabIndex;
+            }
+
+            if (tabToSelectIndex < 0 || tabToSelectIndex >= allowedTabs.Count)
+                tabToSelectIndex = 0;
+
+            var container = new CuiElementContainer();
+            var mainPanelName = AddMainPanel(container);
+            state.MainPanelName = mainPanelName;
+            state.ActiveTabIndex = tabToSelectIndex;
+            state.ActiveSubTabIndex = 0;
+            state.PageIndex = 0;
+
             var activeAllowedTab = allowedTabs[tabToSelectIndex];
-            var tabContentPanelName = CreateTabContent(activeAllowedTab, container, mainPanelName);
+            var tabContentPanelName = CreateTabContent(activeAllowedTab, container, mainPanelName, 0, state.ActiveSubTabIndex);
             var activeTabButtonName = AddActiveButton(tabToSelectIndex, activeAllowedTab, container, mainPanelName);
 
 
@@ -320,8 +400,400 @@ namespace Oxide.Plugins
 
                 AddNonActiveButton(tabIndex, container, allowedTabs[tabIndex], mainPanelName, activeTabButtonName);
             }
-            PlayerActiveTabs[player.userID.Get()].ActiveTabContentPanelName = tabContentPanelName;
+            state.ActiveTabContentPanelName = tabContentPanelName;
             SendUI(player, container);
+        }
+
+        private static int? GetRequestedTabIndex(string[] args)
+        {
+            if (args == null || args.Length != 1)
+                return null;
+
+            int tabIndex;
+            return int.TryParse(args[0], out tabIndex) ? (int?)tabIndex : null;
+        }
+
+        private List<HelpTab> GetAllowedTabs(BasePlayer player)
+        {
+            var allowedTabs = new List<HelpTab>();
+            if (_settings == null || _settings.Tabs == null)
+                return allowedTabs;
+
+            var disabledCommandKeys = LoadDisabledCommandKeys();
+
+            foreach (var tab in _settings.Tabs)
+            {
+                var renderedTab = BuildRenderableTab(player, tab, disabledCommandKeys);
+                if (renderedTab != null && HasVisibleContent(renderedTab))
+                    allowedTabs.Add(renderedTab);
+            }
+
+            return allowedTabs;
+        }
+
+        private HelpTab BuildRenderableTab(BasePlayer player, HelpTab source, HashSet<string> disabledCommandKeys)
+        {
+            if (source == null || !IsTabAllowed(player, source))
+                return null;
+
+            var tab = CloneTabShell(source);
+            if (IsCommandsTab(source) && _settings.CommandCatalog != null && _settings.CommandCatalog.Count > 0)
+            {
+                tab.Pages = new List<HelpTabPage>();
+                tab.SubTabs = BuildCommandSubTabs(player, source, disabledCommandKeys);
+                return tab;
+            }
+
+            tab.Pages = ClonePages(source.Pages);
+            tab.SubTabs = new List<HelpTab>();
+
+            if (source.SubTabs != null)
+            {
+                foreach (var subTab in source.SubTabs)
+                {
+                    var renderedSubTab = BuildRenderableTab(player, subTab, disabledCommandKeys);
+                    if (renderedSubTab != null && HasVisibleContent(renderedSubTab))
+                        tab.SubTabs.Add(renderedSubTab);
+                }
+            }
+
+            return tab;
+        }
+
+        private List<HelpTab> BuildCommandSubTabs(BasePlayer player, HelpTab commandTab, HashSet<string> disabledCommandKeys)
+        {
+            var subTabs = new List<HelpTab>();
+            foreach (var category in _settings.CommandCatalog)
+            {
+                if (category == null || category.Commands == null || category.Commands.Count <= 0)
+                    continue;
+
+                var visibleCommands = category.Commands
+                    .Where(command => IsCommandVisible(player, command, disabledCommandKeys))
+                    .ToList();
+
+                if (visibleCommands.Count <= 0)
+                    continue;
+
+                var template = FindSubTabTemplate(commandTab, category.ButtonText);
+                var subTab = CloneTabShell(template ?? commandTab);
+                subTab.ButtonText = FirstNonEmpty(category.ButtonText, subTab.ButtonText);
+                subTab.HeaderText = FirstNonEmpty(category.HeaderText, subTab.HeaderText);
+                subTab.TabButtonFontSize = template != null ? template.TabButtonFontSize : 13;
+                subTab.Pages = BuildCommandPages(subTab, visibleCommands);
+                subTab.SubTabs = new List<HelpTab>();
+                subTabs.Add(subTab);
+            }
+
+            return subTabs;
+        }
+
+        private static HelpTab FindSubTabTemplate(HelpTab commandTab, string buttonText)
+        {
+            if (commandTab == null || commandTab.SubTabs == null || string.IsNullOrEmpty(buttonText))
+                return null;
+
+            return commandTab.SubTabs.FirstOrDefault(subTab =>
+                string.Equals(subTab.ButtonText, buttonText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static List<HelpTabPage> BuildCommandPages(HelpTab tab, List<CommandEntry> commands)
+        {
+            var pages = new List<HelpTabPage>();
+            if (commands == null || commands.Count <= 0)
+                return pages;
+
+            for (var index = 0; index < commands.Count; index += CommandRowsPerPage)
+            {
+                var page = new HelpTabPage();
+                page.TextLines.Add(string.Format("<color=#ff3b3b><b>{0}</b></color>", tab.HeaderText));
+                page.TextLines.Add("");
+
+                foreach (var command in commands.Skip(index).Take(CommandRowsPerPage))
+                    page.TextLines.Add(CreateCommandTextLine(command));
+
+                pages.Add(page);
+            }
+
+            return pages;
+        }
+
+        private static string CreateCommandTextLine(CommandEntry command)
+        {
+            if (!string.IsNullOrEmpty(command.Text))
+                return command.Text;
+
+            var aliases = command.Aliases != null && command.Aliases.Count > 0
+                ? command.Aliases
+                : new List<string> { command.Command };
+
+            var commandText = string.Join(", ", aliases
+                .Where(alias => !string.IsNullOrEmpty(alias))
+                .Select(alias => string.Format("<color=#ffd166>/{0}</color>", NormalizeDisplayCommand(alias)))
+                .ToArray());
+
+            if (string.IsNullOrEmpty(commandText))
+                commandText = "<color=#ffd166>/command</color>";
+
+            return string.IsNullOrEmpty(command.Description)
+                ? commandText
+                : string.Format("{0} - {1}", commandText, command.Description);
+        }
+
+        private bool IsCommandVisible(BasePlayer player, CommandEntry command, HashSet<string> disabledCommandKeys)
+        {
+            if (player == null || command == null || !command.Enabled)
+                return false;
+
+            if (ShouldCheckPluginLoaded(command) && !IsPluginLoaded(command.Plugin))
+                return false;
+
+            var isAdmin = IsAdmin(player);
+            var isStaff = isAdmin || IsStaff(player);
+
+            if (command.RequireAdmin && !isAdmin)
+                return false;
+
+            if (command.RequireStaff && !isStaff)
+                return false;
+
+            if (command.MinimumAuthLevel > 0 && GetAuthLevel(player) < command.MinimumAuthLevel)
+                return false;
+
+            if (!HasRequiredGroups(player, command.RequiredGroups))
+                return false;
+
+            if (!HasAnyGroup(player, command.AnyGroup))
+                return false;
+
+            if (ShouldCheckPermissions(command))
+            {
+                var bypassPermissions = isAdmin &&
+                    (_settings.CommandCatalogAdminsBypassPermissionChecks || command.AdminBypassesPermissions);
+
+                if (!HasRequiredPermissions(player, command.RequiredPermissions, bypassPermissions))
+                    return false;
+
+                if (!HasAnyPermission(player, command.AnyPermission, bypassPermissions))
+                    return false;
+            }
+
+            if (IsCommandDisabled(command, disabledCommandKeys))
+                return false;
+
+            return true;
+        }
+
+        private bool ShouldCheckPluginLoaded(CommandEntry command)
+        {
+            if (command != null && command.CheckPluginLoaded.HasValue)
+                return command.CheckPluginLoaded.Value;
+
+            return _settings != null && _settings.CommandCatalogUsesPluginLoadedChecks;
+        }
+
+        private bool ShouldCheckPermissions(CommandEntry command)
+        {
+            if (command != null && command.CheckPermissions.HasValue)
+                return command.CheckPermissions.Value;
+
+            return _settings != null && _settings.CommandCatalogUsesPermissionChecks;
+        }
+
+        private bool IsPluginLoaded(string pluginName)
+        {
+            if (string.IsNullOrEmpty(pluginName))
+                return true;
+
+            if (string.Equals(pluginName, Name, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pluginName, GetType().Name, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var plugin = plugins.Find(pluginName);
+            return plugin != null && plugin.IsLoaded;
+        }
+
+        private static bool HasRequiredPermissions(BasePlayer player, List<string> permissions, bool bypass)
+        {
+            if (permissions == null || permissions.Count <= 0 || bypass)
+                return true;
+
+            return permissions
+                .Where(permissionName => !string.IsNullOrEmpty(permissionName))
+                .All(permissionName => Permission.UserHasPermission(player.UserIDString, permissionName));
+        }
+
+        private static bool HasAnyPermission(BasePlayer player, List<string> permissions, bool bypass)
+        {
+            if (permissions == null || permissions.Count <= 0 || bypass)
+                return true;
+
+            var normalized = permissions.Where(permissionName => !string.IsNullOrEmpty(permissionName)).ToList();
+            return normalized.Count <= 0 || normalized.Any(permissionName =>
+                Permission.UserHasPermission(player.UserIDString, permissionName));
+        }
+
+        private static bool HasRequiredGroups(BasePlayer player, List<string> groups)
+        {
+            if (groups == null || groups.Count <= 0)
+                return true;
+
+            return groups
+                .Where(group => !string.IsNullOrEmpty(group))
+                .All(group => Permission.UserHasGroup(player.UserIDString, group));
+        }
+
+        private static bool HasAnyGroup(BasePlayer player, List<string> groups)
+        {
+            if (groups == null || groups.Count <= 0)
+                return true;
+
+            var normalized = groups.Where(group => !string.IsNullOrEmpty(group)).ToList();
+            return normalized.Count <= 0 || normalized.Any(group => Permission.UserHasGroup(player.UserIDString, group));
+        }
+
+        private bool IsStaff(BasePlayer player)
+        {
+            return GetAuthLevel(player) > 0 || player.IsAdmin || HasAnyConfiguredGroup(player, _settings.StaffGroups) ||
+                HasAnyConfiguredGroup(player, _settings.AdminGroups);
+        }
+
+        private bool IsAdmin(BasePlayer player)
+        {
+            return GetAuthLevel(player) >= 2 || player.IsAdmin || HasAnyConfiguredGroup(player, _settings.AdminGroups);
+        }
+
+        private static int GetAuthLevel(BasePlayer player)
+        {
+            return player != null && player.net != null && player.net.connection != null
+                ? (int)player.net.connection.authLevel
+                : 0;
+        }
+
+        private static bool HasAnyConfiguredGroup(BasePlayer player, List<string> groups)
+        {
+            if (player == null || groups == null)
+                return false;
+
+            return groups.Any(group => !string.IsNullOrEmpty(group) &&
+                Permission.UserHasGroup(player.UserIDString, group));
+        }
+
+        private static bool IsCommandDisabled(CommandEntry command, HashSet<string> disabledCommandKeys)
+        {
+            if (disabledCommandKeys == null || disabledCommandKeys.Count <= 0)
+                return false;
+
+            var keys = command.DisabledCommandKeys != null && command.DisabledCommandKeys.Count > 0
+                ? command.DisabledCommandKeys
+                : command.Aliases;
+
+            if (keys == null || keys.Count <= 0)
+                return false;
+
+            return keys.Any(key => disabledCommandKeys.Contains(NormalizeCommandKey(key)));
+        }
+
+        private HashSet<string> LoadDisabledCommandKeys()
+        {
+            var disabledCommandKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var file = Interface.Oxide.DataFileSystem.GetFile("NTeleportationDisabledCommands");
+                var data = file.ReadObject<DisabledCommandData>();
+                if (data == null || data.DisabledCommands == null)
+                    return disabledCommandKeys;
+
+                foreach (var command in data.DisabledCommands)
+                {
+                    var key = NormalizeCommandKey(command);
+                    if (!string.IsNullOrEmpty(key))
+                        disabledCommandKeys.Add(key);
+                }
+            }
+            catch
+            {
+                return disabledCommandKeys;
+            }
+
+            return disabledCommandKeys;
+        }
+
+        private static bool IsTabAllowed(BasePlayer player, HelpTab tab)
+        {
+            if (tab == null || string.IsNullOrEmpty(tab.OxideGroup))
+                return true;
+
+            return tab.OxideGroup.Split(',')
+                .Select(group => group.Trim())
+                .Where(group => !string.IsNullOrEmpty(group))
+                .Any(group => Permission.UserHasGroup(player.userID.ToString(), group));
+        }
+
+        private static bool IsCommandsTab(HelpTab tab)
+        {
+            return tab != null && string.Equals(tab.ButtonText, CommandsTabButtonText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool HasVisibleContent(HelpTab tab)
+        {
+            return tab != null && ((tab.Pages != null && tab.Pages.Count > 0) ||
+                (tab.SubTabs != null && tab.SubTabs.Count > 0));
+        }
+
+        private static HelpTab CloneTabShell(HelpTab source)
+        {
+            return new HelpTab
+            {
+                ButtonText = source.ButtonText,
+                HeaderText = source.HeaderText,
+                TabButtonAnchor = source.TabButtonAnchor,
+                TabButtonFontSize = source.TabButtonFontSize,
+                HeaderAnchor = source.HeaderAnchor,
+                HeaderFontSize = source.HeaderFontSize,
+                TextFontSize = source.TextFontSize,
+                TextAnchor = source.TextAnchor,
+                OxideGroup = source.OxideGroup,
+                Pages = new List<HelpTabPage>(),
+                SubTabs = new List<HelpTab>()
+            };
+        }
+
+        private static List<HelpTabPage> ClonePages(List<HelpTabPage> pages)
+        {
+            if (pages == null)
+                return new List<HelpTabPage>();
+
+            return pages.Select(page => new HelpTabPage
+            {
+                TextLines = page.TextLines != null ? new List<string>(page.TextLines) : new List<string>(),
+                ImageSettings = page.ImageSettings != null ? new List<ImageSettings>(page.ImageSettings) : new List<ImageSettings>()
+            }).ToList();
+        }
+
+        private static string NormalizeDisplayCommand(string command)
+        {
+            return string.IsNullOrEmpty(command) ? string.Empty : command.Trim().TrimStart('/');
+        }
+
+        private static string NormalizeCommandKey(string command)
+        {
+            return NormalizeDisplayCommand(command).ToLowerInvariant();
+        }
+
+        private static string FirstNonEmpty(params string[] values)
+        {
+            if (values == null)
+                return string.Empty;
+
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrEmpty(value))
+                    return value;
+            }
+
+            return string.Empty;
         }
 
         private static void SendUI(BasePlayer player, CuiElementContainer container)
@@ -390,19 +862,21 @@ namespace Oxide.Plugins
             return element;
         }
 
-        private string CreateTabContent(HelpTab helpTab, CuiElementContainer container, string mainPanelName, int pageIndex = 0)
+        private string CreateTabContent(HelpTab helpTab, CuiElementContainer container, string mainPanelName, int pageIndex = 0, int subTabIndex = 0)
         {
-            var tabPanelName = CreateTab(helpTab, container, mainPanelName, pageIndex);
+            var tabPanelName = CreateTab(helpTab, container, mainPanelName, pageIndex, subTabIndex);
             var closeButton = CreateCloseButton(mainPanelName, _settings.CloseButtonColor);
             container.Add(closeButton, tabPanelName);
             return tabPanelName;
         }
 
-        private static string CreateTab(HelpTab helpTab, CuiElementContainer container, string mainPanelName, int pageIndex)
+        private static string CreateTab(HelpTab helpTab, CuiElementContainer container, string mainPanelName, int pageIndex, int subTabIndex)
         {
             var tabPanelName = CreateTabPanel(container, mainPanelName, "#00000000");
+            var activeContentTab = GetActiveContentTab(helpTab, subTabIndex);
+            var hasSubTabs = HasSubTabs(helpTab);
 
-            var currentPage = helpTab.Pages.ElementAtOrDefault(pageIndex);
+            var currentPage = activeContentTab.Pages.ElementAtOrDefault(pageIndex);
             if (currentPage == null)
                 return tabPanelName;
 
@@ -415,13 +889,16 @@ namespace Oxide.Plugins
             var cuiLabel = CreateHeaderLabel(helpTab);
             container.Add(cuiLabel, tabPanelName);
 
-            const float firstLineMargin = 0.91f;
+            if (hasSubTabs)
+                AddSubTabButtons(helpTab, container, tabPanelName, mainPanelName, subTabIndex);
+
+            var firstLineMargin = hasSubTabs ? 0.75f : 0.91f;
             const float textLineHeight = 0.04f;
 
             for (var textRow = 0; textRow < currentPage.TextLines.Count; textRow++)
             {
                 var textLine = currentPage.TextLines[textRow];
-                var textLineLabel = CreateTextLineLabel(helpTab, firstLineMargin, textLineHeight, textRow, textLine);
+                var textLineLabel = CreateTextLineLabel(activeContentTab, firstLineMargin, textLineHeight, textRow, textLine);
                 container.Add(textLineLabel, tabPanelName);
             }
 
@@ -431,13 +908,78 @@ namespace Oxide.Plugins
                 container.Add(prevPageButton, tabPanelName);
             }
 
-            if (helpTab.Pages.Count - 1 == pageIndex)
+            if (activeContentTab.Pages.Count - 1 == pageIndex)
                 return tabPanelName;
 
             var nextPageButton = CreateNextPageButton(mainPanelName, pageIndex, _settings.NextPageButtonColor);
             container.Add(nextPageButton, tabPanelName);
 
             return tabPanelName;
+        }
+
+        private static bool HasSubTabs(HelpTab helpTab)
+        {
+            return helpTab != null && helpTab.SubTabs != null && helpTab.SubTabs.Count > 0;
+        }
+
+        private static HelpTab GetActiveContentTab(HelpTab helpTab, int subTabIndex)
+        {
+            if (!HasSubTabs(helpTab))
+                return helpTab;
+
+            if (subTabIndex < 0 || subTabIndex >= helpTab.SubTabs.Count)
+                subTabIndex = 0;
+
+            return helpTab.SubTabs[subTabIndex];
+        }
+
+        private static void AddSubTabButtons(HelpTab helpTab, CuiElementContainer container, string tabPanelName, string mainPanelName, int activeSubTabIndex)
+        {
+            var subTabs = helpTab.SubTabs;
+            if (subTabs == null || subTabs.Count <= 0)
+                return;
+
+            const float startX = 0.01f;
+            const float endX = 0.84f;
+            const float spacing = 0.006f;
+            const float minY = 0.765f;
+            const float maxY = 0.83f;
+
+            var buttonWidth = (endX - startX - spacing * (subTabs.Count - 1)) / subTabs.Count;
+
+            for (var subTabIndex = 0; subTabIndex < subTabs.Count; subTabIndex++)
+            {
+                var subTab = subTabs[subTabIndex];
+                var color = subTabIndex == activeSubTabIndex ? _settings.ActiveButtonColor : _settings.InactiveButtonColor;
+                var button = CreateSubTabButton(subTab, subTabIndex, mainPanelName, startX + subTabIndex * (buttonWidth + spacing), buttonWidth, minY, maxY, color);
+                container.Add(button, tabPanelName);
+            }
+        }
+
+        private static CuiButton CreateSubTabButton(HelpTab helpTab, int subTabIndex, string mainPanelName, float minX, float width, float minY, float maxY, string hexColor)
+        {
+            Color color;
+            ColorExtensions.TryParseHexString(hexColor, out color);
+
+            return new CuiButton
+            {
+                Button =
+                {
+                    Command = string.Format("changesubtab {0} {1}", subTabIndex, mainPanelName),
+                    Color = ColorExtensions.ToRustFormatString(color)
+                },
+                RectTransform =
+                {
+                    AnchorMin = string.Format("{0:F3} {1:F3}", minX, minY),
+                    AnchorMax = string.Format("{0:F3} {1:F3}", minX + width, maxY)
+                },
+                Text =
+                {
+                    Text = helpTab.ButtonText,
+                    FontSize = Math.Min(13, helpTab.TabButtonFontSize),
+                    Align = TextAnchor.MiddleCenter
+                }
+            };
         }
 
         private static string CreateTabPanel(CuiElementContainer container, string mainPanelName, string hexColor)
@@ -683,6 +1225,12 @@ namespace Oxide.Plugins
             public Settings()
             {
                 Tabs = new List<HelpTab>();
+                CommandCatalog = new List<CommandCategory>();
+                StaffGroups = new List<string> { "admin", "moderator", "staff", "owner" };
+                AdminGroups = new List<string> { "admin", "owner" };
+                CommandCatalogUsesPluginLoadedChecks = false;
+                CommandCatalogUsesPermissionChecks = false;
+                CommandCatalogAdminsBypassPermissionChecks = true;
                 ShowInfoOnPlayerInit = true;
                 ShowInfoOnlyOncePerRuntime = true;
                 TabToOpenByDefault = 0;
@@ -711,6 +1259,12 @@ namespace Oxide.Plugins
             }
 
             public List<HelpTab> Tabs { get; set; }
+            public List<CommandCategory> CommandCatalog { get; set; }
+            public List<string> StaffGroups { get; set; }
+            public List<string> AdminGroups { get; set; }
+            public bool CommandCatalogUsesPluginLoadedChecks { get; set; }
+            public bool CommandCatalogUsesPermissionChecks { get; set; }
+            public bool CommandCatalogAdminsBypassPermissionChecks { get; set; }
             public bool ShowInfoOnPlayerInit { get; set; }
             public bool ShowInfoOnlyOncePerRuntime { get; set; }
 
@@ -911,6 +1465,7 @@ namespace Oxide.Plugins
                 ButtonText = "Default ServerInfo Help Tab";
                 HeaderText = "Default ServerInfo Help";
                 Pages = new List<HelpTabPage>();
+                SubTabs = new List<HelpTab>();
                 TextFontSize = 16;
                 HeaderFontSize = 32;
                 TabButtonFontSize = 16;
@@ -936,6 +1491,7 @@ namespace Oxide.Plugins
             }
 
             public List<HelpTabPage> Pages { get; set; }
+            public List<HelpTab> SubTabs { get; set; }
 
             public TextAnchor TabButtonAnchor { get; set; }
             public int TabButtonFontSize { get; set; }
@@ -947,6 +1503,76 @@ namespace Oxide.Plugins
             public TextAnchor TextAnchor { get; set; }
 
             public string OxideGroup { get; set; }
+        }
+
+        public sealed class CommandCategory
+        {
+            public CommandCategory()
+            {
+                ButtonText = "Commands";
+                HeaderText = "COMMANDS";
+                Commands = new List<CommandEntry>();
+            }
+
+            public string ButtonText { get; set; }
+            public string HeaderText { get; set; }
+            public List<CommandEntry> Commands { get; set; }
+        }
+
+        public sealed class CommandEntry
+        {
+            public CommandEntry()
+            {
+                Enabled = true;
+                Text = string.Empty;
+                Command = string.Empty;
+                Description = string.Empty;
+                Plugin = string.Empty;
+                Aliases = new List<string>();
+                RequiredPermissions = new List<string>();
+                AnyPermission = new List<string>();
+                RequiredGroups = new List<string>();
+                AnyGroup = new List<string>();
+                DisabledCommandKeys = new List<string>();
+                RequireStaff = false;
+                RequireAdmin = false;
+                MinimumAuthLevel = 0;
+                AdminBypassesPermissions = false;
+                CheckPluginLoaded = null;
+                CheckPermissions = null;
+            }
+
+            public bool Enabled { get; set; }
+            public string Text { get; set; }
+            public string Command { get; set; }
+            public string Description { get; set; }
+            public string Plugin { get; set; }
+            public List<string> Aliases { get; set; }
+            public List<string> RequiredPermissions { get; set; }
+            public List<string> AnyPermission { get; set; }
+            public List<string> RequiredGroups { get; set; }
+            public List<string> AnyGroup { get; set; }
+            public List<string> DisabledCommandKeys { get; set; }
+            public bool RequireStaff { get; set; }
+            public bool RequireAdmin { get; set; }
+            public int MinimumAuthLevel { get; set; }
+            public bool AdminBypassesPermissions { get; set; }
+            [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public bool? CheckPluginLoaded { get; set; }
+
+            [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+            public bool? CheckPermissions { get; set; }
+        }
+
+        public sealed class DisabledCommandData
+        {
+            public DisabledCommandData()
+            {
+                DisabledCommands = new List<string>();
+            }
+
+            [JsonProperty("List of disabled commands")]
+            public List<string> DisabledCommands { get; set; }
         }
 
         public sealed class HelpTabPage
@@ -1018,6 +1644,7 @@ namespace Oxide.Plugins
                 if (settings == null) throw new ArgumentNullException("settings");
 
                 ActiveTabIndex = settings.TabToOpenByDefault;
+                ActiveSubTabIndex = 0;
                 PageIndex = 0;
                 InfoShownOnLogin = settings.ShowInfoOnPlayerInit;
                 InfoShownOnLoginOnce = settings.ShowInfoOnlyOncePerRuntime;
@@ -1027,6 +1654,7 @@ namespace Oxide.Plugins
             }
 
             public int ActiveTabIndex { get; set; }
+            public int ActiveSubTabIndex { get; set; }
             public int PageIndex { get; set; }
             public bool InfoShownOnLogin { get; set; }
             public bool InfoShownOnLoginOnce { get; set; }

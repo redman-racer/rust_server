@@ -1,117 +1,493 @@
-Rust server files to update
-Generated: 2026-07-02
+Raidlands Rust server upload manifest
+Updated for Raidlands RP purchase server confirmation.
 
-Rust server files:
+RP purchase server confirmation:
 
-oxide/plugins/Clans.cs
+Upload these website source/handoff files:
+- server-plugins/WebsiteVipBridge.cs
+- server-plugins/WebsiteVipBridge.config.example.json
 
-Why:
+Upload these Rust server files:
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
 
-Fixes Raidlands API invite withdrawal handling so a missing invite DisplayName
-does not break matching, broadcasting, or logging.
+Website endpoints required by this bridge update:
+- api/server/rp-purchases.php
+- api/server/rp-purchase-result.php
 
 After upload:
 
-1. Upload the file to the same relative path on the live Rust server.
-2. Reload the plugin from the server console:
+oxide.reload WebsiteVipBridge
+websitevip.rp.status
+websitevip.rp.sync
 
-oxide.reload Clans
+Why:
+- WebsiteVipBridge v1.4.9 polls signed RP purchase requests from
+  /api/server/rp-purchases.php and posts signed results to
+  /api/server/rp-purchase-result.php using the existing Raidlands HMAC bridge
+  headers.
+- The bridge checks the live ServerRewards balance through the ServerRewards
+  plugin API, debits RP only after balance confirmation, and saves processed
+  request IDs in oxide/data/WebsiteVipBridge/rp_purchases.json.
+- Duplicate polls or plugin reloads return the saved confirmed, rejected, or
+  failed result for the same request ID instead of taking RP a second time.
+- Insufficient fixed purchases are rejected. Insufficient renewal requests are
+  rejected with subscription_status=past_due so the website can let the current
+  entitlement expire normally.
+
+Notes:
+- Keep oxide/data/WebsiteVipBridge/rp_purchases.json when migrating or
+  restoring the live server; deleting it removes the local idempotency ledger.
+- RpPurchaseProcessedRetentionDays defaults to 0 so processed request IDs are
+  kept indefinitely unless you intentionally choose a pruning window.
+- Confirm ServerRewards is loaded before testing RP purchases.
 
 ---
 
-Secret variable support files:
+Previously updated for Raidlands bridge-backed server heartbeat.
 
-oxide/plugins/WebsiteVipBridge.cs
-oxide/plugins/DiscordLogger.cs
-oxide/plugins/DiscordWipe.cs
-oxide/plugins/DiscordAuth.cs
-oxide/plugins/DiscordPresence.cs
-oxide/plugins/DiscordRoles.cs
-oxide/config/WebsiteVipBridge.json
-oxide/config/DiscordLogger.json
-oxide/config/DiscordWipe.json
-oxide/config/DiscordAuth.json
-oxide/config/DiscordPresence.json
-oxide/config/DiscordRoles.json
-oxide/config/Secrets.example.json
+Bridge-backed public server status:
 
-Do not upload from Git:
+Upload these website files:
+- .cpanel.yml
+- database/migrations/009_server_status.sql
+- database/migrations/010_server_status_samples.sql
+- includes/server-status.php
+- api/server-status.php
+- api/server-status-history.php
+- api/server/status-heartbeat.php
+- includes/config.php
+- includes/helpers.php
+- includes/admin.php
+- admin/index.php
+- assets/js/site.js
+- assets/js/raidlands-loader.js
+- assets/css/styles.css
+- pages/server.php
+- server/index.php
+- server-plugins/WebsiteVipBridge.cs
+- server-plugins/WebsiteVipBridge.config.example.json
 
-oxide/config/Secrets.local.json
+Upload these Rust server files:
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
 
-Why:
-
-Adds centralized plugin secret variables. Tracked plugin configs can reference
-`${VARIABLE_NAME}` while the real values live in the ignored local secrets file.
-The Discord plugin files are now self-identifying and log non-secret source
-diagnostics so the live console proves the patched code is running:
-
-DiscordLogger v2.0.21
-DiscordWipe v2.4.4
-DiscordAuth v1.4.1
-DiscordPresence v3.0.2
-DiscordRoles v2.1.1
-
-Expected reload lines include:
-
-Discord Wipe wipe webhook source: DISCORD_WIPE_WEBHOOK_URL in oxide/config/Secrets.local.json; resolved length ...
-Discord Auth bot token source: DISCORD_BOT_TOKEN in oxide/config/Secrets.local.json; resolved length ...
-Discord Presence bot token source: DISCORD_BOT_TOKEN in oxide/config/Secrets.local.json; resolved length ...
+Run this website database migration once:
+- database/migrations/009_server_status.sql
+- database/migrations/010_server_status_samples.sql
 
 After upload:
 
-1. Upload the listed plugin/config/example files to the same relative paths on
-   the live Rust server.
-2. Create or update `oxide/config/Secrets.local.json` directly on the live
-   server with the real values.
-3. Keep the tracked configs using variables, for example:
-
-DiscordWipe.json:
-"Wipe Webhook url": "${DISCORD_WIPE_WEBHOOK_URL}"
-"Protocol Webhook url": "${DISCORD_WIPE_WEBHOOK_URL}"
-
-DiscordAuth.json:
-"Bot Token": "${DISCORD_BOT_TOKEN}"
-
-DiscordPresence.json:
-"Discord Application Bot Token": "${DISCORD_BOT_TOKEN}"
-
-4. Reload the affected plugins from the server console:
-
 oxide.reload WebsiteVipBridge
-oxide.reload DiscordLogger
-oxide.reload DiscordWipe
-oxide.reload DiscordAuth
-oxide.reload DiscordPresence
-oxide.reload DiscordRoles
+websitevip.status
 
-5. Test:
-
-dw protocol
-dw wipe
+Why:
+- Compile hotfix: heartbeat details now read the server protocol through
+  Rust.Protocol.network so the current Oxide compiler can resolve it.
+- WebsiteVipBridge now posts signed server status heartbeats to
+  /api/server/status-heartbeat.php every 30 seconds.
+- /api/server-status.php reads the latest Raidlands heartbeat instead of
+  BattleMetrics, marks delayed data stale after 90 seconds, and keeps the
+  existing hero/status-panel JSON shape.
+- /server/ shows the player-safe status details that are too dense for the
+  landing hero.
+- /api/server-status-history.php powers the public activity graph with
+  player-safe heartbeat samples and does not expose the internal wipe key.
+- .cpanel.yml now copies the server/ route folder during cPanel deploys;
+  without that folder, https://raidlands.net/server/ will 404.
 
 ---
 
-Bridge 401 follow-up:
+Generated for unified ServerRewards shop page update.
 
-Game server file:
+WebsiteVipBridge dynamic kit permission grant fallback:
 
-oxide/plugins/WebsiteVipBridge.cs
+Upload this website source copy:
+- server-plugins/WebsiteVipBridge.cs
 
-Website file:
-
-C:\wamp64\www\raidlands\includes\config.php
+Upload this Rust server file:
+- oxide/plugins/WebsiteVipBridge.cs
 
 Why:
-
-Normalizes the bridge shared secret before HMAC signing/verification and logs a
-non-secret fingerprint on `oxide.reload WebsiteVipBridge` so the game server and
-website values can be compared safely.
+- WebsiteVipBridge v1.4.7 registers website-managed `kits.*` and
+  `serverrewards.*` permissions when they are missing, grants with the
+  console-style permission owner, verifies the grant stuck, and falls back to
+  direct Oxide group-data repair if the permission API still refuses to persist
+  a synced permission such as `kits.paidpvpkit`.
 
 After upload:
 
-1. Upload `oxide/plugins/WebsiteVipBridge.cs` to the live Rust server.
-2. Upload `includes/config.php` to the live website.
-3. Reload the game plugin:
+oxide.reload WebsiteVipBridge
+websitevip.kits.sync
+websitevip.permissions.sync
+oxide.show group default
+/kit RAIDLANDS_PVP_LIGHT
+
+For paid kits that should be visible in the normal `/kit` window, also uncheck
+"Hidden in /kit" on the website kit row, publish, and run the sync commands
+above. Hidden kits can still be redeemed by exact kit command or other systems,
+but they are intentionally omitted from the standard Kits menu.
+
+---
+
+WebsiteVipBridge JSON map-shape hotfix:
+
+Upload these website files:
+- includes/kits.php
+- includes/permissions.php
+- server-plugins/WebsiteVipBridge.cs
+
+Upload this Rust server file:
+- oxide/plugins/WebsiteVipBridge.cs
+
+Why:
+- WebsiteVipBridge v1.4.0 could throw a web-request callback exception when
+  `group_access` or `group_permissions` came back as `[]` instead of `{}`.
+  WebsiteVipBridge v1.4.2 accepts empty arrays defensively, labels future
+  web-request and timer callback exceptions with the failing operation, skips
+  null player rows, and logs no-update kit/permission polls. The website now
+  emits empty maps as JSON objects for kit and permission sync responses.
+
+After upload:
 
 oxide.reload WebsiteVipBridge
+websitevip.kits.sync
+websitevip.permissions.sync
+websitevip.permissions.status
+
+---
+
+Website group and permission management:
+
+Upload these website files:
+- database/migrations/006_game_kits.sql
+- database/migrations/007_admin_auth.sql
+- database/migrations/008_oxide_permissions.sql
+- includes/permissions.php
+- includes/admin.php
+- includes/kits.php
+- includes/store.php
+- admin/index.php
+- api/server/permissions-snapshot.php
+- api/server/permissions-sync.php
+- api/server/permissions-sync-result.php
+- server-plugins/WebsiteVipBridge.cs
+- server-plugins/WebsiteVipBridge.config.example.json
+
+Run these website database migrations once, in order:
+- database/migrations/006_game_kits.sql
+- database/migrations/007_admin_auth.sql
+- database/migrations/008_oxide_permissions.sql
+
+Upload these Rust server files:
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
+
+After upload:
+
+oxide.reload WebsiteVipBridge
+websitevip.permissions.snapshot
+websitevip.permissions.sync
+websitevip.permissions.status
+
+Then verify:
+
+oxide.show group default
+oxide.show group discord
+oxide.show group vip_bronze
+oxide.show group vip_gold
+oxide.show group vip_elite
+oxide.show group perk_personal_mini
+oxide.show group perk_skinbox
+oxide.show group perk_raid_kit
+oxide.show group perk_queue_priority
+oxide.show group perk_supporter_badge
+
+Notes:
+- Run the permission snapshot before the first production publish so the website seeds desired grants from live state instead of publishing an empty desired grant list.
+- The bridge never edits `admin` or `authenticated`. `default` and `discord` can receive direct gameplay permissions but their group metadata is protected.
+- Kit sync now writes Kits and ServerRewards data, then triggers permission sync; group permission grants come from the composed permission payload so kit permissions are not double-revoked.
+
+---
+
+Upload these files:
+- oxide/plugins/ServerRewards.cs
+- oxide/config/ServerRewards.json
+- oxide/config/ServerInfo.json
+
+Notes:
+- Reload ServerRewards after upload so /shop is registered and kits render inside the item browser.
+- ServerInfo only needs reload/upload if you want the in-game command menu copy to advertise /shop immediately.
+
+---
+
+Urgent ServerInfo manual command menu hotfix:
+
+Upload these files:
+- oxide/plugins/ServerInfo.cs
+- oxide/config/ServerInfo.json
+
+Notes:
+- ServerInfo.cs is now version 0.6.2. It keeps the authLevel compile fix and changes /commands to a manually curated catalog.
+- ServerInfo.json is the source of truth for command rows. Visibility is scoped by Enabled, RequireStaff, RequireAdmin, MinimumAuthLevel, RequiredGroups, AnyGroup, and NTeleportation disabled-command keys.
+- Permission and plugin-loaded checks are off by default for the manual catalog. Turn on CommandCatalogUsesPermissionChecks, CommandCatalogUsesPluginLoadedChecks, or per-row CheckPermissions/CheckPluginLoaded only for reviewed exceptions.
+- Reload ServerInfo after upload:
+
+oxide.reload ServerInfo
+
+---
+
+Raidlands Oxide permission reset package:
+
+Upload these files:
+- oxide/plugins/RaidlandsPermissionReset.cs
+- oxide/config/WebsiteVipBridge.json
+- oxide/data/BetterChat.json
+- server/rust/cfg/raidlands_permission_reset_2026-07-02.cfg
+- server/rust/cfg/raidlands_permission_verify_2026-07-02.cfg
+
+Keep these local handoff/verification files:
+- tools/audit_oxide_permissions.py
+- tools/oxide_permission_audit_before_2026-07-02.md
+- tools/raidlands_permission_reset_2026-07-02.rcon
+- tools/raidlands_permission_reset_2026-07-02.md
+
+Live server sequence:
+1. Back up oxide/data/oxide.groups.data, oxide/data/oxide.users.data, oxide/config/WebsiteVipBridge.json, and oxide/data/BetterChat.json.
+2. Upload the RaidlandsPermissionReset plugin, WebsiteVipBridge, BetterChat, and cfg files above.
+3. Preferred reset path after the cfg exec path failed on this host:
+
+oxide.load RaidlandsPermissionReset
+
+The plugin is version 1.0.5. It prints explicit group summaries, uses the Oxide permission API first, and falls back to Oxide group data for grants/revokes that do not stick because the target plugin permission is not registered yet. Elite also receives lower-tier VIP permissions directly so it still works if Oxide only evaluates one parent level. Default also gets the public-population baseline: mini, skin/building-skin, all blueprint unlocks, backpack use/GUI, 12-slot backpack, backpack fetch, and paid PvP kit.
+
+If version 1.0.0, 1.0.1, 1.0.2, 1.0.3, or 1.0.4 is already loaded, upload 1.0.5 and run:
+
+oxide.reload RaidlandsPermissionReset
+raidlands.permissions.apply
+
+Optional cfg fallback:
+
+exec raidlands_permission_reset_2026-07-02.cfg
+
+If the host blocks exec, or exec runs silently without applying permissions, use the plugin path above.
+4. Verify with oxide.show group default, discord, admin, vip_bronze, vip_gold, vip_elite, and each perk_* group.
+5. Reload changed integrations:
+
+oxide.reload WebsiteVipBridge
+oxide.reload BetterChat
+oxide.unload RaidlandsPermissionReset
+
+Notes:
+- Do not edit oxide/data/oxide.groups.data or oxide/data/oxide.users.data directly.
+- Remove oxide/plugins/RaidlandsPermissionReset.cs from the live server after verification so it does not re-run on restart.
+
+---
+
+WebsiteVipBridge protected group hotfix:
+
+Upload this file:
+- oxide/plugins/WebsiteVipBridge.cs
+
+Why:
+- Website API responses can still include `default` in `managed_groups`. WebsiteVipBridge v1.2.2 refuses to manage protected groups (`default`, `admin`, `discord`, `authenticated`) from either config or API data and restores `default` for synced Steam users.
+
+After upload:
+
+oxide.reload WebsiteVipBridge
+websitevip.restoredefault
+
+Then re-test chat. The command repairs currently connected players; future bridge syncs restore `default` automatically if it is missing.
+
+Backpacks permission registry check:
+
+If `oxide.show group default` lists `backpacks.*` permissions but `oxide.grant group default backpacks.use` says the permission does not exist, reload Backpacks because its permission registry is not active:
+
+oxide.reload Backpacks
+backpack.debug.size 76561198274680338
+
+Expected after the public-population baseline is active:
+- `default` includes `backpacks.use`, `backpacks.gui`, `backpacks.size.12`, and `backpacks.fetch`.
+- `backpack.debug.size <steamid>` reports expected/current size 12 for a default player.
+
+Backpacks compile hotfix:
+
+Upload this file:
+- oxide/plugins/Backpacks.cs
+
+Why:
+- Backpacks v3.17.3 used removed Rust API `BasePlayer.ClientRPCPlayer`, and its custom UI sender passed raw byte arrays to `BytesWithSize`. The patched file uses `ClientRPC(RpcTarget.Player(...))` for inventory close and loot panel open calls, and passes a `MemoryStream` to `BytesWithSize`, so `oxide.reload Backpacks` can compile and register `backpacks.*` permissions. Around line 3001, the live file should show `using (var stream = new MemoryStream())`, not `write.BytesWithSize(_bytes, byteCount)`.
+
+After upload:
+
+oxide.reload Backpacks
+backpack.debug.size 76561198274680338
+
+---
+
+BlueprintManager compile hotfix:
+
+Upload this file:
+- oxide/plugins/BlueprintManager.cs
+
+Why:
+- BlueprintManager v2.1.4 used the removed generic Rust API `BaseEntity.ClientRPC<T>` when refreshing players after blueprint updates. The patched file is v2.1.5 and uses `ClientRPC(RpcTarget.Player(...), 0)`, matching the current server API and the working NoWorkbench blueprint refresh path.
+- The default group already has `blueprintmanager.all`; this hotfix lets `oxide.reload BlueprintManager` compile so the permission-based unlock path works again.
+
+After upload:
+
+oxide.reload BlueprintManager
+oxide.reload NoWorkbench
+
+Then have the affected player reconnect, or run:
+
+bpunlockall <player name or SteamID>
+
+---
+
+BetterChat normal player tag cleanup:
+
+Upload these files:
+- oxide/plugins/BetterChat.cs
+- oxide/data/BetterChat.json
+
+Why:
+- The default BetterChat group now hides its own title but keeps `{Title} {Username}: {Message}` formatting, so Clans can still add `[NR]` while normal players do not show `[Player]`.
+- Better Chat v5.2.17 normalizes stale live `oxide/data/BetterChat.json` default-group settings on load, then saves the corrected data.
+- The plugin fallback/default generation now keeps `{Title}` available for third-party tags like Clans while hiding only the default player title.
+- Safer live path: upload `oxide/plugins/BetterChat.cs` first and let reload migrate the live data file in place. Upload `oxide/data/BetterChat.json` only if you want to replace the live BetterChat group definitions with this local copy.
+
+After upload:
+
+oxide.reload BetterChat
+
+---
+
+ImageLibrary compile hotfix and kit image refresh:
+
+Upload this file:
+- oxide/plugins/ImageLibrary.cs
+
+Why:
+- ImageLibrary v2.0.64 used the removed Rust API `CommunityEntity.ClientRPCEx` when sending cached PNG bytes to clients. The patched file uses the current `ClientRPCStart(...).Send(...)` RPC flow with a `MemoryStream`, matching the server's existing Backpacks UI sender pattern.
+
+Also upload these website assets before testing kit icons:
+- assets/media/kits/build-kit.png
+- assets/media/kits/cards-kit.png
+- assets/media/kits/raid-kit.png
+- assets/media/kits/medical-kit.png
+- assets/media/kits/comps-kit.png
+- assets/media/kits/scuba-kit.png
+
+After upload:
+
+oxide.reload ImageLibrary
+oxide.reload Kits
+
+---
+
+SimpleLogo footer logo HUD placement update:
+
+Upload these Rust server files:
+- oxide/plugins/SimpleLogo.cs
+- oxide/config/SimpleLogo.json
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
+
+Upload this website file:
+- assets/media/in-game/raidlands-footer-logo.png
+
+Keep this website source copy in sync if you use the website repo as the plugin handoff source:
+- server-plugins/WebsiteVipBridge.cs
+- server-plugins/WebsiteVipBridge.config.example.json
+
+Why:
+- SimpleLogo registered its image as `simplelogo0` but looked it up as `SimpleLogo0`. ImageLibrary keys are case-sensitive, so players with `simplelogo.display` could receive the missing/placeholder raw image UI on login.
+- SimpleLogo v1.2.10 uses one lowercase image key consistently and skips drawing the logo panel if ImageLibrary has not cached the image yet.
+- SimpleLogo v1.2.11 now points to the PNG derivative of the same horizontal mark used by the website footer: `https://raidlands.net/assets/media/in-game/raidlands-footer-logo.png`.
+- The HUD anchors moved the mark into the bottom band between the backpack button and the health bar instead of the far-left area under clan UI elements.
+- WebsiteVipBridge v1.3.3 has a dedicated `SimpleLogo` brand asset so future brand syncs keep that URL instead of resetting to the generic nav logo.
+
+After upload:
+
+oxide.reload WebsiteVipBridge
+oxide.reload SimpleLogo
+
+If WebsiteVipBridge is still unloaded from an earlier failed reload, use `oxide.load WebsiteVipBridge` once instead.
+
+The reload destroys the existing SimpleLogo UI for connected players. Players who already used `/sl` to hide the broken overlay can run `/sl` again later if they want the logo back.
+
+---
+
+Raidlands website kit editor and Rust kit sync:
+
+Upload these website files:
+- database/migrations/006_game_kits.sql
+- includes/kits.php
+- includes/admin.php
+- admin/index.php
+- pages/store.php
+- assets/css/styles.css
+- api/server/kits-snapshot.php
+- api/server/kits-sync.php
+- api/server/kits-sync-result.php
+- server-plugins/WebsiteVipBridge.cs
+- server-plugins/WebsiteVipBridge.config.example.json
+
+Run this website database migration once:
+- database/migrations/006_game_kits.sql
+
+If `game_kit_sync_log` already exists from an earlier partial kit-editor migration, add the frozen publish payload column before publishing:
+
+ALTER TABLE game_kit_sync_log ADD COLUMN payload_json JSON NULL AFTER status;
+
+Upload these Rust server files:
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
+
+After upload:
+
+oxide.reload WebsiteVipBridge
+websitevip.kits.snapshot
+websitevip.kits.sync
+websitevip.kits.status
+
+Notes:
+- The website Kits admin saves drafts until "Publish to Server" is pressed.
+- The Rust bridge polls raidlands.net for published kit revisions, backs up Kits and ServerRewards data, writes Kits/kits_data.json atomically, updates only the ServerRewards Kits array, applies managed kit permission grants, and posts the result back to the website.
+- If the sync succeeds but the game UI does not refresh immediately, run:
+
+oxide.reload Kits
+oxide.reload ServerRewards
+
+---
+
+SimpleLogo menu-bar logo and shorter HUD sizing:
+
+Upload these Rust server files:
+- oxide/plugins/SimpleLogo.cs
+- oxide/config/SimpleLogo.json
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
+
+Upload or confirm this website media file is live:
+- assets/media/raidlands-logo.png
+
+Keep this website source copy in sync if you use the website repo as the plugin handoff source:
+- server-plugins/WebsiteVipBridge.cs
+- server-plugins/WebsiteVipBridge.config.example.json
+- docs/horizontal-logo-upload-manifest.md
+
+Why:
+- SimpleLogo v1.2.14 now uses the same menu logo asset exposed by the website: `https://raidlands.net/assets/media/raidlands-logo.png`.
+- SimpleLogo now migrates an existing live config that still points at `https://raidlands.net/assets/media/in-game/raidlands-footer-logo.png` or the mistaken `https://raidlands.net/assets/media/nav-logo.png`, so reload can correct the old logo even if the config file was not uploaded first.
+- The HUD logo is slightly shorter, moving from a 0.095 normalized height to 0.080.
+- `AutoWidthFromImage` derives the left edge from the 1:1 logo ratio so the image keeps its natural width instead of being stretched into the panel.
+- WebsiteVipBridge v1.4.5 now keeps the SimpleLogo brand asset pointed at `/assets/media/raidlands-logo.png` and writes the matching SimpleLogo sizing keys during future brand config syncs.
+
+After upload:
+
+oxide.reload WebsiteVipBridge
+oxide.reload SimpleLogo
+
+The SimpleLogo reload refreshes the existing `simplelogo0` ImageLibrary key with the new logo URL and redraws the UI for connected players.

@@ -9,8 +9,13 @@
             "TextLines": [
               "<color=#ff3b3b><b>WELCOME OPERATIONAL BRIEF</b></color>",
               "",
-              "<color=#d0d0d0>Welcome to Raidlands, a high-intensity Rust combat environment.</color>",
-              "<color=#b0b0b0>Expect fast progression, constant pressure, and direct player conflict.</color>",
+              "<color=#d0d0d0>Raidlands is built for fast progression, direct conflict, and clear tools.</color>",
+              "<color=#b0b0b0>Use this panel for the server overview and the full command index.</color>",
+              "",
+              "<color=#ff3b3b><b>START HERE</b></color>",
+              "<color=#ffd166>/help</color> - Open this menu",
+              "<color=#ffd166>/info</color> - Open this briefing",
+              "<color=#ffd166>/commands</color> - Jump straight to the command index",
               "",
               "<color=#ff3b3b><b>MISSION PARAMETERS</b></color>",
               "<color=#d0d0d0>- High-risk PvP environment</color>",
@@ -18,17 +23,16 @@
               "<color=#d0d0d0>- Rapid crafting and deployment systems</color>",
               "<color=#d0d0d0>- Clan-based warfare enabled</color>",
               "",
-              "<color=#ff3b3b><b>OBJECTIVE</b></color>",
               "<color=#ffffff>Build fast. Raid smart. Hold your ground.</color>"
             ],
             "ImageSettings": []
           }
         ],
         "TabButtonAnchor": 4,
-        "TabButtonFontSize": 16,
+        "TabButtonFontSize": 15,
         "HeaderAnchor": 0,
-        "HeaderFontSize": 30,
-        "TextFontSize": 15,
+        "HeaderFontSize": 28,
+        "TextFontSize": 14,
         "TextAnchor": 3,
         "OxideGroup": ""
       },
@@ -40,7 +44,7 @@
             "TextLines": [
               "<color=#ff3b3b><b>SERVER SYSTEMS ONLINE</b></color>",
               "",
-              "<color=#d0d0d0>Raidlands runs a fast, combat-focused ruleset with quality-of-life systems.</color>",
+              "<color=#d0d0d0>Raidlands runs a combat-focused ruleset with quality-of-life systems.</color>",
               "",
               "<color=#ff3b3b><b>CORE SYSTEMS</b></color>",
               "<color=#d0d0d0>- Instant crafting</color>",
@@ -48,6 +52,7 @@
               "<color=#d0d0d0>- Teleportation network</color>",
               "<color=#d0d0d0>- Clan warfare tools</color>",
               "<color=#d0d0d0>- Skin and loadout customization</color>",
+              "<color=#d0d0d0>- Player store and rewards tools</color>",
               "",
               "<color=#ff3b3b><b>COMBAT ENVIRONMENT</b></color>",
               "<color=#d0d0d0>- PvP enabled</color>",
@@ -58,49 +63,661 @@
           }
         ],
         "TabButtonAnchor": 4,
-        "TabButtonFontSize": 16,
+        "TabButtonFontSize": 15,
         "HeaderAnchor": 0,
-        "HeaderFontSize": 30,
-        "TextFontSize": 15,
+        "HeaderFontSize": 28,
+        "TextFontSize": 14,
         "TextAnchor": 3,
         "OxideGroup": ""
       },
       {
-        "ButtonText": "Orders",
-        "HeaderText": "FIELD COMMANDS",
-        "Pages": [
-          {
-            "TextLines": [
-              "<color=#ff3b3b><b>AUTHORIZED COMMANDS</b></color>",
-              "",
-              "<color=#ffd166>/bgrade 0-4</color> - Upgrade structures automatically",
-              "<color=#ffd166>/mymini</color> - Deploy personal air transport",
-              "<color=#ffd166>/fmini</color> - Recall deployed air unit",
-              "<color=#ffd166>/nomini</color> - Decommission air unit",
-              "<color=#ffd166>/outpost</color> - Teleport to safe trading zone",
-              "<color=#ffd166>/bandit</color> - Teleport to hostile trading zone",
-              "<color=#ffd166>/tpr</color> - Start a player teleport request",
-              "<color=#ffd166>/kit</color> - Access equipment loadouts",
-              "<color=#ffd166>/skins</color> - Modify equipment appearance",
-              "<color=#ffd166>/remove</color> - Deconstruct placed structures",
-              "<color=#ffd166>/clanhelp</color> - View clan system help",
-              "<color=#ffd166>/s</color> - Access the supply marketplace",
-              "<color=#ffd166>/bskin</color> - Configure building skins",
-              "<color=#ffd166>/stats</color> - View combat performance",
-              "<color=#ffd166>/auth</color> - Begin Discord account linking"
-            ],
-            "ImageSettings": []
-          }
-        ],
+        "ButtonText": "/commands",
+        "HeaderText": "RAIDLANDS COMMAND INDEX",
+        "Pages": [],
         "TabButtonAnchor": 4,
-        "TabButtonFontSize": 16,
+        "TabButtonFontSize": 15,
         "HeaderAnchor": 0,
-        "HeaderFontSize": 30,
-        "TextFontSize": 15,
+        "HeaderFontSize": 28,
+        "TextFontSize": 14,
         "TextAnchor": 3,
-        "OxideGroup": ""
+        "OxideGroup": "",
+        "SubTabs": [
+          {
+            "ButtonText": "Common",
+            "HeaderText": "COMMON COMMANDS",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>COMMON COMMANDS</b></color>",
+                  "",
+                  "<color=#ffd166>/help</color> - Open this menu",
+                  "<color=#ffd166>/commands</color> - Open this command index",
+                  "<color=#ffd166>/info</color> - Open the briefing tab",
+                  "<color=#ffd166>/kit</color> - Open starter and loadout kits",
+                  "<color=#ffd166>/s</color> or <color=#ffd166>/shop</color> - Open the rewards store",
+                  "<color=#ffd166>/tpr PLAYER</color> - Request a teleport",
+                  "<color=#ffd166>/home NAME</color> - Teleport to a saved home",
+                  "<color=#ffd166>/bgrade 0-4</color> - Auto-upgrade placed building blocks",
+                  "<color=#ffd166>/remove</color> - Start remover mode",
+                  "<color=#ffd166>/mymini</color> - Spawn your minicopter",
+                  "<color=#ffd166>/skin</color> or <color=#ffd166>/skins</color> - Open item skins",
+                  "<color=#ffd166>/clanhelp</color> - Clan command help",
+                  "<color=#ffd166>/auth</color> - Link Discord",
+                  "<color=#ffd166>/trade PLAYER</color> - Send a trade request"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Travel",
+            "HeaderText": "TRAVEL AND HOMES",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>PLAYER TELEPORTS</b></color>",
+                  "",
+                  "<color=#ffd166>/tpr PLAYER</color> - Request teleport to a player",
+                  "<color=#ffd166>/tpa</color> - Accept a teleport request",
+                  "<color=#ffd166>/tpc</color> - Cancel an active teleport",
+                  "<color=#ffd166>/home NAME</color> - Teleport to a saved home",
+                  "<color=#ffd166>/sethome NAME</color> - Save your current home point",
+                  "<color=#ffd166>/listhomes</color> - List saved homes",
+                  "<color=#ffd166>/removehome NAME</color> - Delete a saved home",
+                  "<color=#ffd166>/outpost</color> - Teleport to Outpost",
+                  "<color=#ffd166>/bandit</color> - Teleport to Bandit Camp",
+                  "",
+                  "<color=#d0d0d0>Teleport timers and limits come from the active server rules.</color>"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>TRAVEL SUPPORT COMMANDS</b></color>",
+                  "",
+                  "<color=#ffd166>/tpt</color>, <color=#ffd166>/atp</color>, <color=#ffd166>/tpat</color> - Toggle accepting teleport requests",
+                  "<color=#ffd166>/tphelp</color> - Teleportation help",
+                  "<color=#ffd166>/tpinfo</color> - Teleportation plugin info",
+                  "<color=#ffd166>/toggletpmarker</color> - Toggle teleport map markers",
+                  "",
+                  "<color=#ff3b3b><b>STAFF TELEPORTS</b></color>",
+                  "<color=#d0d0d0>Admin teleport controls live on the Staff tab.</color>"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Base",
+            "HeaderText": "BASE, BUILDING, AND DEFENSE",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>BUILDING TOOLS</b></color>",
+                  "",
+                  "<color=#ffd166>/bgrade 0-4</color> - Auto-upgrade placed blocks",
+                  "<color=#ffd166>/grade 0-4</color> - Alias for /bgrade",
+                  "<color=#ffd166>/remove</color> - Remove placed structures",
+                  "<color=#ffd166>/bskin</color> - Change building block skins",
+                  "<color=#ffd166>/building.skin</color> - Alias for /bskin",
+                  "<color=#ffd166>/skin</color>, <color=#ffd166>/skins</color> - Open item skin selector",
+                  "<color=#ffd166>/br</color> - Toggle base repair mode",
+                  "<color=#ffd166>/tc</color> - Tool cupboard info and limits",
+                  "<color=#ffd166>/buildinglimits</color> - Building limit controls",
+                  "<color=#ffd166>/limits</color>, <color=#ffd166>/limit</color>, <color=#ffd166>/blimit</color> - Limit aliases"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>DOORS AND DEFENSE</b></color>",
+                  "",
+                  "<color=#ffd166>/ad</color>, <color=#ffd166>/autodoor</color> - Auto-door settings",
+                  "<color=#ffd166>/autoauth</color> - Share auth with team, friends, or clan",
+                  "<color=#ffd166>/autoauthui</color> - AutoAuth UI shortcut",
+                  "<color=#ffd166>/sd</color> - Shared Doors controls",
+                  "<color=#ffd166>/turret</color> - Toggle targeted turret power",
+                  "<color=#ffd166>/turret.tc</color> - Toggle turrets in TC range",
+                  "<color=#ffd166>/sam.tc</color> - Toggle SAMs in TC range",
+                  "",
+                  "<color=#d0d0d0>Use the Utility tab for sorting, backpack, time, and smelt toggles.</color>"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Econ",
+            "HeaderText": "ECONOMY AND PROGRESSION",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>PLAYER ECONOMY</b></color>",
+                  "",
+                  "<color=#ffd166>/kit</color> - Open available kits",
+                  "<color=#ffd166>/s</color> or <color=#ffd166>/shop</color> - Open the Raidlands rewards store",
+                  "<color=#ffd166>/playtime</color> - View playtime",
+                  "<color=#ffd166>/refer</color> - Referral command",
+                  "<color=#ffd166>/srnpc</color> - ServerRewards NPC command",
+                  "",
+                  "<color=#ff3b3b><b>REWARD ADMIN</b></color>",
+                  "<color=#ffd166>/xp</color> - ServerRewards point management",
+                  "<color=#ffd166>/clearrpdata</color> - Clear reward point data"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>BLUEPRINT ADMIN</b></color>",
+                  "",
+                  "<color=#ffd166>/bpunlock PLAYER ITEM</color> - Unlock one blueprint",
+                  "<color=#ffd166>/bpunlockall PLAYER</color> - Unlock all blueprints",
+                  "<color=#ffd166>/bpremove PLAYER ITEM</color> - Remove a blueprint",
+                  "<color=#ffd166>/bpreset PLAYER</color> - Reset a player's blueprints",
+                  "<color=#ffd166>/bpwipeall</color> - Wipe all blueprint data",
+                  "",
+                  "<color=#d0d0d0>Blueprint commands are admin-facing progression controls.</color>"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Social",
+            "HeaderText": "SOCIAL, CLANS, AND LINKING",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>CLANS AND ALLIES</b></color>",
+                  "",
+                  "<color=#ffd166>/clanhelp</color> - Clan help",
+                  "<color=#ffd166>/clan</color> - Clan management",
+                  "<color=#ffd166>/c</color> - Clan chat",
+                  "<color=#ffd166>/a</color> - Ally chat",
+                  "<color=#ffd166>/ally</color> - Alliance controls",
+                  "<color=#ffd166>/cinfo</color> - Clan information",
+                  "",
+                  "<color=#ff3b3b><b>PRIVATE CHAT</b></color>",
+                  "<color=#ffd166>/pm PLAYER MESSAGE</color> - Send a private message",
+                  "<color=#ffd166>/r MESSAGE</color> - Reply to last PM",
+                  "<color=#ffd166>/pmhistory</color> - View private message history"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>TRADES AND DISCORD</b></color>",
+                  "",
+                  "<color=#ffd166>/trade PLAYER</color> - Request a trade",
+                  "<color=#ffd166>/trade accept</color> - Accept a trade request",
+                  "<color=#ffd166>/auth</color>, <color=#ffd166>/authenticate</color> - Link Discord",
+                  "<color=#ffd166>/deauth</color>, <color=#ffd166>/deauthenticate</color> - Unlink Discord",
+                  "",
+                  "<color=#ff3b3b><b>CHAT ADMIN</b></color>",
+                  "<color=#ffd166>/chat</color> - BetterChat admin controls"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Combat",
+            "HeaderText": "COMBAT AND SERVER FEEDBACK",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>PLAYER COMBAT TOOLS</b></color>",
+                  "",
+                  "<color=#ffd166>/stats</color> - View KDR and combat stats",
+                  "<color=#ffd166>/leaderboard</color> - Open scoreboards",
+                  "<color=#ffd166>/gather</color> - View gather rates",
+                  "<color=#ffd166>/dn</color> - DeathNotes command",
+                  "<color=#ffd166>/fr</color> - Rocket fire command",
+                  "",
+                  "<color=#ff3b3b><b>SERVER STATE</b></color>",
+                  "<color=#ffd166>/wipe</color> - AutoLock wipe command",
+                  "",
+                  "<color=#d0d0d0>Staff drop, loot, and anti-cheat commands are on the Staff tab.</color>"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Vehicles",
+            "HeaderText": "VEHICLE COMMANDS",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>PERSONAL AIRCRAFT</b></color>",
+                  "",
+                  "<color=#ffd166>/mymini</color> - Spawn minicopter",
+                  "<color=#ffd166>/fmini</color> - Fetch minicopter",
+                  "<color=#ffd166>/nomini</color> - Despawn minicopter",
+                  "",
+                  "<color=#ffd166>/myheli</color> - Spawn scrap transport helicopter",
+                  "<color=#ffd166>/fheli</color> - Fetch scrap transport helicopter",
+                  "<color=#ffd166>/noheli</color> - Despawn scrap transport helicopter",
+                  "",
+                  "<color=#ffd166>/myattack</color> - Spawn attack helicopter",
+                  "<color=#ffd166>/fattack</color> - Fetch attack helicopter",
+                  "<color=#ffd166>/noattack</color> - Despawn attack helicopter"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>VEHICLE GIVE COMMANDS</b></color>",
+                  "",
+                  "<color=#ffd166>/spawnmini.give</color> - Give minicopter",
+                  "<color=#ffd166>/spawnheli.minicopter.give</color> - Give minicopter alias",
+                  "<color=#ffd166>/spawnheli.scraptransporthelicopter.give</color> - Give scrap heli",
+                  "<color=#ffd166>/spawnheli.attackhelicopter.give</color> - Give attack heli",
+                  "",
+                  "<color=#d0d0d0>Give commands are staff-facing SpawnHeli controls.</color>"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Utility",
+            "HeaderText": "UTILITY COMMANDS",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>BACKPACKS</b></color>",
+                  "",
+                  "<color=#ffd166>/backpack</color>, <color=#ffd166>/backpack.open</color> - Open backpack",
+                  "<color=#ffd166>/backpack.next</color> - Next backpack page",
+                  "<color=#ffd166>/backpack.previous</color>, <color=#ffd166>/backpack.prev</color> - Previous page",
+                  "<color=#ffd166>/backpack.fetch</color> - Fetch backpack contents",
+                  "<color=#ffd166>/backpackgui</color> - Toggle backpack GUI",
+                  "<color=#ffd166>/backpack.setgathermode</color> - Set gather mode",
+                  "<color=#ffd166>/backpack.ui.togglegather</color> - Toggle gather UI",
+                  "<color=#ffd166>/backpack.ui.toggleretrieve</color> - Toggle retrieve UI"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>QUALITY OF LIFE</b></color>",
+                  "",
+                  "<color=#ffd166>/tod</color> - Time of day command",
+                  "<color=#ffd166>/sl</color> - SimpleLogo command",
+                  "<color=#ffd166>/ismelt</color> - Toggle instant smelt behavior",
+                  "<color=#ffd166>/sortbutton</color> - Sort button settings",
+                  "<color=#ffd166>/sortbutton.order</color> - Sort order command",
+                  "<color=#ffd166>/sortbutton.sort</color> - Sort command",
+                  "",
+                  "<color=#ff3b3b><b>BACKPACK STAFF</b></color>",
+                  "<color=#ffd166>/viewbackpack</color> - View another player's backpack",
+                  "<color=#ffd166>/backpack.erase</color> - Erase backpack data",
+                  "<color=#ffd166>/backpack.addsize</color>, <color=#ffd166>/backpack.setsize</color> - Resize backpacks"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          },
+          {
+            "ButtonText": "Staff",
+            "HeaderText": "STAFF AND INTEGRATION COMMANDS",
+            "Pages": [
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>TELEPORT ADMIN</b></color>",
+                  "",
+                  "<color=#ffd166>/tp</color> - Teleport to player or position",
+                  "<color=#ffd166>/tpn</color> - Teleport near player",
+                  "<color=#ffd166>/tpl</color> - Teleport to saved location",
+                  "<color=#ffd166>/tpsave</color> - Save teleport location",
+                  "<color=#ffd166>/tpremove</color> - Remove teleport location",
+                  "<color=#ffd166>/tpb</color> - Teleport back",
+                  "<color=#ffd166>/tnt</color> - Toggle NoTeleport",
+                  "<color=#ffd166>/radiushome</color> - Home radius lookup",
+                  "<color=#ffd166>/deletehome</color> - Delete player home",
+                  "<color=#ffd166>/tphome</color> - Teleport to player home",
+                  "<color=#ffd166>/homehomes</color> - List player homes",
+                  "<color=#ffd166>/wipehomes</color> - Wipe home data",
+                  "<color=#ffd166>/teleport.toplayer</color>, <color=#ffd166>/teleport.topos</color> - Console-style teleports",
+                  "<color=#ffd166>/teleport.importhomes</color>, <color=#ffd166>/spm</color>, <color=#ffd166>/nteleportationinfo</color>"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>MODERATION AND SECURITY</b></color>",
+                  "",
+                  "<color=#ffd166>/ban</color>, <color=#ffd166>/playerban</color>, <color=#ffd166>/sa.ban</color> - Ban player",
+                  "<color=#ffd166>/banid</color> - Ban by SteamID",
+                  "<color=#ffd166>/unban</color>, <color=#ffd166>/playerunban</color>, <color=#ffd166>/sa.unban</color> - Unban player",
+                  "<color=#ffd166>/clanban</color> - Ban clan members",
+                  "<color=#ffd166>/sa.cp</color> - ServerArmour check player",
+                  "<color=#ffd166>/sa.clb</color>, <color=#ffd166>/getreport</color> - ServerArmour report",
+                  "<color=#ffd166>/sa.mapupload</color>, <color=#ffd166>/sa.map.upload</color> - Map upload",
+                  "<color=#ffd166>/sa.radar</color>, <color=#ffd166>/sa.apply_key</color> - Radar and key tools",
+                  "",
+                  "<color=#ff3b3b><b>ARKAN</b></color>",
+                  "<color=#ffd166>/arkan</color>, <color=#ffd166>/arkaninfo</color>, <color=#ffd166>/arkannr</color> - Anti-cheat views",
+                  "<color=#ffd166>/arkanaim</color>, <color=#ffd166>/arkanaimr</color>, <color=#ffd166>/arkanir</color> - Reports",
+                  "<color=#ffd166>/arkanclear</color>, <color=#ffd166>/arkansave</color>, <color=#ffd166>/arkanload</color> - Data controls"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>GUARDIAN</b></color>",
+                  "",
+                  "<color=#ffd166>/guardian</color>, <color=#ffd166>/guardian.help</color>, <color=#ffd166>/g.help</color> - Guardian help",
+                  "<color=#ffd166>/g.config</color>, <color=#ffd166>/guardian.config</color> - Config",
+                  "<color=#ffd166>/g.ip</color>, <color=#ffd166>/guardian.ip</color> - IP tools",
+                  "<color=#ffd166>/g.log</color>, <color=#ffd166>/guardian.log</color> - Logs",
+                  "<color=#ffd166>/g.server</color>, <color=#ffd166>/guardian.server</color> - Server checks",
+                  "<color=#ffd166>/g.tp</color>, <color=#ffd166>/g.tpv</color>, <color=#ffd166>/guardian.tp</color>, <color=#ffd166>/guardian.tpv</color> - Teleport tools",
+                  "<color=#ffd166>/g.user</color>, <color=#ffd166>/guardian.user</color> - User checks",
+                  "<color=#ffd166>/g.vpn</color>, <color=#ffd166>/guardian.vpn</color> - VPN checks",
+                  "",
+                  "<color=#ff3b3b><b>GODMODE</b></color>",
+                  "<color=#ffd166>/god</color>, <color=#ffd166>/godmode</color> - Toggle godmode",
+                  "<color=#ffd166>/gods</color>, <color=#ffd166>/godlist</color> - List godmode players"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>LOOT, DROPS, AND CRATES</b></color>",
+                  "",
+                  "<color=#ffd166>/looty</color> - BetterLoot UI",
+                  "<color=#ffd166>/blacklist</color> - BetterLoot blacklist",
+                  "<color=#ffd166>/bl-backup</color>, <color=#ffd166>/bl-restore</color> - BetterLoot backups",
+                  "<color=#ffd166>/droprandom</color>, <color=#ffd166>/droptopos</color> - FancyDrop controls",
+                  "<color=#ffd166>/droptoplayer</color>, <color=#ffd166>/dropdirect</color> - Targeted drops",
+                  "<color=#ffd166>/dropspace</color>, <color=#ffd166>/dropmass</color>, <color=#ffd166>/droptomass</color> - Mass drops",
+                  "<color=#ffd166>/lockedcratetimer.conf</color> - Locked crate timer config",
+                  "",
+                  "<color=#ff3b3b><b>STACK SIZE CONTROLLER</b></color>",
+                  "<color=#ffd166>/stacksizecontroller.setstack</color>, <color=#ffd166>/stacksizecontroller.setstackcat</color>",
+                  "<color=#ffd166>/stacksizecontroller.setallstacks</color>, <color=#ffd166>/stacksizecontroller.itemsearch</color>",
+                  "<color=#ffd166>/stacksizecontroller.listcategories</color>, <color=#ffd166>/stacksizecontroller.listcategoryitems</color>, <color=#ffd166>/stacksizecontroller.vd</color>"
+                ],
+                "ImageSettings": []
+              },
+              {
+                "TextLines": [
+                  "<color=#ff3b3b><b>INTEGRATIONS AND DEBUG</b></color>",
+                  "",
+                  "<color=#ffd166>/dw</color> - Discord wipe protocol command",
+                  "<color=#ffd166>/dcr.forcecheck</color> - Discord roles force check",
+                  "<color=#ffd166>/placeholderapi.list</color>, <color=#ffd166>/placeholderapi.test</color> - PlaceholderAPI tools",
+                  "<color=#ffd166>/customvendingsetup.ui</color> - Custom vending setup UI",
+                  "<color=#ffd166>/testmessage</color> - Entity limit test message",
+                  "<color=#ffd166>/ptt.restorenames</color> - PlaytimeTracker name restore",
+                  "",
+                  "<color=#ff3b3b><b>BACKPACK DEBUG</b></color>",
+                  "<color=#ffd166>/backpack.debug.size</color>, <color=#ffd166>/backpack.debug.capacity</color> - Size debug",
+                  "<color=#ffd166>/backpack.debug.gather</color> - Gather debug"
+                ],
+                "ImageSettings": []
+              }
+            ],
+            "TabButtonAnchor": 4,
+            "TabButtonFontSize": 13,
+            "HeaderAnchor": 0,
+            "HeaderFontSize": 28,
+            "TextFontSize": 14,
+            "TextAnchor": 3,
+            "OxideGroup": "",
+            "SubTabs": []
+          }
+        ]
       }
     ],
+    "CommandCatalog": [
+      {
+        "ButtonText": "Common",
+        "HeaderText": "COMMON COMMANDS",
+        "Commands": [
+          { "Command": "help", "Aliases": [ "help" ], "Plugin": "ServerInfo", "Description": "Open this menu" },
+          { "Command": "commands", "Aliases": [ "commands" ], "Plugin": "ServerInfo", "Description": "Open this command index" },
+          { "Command": "info", "Aliases": [ "info" ], "Plugin": "ServerInfo", "Description": "Open the briefing tab" },
+          { "Command": "kit", "Aliases": [ "kit" ], "Plugin": "Kits", "Description": "Open available kits" },
+          { "Command": "s", "Aliases": [ "s", "shop" ], "Plugin": "ServerRewards", "Description": "Open the rewards store" },
+          { "Command": "tpr", "Aliases": [ "tpr" ], "Plugin": "NTeleportation", "Description": "Request teleport to a player", "AnyPermission": [ "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpr" ] },
+          { "Command": "home", "Aliases": [ "home" ], "Plugin": "NTeleportation", "Description": "Teleport to a saved home", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "home" ] },
+          { "Command": "bgrade", "Aliases": [ "bgrade", "grade" ], "Plugin": "BGrade", "Description": "Auto-upgrade placed building blocks", "AnyPermission": [ "bgrade.all", "bgrade.0", "bgrade.1", "bgrade.2", "bgrade.3", "bgrade.4" ] },
+          { "Command": "remove", "Aliases": [ "remove" ], "Plugin": "RemoverTool", "Description": "Start remover mode", "AnyPermission": [ "removertool.normal", "removertool.all", "removertool.admin" ] },
+          { "Command": "mymini", "Aliases": [ "mymini" ], "Plugin": "SpawnHeli", "Description": "Spawn your minicopter", "AnyPermission": [ "spawnheli.minicopter.spawn", "spawnheli.all.spawn" ] },
+          { "Command": "skin", "Aliases": [ "skin", "skins" ], "Plugin": "Skins", "Description": "Open item skins", "AnyPermission": [ "skins.use" ] },
+          { "Command": "clanhelp", "Aliases": [ "clanhelp" ], "Plugin": "Clans", "Description": "Clan command help" },
+          { "Command": "auth", "Aliases": [ "auth", "authenticate" ], "Plugin": "DiscordAuth", "Description": "Link Discord", "AnyPermission": [ "discordauth.auth" ] },
+          { "Command": "trade", "Aliases": [ "trade" ], "Plugin": "Trade", "Description": "Send a trade request", "AnyPermission": [ "trade.use" ] }
+        ]
+      },
+      {
+        "ButtonText": "Travel",
+        "HeaderText": "TRAVEL AND HOMES",
+        "Commands": [
+          { "Command": "tpr", "Aliases": [ "tpr" ], "Plugin": "NTeleportation", "Description": "Request teleport to a player", "AnyPermission": [ "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpr" ] },
+          { "Command": "tpa", "Aliases": [ "tpa" ], "Plugin": "NTeleportation", "Description": "Accept a teleport request", "AnyPermission": [ "nteleportation.tpa", "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpa" ] },
+          { "Command": "tpc", "Aliases": [ "tpc" ], "Plugin": "NTeleportation", "Description": "Cancel an active teleport", "AnyPermission": [ "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpc" ] },
+          { "Command": "tpb", "Aliases": [ "tpb" ], "Plugin": "NTeleportation", "Description": "Teleport back after a teleport", "AnyPermission": [ "nteleportation.tpb" ], "DisabledCommandKeys": [ "tpb" ] },
+          { "Command": "home", "Aliases": [ "home" ], "Plugin": "NTeleportation", "Description": "Teleport to a saved home", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "home" ] },
+          { "Command": "sethome", "Aliases": [ "sethome" ], "Plugin": "NTeleportation", "Description": "Save your current home point", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "sethome" ] },
+          { "Command": "listhomes", "Aliases": [ "listhomes" ], "Plugin": "NTeleportation", "Description": "List saved homes", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "listhomes" ] },
+          { "Command": "removehome", "Aliases": [ "removehome" ], "Plugin": "NTeleportation", "Description": "Delete a saved home", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "removehome" ] },
+          { "Command": "outpost", "Aliases": [ "outpost" ], "Plugin": "NTeleportation", "Description": "Teleport to Outpost", "AnyPermission": [ "nteleportation.tpoutpost" ], "DisabledCommandKeys": [ "outpost" ] },
+          { "Command": "bandit", "Aliases": [ "bandit" ], "Plugin": "NTeleportation", "Description": "Teleport to Bandit Camp", "AnyPermission": [ "nteleportation.tpbandit" ], "DisabledCommandKeys": [ "bandit" ] },
+          { "Command": "tpt", "Aliases": [ "tpt", "atp", "tpat" ], "Plugin": "NTeleportation", "Description": "Toggle accepting team, clan, or friend teleport requests", "AnyPermission": [ "nteleportation.tpt" ], "DisabledCommandKeys": [ "tpt", "atp", "tpat" ] },
+          { "Command": "tphelp", "Aliases": [ "tphelp" ], "Plugin": "NTeleportation", "Description": "Teleportation help" },
+          { "Command": "tpinfo", "Aliases": [ "tpinfo" ], "Plugin": "NTeleportation", "Description": "Teleportation plugin info" },
+          { "Command": "toggletpmarker", "Aliases": [ "toggletpmarker" ], "Plugin": "NTeleportation", "Description": "Toggle teleport map markers", "AnyPermission": [ "nteleportation.tpmarker" ], "DisabledCommandKeys": [ "toggletpmarker" ] }
+        ]
+      },
+      {
+        "ButtonText": "Base",
+        "HeaderText": "BASE, BUILDING, AND DEFENSE",
+        "Commands": [
+          { "Command": "bgrade", "Aliases": [ "bgrade", "grade" ], "Plugin": "BGrade", "Description": "Auto-upgrade placed blocks", "AnyPermission": [ "bgrade.all", "bgrade.0", "bgrade.1", "bgrade.2", "bgrade.3", "bgrade.4" ] },
+          { "Command": "remove", "Aliases": [ "remove" ], "Plugin": "RemoverTool", "Description": "Remove placed structures", "AnyPermission": [ "removertool.normal", "removertool.all", "removertool.admin" ] },
+          { "Command": "bskin", "Aliases": [ "bskin", "building.skin" ], "Plugin": "BuildingSkins", "Description": "Change building block skins", "AnyPermission": [ "buildingskins.use", "buildingskins.build", "buildingskins.tc", "buildingskins.all" ] },
+          { "Command": "skin", "Aliases": [ "skin", "skins" ], "Plugin": "Skins", "Description": "Open item skin selector", "AnyPermission": [ "skins.use" ] },
+          { "Command": "br", "Aliases": [ "br" ], "Plugin": "BaseRepair", "Description": "Toggle base repair mode", "AnyPermission": [ "baserepair.use" ], "AdminBypassesPermissions": true },
+          { "Command": "tc", "Aliases": [ "tc" ], "Plugin": "CupboardLimiter", "Description": "Tool cupboard info and limits" },
+          { "Command": "buildinglimits", "Aliases": [ "buildinglimits", "limits", "limit", "blimit" ], "Plugin": "EntityLimit", "Description": "Building limit controls" },
+          { "Command": "ad", "Aliases": [ "ad", "autodoor" ], "Plugin": "AutoDoors", "Description": "Auto-door settings" },
+          { "Command": "autoauth", "Aliases": [ "autoauth", "autoauthui" ], "Plugin": "AutomaticAuthorization", "Description": "Share authorization with team, friends, or clan", "AnyPermission": [ "automaticauthorization.use" ] },
+          { "Command": "sd", "Aliases": [ "sd" ], "Plugin": "SharedDoors", "Description": "Shared Doors controls" },
+          { "Command": "turret", "Aliases": [ "turret" ], "Plugin": "PowerlessTurrets", "Description": "Toggle targeted turret power", "AnyPermission": [ "powerlessturrets.use" ] },
+          { "Command": "turret.tc", "Aliases": [ "turret.tc" ], "Plugin": "PowerlessTurrets", "Description": "Toggle turrets in TC range", "AnyPermission": [ "powerlessturrets.radius" ] },
+          { "Command": "sam.tc", "Aliases": [ "sam.tc" ], "Plugin": "PowerlessTurrets", "Description": "Toggle SAMs in TC range", "AnyPermission": [ "powerlessturrets.samradius" ] }
+        ]
+      },
+      {
+        "ButtonText": "Econ",
+        "HeaderText": "ECONOMY AND PROGRESSION",
+        "Commands": [
+          { "Command": "kit", "Aliases": [ "kit" ], "Plugin": "Kits", "Description": "Open available kits" },
+          { "Command": "s", "Aliases": [ "s", "shop" ], "Plugin": "ServerRewards", "Description": "Open the Raidlands rewards store" },
+          { "Command": "playtime", "Aliases": [ "playtime" ], "Plugin": "PlaytimeTracker", "Description": "View playtime" },
+          { "Command": "refer", "Aliases": [ "refer" ], "Plugin": "PlaytimeTracker", "Description": "Referral command" },
+          { "Command": "srnpc", "Aliases": [ "srnpc" ], "Plugin": "ServerRewards", "Description": "ServerRewards NPC command", "RequireAdmin": true },
+          { "Command": "xp", "Aliases": [ "xp" ], "Plugin": "ServerRewards", "Description": "ServerRewards point management", "RequireAdmin": true },
+          { "Command": "clearrpdata", "Aliases": [ "clearrpdata" ], "Plugin": "ServerRewardsWipe", "Description": "Clear reward point data", "AnyPermission": [ "serverrewardswipe.admin" ], "RequireStaff": true },
+          { "Command": "bpunlock", "Aliases": [ "bpunlock", "bpunlockall", "bpremove", "bpreset", "bpwipeall" ], "Plugin": "BlueprintManager", "Description": "Blueprint admin controls", "AnyPermission": [ "blueprintmanager.admin" ], "RequireStaff": true }
+        ]
+      },
+      {
+        "ButtonText": "Social",
+        "HeaderText": "SOCIAL, CLANS, AND LINKING",
+        "Commands": [
+          { "Command": "clanhelp", "Aliases": [ "clanhelp" ], "Plugin": "Clans", "Description": "Clan help" },
+          { "Command": "clan", "Aliases": [ "clan" ], "Plugin": "Clans", "Description": "Clan management" },
+          { "Command": "c", "Aliases": [ "c" ], "Plugin": "Clans", "Description": "Clan chat" },
+          { "Command": "a", "Aliases": [ "a" ], "Plugin": "Clans", "Description": "Ally chat" },
+          { "Command": "ally", "Aliases": [ "ally" ], "Plugin": "Clans", "Description": "Alliance controls" },
+          { "Command": "cinfo", "Aliases": [ "cinfo" ], "Plugin": "Clans", "Description": "Clan information" },
+          { "Command": "pm", "Aliases": [ "pm", "r", "pmhistory" ], "Plugin": "PrivateMessages", "Description": "Private messages and history", "AnyPermission": [ "privatemessages.allow" ] },
+          { "Command": "trade", "Aliases": [ "trade" ], "Plugin": "Trade", "Description": "Request a trade", "AnyPermission": [ "trade.use" ] },
+          { "Command": "trade accept", "Aliases": [ "trade accept" ], "Plugin": "Trade", "Description": "Accept a trade request", "AnyPermission": [ "trade.accept" ] },
+          { "Command": "auth", "Aliases": [ "auth", "authenticate" ], "Plugin": "DiscordAuth", "Description": "Link Discord", "AnyPermission": [ "discordauth.auth" ] },
+          { "Command": "deauth", "Aliases": [ "deauth", "deauthenticate" ], "Plugin": "DiscordAuth", "Description": "Unlink Discord", "AnyPermission": [ "discordauth.deauth" ] },
+          { "Command": "chat", "Aliases": [ "chat" ], "Plugin": "BetterChat", "Description": "BetterChat admin controls", "AnyPermission": [ "betterchat.admin" ], "RequireStaff": true }
+        ]
+      },
+      {
+        "ButtonText": "Combat",
+        "HeaderText": "COMBAT AND SERVER FEEDBACK",
+        "Commands": [
+          { "Command": "stats", "Aliases": [ "stats" ], "Plugin": "KDRScoreboard", "Description": "View KDR and combat stats" },
+          { "Command": "leaderboard", "Aliases": [ "leaderboard" ], "Plugin": "Scoreboards", "Description": "Open scoreboards", "AnyPermission": [ "scoreboards.admin" ], "RequireStaff": true },
+          { "Command": "gather", "Aliases": [ "gather" ], "Plugin": "GatherManager", "Description": "View gather rates" },
+          { "Command": "dn", "Aliases": [ "dn" ], "Plugin": "DeathNotes", "Description": "DeathNotes command" },
+          { "Command": "fr", "Aliases": [ "fr" ], "Plugin": "RocketFire", "Description": "Rocket fire command", "AnyPermission": [ "rocketfire.use" ], "AdminBypassesPermissions": true },
+          { "Command": "wipe", "Aliases": [ "wipe" ], "Plugin": "AutoLock", "Description": "View next wipe timing" }
+        ]
+      },
+      {
+        "ButtonText": "Vehicles",
+        "HeaderText": "VEHICLE COMMANDS",
+        "Commands": [
+          { "Command": "mymini", "Aliases": [ "mymini" ], "Plugin": "SpawnHeli", "Description": "Spawn minicopter", "AnyPermission": [ "spawnheli.minicopter.spawn", "spawnheli.all.spawn" ] },
+          { "Command": "fmini", "Aliases": [ "fmini" ], "Plugin": "SpawnHeli", "Description": "Fetch minicopter", "AnyPermission": [ "spawnheli.minicopter.fetch", "spawnheli.all.fetch" ] },
+          { "Command": "nomini", "Aliases": [ "nomini" ], "Plugin": "SpawnHeli", "Description": "Despawn minicopter", "AnyPermission": [ "spawnheli.minicopter.despawn", "spawnheli.all.despawn" ] },
+          { "Command": "myheli", "Aliases": [ "myheli" ], "Plugin": "SpawnHeli", "Description": "Spawn scrap transport helicopter", "AnyPermission": [ "spawnheli.scraptransport.spawn", "spawnheli.all.spawn" ] },
+          { "Command": "fheli", "Aliases": [ "fheli" ], "Plugin": "SpawnHeli", "Description": "Fetch scrap transport helicopter", "AnyPermission": [ "spawnheli.scraptransport.fetch", "spawnheli.all.fetch" ] },
+          { "Command": "noheli", "Aliases": [ "noheli" ], "Plugin": "SpawnHeli", "Description": "Despawn scrap transport helicopter", "AnyPermission": [ "spawnheli.scraptransport.despawn", "spawnheli.all.despawn" ] },
+          { "Command": "myattack", "Aliases": [ "myattack" ], "Plugin": "SpawnHeli", "Description": "Spawn attack helicopter", "AnyPermission": [ "spawnheli.attackhelicopter.spawn", "spawnheli.all.spawn" ] },
+          { "Command": "fattack", "Aliases": [ "fattack" ], "Plugin": "SpawnHeli", "Description": "Fetch attack helicopter", "AnyPermission": [ "spawnheli.attackhelicopter.fetch", "spawnheli.all.fetch" ] },
+          { "Command": "noattack", "Aliases": [ "noattack" ], "Plugin": "SpawnHeli", "Description": "Despawn attack helicopter", "AnyPermission": [ "spawnheli.attackhelicopter.despawn", "spawnheli.all.despawn" ] }
+        ]
+      },
+      {
+        "ButtonText": "Utility",
+        "HeaderText": "UTILITY COMMANDS",
+        "Commands": [
+          { "Command": "backpack", "Aliases": [ "backpack", "backpack.open" ], "Plugin": "Backpacks", "Description": "Open backpack", "AnyPermission": [ "backpacks.use" ] },
+          { "Command": "backpack.next", "Aliases": [ "backpack.next" ], "Plugin": "Backpacks", "Description": "Next backpack page", "AnyPermission": [ "backpacks.use" ] },
+          { "Command": "backpack.previous", "Aliases": [ "backpack.previous", "backpack.prev" ], "Plugin": "Backpacks", "Description": "Previous backpack page", "AnyPermission": [ "backpacks.use" ] },
+          { "Command": "backpack.fetch", "Aliases": [ "backpack.fetch" ], "Plugin": "Backpacks", "Description": "Fetch backpack contents", "AnyPermission": [ "backpacks.fetch" ] },
+          { "Command": "backpackgui", "Aliases": [ "backpackgui" ], "Plugin": "Backpacks", "Description": "Toggle backpack GUI", "AnyPermission": [ "backpacks.gui" ] },
+          { "Command": "backpack.setgathermode", "Aliases": [ "backpack.setgathermode" ], "Plugin": "Backpacks", "Description": "Set gather mode", "RequiredPermissions": [ "backpacks.use", "backpacks.gather" ] },
+          { "Command": "backpack.ui.togglegather", "Aliases": [ "backpack.ui.togglegather" ], "Plugin": "Backpacks", "Description": "Toggle gather UI", "RequiredPermissions": [ "backpacks.use", "backpacks.gather" ] },
+          { "Command": "backpack.ui.toggleretrieve", "Aliases": [ "backpack.ui.toggleretrieve" ], "Plugin": "Backpacks", "Description": "Toggle retrieve UI", "RequiredPermissions": [ "backpacks.use", "backpacks.retrieve" ] },
+          { "Command": "tod", "Aliases": [ "tod" ], "Plugin": "TimeOfDay", "Description": "View time-of-day settings" },
+          { "Command": "sl", "Aliases": [ "sl" ], "Plugin": "SimpleLogo", "Description": "Toggle the simple logo" },
+          { "Command": "ismelt", "Aliases": [ "ismelt" ], "Plugin": "InstantSmelt", "Description": "Toggle instant smelt behavior", "AnyPermission": [ "instantsmelt.use" ] },
+          { "Command": "sortbutton", "Aliases": [ "sortbutton", "sortbutton.order", "sortbutton.sort" ], "Plugin": "SortButton", "Description": "Sort button settings", "AnyPermission": [ "sortbutton.use" ] },
+          { "Command": "viewbackpack", "Aliases": [ "viewbackpack" ], "Plugin": "Backpacks", "Description": "View another player's backpack", "AnyPermission": [ "backpacks.admin", "backpacks.admin.view", "backpacks.admin.edit" ], "RequireStaff": true },
+          { "Command": "backpack.erase", "Aliases": [ "backpack.erase" ], "Plugin": "Backpacks", "Description": "Erase backpack data", "AnyPermission": [ "backpacks.admin", "backpacks.admin.edit" ], "RequireStaff": true },
+          { "Command": "backpack.resize", "Aliases": [ "backpack.addsize", "backpack.setsize" ], "Plugin": "Backpacks", "Description": "Resize backpacks", "AnyPermission": [ "backpacks.admin", "backpacks.admin.resize" ], "RequireStaff": true }
+        ]
+      },
+      {
+        "ButtonText": "Staff",
+        "HeaderText": "STAFF AND INTEGRATION COMMANDS",
+        "Commands": [
+          { "Command": "tp", "Aliases": [ "tp", "tpn", "tpl", "tpsave", "tpremove", "tnt" ], "Plugin": "NTeleportation", "Description": "Staff teleport controls", "RequireStaff": true, "AnyPermission": [ "nteleportation.tp", "nteleportation.tpn", "nteleportation.tpl", "nteleportation.tpsave", "nteleportation.tpremove", "nteleportation.admin" ], "AdminBypassesPermissions": true, "DisabledCommandKeys": [ "tp", "tpn", "tpl", "tpsave", "tpremove", "tnt" ] },
+          { "Command": "homeadmin", "Aliases": [ "radiushome", "deletehome", "tphome", "homehomes", "wipehomes" ], "Plugin": "NTeleportation", "Description": "Staff home lookup and cleanup", "RequireStaff": true, "AnyPermission": [ "nteleportation.admin", "nteleportation.radiushome", "nteleportation.deletehome", "nteleportation.homehomes", "nteleportation.wipehomes" ], "AdminBypassesPermissions": true, "DisabledCommandKeys": [ "radiushome", "deletehome", "tphome", "homehomes", "wipehomes" ] },
+          { "Command": "teleport.console", "Aliases": [ "teleport.toplayer", "teleport.topos", "teleport.importhomes", "spm", "nteleportationinfo" ], "Plugin": "NTeleportation", "Description": "Teleport import and console-style tools", "RequireStaff": true, "AnyPermission": [ "nteleportation.tpconsole", "nteleportation.importhomes", "nteleportation.admin" ], "AdminBypassesPermissions": true, "DisabledCommandKeys": [ "teleport.toplayer", "teleport.topos", "teleport.importhomes", "spm", "nteleportationinfo" ] },
+          { "Command": "ban", "Aliases": [ "ban", "playerban", "sa.ban", "banid", "clanban" ], "Plugin": "ServerArmour", "Description": "Ban player or clan members", "RequireStaff": true, "AnyPermission": [ "serverarmour.ban" ] },
+          { "Command": "unban", "Aliases": [ "unban", "playerunban", "sa.unban" ], "Plugin": "ServerArmour", "Description": "Unban player", "RequireStaff": true, "AnyPermission": [ "serverarmour.unban" ] },
+          { "Command": "sa.check", "Aliases": [ "sa.cp", "sa.clb", "getreport", "sa.mapupload", "sa.map.upload" ], "Plugin": "ServerArmour", "Description": "ServerArmour checks, reports, and map upload", "RequireStaff": true },
+          { "Command": "sa.radar", "Aliases": [ "sa.radar" ], "Plugin": "ServerArmour", "Description": "ServerArmour radar", "RequireStaff": true, "AnyPermission": [ "serverarmour.radar" ] },
+          { "Command": "arkan", "Aliases": [ "arkan", "arkaninfo", "arkannr", "arkanaim", "arkanaimr", "arkanir", "arkan.nr", "arkan.aim", "arkan.ir" ], "Plugin": "Arkan", "Description": "Anti-cheat views and reports", "RequireAdmin": true, "AnyPermission": [ "arkan.allowed" ] },
+          { "Command": "arkan.data", "Aliases": [ "arkanclear", "arkansave", "arkanload", "arkan.clear", "arkan.save", "arkan.load" ], "Plugin": "Arkan", "Description": "Arkan data controls", "RequireAdmin": true, "AnyPermission": [ "arkan.allowed" ] },
+          { "Command": "guardian", "Aliases": [ "guardian", "guardian.help", "g.help" ], "Plugin": "Guardian", "Description": "Guardian help", "RequireStaff": true, "AnyPermission": [ "guardian.admin", "guardian.all" ] },
+          { "Command": "guardian.config", "Aliases": [ "g.config", "guardian.config" ], "Plugin": "Guardian", "Description": "Guardian config", "RequireStaff": true, "AnyPermission": [ "guardian.command.config", "guardian.all" ] },
+          { "Command": "guardian.ip", "Aliases": [ "g.ip", "guardian.ip" ], "Plugin": "Guardian", "Description": "Guardian IP tools", "RequireStaff": true, "AnyPermission": [ "guardian.command.ip", "guardian.all" ] },
+          { "Command": "guardian.server", "Aliases": [ "g.server", "guardian.server", "g.log", "guardian.log" ], "Plugin": "Guardian", "Description": "Guardian server checks and logs", "RequireStaff": true, "AnyPermission": [ "guardian.command.server", "guardian.all" ] },
+          { "Command": "guardian.tp", "Aliases": [ "g.tp", "g.tpv", "guardian.tp", "guardian.tpv" ], "Plugin": "Guardian", "Description": "Guardian teleport tools", "RequireStaff": true, "AnyPermission": [ "guardian.command.teleport", "guardian.all" ] },
+          { "Command": "guardian.user", "Aliases": [ "g.user", "guardian.user" ], "Plugin": "Guardian", "Description": "Guardian user checks", "RequireStaff": true, "AnyPermission": [ "guardian.admin", "guardian.all" ] },
+          { "Command": "guardian.vpn", "Aliases": [ "g.vpn", "guardian.vpn" ], "Plugin": "Guardian", "Description": "Guardian VPN checks", "RequireStaff": true, "AnyPermission": [ "guardian.command.vpn", "guardian.all" ] },
+          { "Command": "god", "Aliases": [ "god", "godmode" ], "Plugin": "Godmode", "Description": "Toggle godmode", "RequireStaff": true, "AnyPermission": [ "godmode.toggle", "godmode.admin" ] },
+          { "Command": "gods", "Aliases": [ "gods", "godlist" ], "Plugin": "Godmode", "Description": "List godmode players", "RequireStaff": true, "AnyPermission": [ "godmode.admin" ] },
+          { "Command": "betterloot", "Aliases": [ "looty", "blacklist", "bl-backup", "bl-restore" ], "Plugin": "BetterLoot", "Description": "BetterLoot UI, blacklist, and backups", "RequireStaff": true, "AnyPermission": [ "betterloot.admin" ] },
+          { "Command": "fancydrop", "Aliases": [ "droprandom", "droptopos", "droptoplayer", "dropdirect", "dropspace", "dropmass", "droptomass" ], "Plugin": "FancyDrop", "Description": "FancyDrop controls", "RequireAdmin": true },
+          { "Command": "timeofday.admin", "Aliases": [ "tod.daylength", "tod.nightlength", "tod.freezetime", "tod.skipday", "tod.skipnight" ], "Plugin": "TimeOfDay", "Description": "Time-of-day admin controls", "RequireStaff": true, "MinimumAuthLevel": 1 },
+          { "Command": "lockedcratetimer.conf", "Aliases": [ "lockedcratetimer.conf" ], "Plugin": "LockedCrateTimer", "Description": "Locked crate timer config", "RequireStaff": true, "AnyPermission": [ "lockedcratetimer.conf.use" ] },
+          { "Command": "stacksizecontroller", "Aliases": [ "stacksizecontroller.setstack", "stacksizecontroller.setstackcat", "stacksizecontroller.setallstacks", "stacksizecontroller.itemsearch", "stacksizecontroller.listcategories", "stacksizecontroller.listcategoryitems", "stacksizecontroller.vd" ], "Plugin": "StackSizeController", "Description": "Stack size controller commands", "RequireStaff": true, "AnyPermission": [ "stacksizecontroller.setstack", "stacksizecontroller.setstackcat", "stacksizecontroller.setallstacks", "stacksizecontroller.itemsearch", "stacksizecontroller.listcategories", "stacksizecontroller.listcategoryitems", "stacksizecontroller.vd" ] },
+          { "Command": "dw", "Aliases": [ "dw" ], "Plugin": "DiscordWipe", "Description": "Discord wipe protocol command", "RequireStaff": true },
+          { "Command": "dcr.forcecheck", "Aliases": [ "dcr.forcecheck" ], "Plugin": "DiscordRoles", "Description": "Discord roles force check", "RequireStaff": true },
+          { "Command": "placeholderapi", "Aliases": [ "placeholderapi.list", "placeholderapi.test" ], "Plugin": "PlaceholderAPI", "Description": "PlaceholderAPI tools", "RequireStaff": true, "AnyPermission": [ "placeholderapi.list", "placeholderapi.test" ], "AdminBypassesPermissions": true },
+          { "Command": "customvendingsetup.ui", "Aliases": [ "customvendingsetup.ui" ], "Plugin": "CustomVendingSetup", "Description": "Custom vending setup UI", "RequireStaff": true },
+          { "Command": "testmessage", "Aliases": [ "testmessage" ], "Plugin": "EntityLimit", "Description": "Entity limit test message", "RequireStaff": true },
+          { "Command": "ptt.restorenames", "Aliases": [ "ptt.restorenames" ], "Plugin": "PlaytimeTracker", "Description": "PlaytimeTracker name restore", "RequireStaff": true },
+          { "Command": "backpack.debug", "Aliases": [ "backpack.debug.size", "backpack.debug.capacity", "backpack.debug.gather" ], "Plugin": "Backpacks", "Description": "Backpack debug tools", "RequireStaff": true, "AnyPermission": [ "backpacks.admin", "backpacks.admin.debug" ] }
+        ]
+      }
+    ],
+    "StaffGroups": [ "admin", "moderator", "staff", "owner" ],
+    "AdminGroups": [ "admin", "owner" ],
+    "CommandCatalogUsesPluginLoadedChecks": false,
+    "CommandCatalogUsesPermissionChecks": false,
+    "CommandCatalogAdminsBypassPermissionChecks": true,
     "ShowInfoOnPlayerInit": true,
     "ShowInfoOnlyOncePerRuntime": true,
     "TabToOpenByDefault": 0,
@@ -118,8 +735,8 @@
         "MinY": 0.0,
         "MaxY": 1.0
       },
-      "Url": "https://raidlands.net/assets/media/header-bg-rust-v2.png",
-      "TransparencyInPercent": 40
+      "Url": "https://raidlands.net/assets/media/in-game/raidlands-command-menu-bg.png",
+      "TransparencyInPercent": 58
     },
     "ActiveButtonColor": "#ff3b3b",
     "InactiveButtonColor": "#3a3d3f",
@@ -129,7 +746,7 @@
     "NextPageText": "NEXT",
     "PrevPageButtonColor": "#ff3b3b",
     "PrevPageText": "BACK",
-    "BackgroundColor": "#1b1e1f",
+    "BackgroundColor": "#151719",
     "HelpButton": {
       "IsEnabled": false,
       "Text": "HELP",

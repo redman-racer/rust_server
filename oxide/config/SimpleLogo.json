@@ -2,10 +2,13 @@
   "UI": {
     "BackgroundMainColor": "0 0 0 0",
     "BackgroundMainURL": [
-      "https://raidlands.net/assets/media/nav-logo.png"
+      "https://raidlands.net/assets/media/raidlands-logo.png"
     ],
-    "GUIAnchorMax": "0.15 0.1",
-    "GUIAnchorMin": "0.01 0.02",
+    "GUIAnchorMax": "0.84 0.095",
+    "GUIAnchorMin": "0.795 0.015",
+    "AutoWidthFromImage": true,
+    "ImageAspectRatio": 1.0,
+    "ScreenAspectRatio": 1.77778,
     "IntervalBetweenImage": 30
   }
 }

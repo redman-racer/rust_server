@@ -9,6 +9,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Facepunch;
+using Network;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -557,13 +559,40 @@ namespace Oxide.Plugins
             if (array == null)
                 return;
 
-            CommunityEntity.ServerInstance.ClientRPCEx<uint, uint, byte[]>(new Network.SendInfo(player.net.connection)
+            Network.SendInfo sendInfo = new Network.SendInfo(player.net.connection)
             {
                 channel = 2,
                 method = Network.SendMethod.Reliable
-            }, null, "CL_ReceiveFilePng", crc, (uint)array.Length, array);
+            };
+
+            NetWrite write = ClientRPCStart(CommunityEntity.ServerInstance, "CL_ReceiveFilePng");
+            if (write == null)
+                return;
+
+            write.UInt32(crc);
+            write.UInt32((uint)array.Length);
+            using (System.IO.MemoryStream stream = new System.IO.MemoryStream(array, false))
+            {
+                write.BytesWithSize(stream);
+            }
+
+            write.Send(sendInfo);
         }
         #endregion API
+
+        private static NetWrite ClientRPCStart(BaseEntity entity, string funcName)
+        {
+            if (Network.Net.sv.IsConnected() && entity?.net != null)
+            {
+                NetWrite write = Network.Net.sv.StartWrite();
+                write.PacketID(Network.Message.Type.RPCMessage);
+                write.EntityID(entity.net.ID);
+                write.UInt32(StringPool.Get(funcName));
+                return write;
+            }
+
+            return null;
+        }
 
         #region Steam API
         private List<ulong> BuildApprovedItemList()

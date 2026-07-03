@@ -1,0 +1,149 @@
+oxide.group add default default 0
+oxide.group set default default 0
+oxide.group parent default ""
+oxide.group add discord discord 0
+oxide.group set discord discord 0
+oxide.group add admin admin 1
+oxide.group set admin admin 1
+oxide.group add vip_bronze vip_bronze 10
+oxide.group set vip_bronze vip_bronze 10
+oxide.group add vip_gold vip_gold 20
+oxide.group set vip_gold vip_gold 20
+oxide.group parent vip_gold vip_bronze
+oxide.group add vip_elite vip_elite 30
+oxide.group set vip_elite vip_elite 30
+oxide.group parent vip_elite vip_gold
+oxide.group add perk_personal_mini perk_personal_mini 0
+oxide.group set perk_personal_mini perk_personal_mini 0
+oxide.group add perk_skinbox perk_skinbox 0
+oxide.group set perk_skinbox perk_skinbox 0
+oxide.group add perk_raid_kit perk_raid_kit 0
+oxide.group set perk_raid_kit perk_raid_kit 0
+oxide.group add perk_queue_priority perk_queue_priority 0
+oxide.group set perk_queue_priority perk_queue_priority 0
+oxide.group add perk_supporter_badge perk_supporter_badge 0
+oxide.group set perk_supporter_badge perk_supporter_badge 0
+oxide.revoke group default lockedcratetimer.conf.use
+oxide.revoke group default autolock.use
+oxide.revoke group default autolock.item.bypass
+oxide.revoke group default friendlyfire.changestate
+oxide.revoke group default targetabledrones.untargetable
+oxide.revoke group default toolcupboardturrets.ignore
+oxide.grant group default spawnheli.minicopter.spawn
+oxide.grant group default spawnheli.minicopter.fetch
+oxide.grant group default spawnheli.minicopter.despawn
+oxide.grant group default skins.use
+oxide.grant group default buildingskins.use
+oxide.grant group default buildingskins.build
+oxide.grant group default buildingskins.tc
+oxide.grant group default buildingskins.all
+oxide.grant group default blueprintmanager.all
+oxide.grant group default backpacks.use
+oxide.grant group default backpacks.gui
+oxide.grant group default backpacks.size.6
+oxide.grant group default backpacks.size.12
+oxide.grant group default backpacks.fetch
+oxide.grant group default serverrewards.paidpvpkit
+oxide.grant group discord kits.discord
+oxide.grant group admin arkan.allowed
+oxide.grant group admin arkan.nr.draw
+oxide.grant group admin arkan.aim.draw
+oxide.grant group admin arkan.ir.draw
+oxide.grant group admin arkan.nr.reportchat
+oxide.grant group admin arkan.nr.reportconsole
+oxide.grant group admin arkan.aim.reportchat
+oxide.grant group admin arkan.aim.reportconsole
+oxide.grant group admin arkan.ir.reportchat
+oxide.grant group admin arkan.ir.reportconsole
+oxide.grant group admin backpacks.admin
+oxide.grant group admin backpacks.admin.view
+oxide.grant group admin backpacks.admin.edit
+oxide.grant group admin backpacks.admin.resize
+oxide.grant group admin backpacks.admin.debug
+oxide.grant group admin backpacks.admin.protected
+oxide.grant group admin betterchat.admin
+oxide.grant group admin betterloot.admin
+oxide.grant group admin blueprintmanager.admin
+oxide.grant group admin buildingskins.admin
+oxide.grant group admin customvendingsetup.use
+oxide.grant group admin discordauth.deauth
+oxide.grant group admin guardian.admin
+oxide.grant group admin guardian.all
+oxide.grant group admin guardian.command.config
+oxide.grant group admin guardian.command.ip
+oxide.grant group admin guardian.command.server
+oxide.grant group admin guardian.command.teleport
+oxide.grant group admin guardian.command.vpn
+oxide.grant group admin godmode.admin
+oxide.grant group admin godmode.autoenable
+oxide.grant group admin godmode.invulnerable
+oxide.grant group admin godmode.lootprotection
+oxide.grant group admin godmode.noattacking
+oxide.grant group admin godmode.toggle
+oxide.grant group admin godmode.untiring
+oxide.grant group admin kits.admin
+oxide.grant group admin lockedcratetimer.conf.use
+oxide.grant group admin nteleportation.admin
+oxide.grant group admin nteleportation.tp
+oxide.grant group admin nteleportation.tpn
+oxide.grant group admin nteleportation.tpl
+oxide.grant group admin nteleportation.tpsave
+oxide.grant group admin nteleportation.tpremove
+oxide.grant group admin nteleportation.tpconsole
+oxide.grant group admin nteleportation.importhomes
+oxide.grant group admin nteleportation.radiushome
+oxide.grant group admin nteleportation.deletehome
+oxide.grant group admin nteleportation.homehomes
+oxide.grant group admin nteleportation.wipehomes
+oxide.grant group admin placeholderapi.list
+oxide.grant group admin placeholderapi.test
+oxide.grant group admin removertool.admin
+oxide.grant group admin removertool.all
+oxide.grant group admin removertool.target
+oxide.grant group admin removertool.external
+oxide.grant group admin removertool.override
+oxide.grant group admin removertool.structure
+oxide.grant group admin serverarmour.ban
+oxide.grant group admin serverarmour.unban
+oxide.grant group admin serverarmour.radar
+oxide.grant group admin serverarmour.website.admin
+oxide.grant group admin serverrewards.admin
+oxide.grant group admin serverrewardswipe.admin
+oxide.grant group admin scoreboards.admin
+oxide.grant group admin skins.admin
+oxide.grant group admin stacksizecontroller.setstack
+oxide.grant group admin stacksizecontroller.setstackcat
+oxide.grant group admin stacksizecontroller.setallstacks
+oxide.grant group admin stacksizecontroller.itemsearch
+oxide.grant group admin stacksizecontroller.listcategories
+oxide.grant group admin stacksizecontroller.listcategoryitems
+oxide.grant group admin stacksizecontroller.vd
+oxide.grant group perk_personal_mini spawnheli.minicopter.spawn
+oxide.grant group perk_personal_mini spawnheli.minicopter.fetch
+oxide.grant group perk_personal_mini spawnheli.minicopter.despawn
+oxide.grant group perk_skinbox skins.use
+oxide.grant group perk_skinbox buildingskins.use
+oxide.grant group perk_skinbox buildingskins.build
+oxide.grant group perk_skinbox buildingskins.tc
+oxide.grant group perk_skinbox buildingskins.all
+oxide.grant group perk_raid_kit serverrewards.paidpvpkit
+oxide.grant group vip_bronze serverrewards.paidpvpkit
+oxide.grant group vip_bronze spawnheli.minicopter.spawn
+oxide.grant group vip_bronze spawnheli.minicopter.fetch
+oxide.grant group vip_bronze spawnheli.minicopter.despawn
+oxide.grant group vip_bronze skins.use
+oxide.grant group vip_bronze buildingskins.use
+oxide.grant group vip_bronze buildingskins.build
+oxide.grant group vip_bronze buildingskins.tc
+oxide.grant group vip_bronze buildingskins.all
+oxide.grant group vip_bronze backpacks.size.12
+oxide.grant group vip_bronze backpacks.fetch
+oxide.grant group vip_gold backpacks.size.24
+oxide.grant group vip_gold backpacks.gather
+oxide.grant group vip_gold backpacks.retrieve
+oxide.grant group vip_elite backpacks.size.48
+oxide.grant group vip_elite backpacks.keepondeath
+oxide.grant group vip_elite backpacks.nofoodspoiling
+oxide.save
+oxide.reload WebsiteVipBridge
+oxide.reload BetterChat

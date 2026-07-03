@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -10,7 +11,7 @@ namespace Oxide.Plugins
     /// <summary>
     /// Displays a custom logo on player screens with rotation support
     /// </summary>
-    [Info("SimpleLogo", "Sami37", "1.2.9")]
+    [Info("SimpleLogo", "Sami37", "1.2.14")]
     [Description("Place your own logo to your player screen.")]
     public class SimpleLogo : RustPlugin
     {
@@ -23,6 +24,14 @@ namespace Oxide.Plugins
         private const string Perm = "simplelogo.display";
         private const string NoDisplay = "simplelogo.nodisplay";
         private const string UiName = "containerSimpleUI";
+        private const string ImageNamePrefix = "simplelogo";
+        private const string MenuLogoUrl = "https://raidlands.net/assets/media/raidlands-logo.png";
+        private const string MistakenNavLogoUrl = "https://raidlands.net/assets/media/nav-logo.png";
+        private const string LegacyFooterLogoUrl = "https://raidlands.net/assets/media/in-game/raidlands-footer-logo.png";
+        private const string DefaultAnchorMin = "0.795 0.015";
+        private const string DefaultAnchorMax = "0.84 0.095";
+        private const double DefaultImageAspectRatio = 1.0;
+        private const double DefaultScreenAspectRatio = 1.77778;
 
         private string _anchorMin, _anchorMax, _backgroundColor;
 
@@ -45,24 +54,143 @@ namespace Oxide.Plugins
             return string.IsNullOrEmpty(shortname) ? null : (string) _instance.ImageLibrary?.Call("GetImage", shortname, skin, returnUrl);
         }
 
-        private static bool AddImageToLibrary(string url, string shortname, ulong skin = 0)
+        private bool HasImage(string shortname, ulong skin = 0)
         {
-            return (bool)_instance.ImageLibrary.Call("AddImage", url, shortname.ToLower(), skin);
+            if (string.IsNullOrEmpty(shortname) || ImageLibrary == null)
+                return false;
+
+            var result = ImageLibrary.Call("HasImage", shortname, skin);
+            return result is bool && (bool)result;
+        }
+
+        private string GetImageName(int index)
+        {
+            return $"{ImageNamePrefix}{index}";
+        }
+
+        private bool AddImageToLibrary(string url, string shortname, ulong skin = 0, Action callback = null)
+        {
+            if (ImageLibrary == null)
+                return false;
+
+            var result = ImageLibrary.Call("AddImage", url, shortname, skin, callback);
+            return result is bool && (bool)result;
+        }
+
+        private static bool TryParseAnchor(string value, out double x, out double y)
+        {
+            x = 0;
+            y = 0;
+
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var parts = value.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2)
+                return false;
+
+            return double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x) &&
+                   double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y);
+        }
+
+        private static string FormatAnchor(double x, double y)
+        {
+            return $"{x.ToString("0.###", CultureInfo.InvariantCulture)} {y.ToString("0.###", CultureInfo.InvariantCulture)}";
+        }
+
+        private static string AnchorMinWithAutoWidth(string anchorMin, string anchorMax, double imageAspectRatio, double screenAspectRatio)
+        {
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
+
+            if (!TryParseAnchor(anchorMin, out minX, out minY) ||
+                !TryParseAnchor(anchorMax, out maxX, out maxY) ||
+                imageAspectRatio <= 0 ||
+                screenAspectRatio <= 0)
+                return anchorMin;
+
+            var height = Math.Max(0.001, maxY - minY);
+            var width = height * imageAspectRatio / screenAspectRatio;
+            var adjustedMinX = Math.Max(0, maxX - width);
+
+            return FormatAnchor(adjustedMinX, minY);
+        }
+
+        private static bool SameConfigValue(string current, string expected)
+        {
+            return string.Equals((current ?? "").Trim(), expected, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLegacyLogoUrl(string url)
+        {
+            var normalized = (url ?? "").Trim().Replace('\\', '/');
+            return SameConfigValue(normalized, LegacyFooterLogoUrl) ||
+                   SameConfigValue(normalized, MistakenNavLogoUrl) ||
+                   normalized.EndsWith("/assets/media/in-game/raidlands-footer-logo.png", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.EndsWith("/assets/media/nav-logo.png", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLegacyAnchorSet(string anchorMin, string anchorMax)
+        {
+            return (SameConfigValue(anchorMin, "0.675 0.015") && SameConfigValue(anchorMax, "0.84 0.11")) ||
+                   (SameConfigValue(anchorMin, "0.01 0.02") && SameConfigValue(anchorMax, "0.15 0.1"));
+        }
+
+        private bool ApplyRaidlandsLogoDefaults()
+        {
+            bool changed = false;
+            var urls = Config["UI", "BackgroundMainURL"] as List<object>;
+
+            if (urls == null || urls.Count == 0 || urls.Any(url => IsLegacyLogoUrl(url?.ToString())))
+            {
+                Config["UI", "BackgroundMainURL"] = new List<object> { MenuLogoUrl };
+                changed = true;
+            }
+
+            var anchorMin = Config["UI", "GUIAnchorMin"]?.ToString();
+            var anchorMax = Config["UI", "GUIAnchorMax"]?.ToString();
+
+            if (changed || IsLegacyAnchorSet(anchorMin, anchorMax))
+            {
+                Config["UI", "GUIAnchorMin"] = DefaultAnchorMin;
+                Config["UI", "GUIAnchorMax"] = DefaultAnchorMax;
+                Config["UI", "AutoWidthFromImage"] = true;
+                Config["UI", "ImageAspectRatio"] = DefaultImageAspectRatio;
+                Config["UI", "ScreenAspectRatio"] = DefaultScreenAspectRatio;
+                changed = true;
+            }
+
+            return changed;
         }
 
         void LoadConfig()
         {
-            List<object> listUrl = new List<object> { "http://i.imgur.com/KVmbhyB.png" };
-            SetConfig("UI", "GUIAnchorMin", "0.01 0.02");
-            SetConfig("UI", "GUIAnchorMax", "0.15 0.1");
+            List<object> listUrl = new List<object> { MenuLogoUrl };
+            SetConfig("UI", "GUIAnchorMin", DefaultAnchorMin);
+            SetConfig("UI", "GUIAnchorMax", DefaultAnchorMax);
+            SetConfig("UI", "AutoWidthFromImage", true);
+            SetConfig("UI", "ImageAspectRatio", DefaultImageAspectRatio);
+            SetConfig("UI", "ScreenAspectRatio", DefaultScreenAspectRatio);
             SetConfig("UI", "BackgroundMainColor", "0 0 0 0");
             SetConfig("UI", "BackgroundMainURL", listUrl);
             SetConfig("UI", "IntervalBetweenImage", 30);
+
+            if (ApplyRaidlandsLogoDefaults())
+                Puts("Updated SimpleLogo config to use the Raidlands website menu logo and shorter HUD sizing.");
 
             SaveConfig();
 
             _anchorMin = Config["UI", "GUIAnchorMin"].ToString();
             _anchorMax = Config["UI", "GUIAnchorMax"].ToString();
+            bool autoWidthFromImage = GetConfig(true, "UI", "AutoWidthFromImage");
+            double imageAspectRatio = GetConfig(DefaultImageAspectRatio, "UI", "ImageAspectRatio");
+            double screenAspectRatio = GetConfig(DefaultScreenAspectRatio, "UI", "ScreenAspectRatio");
+
+            if (autoWidthFromImage)
+                _anchorMin = AnchorMinWithAutoWidth(_anchorMin, _anchorMax, imageAspectRatio, screenAspectRatio);
+
             _backgroundColor = Config["UI", "BackgroundMainColor"].ToString();
             _intervals = GetConfig(30, "UI", "IntervalBetweenImage");
             _urlList = (List<object>)Config["UI", "BackgroundMainURL"];
@@ -81,7 +209,8 @@ namespace Oxide.Plugins
                     PrintWarning($"Empty URL at index {i}");
                     continue;
                 }
-                AddImageToLibrary(url.ToString(), "SimpleLogo" + i);
+                var imageName = GetImageName(i);
+                AddImageToLibrary(url.ToString(), imageName, 0, () => NextTick(RefreshUi));
                 i++;
             }
         }
@@ -116,11 +245,20 @@ namespace Oxide.Plugins
 
         private CuiElement CreateImage(string panelName)
         {
-            var url = GetImage($"SimpleLogo{_currentlySelected}");
+            var imageName = GetImageName(_currentlySelected);
+
+            if (!HasImage(imageName))
+            {
+                PrintWarning($"Image {imageName} not found in ImageLibrary; skipping SimpleLogo UI until the image is cached.");
+                return null;
+            }
+
+            var url = GetImage(imageName);
 
             if (string.IsNullOrEmpty(url))
             {
-                PrintWarning($"Image SimpleLogo{_currentlySelected} not found in ImageLibrary!");
+                PrintWarning($"Image {imageName} returned an empty ImageLibrary id; skipping SimpleLogo UI.");
+                return null;
             }
 
             return new CuiElement
@@ -167,6 +305,9 @@ namespace Oxide.Plugins
                     }
                 };
                 var backgroundImageWin = CreateImage(UiName);
+                if (backgroundImageWin == null)
+                    return;
+
                 panel.Add(backgroundImageWin);
                 CuiHelper.AddUi(player, panel);
             }

@@ -50,7 +50,7 @@ class ServerRewards : RustPlugin
         _products.Data.RegisterPermissions(permission, this);
 
         Command command = Interface.Oxide.GetLibrary<Command>();
-        command.AddChatCommand(Configuration.Options.StoreCommand, this, ChatOpenMenu);
+        RegisterStoreCommands(command);
         command.AddChatCommand(Configuration.Options.RPCommand, this, ChatPointsManagement);
         command.AddConsoleCommand(Configuration.Options.RPCommand, this, ConsolePointsManagement);
     }
@@ -144,6 +144,37 @@ class ServerRewards : RustPlugin
     }
     
     private static double CurrentTime() => DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1, 0, 0, 0)).TotalSeconds;
+
+    private void RegisterStoreCommands(Command command)
+    {
+        foreach (string storeCommand in GetStoreCommands())
+            command.AddChatCommand(storeCommand, this, ChatOpenMenu);
+    }
+
+    private IEnumerable<string> GetStoreCommands()
+    {
+        HashSet<string> storeCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddStoreCommand(string storeCommand)
+        {
+            if (string.IsNullOrWhiteSpace(storeCommand))
+                return;
+
+            storeCommand = storeCommand.Trim().TrimStart('/');
+            if (!string.IsNullOrWhiteSpace(storeCommand))
+                storeCommands.Add(storeCommand);
+        }
+
+        AddStoreCommand(Configuration.Options.StoreCommand);
+
+        if (Configuration.Options.StoreCommandAliases != null)
+        {
+            foreach (string storeCommand in Configuration.Options.StoreCommandAliases)
+                AddStoreCommand(storeCommand);
+        }
+
+        return storeCommands;
+    }
 
     private bool IsAdmin(BasePlayer player) => permission.UserHasPermission(player.UserIDString, ADMIN_PERMISSION) ||
                                                (player.net?.connection != null && player.net.connection.authLevel >= 2);
@@ -812,7 +843,7 @@ class ServerRewards : RustPlugin
                 return;
             }
 
-            if (!categories.Contains(NavigationCategory.Items) && !categories.Contains(NavigationCategory.Kits) &&
+            if (!categories.Contains(NavigationCategory.Items) &&
                 !categories.Contains(NavigationCategory.Commands) && !categories.Contains(NavigationCategory.Sell))
             {
                 if (categories.Contains(NavigationCategory.Transfer))
@@ -831,14 +862,13 @@ class ServerRewards : RustPlugin
             }
         }
 
+        NormalizeStoreCategory(user, navigation, products);
+
         CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
         CreateHeader(container, user);
 
         switch (user.Category)
         {
-            case NavigationCategory.Kits:
-                CreateKits(container, user);
-                break;
             case NavigationCategory.Commands:
                 CreateCommands(container, user);
                 break;
@@ -855,6 +885,41 @@ class ServerRewards : RustPlugin
         CreateFooter(container, user);
         user.SendUI(container);
     }
+
+    private void NormalizeStoreCategory(UIUser user, StoreNavigation navigation, Products products)
+    {
+        if (user.Category == NavigationCategory.Kits)
+        {
+            user.Category = NavigationCategory.Items;
+            user.ViewingKits = true;
+        }
+
+        if (user.Category != NavigationCategory.None && !user.AvailableCategories.Contains(user.Category))
+        {
+            user.Category = user.AvailableCategories.Count > 0 ? user.AvailableCategories[0] : NavigationCategory.None;
+            user.ViewingKits = false;
+        }
+
+        if (user.Category == NavigationCategory.None && user.AvailableCategories.Count > 0)
+            user.Category = user.AvailableCategories[0];
+
+        if (user.Category != NavigationCategory.Items)
+        {
+            user.ViewingKits = false;
+            return;
+        }
+
+        bool hasKitRailOption = HasKitRailOption(user, navigation, products);
+        bool hasItemRailOption = (navigation.Items && products.Items.Count > 0) || user.AdminMode;
+
+        if (user.ViewingKits && !hasKitRailOption)
+            user.ViewingKits = false;
+        else if (!user.ViewingKits && !hasItemRailOption && hasKitRailOption)
+            user.ViewingKits = true;
+    }
+
+    private bool HasKitRailOption(UIUser user, StoreNavigation navigation, Products products) =>
+        (navigation.Kits && products.Kits.Count > 0) || user.AdminMode;
 
     private void CreateHeader(CuiElementContainer container, UIUser user)
     {
@@ -893,6 +958,9 @@ class ServerRewards : RustPlugin
 
         if (user.Category == 0 && categories.Count > 0)
             user.Category = categories[0];
+
+        if (categories.Count <= 1)
+            return;
 
         const float WIDTH = 100f;
         const float SPACING = 5f;
@@ -982,34 +1050,71 @@ class ServerRewards : RustPlugin
     private void CreateItems(CuiElementContainer container, UIUser user)
     {
         Products products = user.NpcStore is { CustomStore: true } ? user.NpcStore.Products : _products.Data;
+        StoreNavigation navigation = user.NpcStore != null ? user.NpcStore.Navigation : Configuration.Navigation;
         
         const string ITEMS = "sr.items";
         UI.Panel(container, UI_MENU, Colors.Clear, Anchor.FullStretch, new Offset(5f, 40f, -5f, -40f), ITEMS);
-        CreateItemsNavigation(container, ITEMS, user, products);
-        CreateItemsLayout(container, ITEMS, user, products);
+        CreateItemsNavigation(container, ITEMS, user, products, navigation);
+
+        if (user.ViewingKits)
+            CreateKitsLayout(container, ITEMS, user, products, new Offset(145f, 0f, 0f, 0f));
+        else CreateItemsLayout(container, ITEMS, user, products);
     }
 
-    private void CreateItemsNavigation(CuiElementContainer container, string parent, UIUser user, Products products)
+    private void CreateItemsNavigation(CuiElementContainer container, string parent, UIUser user, Products products, StoreNavigation navigation)
     {
         const string NAVIGATION = "sr.items.navigation";
         UI.Panel(container, parent, Configuration.UI.PanelPrimary, Anchor.LeftStretch, new Offset(0f, 0f, 140f, 0f), NAVIGATION);
 
         const float HEIGHT = 20f;
         const float SPACING = 5f;
+        int row = 0;
 
-        for (int i = 0; i < products.ItemCategories.Length; i++)
+        void CreateRailButton(string buttonName, string text, string command, bool selected)
         {
-            ItemCategory category = products.ItemCategories[i];
-           
-            string buttonName = $"{NAVIGATION}.{category}";
-            string buttonColor = user.ItemCategory == category ? Configuration.UI.ButtonConfirm : Configuration.UI.Button;
-            string textColor = user.ItemCategory == category ? Configuration.UI.ButtonConfirmText : Configuration.UI.ButtonText;
+            string buttonColor = selected ? Configuration.UI.ButtonConfirm : Configuration.UI.Button;
+            string textColor = selected ? Configuration.UI.ButtonConfirmText : Configuration.UI.ButtonText;
 
-            float yMax = -5f - (i * (HEIGHT + SPACING));
+            float yMax = -5f - (row * (HEIGHT + SPACING));
 
             UI.Panel(container, NAVIGATION, buttonColor, Anchor.TopStretch, new Offset(5f, yMax - HEIGHT, -5f, yMax), buttonName);
-            UI.Text(container, buttonName, user.Translate($"UI.ItemCategory.{category.ToString()}"), Anchor.FullStretch, Offset.zero, color: textColor);
-            UI.Button(container, buttonName, $"{Commands.ItemCategory} {(int)category}", Anchor.FullStretch, Offset.zero);
+            UI.Text(container, buttonName, text, Anchor.FullStretch, Offset.zero, color: textColor);
+            UI.Button(container, buttonName, command, Anchor.FullStretch, Offset.zero);
+
+            row++;
+        }
+
+        bool hasKitRailOption = HasKitRailOption(user, navigation, products);
+        bool hasItemRailOption = (navigation.Items && products.Items.Count > 0) || user.AdminMode;
+
+        if (hasItemRailOption)
+        {
+            for (int i = 0; i < products.ItemCategories.Length; i++)
+            {
+                ItemCategory category = products.ItemCategories[i];
+                CreateRailButton(
+                    $"{NAVIGATION}.{category}",
+                    user.Translate($"UI.ItemCategory.{category.ToString()}"),
+                    $"{Commands.ItemCategory} {(int)category}",
+                    !user.ViewingKits && user.ItemCategory == category);
+
+                if (hasKitRailOption && category == ItemCategory.All)
+                {
+                    CreateRailButton(
+                        $"{NAVIGATION}.Kits",
+                        user.Translate("UI.Category.Kits"),
+                        Commands.KitCategory,
+                        user.ViewingKits);
+                }
+            }
+        }
+        else if (hasKitRailOption)
+        {
+            CreateRailButton(
+                $"{NAVIGATION}.Kits",
+                user.Translate("UI.Category.Kits"),
+                Commands.KitCategory,
+                user.ViewingKits);
         }
     }
 
@@ -1123,20 +1228,25 @@ class ServerRewards : RustPlugin
     {
         Products products = user.NpcStore is { CustomStore: true } ? user.NpcStore.Products : _products.Data;
 
-        const string KITS = "sr.kits";
-        UI.Panel(container, UI_MENU, Configuration.UI.PanelPrimary, Anchor.FullStretch, new Offset(5f, 40f, -5f, -40f), KITS);
-        UI.Text(container, KITS, user.Translate("UI.Kits"), Anchor.FullStretch, Offset.zero, color: Colors.BarelyVisible, size: 120);
+        CreateKitsLayout(container, UI_MENU, user, products, new Offset(5f, 40f, -5f, -40f));
+    }
+
+    private void CreateKitsLayout(CuiElementContainer container, string parent, UIUser user, Products products, Offset offset)
+    {
+        string kitsPanel = $"{parent}.kits";
+        UI.Panel(container, parent, Configuration.UI.PanelPrimary, Anchor.FullStretch, offset, kitsPanel);
+        UI.Text(container, kitsPanel, user.Translate("UI.Kits"), Anchor.FullStretch, Offset.zero, color: Colors.BarelyVisible, size: 120);
         
-        const string SCROLL = "sr.kits.scroll";
+        string scroll = $"{kitsPanel}.scroll";
         CuiScrollbar scrollbar = UI.Scrollbar(
             Configuration.UI.ScrollbarHandle, Configuration.UI.ScrollbarHighlight, Configuration.UI.ScrollbarPressed, Configuration.UI.Scrollbar);
         
-        CuiRectTransformComponent contentRect = UI.ScrollView(container, KITS, Anchor.FullStretch, new Offset(5f, 5f, -5f, -5f), 
-            Anchor.FullStretch, Offset.zero, null, scrollbar, SCROLL);
+        CuiRectTransformComponent contentRect = UI.ScrollView(container, kitsPanel, Anchor.FullStretch, new Offset(5f, 5f, -5f, -5f),
+            Anchor.FullStretch, Offset.zero, null, scrollbar, scroll);
         
         int count = 0;
 
-        _kitsGrid ??= new HorizontalGrid(new Vector2(307.5f, 361.5f), new Vector2(5f, 5f), 4, 630f);
+        _kitsGrid ??= new HorizontalGrid(new Vector2(307.5f, 361.5f), new Vector2(5f, 5f), 3, 630f);
         
         _balances.Data.TryGetValue(user.UserId, out int balance);
 
@@ -1154,8 +1264,8 @@ class ServerRewards : RustPlugin
             if (!string.IsNullOrEmpty(kit.Permission) && !permission.UserHasPermission(user.Player.UserIDString, kit.Permission) && !IsAdmin(user.Player))
                 continue;
 
-            string kitName = $"sr.kits.{kit.ID}";
-            UI.Panel(container, SCROLL, Configuration.UI.PanelSecondary, Anchor.TopLeft, _kitsGrid.Get(count), kitName);
+            string kitName = $"{kitsPanel}.{kit.ID}";
+            UI.Panel(container, scroll, Configuration.UI.PanelSecondary, Anchor.TopLeft, _kitsGrid.Get(count), kitName);
             
             if (CreateKitElement(container, kitName, kit, user, balance))
                 count++;
@@ -2223,6 +2333,7 @@ class ServerRewards : RustPlugin
         public List<NavigationCategory> AvailableCategories;
         public NavigationCategory Category = NavigationCategory.None;
         public ItemCategory ItemCategory = ItemCategory.All;
+        public bool ViewingKits = false;
         public string SearchFilter = string.Empty;
         public bool AdminMode = false;
         public bool HasToast = false;
@@ -2248,10 +2359,8 @@ class ServerRewards : RustPlugin
         {
             AvailableCategories.Clear();
             
-            if ((navigation.Items && products.Items.Count > 0) || AdminMode)
+            if ((navigation.Items && products.Items.Count > 0) || (navigation.Kits && products.Kits.Count > 0) || AdminMode)
                 AvailableCategories.Add(NavigationCategory.Items);
-            if ((navigation.Kits && products.Kits.Count > 0) || AdminMode)
-                AvailableCategories.Add(NavigationCategory.Kits);
             if ((navigation.Commands && products.Commands.Count > 0) || AdminMode)
                 AvailableCategories.Add(NavigationCategory.Commands);
             if (navigation.Seller)
@@ -2341,6 +2450,7 @@ class ServerRewards : RustPlugin
         public const string Navigation = "srui.navigation";
         public const string Search = "srui.search";
         public const string ItemCategory = "srui.itemcategory";
+        public const string KitCategory = "srui.kitcategory";
         public const string Purchase = "srui.purchase";
         public const string Sell = "srui.sell";
         public const string ConfirmSell = "srui.confirmsell";
@@ -2403,6 +2513,7 @@ class ServerRewards : RustPlugin
         
         user.AddEditProduct = user.Category switch
         {
+            NavigationCategory.Items when user.ViewingKits => new Products.Kit(),
             NavigationCategory.Items => new Products.Item{ Shortname = "rifle.ak", DisplayName = "Assault Rifle", Amount = 1, Category = ItemCategory.Weapon },
             NavigationCategory.Kits => new Products.Kit(),
             NavigationCategory.Commands => new Products.Command(),
@@ -2786,6 +2897,22 @@ class ServerRewards : RustPlugin
             return;
 
         user.ItemCategory = (ItemCategory)arg.GetInt(0, 0);
+        user.ViewingKits = false;
+        user.Category = NavigationCategory.Items;
+        OpenStore(player);
+    }
+
+    [ConsoleCommand(Commands.KitCategory)]
+    private void CommandSelectKitCategory(ConsoleSystem.Arg arg)
+    {
+        BasePlayer player = arg.Player();
+
+        UIUser user = UIUser.Get(player);
+        if (user == null)
+            return;
+
+        user.ViewingKits = true;
+        user.Category = NavigationCategory.Items;
         OpenStore(player);
     }
     
@@ -4018,6 +4145,9 @@ class ServerRewards : RustPlugin
         {
             [JsonProperty("Open Store Command")]
             public string StoreCommand { get; set; }
+
+            [JsonProperty("Open Store Command Aliases")]
+            public List<string> StoreCommandAliases { get; set; }
             
             [JsonProperty("Admin RP Command")]
             public string RPCommand { get; set; }
@@ -4184,7 +4314,15 @@ class ServerRewards : RustPlugin
         if (Configuration.Version < Version)
             UpdateConfigValues();
 
+        EnsureConfigValues();
+
         Config.WriteObject(Configuration, true);
+    }
+
+    private void EnsureConfigValues()
+    {
+        if (Configuration.Options.StoreCommandAliases == null)
+            Configuration.Options.StoreCommandAliases = new List<string> { "shop" };
     }
 
     protected override void LoadDefaultConfig() => Configuration = GetBaseConfig();
@@ -4205,6 +4343,7 @@ class ServerRewards : RustPlugin
             Options = new ConfigData.OtherOptions
             {
                 StoreCommand = "s",
+                StoreCommandAliases = new List<string> { "shop" },
                 RPCommand = "rp",
                 OwnedSkins = true,
                 HideDlc = false,

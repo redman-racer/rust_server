@@ -1544,7 +1544,7 @@ namespace Oxide.Plugins
 
         private static void ClosePlayerInventory(BasePlayer player)
         {
-            player.ClientRPCPlayer(null, player, "OnRespawnInformation");
+            player.ClientRPC(RpcTarget.Player("OnRespawnInformation", player));
         }
 
         private static float CalculateOpenDelay(ItemContainer currentContainer, int nextContainerCapacity, bool isKeyBind = false)
@@ -1580,7 +1580,7 @@ namespace Oxide.Plugins
             {
                 player.inventory.loot.AddContainer(container);
                 player.inventory.loot.SendImmediate();
-                player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", entitySource.panelName);
+                player.ClientRPC(RpcTarget.Player("RPC_OpenLootPanel", player), entitySource.panelName);
             }
         }
 
@@ -2998,7 +2998,12 @@ namespace Oxide.Plugins
                 if (write != null)
                 {
                     var byteCount = Encoding.UTF8.GetBytes(_chars, 0, Length, _bytes, 0);
-                    write.BytesWithSize(_bytes, byteCount);
+                    using (var stream = new MemoryStream())
+                    {
+                        stream.Write(_bytes, 0, byteCount);
+                        stream.Position = 0;
+                        write.BytesWithSize(stream);
+                    }
                     write.Send(sendInfo);
                 }
             }

@@ -449,7 +449,7 @@ namespace Oxide.Plugins
             if (heli != null)
             {
                 if ((options.AutoFetch ?? vehicleInfo.Config.AutoFetch)
-                    && HasPermission(player, vehicleInfo.Permissions.Fetch, VehicleInfo.All.Fetch))
+                    && HasCommandPermission(vehicleInfo, player, vehicleInfo.Permissions.Fetch, VehicleInfo.All.Fetch))
                 {
                     if (TryFetchVehicle(vehicleInfo, player, basePlayer, heli, options))
                         return heli;
@@ -515,7 +515,7 @@ namespace Oxide.Plugins
         {
             if (vehicleInfo == null
                 || !VerifyPlayer(player, out var basePlayer)
-                || !VerifyPermission(player, vehicleInfo.Permissions.Spawn, VehicleInfo.All.Spawn))
+                || !VerifyCommandPermission(vehicleInfo, player, vehicleInfo.Permissions.Spawn, VehicleInfo.All.Spawn))
                 return;
 
             AttemptSpawnOrFetchHeli(vehicleInfo, player, basePlayer);
@@ -540,7 +540,7 @@ namespace Oxide.Plugins
         {
             if (vehicleInfo == null
                 || !VerifyPlayer(player, out var basePlayer)
-                || !VerifyPermission(player, vehicleInfo.Permissions.Fetch, VehicleInfo.All.Fetch)
+                || !VerifyCommandPermission(vehicleInfo, player, vehicleInfo.Permissions.Fetch, VehicleInfo.All.Fetch)
                 || !VerifyVehicleExists(player, basePlayer, vehicleInfo, out var heli))
                 return;
 
@@ -566,7 +566,7 @@ namespace Oxide.Plugins
         {
             if (vehicleInfo == null
                 || !VerifyPlayer(player, out var basePlayer)
-                || !VerifyPermission(player, vehicleInfo.Permissions.Despawn, VehicleInfo.All.Despawn)
+                || !VerifyCommandPermission(vehicleInfo, player, vehicleInfo.Permissions.Despawn, VehicleInfo.All.Despawn)
                 || !VerifyVehicleExists(player, basePlayer, vehicleInfo, out var heli))
                 return;
 
@@ -775,6 +775,23 @@ namespace Oxide.Plugins
 
             player.Reply(GetMessage(player.Id, LangEntry.ErrorNoPermission));
             return false;
+        }
+
+        private bool VerifyCommandPermission(VehicleInfo vehicleInfo, IPlayer player, string perm1, string perm2 = null)
+        {
+            if (HasCommandPermission(vehicleInfo, player, perm1, perm2))
+                return true;
+
+            player.Reply(GetMessage(player.Id, LangEntry.ErrorNoPermission));
+            return false;
+        }
+
+        private bool HasCommandPermission(VehicleInfo vehicleInfo, IPlayer player, string perm1, string perm2 = null)
+        {
+            if (vehicleInfo == _vehicleInfoManager.Minicopter)
+                return true;
+
+            return HasPermission(player, perm1, perm2);
         }
 
         private bool VerifyVehicleExists(IPlayer player, BasePlayer basePlayer, VehicleInfo vehicleInfo, out PlayerHelicopter heli)
