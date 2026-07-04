@@ -9,7 +9,7 @@
     "Playtime rewards": {
       "Issue rewards for playtime": true,
       "Reward interval (seconds)": 300,
-      "Reward amount": 5
+      "Reward amount": 50
     },
     "Referral rewards": {
       "Issue rewards for player referrals": true,
@@ -17,8 +17,13 @@
       "Referee reward amount": 3
     },
     "Custom reward multipliers (permission / multiplier)": {
-      "playtimetracker.examplevip1": 1.0,
-      "playtimetracker.examplevip2": 2.0
+      "playtimetracker.vip": 2.5,
+      "playtimetracker.vip_plus": 3.5,
+      "playtimetracker.mvp": 4.0,
+      "playtimetracker.golden_vip": 4.0,
+      "playtimetracker.diamond_vip": 10.0,
+      "playtimetracker.ultimate_vip": 15.0,
+      "playtimetracker.titan_vip": 30.0
     }
   },
   "Version": {

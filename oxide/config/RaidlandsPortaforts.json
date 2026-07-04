@@ -1,0 +1,59 @@
+{
+  "Token Item": {
+    "Shortname": "grenade.smoke",
+    "Display Name": "Portafort Token",
+    "Skin": 0,
+    "Require Display Name Match": true
+  },
+  "Additional Token Items": [
+    {
+      "Shortname": "wrappedgift",
+      "Display Name": "Portafort Token",
+      "Skin": 0,
+      "Require Display Name Match": true
+    }
+  ],
+  "CopyPaste File": "raidlands_portafort",
+  "CopyPaste Arguments": [
+    "deployables",
+    "true",
+    "inventories",
+    "true",
+    "autoheight",
+    "false",
+    "height",
+    "0",
+    "blockcollision",
+    "3"
+  ],
+  "Use Ground Anchored Placement": true,
+  "Ground Placement Distance": 12.0,
+  "Ground Clearance": 0.15,
+  "Deploy On Item Drop": true,
+  "Deploy On Throwable Throw": true,
+  "Throwable Deploy Delay Seconds": 1.25,
+  "Throwable Intent Timeout Seconds": 5.0,
+  "Throwable Token Shortnames": [
+    "grenade.f1",
+    "grenade.beancan",
+    "grenade.smoke",
+    "grenade.flashbang",
+    "grenade.molotov",
+    "grenade.bee",
+    "supply.signal",
+    "surveycharge",
+    "explosive.satchel",
+    "explosive.timed"
+  ],
+  "Use Actions": [
+    "unwrap",
+    "open",
+    "use"
+  ],
+  "Token Icon URL": "https://raidlands.net/assets/media/kits/portafort-token.webp",
+  "Token Icon ImageLibrary Key": "RaidlandsPortafortToken",
+  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
+  "Kit Grants": {
+    "custom.pending.portafort": 1
+  }
+}

@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.4.9")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.5.1")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -37,8 +37,10 @@ namespace Oxide.Plugins
         private Dictionary<string, string> secrets;
         private const string SecretsConfigName = "Secrets.local";
         private const string RpPurchaseDataFile = "WebsiteVipBridge/rp_purchases";
+        private const string DeletedGroupsDataFile = "WebsiteVipBridge/deleted_groups";
         private string secretsConfigSource;
         private RpPurchaseLedger rpPurchaseData;
+        private DeletedGroupState deletedGroupState;
         private bool rpPurchasePollInFlight;
         private readonly HashSet<string> rpResultPostsInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -67,6 +69,7 @@ namespace Oxide.Plugins
             public bool StatusHeartbeatEnabled = true;
             public int StatusHeartbeatIntervalSeconds = 30;
             public int StatusHeartbeatDebounceSeconds = 10;
+            public int WebRequestTimeoutMilliseconds = 20000;
             public bool StatsEnabled = true;
             public int StatsSyncIntervalSeconds = 300;
             public int StatsDebounceSeconds = 30;
@@ -83,14 +86,20 @@ namespace Oxide.Plugins
             {
                 "default",
                 "discord",
+                "rank_vip",
+                "rank_vip_plus",
+                "rank_mvp",
+                "rank_golden_vip",
+                "rank_diamond_vip",
+                "rank_ultimate_vip",
+                "rank_titan_vip",
                 "vip_bronze",
                 "vip_gold",
                 "vip_elite",
-                "perk_personal_mini",
-                "perk_skinbox",
-                "perk_raid_kit",
-                "perk_queue_priority",
-                "perk_supporter_badge"
+                "claim_steam_name",
+                "claim_steam_group",
+                "claim_discord_member",
+                "claim_discord_booster"
             };
             public List<string> KitPermissionPrefixes = new List<string>
             {
@@ -101,14 +110,38 @@ namespace Oxide.Plugins
             public string WipeStartedAt = "";
             public List<string> ManagedGroups = new List<string>
             {
+                "rank_vip",
+                "rank_vip_plus",
+                "rank_mvp",
+                "rank_golden_vip",
+                "rank_diamond_vip",
+                "rank_ultimate_vip",
+                "rank_titan_vip",
+                "perk_queue_priority",
+                "perk_teleport_instant",
+                "perk_home_5s",
+                "perk_sign_art",
+                "perk_chat_title",
+                "perk_backpack_36",
+                "perk_backpack_42",
+                "perk_backpack_48",
+                "perk_backpack_keep_death",
+                "perk_backpack_keep_wipe",
+                "perk_spawn_full",
+                "perk_vehicle_hp_125",
+                "perk_vehicle_hp_150",
+                "perk_tc_12",
+                "perk_minicopter_instant_takeoff",
+                "perk_shop_sale_25",
+                "perk_shop_sale_50",
+                "perk_shop_sale_75",
                 "vip_bronze",
                 "vip_gold",
                 "vip_elite",
-                "perk_personal_mini",
-                "perk_skinbox",
-                "perk_raid_kit",
-                "perk_queue_priority",
-                "perk_supporter_badge"
+                "claim_steam_name",
+                "claim_steam_group",
+                "claim_discord_member",
+                "claim_discord_booster"
             };
         }
 
@@ -196,6 +229,7 @@ namespace Oxide.Plugins
             public JToken group_permissions;
             public List<string> managed_groups;
             public List<string> read_only_groups;
+            public List<string> deleted_groups;
         }
 
         private class PermissionSnapshotGroup
@@ -220,6 +254,11 @@ namespace Oxide.Plugins
         private class RpPurchaseLedger
         {
             public Dictionary<string, RpPurchaseLedgerEntry> processed = new Dictionary<string, RpPurchaseLedgerEntry>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class DeletedGroupState
+        {
+            public List<string> groups = new List<string>();
         }
 
         private class RpPurchaseLedgerEntry
@@ -389,6 +428,11 @@ namespace Oxide.Plugins
                 config.StatusHeartbeatDebounceSeconds = defaults.StatusHeartbeatDebounceSeconds;
             }
 
+            if (config.WebRequestTimeoutMilliseconds <= 0)
+            {
+                config.WebRequestTimeoutMilliseconds = defaults.WebRequestTimeoutMilliseconds;
+            }
+
             if (config.KitSyncIntervalSeconds <= 0)
             {
                 config.KitSyncIntervalSeconds = defaults.KitSyncIntervalSeconds;
@@ -424,6 +468,7 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
+            LoadDeletedGroupState();
             EnsureManagedGroups(config.ManagedGroups);
             SyncBrandConfigs();
             LogBridgeSecretDiagnostics();
@@ -461,6 +506,7 @@ namespace Oxide.Plugins
             pendingPermissionSnapshotTimer?.Destroy();
             rpPurchaseTimer?.Destroy();
             SaveRpPurchaseData();
+            SaveDeletedGroupState();
         }
 
         private void OnUserConnected(IPlayer player)
@@ -1247,6 +1293,87 @@ namespace Oxide.Plugins
             }
         }
 
+        private void LoadDeletedGroupState()
+        {
+            if (deletedGroupState != null)
+            {
+                return;
+            }
+
+            deletedGroupState = ReadDataFile<DeletedGroupState>(DeletedGroupsDataFile) ?? new DeletedGroupState();
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in deletedGroupState.groups ?? new List<string>())
+            {
+                if (IsGroupName(group))
+                {
+                    groups.Add(group.Trim());
+                }
+            }
+
+            deletedGroupState.groups = groups.OrderBy(value => value).ToList();
+        }
+
+        private void SaveDeletedGroupState()
+        {
+            if (deletedGroupState == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Interface.Oxide.DataFileSystem.WriteObject(DeletedGroupsDataFile, deletedGroupState, true);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write data file {DeletedGroupsDataFile}: {ex.Message}");
+            }
+        }
+
+        private bool IsDeletedManagedGroup(string group)
+        {
+            LoadDeletedGroupState();
+            return deletedGroupState.groups.Any(item => string.Equals(item, group, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool RememberDeletedManagedGroup(string group)
+        {
+            if (!IsGroupName(group))
+            {
+                return false;
+            }
+
+            LoadDeletedGroupState();
+
+            if (deletedGroupState.groups.Any(item => string.Equals(item, group, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            deletedGroupState.groups.Add(group.Trim());
+            deletedGroupState.groups = deletedGroupState.groups.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value).ToList();
+            return true;
+        }
+
+        private bool ForgetDeletedManagedGroup(string group)
+        {
+            if (!IsGroupName(group))
+            {
+                return false;
+            }
+
+            LoadDeletedGroupState();
+            var removed = deletedGroupState.groups.RemoveAll(item => string.Equals(item, group, StringComparison.OrdinalIgnoreCase));
+
+            if (removed > 0)
+            {
+                deletedGroupState.groups = deletedGroupState.groups.OrderBy(value => value).ToList();
+            }
+
+            return removed > 0;
+        }
+
         private void PruneRpPurchaseData()
         {
             LoadRpPurchaseData();
@@ -1596,6 +1723,8 @@ namespace Oxide.Plugins
                 return;
             }
 
+            var canCheckLiveBalances = ServerRewards != null;
+
             foreach (var entry in balances)
             {
                 if (!IsSteamId64(entry.Key))
@@ -1603,8 +1732,17 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                var rewardPoints = Math.Max(0, entry.Value);
+                int liveBalance;
+                string balanceError;
+
+                if (canCheckLiveBalances && TryGetServerRewardsBalance(entry.Key, out liveBalance, out balanceError))
+                {
+                    rewardPoints = Math.Max(0, liveBalance);
+                }
+
                 var player = EnsureStatsPlayer(playersById, entry.Key);
-                player.reward_points = Math.Max(0, entry.Value);
+                player.reward_points = rewardPoints;
             }
         }
 
@@ -2067,7 +2205,7 @@ namespace Oxide.Plugins
         private void ApplyKitGroupAccess(Dictionary<string, List<string>> groupAccess)
         {
             var managedGroups = new HashSet<string>((config.KitPermissionManagedGroups ?? new List<string>())
-                .Where(IsKitManageableGroupName), StringComparer.OrdinalIgnoreCase);
+                .Where(group => IsKitManageableGroupName(group) && !IsDeletedManagedGroup(group)), StringComparer.OrdinalIgnoreCase);
             var desiredByGroup = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var group in managedGroups)
@@ -2129,7 +2267,7 @@ namespace Oxide.Plugins
 
             foreach (var group in config.KitPermissionManagedGroups ?? new List<string>())
             {
-                if (!IsKitManageableGroupName(group) || !permission.GroupExists(group))
+                if (!IsKitManageableGroupName(group) || IsDeletedManagedGroup(group) || !permission.GroupExists(group))
                 {
                     continue;
                 }
@@ -2326,10 +2464,11 @@ namespace Oxide.Plugins
 
             var readOnly = PermissionReadOnlyGroups(payload);
             var managedGroups = PermissionPayloadManagedGroups(payload);
+            var deletedGroups = PermissionPayloadDeletedGroups(payload);
 
-            if (managedGroups.Count == 0)
+            if (managedGroups.Count == 0 && deletedGroups.Count == 0)
             {
-                errors.Add("Published payload did not include managed groups.");
+                errors.Add("Published payload did not include managed or deleted groups.");
             }
 
             foreach (var group in managedGroups)
@@ -2337,6 +2476,14 @@ namespace Oxide.Plugins
                 if (!IsPermissionManageableGroupName(group) || readOnly.Contains(group))
                 {
                     errors.Add($"Group {group} is not editable by the website.");
+                }
+            }
+
+            foreach (var group in deletedGroups)
+            {
+                if (!IsPermissionManageableGroupName(group) || readOnly.Contains(group) || IsProtectedPermissionGroupName(group))
+                {
+                    errors.Add($"Deleted group {group} is not removable by the website.");
                 }
             }
 
@@ -2388,6 +2535,11 @@ namespace Oxide.Plugins
             var managedGroups = PermissionPayloadManagedGroups(payload)
                 .Where(group => IsPermissionManageableGroupName(group) && !readOnly.Contains(group))
                 .ToList();
+            var managedSet = new HashSet<string>(managedGroups, StringComparer.OrdinalIgnoreCase);
+            var deletedGroups = PermissionPayloadDeletedGroups(payload)
+                .Where(group => IsPermissionManageableGroupName(group) && !readOnly.Contains(group) && !IsProtectedPermissionGroupName(group))
+                .Where(group => !managedSet.Contains(group))
+                .ToList();
             var groupDetails = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var group in payload.groups ?? new List<JObject>())
@@ -2432,7 +2584,16 @@ namespace Oxide.Plugins
                 }
             }
 
-            var changes = 0;
+            var changes = ApplyDeletedPermissionGroups(deletedGroups);
+            var deletedStateChanged = false;
+
+            foreach (var group in managedGroups)
+            {
+                if (ForgetDeletedManagedGroup(group))
+                {
+                    deletedStateChanged = true;
+                }
+            }
 
             foreach (var group in managedGroups)
             {
@@ -2464,7 +2625,81 @@ namespace Oxide.Plugins
                 }
             }
 
+            if (deletedStateChanged)
+            {
+                SaveDeletedGroupState();
+            }
+
             return changes;
+        }
+
+        private int ApplyDeletedPermissionGroups(List<string> groups)
+        {
+            var changes = 0;
+            var stateChanged = false;
+
+            foreach (var group in groups ?? new List<string>())
+            {
+                if (!IsPermissionManageableGroupName(group) || IsProtectedPermissionGroupName(group))
+                {
+                    continue;
+                }
+
+                if (RememberDeletedManagedGroup(group))
+                {
+                    stateChanged = true;
+                }
+
+                if (!permission.GroupExists(group))
+                {
+                    continue;
+                }
+
+                var current = (permission.GetGroupPermissions(group, false) ?? new string[0])
+                    .Select(NormalizePermissionName)
+                    .Where(IsSafePermissionName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var permissionName in current)
+                {
+                    if (RevokeGroupPermissionVerified(group, permissionName))
+                    {
+                        changes++;
+                    }
+                }
+
+                if (RemovePermissionGroup(group))
+                {
+                    changes++;
+                }
+            }
+
+            if (stateChanged)
+            {
+                SaveDeletedGroupState();
+            }
+
+            return changes;
+        }
+
+        private bool RemovePermissionGroup(string group)
+        {
+            if (!permission.GroupExists(group))
+            {
+                return false;
+            }
+
+            InvokePermissionMethod("RemoveGroup", group);
+
+            if (!permission.GroupExists(group))
+            {
+                Puts($"Removed Oxide group {group}.");
+                return true;
+            }
+
+            PrintWarning($"Website requested deletion of {group}, but Oxide still reports that group exists.");
+            return false;
         }
 
         private void EnsurePermissionGroup(string group, JObject details)
@@ -2612,7 +2847,7 @@ namespace Oxide.Plugins
 
             foreach (var group in config.ManagedGroups ?? new List<string>())
             {
-                if (IsGroupName(group))
+                if (IsGroupName(group) && !IsDeletedManagedGroup(group))
                 {
                     result.Add(group.Trim());
                 }
@@ -2620,7 +2855,7 @@ namespace Oxide.Plugins
 
             foreach (var group in config.KitPermissionManagedGroups ?? new List<string>())
             {
-                if (IsGroupName(group))
+                if (IsGroupName(group) && !IsDeletedManagedGroup(group))
                 {
                     result.Add(group.Trim());
                 }
@@ -2628,7 +2863,7 @@ namespace Oxide.Plugins
 
             foreach (var group in PermissionStringEnumerable("GetGroups"))
             {
-                if (IsGroupName(group))
+                if (IsGroupName(group) && !IsDeletedManagedGroup(group))
                 {
                     result.Add(group.Trim());
                 }
@@ -2748,6 +2983,21 @@ namespace Oxide.Plugins
                     {
                         result.Add(group.Trim());
                     }
+                }
+            }
+
+            return result;
+        }
+
+        private HashSet<string> PermissionPayloadDeletedGroups(PermissionSyncResponse payload)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in payload?.deleted_groups ?? new List<string>())
+            {
+                if (IsGroupName(group))
+                {
+                    result.Add(group.Trim());
                 }
             }
 
@@ -3749,14 +3999,19 @@ namespace Oxide.Plugins
         private void SendGet(string url, Action<int, string> callback)
         {
             var headers = BuildHeaders("GET", url, "");
-            webrequest.Enqueue(url, null, (code, response) => RunWebCallback($"GET {url}", callback, code, response), this, RequestMethod.GET, headers);
+            webrequest.Enqueue(url, null, (code, response) => RunWebCallback($"GET {url}", callback, code, response), this, RequestMethod.GET, headers, WebRequestTimeoutMilliseconds());
         }
 
         private void SendPost(string url, string body, Action<int, string> callback)
         {
             var headers = BuildHeaders("POST", url, body);
             headers["Content-Type"] = "application/json";
-            webrequest.Enqueue(url, body, (code, response) => RunWebCallback($"POST {url}", callback, code, response), this, RequestMethod.POST, headers);
+            webrequest.Enqueue(url, body, (code, response) => RunWebCallback($"POST {url}", callback, code, response), this, RequestMethod.POST, headers, WebRequestTimeoutMilliseconds());
+        }
+
+        private float WebRequestTimeoutMilliseconds()
+        {
+            return (float)Math.Max(5000, config.WebRequestTimeoutMilliseconds);
         }
 
         private void RunWebCallback(string context, Action<int, string> callback, int code, string response)
@@ -3885,17 +4140,19 @@ namespace Oxide.Plugins
         {
             EnsureDefaultUserGroup(steamId);
 
-            var managed = new HashSet<string>((config.ManagedGroups ?? new List<string>()).Where(IsManageableGroupName), StringComparer.OrdinalIgnoreCase);
+            var managed = new HashSet<string>((config.ManagedGroups ?? new List<string>())
+                .Where(group => IsManageableGroupName(group) && !IsDeletedManagedGroup(group)), StringComparer.OrdinalIgnoreCase);
 
             foreach (var group in apiManagedGroups ?? new List<string>())
             {
-                if (IsManageableGroupName(group))
+                if (IsManageableGroupName(group) && !IsDeletedManagedGroup(group))
                 {
                     managed.Add(group);
                 }
             }
 
-            var desired = new HashSet<string>((desiredGroups ?? new List<string>()).Where(IsManageableGroupName), StringComparer.OrdinalIgnoreCase);
+            var desired = new HashSet<string>((desiredGroups ?? new List<string>())
+                .Where(group => IsManageableGroupName(group) && !IsDeletedManagedGroup(group)), StringComparer.OrdinalIgnoreCase);
 
             EnsureManagedGroups(managed.ToList());
 
@@ -3923,7 +4180,7 @@ namespace Oxide.Plugins
         {
             foreach (var group in groups ?? new List<string>())
             {
-                if (!IsManageableGroupName(group))
+                if (!IsManageableGroupName(group) || IsDeletedManagedGroup(group))
                 {
                     continue;
                 }
@@ -3966,7 +4223,7 @@ namespace Oxide.Plugins
         private bool IsGroupName(string group)
         {
             return !string.IsNullOrWhiteSpace(group) && group.All(character =>
-                char.IsLetterOrDigit(character) || character == '_' || character == '-');
+                char.IsLetterOrDigit(character) || character == '_' || character == '-' || character == '.');
         }
 
         private bool IsSteamId64(string value)

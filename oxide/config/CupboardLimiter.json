@@ -1,8 +1,10 @@
 {
   "Max amount of TC(s) to place": {
-    "Limit Default": 5,
-    "Limit Vip": 3,
-    "Limit Others": [],
+    "Limit Default": 8,
+    "Limit Vip": 8,
+    "Limit Others": [
+      12
+    ],
     "Limit Others Can Downgrade Default": false,
     "Global Team Limit": true,
     "Limits In Team": {}

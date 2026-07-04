@@ -39,7 +39,7 @@
       ]
     }
   },
-  "Drop on Death (true/false)": false,
+  "Drop on Death (true/false)": true,
   "Erase on Death (true/false)": false,
   "Minimum Despawn Time (Seconds)": 300.0,
   "GUI Button": {
@@ -91,7 +91,7 @@
     ]
   },
   "Clear on wipe": {
-    "Enabled": false,
+    "Enabled": true,
     "Enable legacy keeponwipe permission": false,
     "Default ruleset": {
       "Max slots to keep": 0,

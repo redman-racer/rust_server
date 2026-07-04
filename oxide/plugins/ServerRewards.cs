@@ -534,6 +534,7 @@ class ServerRewards : RustPlugin
 
     private static Func<string, bool> _isKit;
     private static Func<BasePlayer, string, object> _giveKit;
+    private static Func<BasePlayer, string, object> _purchaseKit;
     private static Func<string, string> _getKitDescription;
     private static Func<string, string> _getKitImage;
     private static Func<string, JObject> _getKitData;
@@ -542,6 +543,7 @@ class ServerRewards : RustPlugin
     {
         _isKit = IsKit;
         _giveKit = GiveKit;
+        _purchaseKit = PurchaseKit;
         _getKitDescription = GetKitDescription;
         _getKitImage = GetKitImage;
         _getKitData = GetKitObject;
@@ -549,6 +551,12 @@ class ServerRewards : RustPlugin
     }
     
     private object GiveKit(BasePlayer player, string kit) => Kits?.Call("GiveKit", player, kit);
+
+    private object PurchaseKit(BasePlayer player, string kit)
+    {
+        object result = Kits?.Call("PurchaseKit", player, kit);
+        return result ?? GiveKit(player, kit);
+    }
 
     private void GetAllKits(List<string> list) => Kits?.Call("GetAllKits", list);
     
@@ -4891,7 +4899,7 @@ class ServerRewards : RustPlugin
                 if (string.IsNullOrEmpty(KitName) || !_isKit(KitName))
                     return false;
 
-                return _giveKit(player, KitName) is true;
+                return _purchaseKit(player, KitName) is true;
             }
         }
 

@@ -5,8 +5,8 @@ using System.Reflection;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsPermissionReset", "Raidlands", "1.0.5")]
-    [Description("One-shot Raidlands Oxide permission reset and VIP/perk group wiring.")]
+    [Info("RaidlandsPermissionReset", "Raidlands", "1.1.0")]
+    [Description("Retired legacy permission reset. WebsiteVipBridge now owns VIP/perk group wiring.")]
     public class RaidlandsPermissionReset : RustPlugin
     {
         private bool applied;
@@ -150,12 +150,12 @@ namespace Oxide.Plugins
 
         private void Loaded()
         {
-            timer.Once(2f, () => ApplyReset("Loaded"));
+            Puts("Legacy Raidlands permission reset is retired. Use WebsiteVipBridge permission sync for VIP/perk groups.");
         }
 
         private void OnServerInitialized()
         {
-            timer.Once(2f, () => ApplyReset("OnServerInitialized"));
+            Puts("RaidlandsPermissionReset did not apply legacy groups on server initialization.");
         }
 
         [ConsoleCommand("raidlands.permissions.apply")]
@@ -167,8 +167,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            applied = false;
-            ApplyReset("manual command");
+            SendReply(arg, "RaidlandsPermissionReset is retired. Run websitevip.permissions.sync after applying the website workbook migration.");
         }
 
         private void ApplyReset(string source)

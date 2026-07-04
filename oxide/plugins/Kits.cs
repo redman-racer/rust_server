@@ -165,7 +165,7 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private object CanClaimKit(BasePlayer player, KitData.Kit kit, bool ignoreAuthCost = false)
+        private object CanClaimKit(BasePlayer player, KitData.Kit kit, bool ignoreAuthCost = false, bool ignorePermission = false)
         {
             object success = Interface.Oxide.CallDeprecatedHook("canRedeemKit", "CanRedeemKit", _deprecatedHookTime, player) ?? Interface.Oxide.CallHook("CanRedeemKit", player);
             if (success != null)
@@ -186,7 +186,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            if (!string.IsNullOrEmpty(kit.RequiredPermission) && !permission.UserHasPermission(player.UserIDString, kit.RequiredPermission))
+            if (!ignorePermission && !string.IsNullOrEmpty(kit.RequiredPermission) && !permission.UserHasPermission(player.UserIDString, kit.RequiredPermission))
                 return Message("Error.CanClaim.Permission", player.userID);
 
             if (Configuration.WipeCooldowns.TryGetValue(kit.Name, out int wipeCooldownTime))
@@ -558,6 +558,26 @@ namespace Oxide.Plugins
                 return Message("Error.InvalidKitName", player.userID);
 
             return GiveKit(player, kit);
+        }
+
+        [HookMethod("PurchaseKit")]
+        public object PurchaseKit(BasePlayer player, string name)
+        {
+            if (!player)
+                return null;
+
+            if (string.IsNullOrEmpty(name))
+                return Message("Error.EmptyKitName", player.userID);
+
+            if (!kitData.Find(name, out KitData.Kit kit))
+                return Message("Error.InvalidKitName", player.userID);
+
+            object success = CanClaimKit(player, kit, true, true) ?? GiveKit(player, kit);
+            if (success is string)
+                return success;
+
+            OnKitReceived(player, kit);
+            return true;
         }
 
         [HookMethod("IsKit")]
