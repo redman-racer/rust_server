@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.5.1")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.5.2")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -1954,11 +1954,12 @@ namespace Oxide.Plugins
                     errors.Add($"Kit {name} uses an unsafe name.");
                 }
 
-                var previousName = KitString(kit, "PreviousName");
-
-                if (!string.IsNullOrWhiteSpace(previousName) && !IsSafeKitName(previousName))
+                foreach (var previousName in KitPreviousNames(kit))
                 {
-                    errors.Add($"Kit {name} uses an unsafe previous name.");
+                    if (!IsSafeKitName(previousName))
+                    {
+                        errors.Add($"Kit {name} uses an unsafe previous name.");
+                    }
                 }
 
                 var permissionName = KitString(kit, "RequiredPermission");
@@ -2068,11 +2069,12 @@ namespace Oxide.Plugins
             foreach (var kit in payload.kits ?? new List<JObject>())
             {
                 var name = KitString(kit, "Name");
-                var previousName = KitString(kit, "PreviousName");
-
-                if (!string.IsNullOrWhiteSpace(previousName) && !previousName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                foreach (var previousName in KitPreviousNames(kit))
                 {
-                    kitsRoot.Remove(previousName);
+                    if (!string.IsNullOrWhiteSpace(previousName) && !previousName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        kitsRoot.Remove(previousName);
+                    }
                 }
 
                 if (!KitBool(kit, "IsActive", true))
@@ -2157,9 +2159,17 @@ namespace Oxide.Plugins
             var path = KitDataPath("ServerRewards", "products.json");
             var products = ReadJsonFile(path);
             var existing = products["Kits"] as JArray ?? new JArray();
-            var managedKitNames = new HashSet<string>((payload.kits ?? new List<JObject>())
-                .Select(kit => KitString(kit, "Name"))
-                .Where(name => !string.IsNullOrWhiteSpace(name)), StringComparer.OrdinalIgnoreCase);
+            var managedKitNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kit in payload.kits ?? new List<JObject>())
+            {
+                AddManagedKitName(managedKitNames, KitString(kit, "Name"));
+
+                foreach (var previousName in KitPreviousNames(kit))
+                {
+                    AddManagedKitName(managedKitNames, previousName);
+                }
+            }
             var merged = new JArray();
 
             foreach (var token in existing)
@@ -3473,6 +3483,52 @@ namespace Oxide.Plugins
             }
 
             return "";
+        }
+
+        private static List<string> KitPreviousNames(JObject obj)
+        {
+            var names = new List<string>();
+
+            AddKitPreviousName(names, KitString(obj, "PreviousName"));
+
+            var token = obj?["PreviousNames"];
+
+            if (token is JArray array)
+            {
+                foreach (var item in array)
+                {
+                    AddKitPreviousName(names, item?.ToString());
+                }
+            }
+            else
+            {
+                AddKitPreviousName(names, token?.ToString());
+            }
+
+            return names;
+        }
+
+        private static void AddKitPreviousName(List<string> names, string value)
+        {
+            foreach (var chunk in (value ?? "").Split(new[] { ',', ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var name = chunk.Trim();
+
+                if (name.Length == 0 || names.Any(existing => existing.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                names.Add(name);
+            }
+        }
+
+        private static void AddManagedKitName(HashSet<string> names, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                names.Add(value.Trim());
+            }
         }
 
         private static int KitInt(JObject obj, string key, int fallback)
