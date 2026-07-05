@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.19")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.22")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -29,6 +29,7 @@ namespace Oxide.Plugins
         private const float RetreatFallbackReturnFireAfterSeconds = 2.5f;
         private const float RetreatFallbackTimeoutSeconds = 8f;
         private const float MinimumAmmoFractionToShoot = 0.01f;
+        private const int ForestSplatMask = 32;
         private const string ScoreboardNpcKills = "NPC Kills";
         private const string ScoreboardDeathsByNpc = "Killed by NPCs";
         private const string ScoreboardBotKd = "Bot K/D";
@@ -49,6 +50,7 @@ namespace Oxide.Plugins
         private readonly List<BaseEntity> botPlacedEntities = new List<BaseEntity>();
         private readonly Dictionary<string, KitEligibility> eligibleKits = new Dictionary<string, KitEligibility>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, SquadBlackboard> squadBlackboards = new Dictionary<int, SquadBlackboard>();
+        private readonly Dictionary<string, float> recentSoundBroadcasts = new Dictionary<string, float>(StringComparer.Ordinal);
         private readonly List<DecisionTrace> pendingDecisionTraces = new List<DecisionTrace>();
         private IDecisionAdvisor decisionAdvisor;
         private Timer maintainTimer;
@@ -320,13 +322,22 @@ namespace Oxide.Plugins
             public bool FoliageBlocksVision = true;
 
             [JsonProperty("Foliage Vision Check Radius")]
-            public float FoliageVisionCheckRadius = 0.65f;
+            public float FoliageVisionCheckRadius = 0.9f;
 
             [JsonProperty("Maximum Clear Vision Through Foliage")]
-            public float MaximumClearVisionThroughFoliage = 24f;
+            public float MaximumClearVisionThroughFoliage = 14f;
 
             [JsonProperty("Foliage Hits To Block Vision")]
-            public int FoliageHitsToBlockVision = 2;
+            public int FoliageHitsToBlockVision = 1;
+
+            [JsonProperty("Foliage Terrain Sampling")]
+            public bool FoliageTerrainSampling = true;
+
+            [JsonProperty("Foliage Terrain Sample Step")]
+            public float FoliageTerrainSampleStep = 6f;
+
+            [JsonProperty("Foliage Terrain Samples To Block Vision")]
+            public int FoliageTerrainSamplesToBlockVision = 4;
 
             [JsonProperty("Foliage Occluder Layer Names")]
             public List<string> FoliageOccluderLayerNames = new List<string> { "Tree", "Resource", "World", "Default" };
@@ -351,6 +362,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("Sprint Hearing Range")]
             public float SprintHearingRange = 28f;
+
+            [JsonProperty("Sound Investigation Commitment Seconds")]
+            public float SoundInvestigationCommitmentSeconds = 16f;
+
+            [JsonProperty("Sound Investigation Command Cooldown Seconds")]
+            public float SoundInvestigationCommandCooldownSeconds = 1.25f;
 
             [JsonProperty("Require Line Of Sight To Shoot")]
             public bool RequireLineOfSightToShoot = true;
@@ -443,7 +460,7 @@ namespace Oxide.Plugins
             public float TeamGrenadeCooldownSeconds = 10f;
 
             [JsonProperty("Barricade Cooldown Seconds")]
-            public float BarricadeCooldownSeconds = 18f;
+            public float BarricadeCooldownSeconds = 12f;
 
             [JsonProperty("Barricade Prefab")]
             public string BarricadePrefab = WoodenBarricadeCoverPrefab;
@@ -462,6 +479,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Barricade Fight Commitment Seconds")]
             public float BarricadeFightCommitmentSeconds = 10f;
+
+            [JsonProperty("Barricade Followup Memory Seconds")]
+            public float BarricadeFollowupMemorySeconds = 6f;
 
             [JsonProperty("Retreat Wall Cover Distance")]
             public float RetreatWallCoverDistance = 10f;
@@ -741,6 +761,7 @@ namespace Oxide.Plugins
             public float NextStuckRecoveryAt;
             public float NextGrenadeAt;
             public float NextBarricadeAt;
+            public float LastBarricadePlacedAt;
             public float DamageBarricadeAwareUntil;
             public float LastDamageBarricadeAwarenessCheckAt;
             public float LowHealthCoverAwareUntil;
@@ -753,6 +774,8 @@ namespace Oxide.Plugins
             public float LastShotAt;
             public float LastDamageTakenAt;
             public float LastDamageDealtAt;
+            public float LastSoundInvestigateCommandAt;
+            public float LastSoundDebugAt;
             public float InvalidPositionSince;
             public string LastBarricadeReason = "none";
             public string LastFireBlockReason = "none";
@@ -1344,17 +1367,17 @@ namespace Oxide.Plugins
                 config.AI.MinimumExposedTargetFractionToShoot = defaults.AI.MinimumExposedTargetFractionToShoot;
             }
 
-            if (config.AI.FoliageVisionCheckRadius <= 0.46f || config.AI.FoliageVisionCheckRadius >= 1.3f)
+            if (config.AI.FoliageVisionCheckRadius <= 0.66f || config.AI.FoliageVisionCheckRadius >= 1.5f)
             {
                 config.AI.FoliageVisionCheckRadius = defaults.AI.FoliageVisionCheckRadius;
             }
 
-            if (config.AI.MaximumClearVisionThroughFoliage <= 12.1f || config.AI.MaximumClearVisionThroughFoliage >= 34.9f)
+            if (config.AI.MaximumClearVisionThroughFoliage <= 8.1f || config.AI.MaximumClearVisionThroughFoliage >= 23.9f)
             {
                 config.AI.MaximumClearVisionThroughFoliage = defaults.AI.MaximumClearVisionThroughFoliage;
             }
 
-            if (config.AI.FoliageHitsToBlockVision <= 1 || config.AI.FoliageHitsToBlockVision >= 3)
+            if (config.AI.FoliageHitsToBlockVision <= 0 || config.AI.FoliageHitsToBlockVision >= 2)
             {
                 config.AI.FoliageHitsToBlockVision = defaults.AI.FoliageHitsToBlockVision;
             }
@@ -1366,6 +1389,8 @@ namespace Oxide.Plugins
             config.AI.FoliageVisionCheckRadius = Mathf.Clamp(config.AI.FoliageVisionCheckRadius, 0.1f, 3f);
             config.AI.MaximumClearVisionThroughFoliage = Mathf.Clamp(config.AI.MaximumClearVisionThroughFoliage, 1f, config.AI.VisionRange);
             config.AI.FoliageHitsToBlockVision = Math.Max(1, config.AI.FoliageHitsToBlockVision);
+            config.AI.FoliageTerrainSampleStep = Mathf.Clamp(config.AI.FoliageTerrainSampleStep <= 0f ? defaults.AI.FoliageTerrainSampleStep : config.AI.FoliageTerrainSampleStep, 3f, 18f);
+            config.AI.FoliageTerrainSamplesToBlockVision = Clamp(config.AI.FoliageTerrainSamplesToBlockVision <= 0 ? defaults.AI.FoliageTerrainSamplesToBlockVision : config.AI.FoliageTerrainSamplesToBlockVision, 1, 12);
             if (config.AI.FoliageOccluderLayerNames == null || config.AI.FoliageOccluderLayerNames.Count == 0)
             {
                 config.AI.FoliageOccluderLayerNames = defaults.AI.FoliageOccluderLayerNames;
@@ -1386,6 +1411,13 @@ namespace Oxide.Plugins
                 .ToList();
             config.AI.TargetMemorySeconds = Math.Max(1f, config.AI.TargetMemorySeconds);
             config.AI.SearchLastSeenSeconds = Math.Max(config.AI.TargetMemorySeconds, config.AI.SearchLastSeenSeconds);
+            config.AI.UnsuppressedGunshotHearingRange = Mathf.Clamp(config.AI.UnsuppressedGunshotHearingRange, 0f, 500f);
+            config.AI.SuppressedGunshotHearingRange = Mathf.Clamp(config.AI.SuppressedGunshotHearingRange, 0f, config.AI.UnsuppressedGunshotHearingRange);
+            config.AI.ExplosionHearingRange = Mathf.Clamp(config.AI.ExplosionHearingRange, 0f, 800f);
+            config.AI.MeleeOrToolHearingRange = Mathf.Clamp(config.AI.MeleeOrToolHearingRange, 0f, 120f);
+            config.AI.SprintHearingRange = Mathf.Clamp(config.AI.SprintHearingRange, 0f, 80f);
+            config.AI.SoundInvestigationCommitmentSeconds = Mathf.Clamp(config.AI.SoundInvestigationCommitmentSeconds, 2f, config.AI.SearchLastSeenSeconds);
+            config.AI.SoundInvestigationCommandCooldownSeconds = Mathf.Clamp(config.AI.SoundInvestigationCommandCooldownSeconds, 0.1f, 5f);
             config.AI.CoverSearchRadius = Math.Max(4f, config.AI.CoverSearchRadius);
             config.AI.CoverPointAttempts = Clamp(config.AI.CoverPointAttempts, 8, 80);
             config.AI.CoverMinimumDistanceFromThreat = Math.Max(2f, config.AI.CoverMinimumDistanceFromThreat);
@@ -1410,6 +1442,7 @@ namespace Oxide.Plugins
             config.AI.BarricadeFightCommitmentSeconds = Mathf.Clamp(config.AI.BarricadeFightCommitmentSeconds, 2f, 30f);
             config.AI.RetreatWallCoverDistance = Mathf.Clamp(config.AI.RetreatWallCoverDistance, 2f, 40f);
             config.AI.DamageWallReactionWindowSeconds = Mathf.Clamp(config.AI.DamageWallReactionWindowSeconds, 2f, 30f);
+            config.AI.BarricadeFollowupMemorySeconds = Mathf.Clamp(config.AI.BarricadeFollowupMemorySeconds <= 0f ? defaults.AI.BarricadeFollowupMemorySeconds : config.AI.BarricadeFollowupMemorySeconds, 1f, config.AI.DamageWallReactionWindowSeconds);
             config.AI.DamageWallAwarenessRecheckSeconds = Mathf.Clamp(config.AI.DamageWallAwarenessRecheckSeconds, 0.25f, 10f);
             config.AI.DamageWallChanceCasual = Mathf.Clamp01(config.AI.DamageWallChanceCasual);
             config.AI.DamageWallChanceAverage = Mathf.Clamp01(config.AI.DamageWallChanceAverage);
@@ -1989,6 +2022,11 @@ namespace Oxide.Plugins
 
             var now = Time.realtimeSinceStartup;
 
+            if (IsRealPlayer(attacker) && IsExplosionDamage(info))
+            {
+                BroadcastPlayerSound(attacker, SoundPositionFromHit(info, attacker), config.AI.ExplosionHearingRange, "explosion", 1f, 0.75f);
+            }
+
             if (victimRuntime != null && IsRealPlayer(attacker))
             {
                 info.damageTypes.ScaleAll(victimRuntime.Skill.IncomingDamageScale);
@@ -2036,6 +2074,61 @@ namespace Oxide.Plugins
             }
 
             return null;
+        }
+
+        private void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectileShoot)
+        {
+            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            var item = projectile?.GetItem() ?? player.GetActiveItem();
+            var shortname = item?.info?.shortname ?? "";
+            var quietProjectile = IsQuietProjectileWeapon(shortname);
+            var suppressed = !quietProjectile && IsSuppressedWeapon(item);
+            var range = quietProjectile
+                ? config.AI.MeleeOrToolHearingRange
+                : suppressed
+                    ? config.AI.SuppressedGunshotHearingRange
+                    : config.AI.UnsuppressedGunshotHearingRange;
+            var soundType = quietProjectile
+                ? "quiet_projectile"
+                : suppressed
+                    ? "suppressed_gunshot"
+                    : "gunshot";
+
+            BroadcastPlayerSound(player, player.transform.position, range, soundType, quietProjectile ? 0.42f : suppressed ? 0.7f : 1f, 0.08f);
+        }
+
+        private void OnRocketLaunched(BasePlayer player, BaseEntity entity)
+        {
+            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            BroadcastPlayerSound(player, player.transform.position, config.AI.ExplosionHearingRange, "rocket_launch", 1f, 0.35f);
+        }
+
+        private void OnExplosiveThrown(BasePlayer player, BaseEntity entity)
+        {
+            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            BroadcastPlayerSound(player, player.transform.position, config.AI.MeleeOrToolHearingRange, "thrown_explosive", 0.45f, 0.35f);
+        }
+
+        private void OnMeleeAttack(BasePlayer player, HitInfo info)
+        {
+            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            BroadcastPlayerSound(player, SoundPositionFromHit(info, player), config.AI.MeleeOrToolHearingRange, "melee_or_tool", 0.42f, 0.35f);
         }
 
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
@@ -4317,39 +4410,39 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            var blockers = 0;
             var mask = FoliageVisionMask();
 
-            if (mask == 0)
+            if (mask != 0)
             {
-                return false;
-            }
+                var hits = Physics.SphereCastAll(from, config.AI.FoliageVisionCheckRadius, delta.normalized, distance, mask, QueryTriggerInteraction.Ignore);
+                var seenColliders = new HashSet<int>();
 
-            var hits = Physics.SphereCastAll(from, config.AI.FoliageVisionCheckRadius, delta.normalized, distance, mask, QueryTriggerInteraction.Ignore);
-            var blockers = 0;
-            var seenColliders = new HashSet<int>();
-
-            foreach (var foliageHit in hits)
-            {
-                if (foliageHit.collider != null && !seenColliders.Add(foliageHit.collider.GetInstanceID()))
+                foreach (var foliageHit in hits)
                 {
-                    continue;
-                }
+                    if (foliageHit.collider != null && !seenColliders.Add(foliageHit.collider.GetInstanceID()))
+                    {
+                        continue;
+                    }
 
-                if (!IsFoliageVisionBlocker(foliageHit, bot, player))
-                {
-                    continue;
-                }
+                    if (!IsFoliageVisionBlocker(foliageHit, bot, player))
+                    {
+                        continue;
+                    }
 
-                blockers++;
-                blockerHits = blockers;
+                    blockers++;
+                    blockerHits = blockers;
 
-                if (blockers >= config.AI.FoliageHitsToBlockVision)
-                {
-                    return true;
+                    if (blockers >= config.AI.FoliageHitsToBlockVision)
+                    {
+                        return true;
+                    }
                 }
             }
 
-            return false;
+            var terrainBlockers = FoliageTerrainSampleHits(from, to, distance);
+            blockerHits = blockers + terrainBlockers;
+            return terrainBlockers >= config.AI.FoliageTerrainSamplesToBlockVision;
         }
 
         private int FoliageVisionMask()
@@ -4367,6 +4460,247 @@ namespace Oxide.Plugins
             }
 
             return mask;
+        }
+
+        private int FoliageTerrainSampleHits(Vector3 from, Vector3 to, float distance)
+        {
+            if (!config.AI.FoliageTerrainSampling || TerrainMeta.SplatMap == null)
+            {
+                return 0;
+            }
+
+            var step = Math.Max(3f, config.AI.FoliageTerrainSampleStep);
+            var firstSampleDistance = Math.Max(config.AI.MaximumClearVisionThroughFoliage, step);
+            var sampleCount = Mathf.Min(48, Mathf.FloorToInt((distance - firstSampleDistance) / step));
+
+            if (sampleCount <= 0)
+            {
+                return 0;
+            }
+
+            var direction = (to - from).normalized;
+            var hits = 0;
+
+            for (var i = 0; i < sampleCount; i++)
+            {
+                var sampleDistance = firstSampleDistance + step * (i + 1);
+
+                if (sampleDistance >= distance - 1f)
+                {
+                    break;
+                }
+
+                var sample = from + direction * sampleDistance;
+                sample.y = TerrainHeight(sample);
+
+                if (!IsForestSplat(sample))
+                {
+                    continue;
+                }
+
+                hits++;
+
+                if (hits >= config.AI.FoliageTerrainSamplesToBlockVision)
+                {
+                    return hits;
+                }
+            }
+
+            return hits;
+        }
+
+        private bool IsForestSplat(Vector3 position)
+        {
+            try
+            {
+                return ((int)TerrainMeta.SplatMap.GetSplatMaxType(position) & ForestSplatMask) != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void BroadcastPlayerSound(BasePlayer source, Vector3 sourcePosition, float range, string soundType, float baseConfidence, float throttleSeconds)
+        {
+            if (!config.AI.AllowHearing || !IsRealPlayer(source) || range <= 0f || sourcePosition == Vector3.zero)
+            {
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+
+            if (ShouldThrottleSound(source, soundType, now, throttleSeconds))
+            {
+                return;
+            }
+
+            foreach (var entry in activeBots.ToList())
+            {
+                var bot = entry.Key;
+                var runtime = entry.Value;
+
+                if (!IsLiveBot(bot) || runtime == null || IsInvalidRuntimePosition(bot))
+                {
+                    continue;
+                }
+
+                var distance = Vector3.Distance(bot.transform.position, sourcePosition);
+
+                if (distance > range)
+                {
+                    continue;
+                }
+
+                var sameTarget = runtime.Memory.TargetUserId == source.userID;
+                var confidence = SoundConfidence(distance, range, baseConfidence);
+
+                if (!sameTarget && HasFreshVisibleDifferentTarget(runtime, source.userID, now))
+                {
+                    continue;
+                }
+
+                if (!sameTarget)
+                {
+                    runtime.Memory.Target = null;
+                }
+
+                runtime.Memory.TargetUserId = source.userID;
+                runtime.Memory.LastHeardPosition = sourcePosition;
+                runtime.Memory.LastHeardAt = now;
+                runtime.Memory.TargetConfidence = Math.Max(runtime.Memory.TargetConfidence, confidence);
+                runtime.NextDecisionAt = Math.Min(runtime.NextDecisionAt, now);
+
+                if (ShouldCommandSoundInvestigation(runtime, source.userID, now))
+                {
+                    var destination = SoundInvestigationDestination(bot.transform.position, sourcePosition);
+                    var destinationChanged = runtime.CurrentDestination == Vector3.zero
+                        || Vector3.Distance(runtime.CurrentDestination, destination) > 6f;
+
+                    if (destinationChanged || now - runtime.LastSoundInvestigateCommandAt >= config.AI.SoundInvestigationCommandCooldownSeconds)
+                    {
+                        runtime.LastSoundInvestigateCommandAt = now;
+                        runtime.CurrentDestination = destination;
+                        SetState(runtime, TacticalState.InvestigateSound, now);
+                        MoveBotTo(bot, runtime, destination, BaseNavigator.NavigationSpeed.Fast);
+                    }
+
+                    FacePosition(bot, sourcePosition);
+                }
+
+                if (config.Debug.DebugPerception && now - runtime.LastSoundDebugAt >= 1.5f)
+                {
+                    runtime.LastSoundDebugAt = now;
+                    Puts($"{runtime.DisplayName} heard {soundType} from {PlayerName(source)} at {distance.ToString("0", CultureInfo.InvariantCulture)}m; investigating {FormatVector(sourcePosition)}.");
+                }
+            }
+        }
+
+        private bool ShouldThrottleSound(BasePlayer source, string soundType, float now, float throttleSeconds)
+        {
+            if (source == null || throttleSeconds <= 0f)
+            {
+                return false;
+            }
+
+            var key = $"{source.userID}:{soundType}";
+
+            if (recentSoundBroadcasts.TryGetValue(key, out var lastAt) && now - lastAt < throttleSeconds)
+            {
+                return true;
+            }
+
+            recentSoundBroadcasts[key] = now;
+            return false;
+        }
+
+        private bool HasFreshVisibleDifferentTarget(BotRuntime runtime, ulong sourceUserId, float now)
+        {
+            return runtime != null
+                && runtime.Memory.HasLineOfSight
+                && runtime.Memory.TargetUserId != 0
+                && runtime.Memory.TargetUserId != sourceUserId
+                && runtime.Memory.LastLineOfSightAt > 0f
+                && now - runtime.Memory.LastLineOfSightAt <= 4f;
+        }
+
+        private bool ShouldCommandSoundInvestigation(BotRuntime runtime, ulong sourceUserId, float now)
+        {
+            if (runtime == null || runtime.IsShooting || HasFreshVisibleDifferentTarget(runtime, sourceUserId, now))
+            {
+                return false;
+            }
+
+            return runtime.State == TacticalState.Roam
+                || runtime.State == TacticalState.InvestigateSound
+                || runtime.State == TacticalState.SearchLastKnown
+                || runtime.State == TacticalState.Regroup
+                || !HasRecentContact(runtime, now);
+        }
+
+        private float SoundConfidence(float distance, float range, float baseConfidence)
+        {
+            if (range <= 0f)
+            {
+                return 0f;
+            }
+
+            var closeness = 1f - Mathf.Clamp01(distance / range);
+            return Mathf.Clamp01(baseConfidence * Mathf.Lerp(0.35f, 1f, closeness));
+        }
+
+        private Vector3 SoundInvestigationDestination(Vector3 origin, Vector3 sourcePosition)
+        {
+            var distance = Vector3.Distance(origin, sourcePosition);
+
+            if (distance <= 55f)
+            {
+                return sourcePosition;
+            }
+
+            return MoveTowardPosition(origin, sourcePosition, Mathf.Clamp(distance * 0.65f, 35f, 85f));
+        }
+
+        private bool IsSuppressedWeapon(Item item)
+        {
+            var contents = item?.contents?.itemList;
+
+            if (contents == null)
+            {
+                return false;
+            }
+
+            return contents.Any(attachment => string.Equals(attachment?.info?.shortname, "weapon.mod.silencer", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool IsQuietProjectileWeapon(string shortname)
+        {
+            if (string.IsNullOrWhiteSpace(shortname))
+            {
+                return false;
+            }
+
+            return shortname.IndexOf("bow", StringComparison.OrdinalIgnoreCase) >= 0
+                || shortname.IndexOf("crossbow", StringComparison.OrdinalIgnoreCase) >= 0
+                || shortname.IndexOf("speargun", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsExplosionDamage(HitInfo info)
+        {
+            try
+            {
+                return info?.damageTypes?.GetMajorityDamageType() == Rust.DamageType.Explosion;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private Vector3 SoundPositionFromHit(HitInfo info, BasePlayer fallback)
+        {
+            var position = info?.HitPositionWorld ?? Vector3.zero;
+            return position == Vector3.zero && fallback != null ? fallback.transform.position : position;
         }
 
         private bool IsFoliageVisionBlocker(RaycastHit hit, BaseCombatEntity bot, BasePlayer player)
@@ -4388,6 +4722,14 @@ namespace Oxide.Plugins
                 return true;
             }
 
+            var layerName = LayerMask.LayerToName(hit.collider.gameObject.layer);
+
+            if (string.Equals(layerName, "Tree", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(layerName, "Resource", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
             var colliderName = hit.collider.name ?? "";
             var entityName = entity == null ? "" : $"{entity.ShortPrefabName} {entity.PrefabName}";
             var text = $"{colliderName} {entityName}".ToLowerInvariant();
@@ -4397,7 +4739,16 @@ namespace Oxide.Plugins
                 || text.Contains("shrub")
                 || text.Contains("foliage")
                 || text.Contains("plant")
-                || text.Contains("forest");
+                || text.Contains("forest")
+                || text.Contains("jungle")
+                || text.Contains("leaf")
+                || text.Contains("leaves")
+                || text.Contains("branch")
+                || text.Contains("canopy")
+                || text.Contains("palm")
+                || text.Contains("fern")
+                || text.Contains("vine")
+                || text.Contains("bramble");
         }
 
         private Vector3 EyePosition(BaseEntity entity)
@@ -4447,7 +4798,8 @@ namespace Oxide.Plugins
             var candidates = new List<TacticalActionCandidate>();
             var target = runtime.Memory.Target;
             var hasFreshSeen = runtime.Memory.LastSeenAt > 0f && now - runtime.Memory.LastSeenAt <= config.AI.SearchLastSeenSeconds;
-            var hasFreshHeard = config.AI.AllowHearing && runtime.Memory.LastHeardAt > 0f && now - runtime.Memory.LastHeardAt <= config.AI.TargetMemorySeconds;
+            var soundMemorySeconds = Math.Min(config.AI.TargetMemorySeconds, config.AI.SoundInvestigationCommitmentSeconds);
+            var hasFreshHeard = config.AI.AllowHearing && runtime.Memory.LastHeardAt > 0f && now - runtime.Memory.LastHeardAt <= soundMemorySeconds;
             var healthFraction = Mathf.Clamp01(bot.Health() / Math.Max(1f, runtime.Skill.Health));
             var board = SquadBoardFor(runtime);
             var squadHasFreshContact = SquadHasFreshContact(board, now);
@@ -4510,7 +4862,7 @@ namespace Oxide.Plugins
 
             if (config.AI.AllowBarricades && !atCoverNow && knownThreatPosition != Vector3.zero && now < runtime.NextBarricadeAt)
             {
-                runtime.LastBarricadeReason = $"cooldown {Math.Max(0f, runtime.NextBarricadeAt - now).ToString("0", CultureInfo.InvariantCulture)}s";
+                runtime.LastBarricadeReason = $"{(damageWallAware ? "queued" : "cooldown")} {Math.Max(0f, runtime.NextBarricadeAt - now).ToString("0", CultureInfo.InvariantCulture)}s";
             }
 
             if (config.AI.AllowBarricades
@@ -4801,8 +5153,11 @@ namespace Oxide.Plugins
 
             if (!runtime.Memory.HasLineOfSight && hasFreshHeard)
             {
-                var investigateScore = hasRecentContact ? 74f : 58f;
-                candidates.Add(Candidate(TacticalActionId.InvestigateSound, investigateScore, "medium", "recent damage or sound stimulus without visual contact", runtime.Memory.LastHeardPosition, runtime.Memory.TargetUserId, now));
+                var soundAge = now - runtime.Memory.LastHeardAt;
+                var soundFreshness = soundMemorySeconds <= 0f ? 0f : 1f - Mathf.Clamp01(soundAge / soundMemorySeconds);
+                var investigateScore = (hasRecentContact ? 98f : 86f) + soundFreshness * 12f + runtime.Skill.Aggression * 8f;
+                var investigateDestination = SoundInvestigationDestination(bot.transform.position, runtime.Memory.LastHeardPosition);
+                candidates.Add(Candidate(TacticalActionId.InvestigateSound, investigateScore, "medium", "fresh sound stimulus without visual contact", investigateDestination, runtime.Memory.TargetUserId, now));
             }
 
             if (!lowHealthAware && healthFraction < 0.35f && (hasFreshSeen || hasFreshHeard))
@@ -6080,6 +6435,7 @@ namespace Oxide.Plugins
 
             if (runtime.DamageBarricadeAwareUntil > now)
             {
+                ExtendDamageBarricadeAwarenessThroughCooldown(runtime, now);
                 return true;
             }
 
@@ -6107,8 +6463,39 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            runtime.DamageBarricadeAwareUntil = now + config.AI.DamageWallReactionWindowSeconds;
+            runtime.DamageBarricadeAwareUntil = DamageBarricadeAwarenessUntil(runtime, now);
             return true;
+        }
+
+        private void ExtendDamageBarricadeAwarenessThroughCooldown(BotRuntime runtime, float now)
+        {
+            if (runtime == null || !ShouldCarryDamageBarricadeAwarenessThroughCooldown(runtime, now))
+            {
+                return;
+            }
+
+            runtime.DamageBarricadeAwareUntil = Math.Max(runtime.DamageBarricadeAwareUntil, DamageBarricadeAwarenessUntil(runtime, now));
+        }
+
+        private float DamageBarricadeAwarenessUntil(BotRuntime runtime, float now)
+        {
+            var awareUntil = now + config.AI.DamageWallReactionWindowSeconds;
+
+            if (ShouldCarryDamageBarricadeAwarenessThroughCooldown(runtime, now))
+            {
+                awareUntil = Math.Max(awareUntil, runtime.NextBarricadeAt + config.AI.BarricadeFollowupMemorySeconds);
+            }
+
+            return awareUntil;
+        }
+
+        private bool ShouldCarryDamageBarricadeAwarenessThroughCooldown(BotRuntime runtime, float now)
+        {
+            return runtime != null
+                && runtime.NextBarricadeAt > now
+                && runtime.LastDamageTakenAt > 0f
+                && now - runtime.LastDamageTakenAt <= config.AI.DamageWallReactionWindowSeconds
+                && (runtime.LastBarricadePlacedAt <= 0f || runtime.LastDamageTakenAt >= runtime.LastBarricadePlacedAt - 0.2f);
         }
 
         private bool ShouldNoticeLowHealth(BotRuntime runtime, float healthFraction, float now)
@@ -6546,6 +6933,7 @@ namespace Oxide.Plugins
 
             entity.Spawn();
             botPlacedEntities.Add(entity);
+            runtime.LastBarricadePlacedAt = Time.realtimeSinceStartup;
             runtime.LastBarricadeReason = "placed";
 
             if (config.Debug.DebugTacticalDecisions)

@@ -1,4 +1,44 @@
-Raidlands Gen2 native land roam bots rollout - 2026-07-04
+Raidlands roam bots foliage and barricade update - 2026-07-05
+
+Current update:
+- RaidlandsRoamBots is now v0.3.22.
+- Bots now keep fresh damage-wall awareness through the active barricade cooldown when they are shot again at or after their current barricade placement, so a follow-up wall can happen once the cooldown opens instead of the damage reaction expiring early.
+- The default barricade cooldown is now `12s` instead of `18s`, with a new `AI -> Barricade Followup Memory Seconds` value of `6s` to keep the follow-up window tight without making bots spam walls.
+- Foliage LOS is stricter for long jungle/forest sight lines like the screenshot case where a bot 90m+ away reported `LOS: Y` and `Exposure: 1.00 (6/6)` through dense leaf cover.
+- Foliage sphere casts now default to a wider `0.9m` radius, allow only `14m` of free clear-through-foliage visibility, and require just `1` foliage blocker hit to hide a probe.
+- Tree/resource layer hits now count as foliage blockers even when the collider/prefab name does not include an obvious foliage word.
+- The foliage classifier also recognizes more jungle-style names such as leaves, branches, canopy, palms, ferns, vines, and bramble.
+- Long sight lines now sample terrain forest splat along the ray, so purely visual forest/jungle density can still conceal targets even when individual leaf meshes do not produce useful physics hits.
+- This package still includes the v0.3.20 sound-investigation changes: bots listen for player gunfire, suppressed shots, rocket launches, explosive damage, thrown explosives, and melee/tool impacts.
+- New config knobs:
+  - `AI -> Foliage Terrain Sampling`
+  - `AI -> Foliage Terrain Sample Step`
+  - `AI -> Foliage Terrain Samples To Block Vision`
+  - `AI -> Sound Investigation Commitment Seconds`
+  - `AI -> Sound Investigation Command Cooldown Seconds`
+  - `AI -> Barricade Followup Memory Seconds`
+
+Rust server files to upload for this update:
+- oxide/plugins/RaidlandsRoamBots.cs
+- oxide/config/RaidlandsRoamBots.json
+
+Recommended live RCON order for this update:
+- Upload `oxide/plugins/RaidlandsRoamBots.cs`
+- Upload `oxide/config/RaidlandsRoamBots.json`
+- `oxide.reload RaidlandsRoamBots`
+- `raidbots.list ababmxking`
+- Recheck the jungle/forest sight line from the screenshot at 70m-120m.
+- Shoot a bot after it has placed its first barricade; once the `12s` cooldown opens, it should be eligible to place another barricade if it is still exposed or its current wall is not effective cover.
+- `raidbots.list ababmxking`
+
+Expected verification for this update:
+- Through dense jungle/forest cover, the side panel should stop showing `LOS: Y` with `Exposure: 1.00 (6/6)`.
+- Expected good outcomes are either `LOS: N` with `Sight: foliage ...`, or a reduced exposure count below the shoot threshold.
+- In a cleaner lane with only light brush or a short gap, bots can still reacquire once enough target probes are genuinely visible.
+- A repeatedly pressured bot should show a shorter barricade cooldown and should not lose the second wall opportunity just because the original damage reaction window expired.
+- If the bot still gets perfect sight through foliage, paste the side panel `Sight:` line plus `raidbots.list ababmxking` from that same angle.
+
+Previous Gen2/native land roam bots rollout - 2026-07-04
 
 Context:
 - Live testing proved the plugin can spawn and teleport to bots, but the accepted legacy scientists can remain stuck standing.
