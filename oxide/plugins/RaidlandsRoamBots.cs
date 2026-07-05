@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
@@ -12,13 +13,16 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.1.19")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.2.6")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
         private const string AdminPermission = "raidlandsroambots.admin";
         private const string SpawnModeNearPlayers = "near_players";
         private const string SpawnModeRandom = "random";
+        private const string AiRuntimeModeGen2Native = "gen2_native";
+        private const string AiRuntimeModeLegacyScientist = "legacy_scientist";
+        private const string NativeGen2KitName = "native_gen2";
         private const string StatsDataFile = "RaidlandsRoamBots/stats";
         private const string KitsDataFile = "Kits/kits_data";
         private const string ScoreboardNpcKills = "NPC Kills";
@@ -34,12 +38,13 @@ namespace Oxide.Plugins
         private Configuration config;
         private StoredData data;
         private readonly System.Random random = new System.Random();
-        private readonly Dictionary<BasePlayer, BotRuntime> activeBots = new Dictionary<BasePlayer, BotRuntime>();
-        private readonly HashSet<BasePlayer> despawningBots = new HashSet<BasePlayer>();
+        private readonly Dictionary<BaseCombatEntity, BotRuntime> activeBots = new Dictionary<BaseCombatEntity, BotRuntime>();
+        private readonly HashSet<BaseCombatEntity> despawningBots = new HashSet<BaseCombatEntity>();
         private readonly Dictionary<string, KitEligibility> eligibleKits = new Dictionary<string, KitEligibility>(StringComparer.OrdinalIgnoreCase);
         private readonly List<SpawnGroup> npcSpawnGroups = new List<SpawnGroup>();
-        private int nativeBasePlayerPrefabGroups;
+        private int nativeRoamPrefabGroups;
         private Timer maintainTimer;
+        private Timer movementTimer;
         private Timer scoreboardTimer;
         private Timer saveTimer;
         private int teamSequence;
@@ -94,13 +99,22 @@ namespace Oxide.Plugins
             [JsonProperty("Prefab Candidates In Order")]
             public List<string> PrefabCandidates = new List<string>
             {
+                "assets/rust.ai/agents/npcplayer/humannpc/scientist/gen2/scientist2.prefab",
+                "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_ptboat.prefab",
+                "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_rhib.prefab",
                 "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_roam.prefab",
                 "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_full_any.prefab",
-                "assets/rust.ai/agents/npcplayer/humannpc/scientist/gen2/scientist2.prefab"
+                "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_junkpile_pistol.prefab"
             };
 
-            [JsonProperty("Use Gen2 Scientist Fallback")]
-            public bool UseGen2ScientistFallback = false;
+            [JsonProperty("AI Runtime Mode")]
+            public string AiRuntimeMode = AiRuntimeModeGen2Native;
+
+            [JsonProperty("Allow Legacy Scientist Fallback")]
+            public bool AllowLegacyScientistFallback = true;
+
+            [JsonProperty("Apply Kits To Native Gen2 Bots")]
+            public bool ApplyKitsToNativeGen2Bots = false;
 
             [JsonProperty("Require NPC Navigator Placement")]
             public bool RequireNpcNavigatorPlacement = true;
@@ -196,7 +210,7 @@ namespace Oxide.Plugins
             public bool PreferNativeNpcSpawnGroups = false;
 
             [JsonProperty("Only Use Native BasePlayer Spawn Groups")]
-            public bool OnlyUseNativeBasePlayerSpawnGroups = true;
+            public bool OnlyUseNativeBasePlayerSpawnGroups = false;
 
             [JsonProperty("Prefer Native Spawn Group Prefabs")]
             public bool PreferNativeSpawnGroupPrefabs = false;
@@ -301,6 +315,10 @@ namespace Oxide.Plugins
             public Vector3 HomePosition;
             public float LastCombatAt;
             public BasePlayer LastEnemy;
+            public string Prefab;
+            public string EntityType;
+            public string AiMode;
+            public bool NativeGen2;
         }
 
         private class SpawnCandidate
@@ -395,6 +413,7 @@ namespace Oxide.Plugins
             StopRuntime();
             spawnRetryBlockedUntil = 0f;
             maintainTimer = timer.Every(Math.Max(5f, config.MaintainIntervalSeconds), MaintainPopulation);
+            movementTimer = timer.Every(2f, DriveActiveBotMovement);
             scoreboardTimer = timer.Every(Math.Max(15f, config.ScoreboardIntervalSeconds), UpdateScoreboards);
             MaintainPopulation();
             Puts($"Raidlands roam bots enabled. Target population: {TargetPopulation()}.");
@@ -404,6 +423,8 @@ namespace Oxide.Plugins
         {
             maintainTimer?.Destroy();
             maintainTimer = null;
+            movementTimer?.Destroy();
+            movementTimer = null;
             scoreboardTimer?.Destroy();
             scoreboardTimer = null;
         }
@@ -471,6 +492,7 @@ namespace Oxide.Plugins
                 config.Spawn = defaults.Spawn;
             }
 
+            config.AiRuntimeMode = NormalizeAiRuntimeMode(config.AiRuntimeMode);
             config.Spawn.SpawnMode = NormalizeSpawnMode(config.Spawn.SpawnMode);
             config.Spawn.MaxPositionAttempts = Math.Max(10, config.Spawn.MaxPositionAttempts);
             config.Spawn.NavmeshSampleDistance = Math.Max(2f, config.Spawn.NavmeshSampleDistance);
@@ -495,6 +517,16 @@ namespace Oxide.Plugins
                 .Select(prefab => prefab.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            if (IsGen2NativeMode())
+            {
+                config.PrefabCandidates = defaults.PrefabCandidates
+                    .Concat(config.PrefabCandidates)
+                    .Where(prefab => !string.IsNullOrWhiteSpace(prefab))
+                    .Select(prefab => prefab.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
 
             config.SpawnFailureRetrySeconds = Math.Max(15f, config.SpawnFailureRetrySeconds);
 
@@ -555,6 +587,7 @@ namespace Oxide.Plugins
                 return;
             }
 
+            DriveActiveBotMovement();
             RefreshEligibleKits();
 
             var target = TargetPopulation();
@@ -665,7 +698,7 @@ namespace Oxide.Plugins
 
             RefreshEligibleKits();
 
-            if (eligibleKits.Count == 0)
+            if (!IsGen2NativeMode() && eligibleKits.Count == 0)
             {
                 PrintWarning("No eligible default-access weapon kits found for roam bots.");
                 return 0;
@@ -673,37 +706,60 @@ namespace Oxide.Plugins
 
             var spawned = 0;
             var remaining = requested;
+            var positionAttemptsPerTeam = Math.Max(1, Math.Min(10, config.Spawn.MaxPositionAttempts));
 
             while (remaining > 0)
             {
                 var teamSize = Math.Min(remaining, WeightedTeamSize());
                 var teamId = ++teamSequence;
+                var teamSpawned = false;
 
-                if (!TryFindSpawnPosition(out var leaderPosition, out var preferredPrefab))
+                for (var spawnAttempt = 0; spawnAttempt < positionAttemptsPerTeam && remaining > 0; spawnAttempt++)
                 {
-                    PrintWarning("Could not find a valid land/navmesh spawn position for roam bots.");
-                    break;
-                }
-
-                for (var index = 0; index < teamSize; index++)
-                {
-                    var position = leaderPosition;
-
-                    if (index > 0)
+                    if (!TryFindSpawnPosition(out var leaderPosition, out var preferredPrefab))
                     {
-                        TryFindNearbyPosition(leaderPosition, out position);
-                    }
+                        if (spawnAttempt == 0)
+                        {
+                            PrintWarning("Could not find a valid land/navmesh spawn position for roam bots.");
+                        }
 
-                    if (TrySpawnBot(position, teamId, preferredPrefab) != null)
-                    {
-                        spawned++;
-                        remaining--;
-                    }
-                    else
-                    {
-                        remaining = 0;
                         break;
                     }
+
+                    var teamSpawnedThisAttempt = 0;
+
+                    for (var index = 0; index < teamSize; index++)
+                    {
+                        var position = leaderPosition;
+
+                        if (index > 0)
+                        {
+                            TryFindNearbyPosition(leaderPosition, out position);
+                        }
+
+                        if (TrySpawnBot(position, teamId, preferredPrefab) != null)
+                        {
+                            spawned++;
+                            remaining--;
+                            teamSpawned = true;
+                            teamSpawnedThisAttempt++;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    if (teamSpawnedThisAttempt > 0)
+                    {
+                        break;
+                    }
+                }
+
+                if (!teamSpawned)
+                {
+                    remaining = 0;
+                    break;
                 }
             }
 
@@ -715,13 +771,13 @@ namespace Oxide.Plugins
             return spawned;
         }
 
-        private BasePlayer TrySpawnBot(Vector3 position, int teamId, string preferredPrefab)
+        private BaseCombatEntity TrySpawnBot(Vector3 position, int teamId, string preferredPrefab)
         {
             foreach (var prefab in ActivePrefabCandidates(preferredPrefab))
             {
                 if (config.DebugSpawnDetails)
                 {
-                    Puts($"Trying prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), require navigator placement={config.RequireNpcNavigatorPlacement}.");
+                    Puts($"Trying prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), mode={config.AiRuntimeMode}, require navigator placement={config.RequireNpcNavigatorPlacement}.");
                 }
 
                 var entity = GameManager.server.CreateEntity(prefab, position, Quaternion.Euler(0f, UnityEngine.Random.Range(0f, 360f), 0f), true);
@@ -736,13 +792,13 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                var bot = entity as BasePlayer;
+                var bot = entity as BaseCombatEntity;
 
                 if (bot == null)
                 {
                     if (config.DebugSpawnDetails)
                     {
-                        Puts($"Prefab {prefab} created {entity.GetType().Name}, not BasePlayer; rejecting spawn attempt.");
+                        Puts($"Prefab {prefab} created {entity.GetType().Name}, not BaseCombatEntity; rejecting spawn attempt.");
                     }
 
                     SafeKillSpawnAttempt(entity);
@@ -750,6 +806,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
+                var nativeGen2 = IsNativeGen2Bot(bot, prefab);
 
                 if (config.RequireNpcNavigatorPlacement && !TryPlaceBotOnOwnNavmesh(bot, ref position))
                 {
@@ -765,11 +822,31 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                ConfigureBot(bot, position, teamId);
+                if (nativeGen2 && !TryActivateNativeAi(bot, ref position))
+                {
+                    PrintWarning($"Prefab {prefab} spawned as Gen2/native, but its internal NavMeshAgent was not active on navmesh after wake; trying the next candidate.");
+                    SafeKillSpawnAttempt(bot);
+                    continue;
+                }
+
+                var runtime = ConfigureBot(bot, position, teamId, prefab, nativeGen2);
+
+                if (nativeGen2)
+                {
+                    SeedNativeTarget(bot);
+                    TrySetNativeDestinationToTarget(bot);
+                    ForceNativeFsm(bot);
+                    ScheduleNativeAiKick(bot);
+                }
+                else
+                {
+                    KickLegacyNpcMovement(bot);
+                    ScheduleLegacyNpcKick(bot);
+                }
 
                 if (config.DebugSpawnDetails)
                 {
-                    Puts($"Accepted roam bot {bot.displayName} from prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}).");
+                    Puts($"Accepted roam bot {runtime.DisplayName} from prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), {BotRuntimeDiagnostics(bot, runtime)}.");
                 }
 
                 return bot;
@@ -783,9 +860,16 @@ namespace Oxide.Plugins
         {
             var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            if (CanUseRoamPrefab(preferredPrefab) && yielded.Add(preferredPrefab.Trim()))
+            var preferred = (preferredPrefab ?? "").Trim();
+
+            if (CanUseRoamPrefab(preferred) && ShouldTryPreferredPrefabFirst(preferred) && yielded.Add(preferred))
             {
-                yield return preferredPrefab.Trim();
+                yield return preferred;
+            }
+
+            if (!IsGen2NativeMode() && CanUseRoamPrefab(preferred) && yielded.Add(preferred))
+            {
+                yield return preferred;
             }
 
             foreach (var prefab in config.PrefabCandidates ?? new List<string>())
@@ -800,6 +884,26 @@ namespace Oxide.Plugins
                     yield return prefab.Trim();
                 }
             }
+
+            if (IsGen2NativeMode() && CanUseRoamPrefab(preferred) && yielded.Add(preferred))
+            {
+                yield return preferred;
+            }
+        }
+
+        private bool ShouldTryPreferredPrefabFirst(string preferredPrefab)
+        {
+            if (string.IsNullOrWhiteSpace(preferredPrefab))
+            {
+                return false;
+            }
+
+            if (config?.Spawn?.PreferNativeSpawnGroupPrefabs != true)
+            {
+                return false;
+            }
+
+            return !IsGen2NativeMode() || IsGen2OrNavalPrefab(preferredPrefab);
         }
 
         private void SafeKillSpawnAttempt(BaseNetworkable entity)
@@ -819,39 +923,59 @@ namespace Oxide.Plugins
             }
         }
 
-        private void ConfigureBot(BasePlayer bot, Vector3 position, int teamId)
+        private BotRuntime ConfigureBot(BaseCombatEntity bot, Vector3 position, int teamId, string prefab, bool nativeGen2)
         {
             var skillTier = WeightedKey(config.SkillWeights, "average");
             var skill = SkillFor(skillTier);
-            var kit = ChooseKit();
+            var kit = ShouldApplyKit(bot, nativeGen2) ? ChooseKit() : null;
             var displayName = ChooseProfileName();
             var botKey = BotKey(displayName);
+            var playerBot = bot as BasePlayer;
 
-            bot.displayName = displayName;
+            if (playerBot != null)
+            {
+                playerBot.displayName = displayName;
+            }
+
             bot.InitializeHealth(skill.Health, skill.Health);
-            bot.health = skill.Health;
+            bot.SetHealth(skill.Health);
 
             var runtime = new BotRuntime
             {
                 BotKey = botKey,
                 DisplayName = displayName,
-                KitName = kit?.Name ?? "",
+                KitName = nativeGen2 ? NativeGen2KitName : kit?.Name ?? "native_scientist",
                 SkillTier = skillTier,
                 Skill = skill,
                 TeamId = teamId,
                 SpawnPosition = position,
-                HomePosition = position
+                HomePosition = position,
+                Prefab = prefab ?? "",
+                EntityType = EntityTypeName(bot),
+                AiMode = nativeGen2 ? AiRuntimeModeGen2Native : AiRuntimeModeLegacyScientist,
+                NativeGen2 = nativeGen2
             };
 
             activeBots[bot] = runtime;
             EnsureBotStats(runtime);
 
-            if (kit != null)
+            if (kit != null && playerBot != null)
             {
-                ApplyKit(bot, kit.Name);
+                ApplyKit(playerBot, kit.Name);
             }
 
             bot.SendNetworkUpdateImmediate();
+            return runtime;
+        }
+
+        private bool ShouldApplyKit(BaseCombatEntity bot, bool nativeGen2)
+        {
+            if (!(bot is BasePlayer))
+            {
+                return false;
+            }
+
+            return !nativeGen2 || config.ApplyKitsToNativeGen2Bots;
         }
 
         private void ApplyKit(BasePlayer bot, string kitName)
@@ -870,7 +994,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool TryPlaceBotOnOwnNavmesh(BasePlayer bot, ref Vector3 position)
+        private bool TryPlaceBotOnOwnNavmesh(BaseCombatEntity bot, ref Vector3 position)
         {
             if (bot == null)
             {
@@ -879,31 +1003,36 @@ namespace Oxide.Plugins
 
             var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
 
-            if (navigator == null)
+            if (navigator != null)
             {
-                position = bot.transform.position;
+                Vector3 nearest;
+
+                if (navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f)))
+                {
+                    bot.transform.position = nearest;
+                    position = nearest;
+                    bot.SendNetworkUpdateImmediate();
+                }
+
+                if (navigator.PlaceOnNavMesh(0f))
+                {
+                    position = bot.transform.position;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (TryPlaceGen2AgentOnNavmesh(bot, ref position))
+            {
                 return true;
             }
 
-            Vector3 nearest;
-
-            if (navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f)))
-            {
-                bot.transform.position = nearest;
-                position = nearest;
-                bot.SendNetworkUpdateImmediate();
-            }
-
-            if (navigator.PlaceOnNavMesh(0f))
-            {
-                position = bot.transform.position;
-                return true;
-            }
-
-            return false;
+            position = bot.transform.position;
+            return true;
         }
 
-        private void DespawnBot(BasePlayer bot, string reason)
+        private void DespawnBot(BaseCombatEntity bot, string reason)
         {
             if (bot == null || !activeBots.ContainsKey(bot))
             {
@@ -955,23 +1084,25 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            var victim = entity as BasePlayer;
+            var victim = entity;
+            var victimPlayer = entity as BasePlayer;
             var attacker = info.Initiator as BasePlayer;
+            var attackerEntity = info.Initiator as BaseCombatEntity;
 
-            if (victim == null && attacker == null)
+            if (victim == null && attacker == null && attackerEntity == null)
             {
                 return null;
             }
 
-            var victimRuntime = victim != null ? RuntimeFor(victim) : null;
-            var attackerRuntime = attacker != null ? RuntimeFor(attacker) : null;
+            var victimRuntime = RuntimeFor(victim);
+            var attackerRuntime = RuntimeFor(attackerEntity);
 
             if (victimRuntime != null && attackerRuntime != null)
             {
                 return true;
             }
 
-            if (attackerRuntime != null && IsRealPlayer(victim) && ShouldIgnoreSafeZonePlayer(victim))
+            if (attackerRuntime != null && IsRealPlayer(victimPlayer) && ShouldIgnoreSafeZonePlayer(victimPlayer))
             {
                 return true;
             }
@@ -991,11 +1122,11 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            if (attackerRuntime != null && IsRealPlayer(victim))
+            if (attackerRuntime != null && IsRealPlayer(victimPlayer))
             {
                 info.damageTypes.ScaleAll(attackerRuntime.Skill.DamageScale);
                 attackerRuntime.LastCombatAt = now;
-                attackerRuntime.LastEnemy = victim;
+                attackerRuntime.LastEnemy = victimPlayer;
             }
 
             return null;
@@ -1003,7 +1134,8 @@ namespace Oxide.Plugins
 
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
         {
-            var victim = entity as BasePlayer;
+            var victim = entity;
+            var victimPlayer = entity as BasePlayer;
 
             if (victim == null)
             {
@@ -1012,7 +1144,8 @@ namespace Oxide.Plugins
 
             var victimRuntime = RuntimeFor(victim);
             var attacker = info?.Initiator as BasePlayer;
-            var attackerRuntime = attacker != null ? RuntimeFor(attacker) : null;
+            var attackerEntity = info?.Initiator as BaseCombatEntity;
+            var attackerRuntime = RuntimeFor(attackerEntity);
 
             if (victimRuntime != null)
             {
@@ -1041,9 +1174,9 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (attackerRuntime != null && IsRealPlayer(victim) && !ShouldIgnoreSafeZonePlayer(victim))
+            if (attackerRuntime != null && IsRealPlayer(victimPlayer) && !ShouldIgnoreSafeZonePlayer(victimPlayer))
             {
-                var playerStats = EnsurePlayerStats(victim);
+                var playerStats = EnsurePlayerStats(victimPlayer);
                 playerStats.deaths_by_npc++;
                 var botStats = EnsureBotStats(attackerRuntime);
                 botStats.kills++;
@@ -1054,7 +1187,7 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(BaseNetworkable entity)
         {
-            var bot = entity as BasePlayer;
+            var bot = entity as BaseCombatEntity;
 
             if (bot == null)
             {
@@ -1078,7 +1211,9 @@ namespace Oxide.Plugins
             RefreshNpcSpawnGroups();
             var retrySeconds = Math.Max(0f, spawnRetryBlockedUntil - Time.realtimeSinceStartup);
             var retryMessage = retrySeconds > 0f ? $", spawn retry in {retrySeconds:0}s" : "";
-            Reply(arg, $"Raidlands roam bots: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, anchor={SpawnAnchorLabel()}, target={TargetPopulation()}, active={activeBots.Count}{retryMessage}, navcheck={config.RequireNpcNavigatorPlacement}, nativePrefabs={config.Spawn.PreferNativeSpawnGroupPrefabs}, near-player anchors={SpawnAnchorPlayers().Count}, npc spawn groups={npcSpawnGroups.Count}, native baseplayer prefabs={nativeBasePlayerPrefabGroups}, eligible kits={string.Join(", ", eligibleKits.Keys.OrderBy(name => name))}, tracked players={data.players.Count}, tracked bots={data.bots.Count}.");
+            var nativeCount = activeBots.Count(entry => entry.Value?.NativeGen2 == true);
+            var legacyCount = activeBots.Count(entry => entry.Value != null && !entry.Value.NativeGen2);
+            Reply(arg, $"Raidlands roam bots: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, ai={config.AiRuntimeMode}, anchor={SpawnAnchorLabel()}, target={TargetPopulation()}, active={activeBots.Count} (native={nativeCount}, legacy={legacyCount}){retryMessage}, navcheck={config.RequireNpcNavigatorPlacement}, nativePrefabs={config.Spawn.PreferNativeSpawnGroupPrefabs}, legacyFallback={config.AllowLegacyScientistFallback}, gen2Kits={config.ApplyKitsToNativeGen2Bots}, near-player anchors={SpawnAnchorPlayers().Count}, npc spawn groups={npcSpawnGroups.Count}, native roam prefabs={nativeRoamPrefabGroups}, eligible kits={string.Join(", ", eligibleKits.Keys.OrderBy(name => name))}, tracked players={data.players.Count}, tracked bots={data.bots.Count}.");
         }
 
         [ConsoleCommand("raidbots.enable")]
@@ -1195,7 +1330,7 @@ namespace Oxide.Plugins
             RefreshNpcSpawnGroups();
 
             var anchors = SpawnAnchorPlayers();
-            Reply(arg, $"Raidlands roam bot diag: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, anchor={SpawnAnchorLabel()}, anchors={anchors.Count}, target={TargetPopulation()}, active={activeBots.Count}, requireNavigator={config.RequireNpcNavigatorPlacement}, requireLand={config.Spawn.RequireLandSpawns}.");
+            Reply(arg, $"Raidlands roam bot diag: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, ai={config.AiRuntimeMode}, anchor={SpawnAnchorLabel()}, anchors={anchors.Count}, target={TargetPopulation()}, active={activeBots.Count}, requireNavigator={config.RequireNpcNavigatorPlacement}, requireLand={config.Spawn.RequireLandSpawns}, legacyFallback={config.AllowLegacyScientistFallback}.");
 
             foreach (var anchor in anchors.Take(5))
             {
@@ -1211,6 +1346,11 @@ namespace Oxide.Plugins
             {
                 Reply(arg, "No spawn candidate found with the current mode, anchor, safe-zone, water, and distance filters.");
             }
+
+            foreach (var entry in ActiveBotEntries().Take(5))
+            {
+                Reply(arg, $"Active {entry.Value.DisplayName}: {BotRuntimeDiagnostics(entry.Key, entry.Value)}.");
+            }
         }
 
         [ConsoleCommand("raidbots.testsetup")]
@@ -1222,37 +1362,54 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var anchor = ArgStringFrom(arg, 0);
-
-            config.Enabled = false;
-            config.TargetPopulation = 1;
-            config.MinAllowedPopulation = 1;
-            config.MaxAllowedPopulation = 3;
-            config.TeamSizeWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            try
             {
-                ["solo"] = 100,
-                ["duo"] = 0,
-                ["trio"] = 0
-            };
-            config.Spawn.SpawnMode = SpawnModeNearPlayers;
-            config.Spawn.NearPlayerAnchorNameOrSteamId = string.IsNullOrWhiteSpace(anchor) ? config.Spawn.NearPlayerAnchorNameOrSteamId : anchor.Trim();
-            config.Spawn.PreferNativeNpcSpawnPointsNearPlayers = true;
-            config.Spawn.PreferNativeSpawnGroupPrefabs = true;
-            config.Spawn.UseGeneratedPositionsNearPlayers = false;
-            config.Spawn.UseRandomLandFallback = false;
-            config.Spawn.RequireLandSpawns = true;
-            config.Spawn.AvoidSafeZoneSpawns = true;
-            config.Spawn.IgnorePlayersInSafeZones = true;
-            config.RequireNpcNavigatorPlacement = true;
-            config.DebugSpawnDetails = true;
-            config.SpawnFailureRetrySeconds = 30f;
-            spawnRetryBlockedUntil = 0f;
-            NormalizeConfig();
-            SaveConfig();
-            StopRuntime();
-            KillAllBots(false);
+                var anchor = ArgStringFrom(arg, 0);
 
-            Reply(arg, $"Raidlands roam bot moving test setup applied: anchor={SpawnAnchorLabel()}, target={TargetPopulation()}, max={config.MaxAllowedPopulation}, navcheck={config.RequireNpcNavigatorPlacement}, nativePrefabs={config.Spawn.PreferNativeSpawnGroupPrefabs}, debug={config.DebugSpawnDetails}, requireLand={config.Spawn.RequireLandSpawns}. Run raidbots.diag, then raidbots.enable 1.");
+                config.Enabled = false;
+                config.TargetPopulation = 1;
+                config.MinAllowedPopulation = 1;
+                config.MaxAllowedPopulation = 3;
+                config.TeamSizeWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["solo"] = 100,
+                    ["duo"] = 0,
+                    ["trio"] = 0
+                };
+                config.Spawn.SpawnMode = SpawnModeNearPlayers;
+                config.Spawn.NearPlayerAnchorNameOrSteamId = string.IsNullOrWhiteSpace(anchor) ? config.Spawn.NearPlayerAnchorNameOrSteamId : anchor.Trim();
+                config.Spawn.PreferNativeNpcSpawnPointsNearPlayers = true;
+                config.Spawn.PreferNativeSpawnGroupPrefabs = false;
+                config.Spawn.OnlyUseNativeBasePlayerSpawnGroups = false;
+                config.Spawn.UseGeneratedPositionsNearPlayers = true;
+                config.Spawn.UseRandomLandFallback = false;
+                config.Spawn.NearPlayerMinDistance = 45f;
+                config.Spawn.NearPlayerMaxDistance = 180f;
+                config.Spawn.NearPlayerNativeSpawnPointAttempts = 1000;
+                config.Spawn.NearPlayerAttempts = 160;
+                config.Spawn.NavmeshSampleDistance = Math.Max(config.Spawn.NavmeshSampleDistance, 18f);
+                config.Spawn.RequireLandSpawns = true;
+                config.Spawn.AvoidSafeZoneSpawns = true;
+                config.Spawn.IgnorePlayersInSafeZones = true;
+                config.AiRuntimeMode = AiRuntimeModeGen2Native;
+                config.AllowLegacyScientistFallback = true;
+                config.ApplyKitsToNativeGen2Bots = false;
+                config.RequireNpcNavigatorPlacement = true;
+                config.DebugSpawnDetails = true;
+                config.SpawnFailureRetrySeconds = 30f;
+                spawnRetryBlockedUntil = 0f;
+                NormalizeConfig();
+                SaveConfig();
+                StopRuntime();
+                KillAllBots(false);
+
+                Reply(arg, $"Raidlands roam bot Gen2 moving test setup applied: anchor={SpawnAnchorLabel()}, target={TargetPopulation()}, max={config.MaxAllowedPopulation}, ai={config.AiRuntimeMode}, navcheck={config.RequireNpcNavigatorPlacement}, nativePrefabs={config.Spawn.PreferNativeSpawnGroupPrefabs}, legacyFallback={config.AllowLegacyScientistFallback}, debug={config.DebugSpawnDetails}, requireLand={config.Spawn.RequireLandSpawns}. Run raidbots.diag, then raidbots.enable 1.");
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"raidbots.testsetup failed: {ex.GetType().Name}: {ex.Message}");
+                Reply(arg, "Raidlands roam bot test setup failed; check the server console warning for details.");
+            }
         }
 
         [ConsoleCommand("raidbots.navcheck")]
@@ -1469,7 +1626,7 @@ namespace Oxide.Plugins
                 var runtime = bots[index].Value;
                 var position = bot.transform.position;
                 var distance = targetPlayer == null ? "" : $", {Vector3.Distance(targetPlayer.transform.position, position):0}m from {PlayerName(targetPlayer)}";
-                Reply(arg, $"{index + 1}. {runtime.DisplayName} [{runtime.KitName}/{runtime.SkillTier}] at {FormatVector(position)}{distance}");
+                Reply(arg, $"{index + 1}. {runtime.DisplayName} [{runtime.KitName}/{runtime.SkillTier}; {BotRuntimeDiagnostics(bot, runtime)}] at {FormatVector(position)}{distance}");
             }
         }
 
@@ -1614,7 +1771,7 @@ namespace Oxide.Plugins
         private void RefreshNpcSpawnGroups()
         {
             npcSpawnGroups.Clear();
-            nativeBasePlayerPrefabGroups = 0;
+            nativeRoamPrefabGroups = 0;
 
             foreach (var group in UnityEngine.Object.FindObjectsOfType<SpawnGroup>() ?? new SpawnGroup[0])
             {
@@ -1627,18 +1784,18 @@ namespace Oxide.Plugins
                 {
                     if (group.DoesGroupContainNPCs() && group.SpawnPointCount > 0)
                     {
-                        var basePlayerPrefab = FirstBasePlayerPrefabPath(group);
+                        var roamPrefab = FirstRoamPrefabPath(group);
 
-                        if (config.Spawn.OnlyUseNativeBasePlayerSpawnGroups && string.IsNullOrWhiteSpace(basePlayerPrefab))
+                        if (config.Spawn.OnlyUseNativeBasePlayerSpawnGroups && string.IsNullOrWhiteSpace(roamPrefab))
                         {
                             continue;
                         }
 
                         npcSpawnGroups.Add(group);
 
-                        if (!string.IsNullOrWhiteSpace(basePlayerPrefab))
+                        if (!string.IsNullOrWhiteSpace(roamPrefab))
                         {
-                            nativeBasePlayerPrefabGroups++;
+                            nativeRoamPrefabGroups++;
                         }
                     }
                 }
@@ -1969,7 +2126,7 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                var groupPreferredPrefab = config.Spawn.PreferNativeSpawnGroupPrefabs ? FirstBasePlayerPrefabPath(group) : "";
+                var groupPreferredPrefab = config.Spawn.PreferNativeSpawnGroupPrefabs ? FirstRoamPrefabPath(group) : "";
 
                 if (config.Spawn.PreferNativeSpawnGroupPrefabs && string.IsNullOrWhiteSpace(groupPreferredPrefab))
                 {
@@ -2122,7 +2279,7 @@ namespace Oxide.Plugins
                 try
                 {
                     var prefabRef = ChooseNativePrefabRef(group);
-                    var basePlayerPrefab = BasePlayerPrefabPath(prefabRef);
+                    var basePlayerPrefab = RoamPrefabPath(prefabRef);
 
                     if (config.Spawn.OnlyUseNativeBasePlayerSpawnGroups && string.IsNullOrWhiteSpace(basePlayerPrefab))
                     {
@@ -2170,7 +2327,7 @@ namespace Oxide.Plugins
             return false;
         }
 
-        private string FirstBasePlayerPrefabPath(SpawnGroup group)
+        private string FirstRoamPrefabPath(SpawnGroup group)
         {
             if (group?.prefabs == null)
             {
@@ -2179,7 +2336,7 @@ namespace Oxide.Plugins
 
             foreach (var entry in group.prefabs)
             {
-                var path = BasePlayerPrefabPath(entry?.prefab);
+                var path = RoamPrefabPath(entry?.prefab);
 
                 if (CanUseRoamPrefab(path))
                 {
@@ -2201,7 +2358,7 @@ namespace Oxide.Plugins
                 .Where(entry => entry?.prefab != null && entry.prefab.isValid)
                 .Where(entry =>
                 {
-                    var path = BasePlayerPrefabPath(entry.prefab);
+                    var path = RoamPrefabPath(entry.prefab);
                     return (!config.Spawn.OnlyUseNativeBasePlayerSpawnGroups || !string.IsNullOrWhiteSpace(path)) && CanUseRoamPrefab(path);
                 })
                 .ToList();
@@ -2263,7 +2420,7 @@ namespace Oxide.Plugins
             return false;
         }
 
-        private string BasePlayerPrefabPath(GameObjectRef prefabRef)
+        private string RoamPrefabPath(GameObjectRef prefabRef)
         {
             if (prefabRef == null || !prefabRef.isValid)
             {
@@ -2274,7 +2431,7 @@ namespace Oxide.Plugins
             {
                 var prefabEntity = prefabRef.GetEntity();
 
-                if (prefabEntity is BasePlayer)
+                if (prefabEntity is BaseCombatEntity)
                 {
                     return prefabRef.resourcePath ?? "";
                 }
@@ -2400,17 +2557,1060 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (!config.UseGen2ScientistFallback && prefab.IndexOf("/gen2/", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return false;
-            }
-
             if (config.Spawn.RequireLandSpawns && IsNonLandRoamPrefab(prefab))
             {
                 return false;
             }
 
+            if (IsGen2NativeMode())
+            {
+                return IsGen2OrNavalPrefab(prefab) || (config.AllowLegacyScientistFallback && IsLegacyScientistPrefab(prefab));
+            }
+
             return true;
+        }
+
+        private bool IsGen2OrNavalPrefab(string prefab)
+        {
+            var value = prefab ?? "";
+            return value.IndexOf("/gen2/", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("scientistnpc_ptboat", StringComparison.OrdinalIgnoreCase) >= 0
+                || value.IndexOf("scientistnpc_rhib", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsLegacyScientistPrefab(string prefab)
+        {
+            var value = prefab ?? "";
+            return value.IndexOf("/scientist/", StringComparison.OrdinalIgnoreCase) >= 0
+                && value.IndexOf("scientistnpc", StringComparison.OrdinalIgnoreCase) >= 0
+                && !IsGen2OrNavalPrefab(value);
+        }
+
+        private bool IsNativeGen2Bot(BaseCombatEntity bot, string prefab)
+        {
+            return IsGen2NativeMode() && (IsGen2OrNavalPrefab(prefab) || HasGen2Components(bot));
+        }
+
+        private bool HasGen2Components(BaseCombatEntity bot)
+        {
+            return FindComponentByTypeName(bot, "Rust.Ai.Gen2.ScientistNPC2") != null
+                || FindComponentByTypeName(bot, "Rust.Ai.Gen2.Scientist2FSM") != null
+                || FindComponentByTypeName(bot, "Rust.Ai.Gen2.FSMComponent") != null
+                || FindComponentByTypeName(bot, "Rust.Ai.Gen2.SenseComponent") != null;
+        }
+
+        private bool TryPlaceGen2AgentOnNavmesh(BaseCombatEntity bot, ref Vector3 position)
+        {
+            var agent = FindComponentByTypeName(bot, "Rust.Ai.Gen2.RustNavMeshAgent");
+
+            if (agent == null)
+            {
+                return false;
+            }
+
+            var navPosition = WorldToNavMeshPosition(bot, position);
+            var sample = navPosition;
+
+            if (TrySampleGen2AgentPosition(agent, navPosition, out sample))
+            {
+                navPosition = sample;
+                position = NavMeshToWorldPosition(bot, sample);
+                bot.transform.position = position;
+                bot.SendNetworkUpdateImmediate();
+            }
+
+            if (TryPlaceUnityNavMeshAgent(agent, navPosition) || TryInvokeBool(agent, "Warp", navPosition))
+            {
+                TryInvoke(agent, "TrySyncWorldPosWithNavPos");
+                position = bot.transform.position;
+                return IsGen2UnityAgentPlaced(agent);
+            }
+
+            return false;
+        }
+
+        private bool TrySampleGen2AgentPosition(Component agent, Vector3 position, out Vector3 sample)
+        {
+            sample = position;
+
+            var args = new object[]
+            {
+                position,
+                new NavMeshHit(),
+                Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f),
+                false
+            };
+
+            if (!TryInvokeBool(agent, "SamplePosition", args))
+            {
+                return false;
+            }
+
+            if (args.Length > 1 && args[1] is NavMeshHit hit)
+            {
+                sample = hit.position;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryActivateNativeAi(BaseCombatEntity bot, ref Vector3 position)
+        {
+            if (!HasGen2Components(bot))
+            {
+                return true;
+            }
+
+            foreach (var sleeper in FindComponentsByTypeName(bot, "Rust.Ai.Gen2.NpcSleepingComponent"))
+            {
+                TryInvoke(sleeper, "SetSleeping", false);
+            }
+
+            return TryPlaceGen2AgentOnNavmesh(bot, ref position);
+        }
+
+        private void ScheduleNativeAiKick(BaseCombatEntity bot)
+        {
+            if (!HasGen2Components(bot))
+            {
+                return;
+            }
+
+            timer.Once(0.25f, () =>
+            {
+                if (!IsLiveBot(bot) || !activeBots.ContainsKey(bot))
+                {
+                    return;
+                }
+
+                var position = bot.transform.position;
+                var placed = TryActivateNativeAi(bot, ref position);
+                SeedNativeTarget(bot);
+                TrySetNativeDestinationToTarget(bot);
+                ForceNativeFsm(bot);
+
+                if (config.RequireNpcNavigatorPlacement && !placed)
+                {
+                    var label = activeBots.TryGetValue(bot, out var runtimeForLabel) ? runtimeForLabel.DisplayName : ShortPrefab(bot.PrefabName);
+                    PrintWarning($"Despawning {label} because its Gen2 Unity NavMeshAgent is not active on navmesh after the delayed AI kick.");
+                    DespawnBot(bot, "Gen2 nav agent placement failed after delayed wake");
+                    return;
+                }
+
+                if (config.DebugSpawnDetails && activeBots.TryGetValue(bot, out var runtime))
+                {
+                    Puts($"Delayed Gen2 AI kick for {runtime.DisplayName}: {BotRuntimeDiagnostics(bot, runtime)}.");
+                }
+            });
+        }
+
+        private void ForceNativeFsm(BaseCombatEntity bot)
+        {
+            foreach (var fsm in FindComponentsByTypeName(bot, "Rust.Ai.Gen2.FSMComponent"))
+            {
+                TryInvoke(fsm, "SetFsmActive", true);
+                TryInvoke(fsm, "ForceTickOnTheNextUpdate");
+            }
+        }
+
+        private bool SeedNativeTarget(BaseCombatEntity bot)
+        {
+            if (!HasGen2Components(bot))
+            {
+                return false;
+            }
+
+            var sense = FindComponentByTypeName(bot, "Rust.Ai.Gen2.SenseComponent");
+            var target = NearestRealPlayer(bot.transform.position);
+
+            if (sense == null || target == null)
+            {
+                return false;
+            }
+
+            TryInvoke(sense, "SimulateSighting", target, target.transform.position);
+            return TryInvokeBool(sense, "TrySetTarget", target, true);
+        }
+
+        private bool TrySetNativeDestinationToTarget(BaseCombatEntity bot)
+        {
+            var agent = FindComponentByTypeName(bot, "Rust.Ai.Gen2.RustNavMeshAgent");
+            var sense = FindComponentByTypeName(bot, "Rust.Ai.Gen2.SenseComponent");
+
+            if (agent == null || sense == null || !IsGen2UnityAgentPlaced(agent))
+            {
+                return false;
+            }
+
+            var targetField = sense.GetType().GetField("Target", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var target = targetField?.GetValue(sense) as BaseEntity;
+
+            if (target == null || target.IsDestroyed)
+            {
+                return false;
+            }
+
+            return TryInvokeBool(agent, "SetDestination", WorldToNavMeshPosition(bot, target.transform.position));
+        }
+
+        private void DriveActiveBotMovement()
+        {
+            foreach (var entry in activeBots.ToList())
+            {
+                var bot = entry.Key;
+                var runtime = entry.Value;
+
+                if (!IsLiveBot(bot) || runtime == null)
+                {
+                    continue;
+                }
+
+                if (runtime.NativeGen2)
+                {
+                    SeedNativeTarget(bot);
+                    TrySetNativeDestinationToTarget(bot);
+                    ForceNativeFsm(bot);
+                    continue;
+                }
+
+                KickLegacyNpcMovement(bot, false);
+            }
+        }
+
+        private void ScheduleLegacyNpcKick(BaseCombatEntity bot)
+        {
+            timer.Once(0.25f, () => KickLegacyNpcMovementIfActive(bot, "initial"));
+            timer.Once(1.25f, () => KickLegacyNpcMovementIfActive(bot, "followup"));
+            timer.Once(3f, () => KickLegacyNpcMovementIfActive(bot, "combat"));
+            timer.Once(6f, () => KickLegacyNpcMovementIfActive(bot, "settled"));
+        }
+
+        private void KickLegacyNpcMovementIfActive(BaseCombatEntity bot, string phase)
+        {
+            if (!IsLiveBot(bot) || !activeBots.ContainsKey(bot))
+            {
+                return;
+            }
+
+            var moved = KickLegacyNpcMovement(bot);
+
+            if (config.DebugSpawnDetails && activeBots.TryGetValue(bot, out var runtime))
+            {
+                Puts($"Legacy NPC movement kick ({phase}) for {runtime.DisplayName}: moved={moved}, {BotRuntimeDiagnostics(bot, runtime)}.");
+            }
+        }
+
+        private bool KickLegacyNpcMovement(BaseCombatEntity bot, bool logDetails = true)
+        {
+            var npc = bot as NPCPlayer;
+
+            if (npc == null)
+            {
+                return false;
+            }
+
+            var target = NearestRealPlayer(bot.transform.position);
+            var destination = LegacyMoveDestination(bot.transform.position, target);
+            var npcCommanded = false;
+            var navigatorCommanded = false;
+            var attackStarted = false;
+            var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+
+            try
+            {
+                npc.Resume();
+                npc.SetDestination(destination);
+                npcCommanded = true;
+            }
+            catch (Exception ex)
+            {
+                if (config.DebugSpawnDetails)
+                {
+                    PrintWarning($"Legacy NPCPlayer.SetDestination failed for {ShortPrefab(bot.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
+
+            if (brain != null)
+            {
+                TryInvoke(brain, "SetEnabled", true);
+                TryInvoke(brain, "SetThinkMode", AIThinkMode.FixedUpdate);
+                TryInvoke(brain, "StartMovementTick");
+                TryInvoke(brain, "DoMovementTick");
+                TryInvoke(brain, "DoThink");
+            }
+
+            attackStarted = TryKickLegacyCombat(bot, target);
+            navigatorCommanded = CommandLegacyNavigator(bot, navigator, destination, target) || navigatorCommanded;
+
+            if (logDetails && config.DebugSpawnDetails && activeBots.ContainsKey(bot))
+            {
+                Puts($"Legacy move command for {ShortPrefab(bot.PrefabName)}: npcCommand={npcCommanded}, navCommand={navigatorCommanded}, attackStarted={attackStarted}, dest={FormatVector(destination)}, target={(target == null ? "none" : PlayerName(target))}, {LegacyNavDiagnostics(bot)}.");
+            }
+
+            return navigatorCommanded || npcCommanded;
+        }
+
+        private bool CommandLegacyNavigator(BaseCombatEntity bot, BaseNavigator navigator, Vector3 destination, BasePlayer target)
+        {
+            if (navigator == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                navigator.SetNavMeshEnabled(true);
+                navigator.Resume();
+                navigator.CanPathFindToChaseTargetIfNoMovePoint = true;
+                navigator.CanUseRandomMovePointIfNonFound = true;
+                navigator.FaceMoveTowardsTarget = true;
+                navigator.FaceTargetChaseDistance = Math.Max(navigator.FaceTargetChaseDistance, 80f);
+                navigator.StoppingDistance = Mathf.Clamp(navigator.StoppingDistance <= 0f ? 4f : navigator.StoppingDistance, 3f, 10f);
+                navigator.SetCurrentSpeed(BaseNavigator.NavigationSpeed.Fast);
+
+                if (target != null)
+                {
+                    navigator.SetFacingDirectionEntity(target);
+                }
+
+                var moved = navigator.SetDestination(destination, BaseNavigator.NavigationSpeed.Fast, 0f, Math.Max(6f, config.Spawn.NavmeshSampleDistance));
+                TryInvoke(navigator, "Think", 0.1f);
+                TryInvoke(navigator, "UpdateNavigation", 0.1f);
+                TryInvoke(navigator, "UpdateMovement", 0.1f);
+                return moved;
+            }
+            catch (Exception ex)
+            {
+                if (config.DebugSpawnDetails)
+                {
+                    PrintWarning($"Legacy BaseNavigator.SetDestination failed for {ShortPrefab(bot?.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                return false;
+            }
+        }
+
+        private bool TryKickLegacyCombat(BaseCombatEntity bot, BasePlayer target)
+        {
+            if (bot == null || target == null)
+            {
+                return false;
+            }
+
+            var started = false;
+            var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
+
+            if (brain != null)
+            {
+                var distance = Vector3.Distance(bot.transform.position, target.transform.position);
+
+                brain.AllowedToSleep = false;
+                brain.sleeping = false;
+                brain.HostileTargetsOnly = false;
+                brain.IgnoreSafeZonePlayers = false;
+                brain.RefreshKnownLOS = true;
+                brain.SenseTypes |= EntityType.Player;
+                brain.SenseRange = Math.Max(brain.SenseRange, distance + 30f);
+                brain.TargetLostRange = Math.Max(brain.TargetLostRange, distance + 60f);
+                brain.ListenRange = Math.Max(brain.ListenRange, distance + 30f);
+                brain.AttackRangeMultiplier = Math.Max(brain.AttackRangeMultiplier, 1.4f);
+                brain.mainInterestPoint = target.transform.position;
+
+                SeedLegacySenses(brain, bot, target);
+                TryInvoke(brain, "SetThinkMode", AIThinkMode.FixedUpdate);
+                TryInvoke(brain, "SwitchToState", AIState.Chase, 0);
+                TryInvoke(brain, "DoThink");
+            }
+
+            var attacker = bot as IAIAttack;
+
+            if (attacker == null)
+            {
+                try
+                {
+                    attacker = bot.GetComponent<IAIAttack>() ?? bot.GetComponentInChildren<IAIAttack>(true);
+                }
+                catch
+                {
+                }
+            }
+
+            if (attacker != null)
+            {
+                try
+                {
+                    started = attacker.StartAttacking(target);
+                    attacker.AttackTick(0.1f, target, true);
+                }
+                catch (Exception ex)
+                {
+                    if (config.DebugSpawnDetails)
+                    {
+                        PrintWarning($"Legacy IAIAttack.StartAttacking failed for {ShortPrefab(bot.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                    }
+                }
+            }
+
+            if (!started && target != null)
+            {
+                started = TryInvokeBool(bot, "StartAttacking", target);
+            }
+
+            return started;
+        }
+
+        private void SeedLegacySenses(BaseAIBrain brain, BaseCombatEntity bot, BasePlayer target)
+        {
+            if (brain == null || bot == null || target == null)
+            {
+                return;
+            }
+
+            var senses = brain.Senses;
+
+            if (senses == null)
+            {
+                return;
+            }
+
+            senses.hostileTargetsOnly = false;
+            senses.ignoreSafeZonePlayers = false;
+            senses.refreshKnownLOS = true;
+            senses.senseTypes |= EntityType.Player;
+            senses.maxRange = Math.Max(senses.maxRange, Vector3.Distance(bot.transform.position, target.transform.position) + 30f);
+            senses.targetLostRange = Math.Max(senses.targetLostRange, senses.maxRange + 30f);
+            senses.LastThreatTimestamp = Time.time;
+            senses.TimeInAgressiveState = Math.Max(senses.TimeInAgressiveState, 0.1f);
+
+            var memory = senses.Memory;
+
+            if (memory != null)
+            {
+                memory.SetKnown(target, bot, senses);
+                memory.SetLOS(target, true);
+                AddMemoryEntity(memory.Players, target);
+                AddMemoryEntity(memory.Targets, target);
+                AddMemoryEntity(memory.Threats, target);
+                memory.LOS.Add(target);
+            }
+
+            TryInvoke(senses, "DelaySenseUpdate", 0f);
+            TryInvoke(senses, "UpdateKnownPlayersLOS");
+            TryInvoke(senses, "UpdateSenses");
+        }
+
+        private void AddMemoryEntity(List<BaseEntity> list, BaseEntity entity)
+        {
+            if (list == null || entity == null || list.Contains(entity))
+            {
+                return;
+            }
+
+            list.Add(entity);
+        }
+
+        private Vector3 LegacyRoamDestination(Vector3 origin)
+        {
+            var radius = Math.Max(12f, config.Spawn.GroupSpawnRadius * 3f);
+            var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            var candidate = origin + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
+            candidate.y = TerrainHeight(candidate) + 0.25f;
+
+            if (NavMesh.SamplePosition(candidate, out var hit, Math.Max(6f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas)
+                && !IsUnderWater(hit.position)
+                && !IsBlockedSafeZoneSpawn(hit.position))
+            {
+                return hit.position;
+            }
+
+            return origin;
+        }
+
+        private Vector3 LegacyMoveDestination(Vector3 origin, BasePlayer target)
+        {
+            if (target == null)
+            {
+                return LegacyRoamDestination(origin);
+            }
+
+            var targetPosition = target.transform.position;
+            var delta = targetPosition - origin;
+            delta.y = 0f;
+            var distance = delta.magnitude;
+
+            if (distance <= 3f)
+            {
+                return origin;
+            }
+
+            var step = Mathf.Clamp(distance - 12f, 18f, 45f);
+            var candidate = origin + delta.normalized * step;
+            candidate.y = TerrainHeight(candidate) + 0.25f;
+
+            if (NavMesh.SamplePosition(candidate, out var hit, Math.Max(12f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas)
+                && !IsUnderWater(hit.position)
+                && !IsBlockedSafeZoneSpawn(hit.position))
+            {
+                return hit.position;
+            }
+
+            if (NavMesh.SamplePosition(targetPosition, out hit, Math.Max(12f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas)
+                && !IsUnderWater(hit.position)
+                && !IsBlockedSafeZoneSpawn(hit.position))
+            {
+                return hit.position;
+            }
+
+            return LegacyRoamDestination(origin);
+        }
+
+        private BasePlayer NearestRealPlayer(Vector3 position)
+        {
+            return BasePlayer.activePlayerList
+                .Where(player => IsRealPlayer(player) && player.IsConnected && !player.IsDead() && !player.IsSleeping() && !ShouldIgnoreSafeZonePlayer(player))
+                .OrderBy(player => Vector3.Distance(position, player.transform.position))
+                .FirstOrDefault();
+        }
+
+        private Component FindComponentByTypeName(BaseCombatEntity bot, string typeName)
+        {
+            return FindComponentsByTypeName(bot, typeName).FirstOrDefault();
+        }
+
+        private bool TryPlaceUnityNavMeshAgent(Component rustAgent, Vector3 navPosition)
+        {
+            if (!TryGetUnityNavMeshAgent(rustAgent, out var unityAgent))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!unityAgent.enabled)
+                {
+                    unityAgent.enabled = true;
+                }
+
+                if (!unityAgent.isOnNavMesh)
+                {
+                    unityAgent.Warp(navPosition);
+                }
+
+                if (!unityAgent.isOnNavMesh)
+                {
+                    return false;
+                }
+
+                unityAgent.Warp(navPosition);
+                return unityAgent.isOnNavMesh;
+            }
+            catch (Exception ex)
+            {
+                if (config?.DebugSpawnDetails == true)
+                {
+                    PrintWarning($"Native AI Unity NavMeshAgent placement failed: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                return false;
+            }
+        }
+
+        private bool TryGetUnityNavMeshAgent(Component rustAgent, out NavMeshAgent unityAgent)
+        {
+            unityAgent = null;
+
+            if (rustAgent == null)
+            {
+                return false;
+            }
+
+            var args = new object[] { null };
+
+            if (TryInvokeBool(rustAgent, "TryGetAgent", args) && args[0] is NavMeshAgent agent)
+            {
+                unityAgent = agent;
+                return unityAgent != null;
+            }
+
+            try
+            {
+                unityAgent = rustAgent.GetComponent<NavMeshAgent>() ?? rustAgent.GetComponentInChildren<NavMeshAgent>(true);
+            }
+            catch
+            {
+            }
+
+            return unityAgent != null;
+        }
+
+        private bool IsGen2UnityAgentPlaced(Component rustAgent)
+        {
+            if (!TryGetUnityNavMeshAgent(rustAgent, out var unityAgent))
+            {
+                return false;
+            }
+
+            try
+            {
+                return unityAgent.enabled && unityAgent.isActiveAndEnabled && unityAgent.isOnNavMesh;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private List<Component> FindComponentsByTypeName(BaseCombatEntity bot, string typeName)
+        {
+            var matches = new List<Component>();
+
+            if (bot == null || string.IsNullOrWhiteSpace(typeName))
+            {
+                return matches;
+            }
+
+            try
+            {
+                foreach (var component in bot.GetComponentsInChildren<Component>(true) ?? new Component[0])
+                {
+                    if (component == null)
+                    {
+                        continue;
+                    }
+
+                    var type = component.GetType();
+                    var fullName = type.FullName ?? "";
+
+                    if (fullName.Equals(typeName, StringComparison.Ordinal) || type.Name.Equals(typeName, StringComparison.Ordinal))
+                    {
+                        matches.Add(component);
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return matches;
+        }
+
+        private bool TryInvokeBool(object target, string methodName, params object[] args)
+        {
+            var result = TryInvoke(target, methodName, args);
+            return result is bool value && value;
+        }
+
+        private object TryInvoke(object target, string methodName, params object[] args)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(methodName))
+            {
+                return null;
+            }
+
+            try
+            {
+                var methods = target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var method = methods.FirstOrDefault(candidate => candidate.Name == methodName && candidate.GetParameters().Length == args.Length);
+
+                return method?.Invoke(target, args);
+            }
+            catch (Exception ex)
+            {
+                if (config?.DebugSpawnDetails == true)
+                {
+                    PrintWarning($"Native AI call {target.GetType().Name}.{methodName} failed: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                return null;
+            }
+        }
+
+        private string BotRuntimeDiagnostics(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (bot == null || runtime == null)
+            {
+                return "type=none";
+            }
+
+            return $"type={runtime.EntityType}, ai={runtime.AiMode}, gen2={HasGen2Components(bot)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+        }
+
+        private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (runtime?.NativeGen2 == true)
+            {
+                return NativeSenseHasTarget(bot) ? "gen2" : "none";
+            }
+
+            var npc = bot as NPCPlayer;
+
+            if (npc != null)
+            {
+                try
+                {
+                    if (npc.HasPath)
+                    {
+                        return "legacy:path";
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+
+            if (navigator != null)
+            {
+                try
+                {
+                    if (navigator.HasPath)
+                    {
+                        return "legacy:path";
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return NearestRealPlayer(bot.transform.position) != null ? "legacy:player" : "none";
+        }
+
+        private string BotNavStatus(BaseCombatEntity bot)
+        {
+            if (bot == null)
+            {
+                return "none";
+            }
+
+            var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+
+            if (navigator != null)
+            {
+                return $"legacy:{navigator.GetType().Name},{LegacyNavDiagnostics(bot)}";
+            }
+
+            var agent = FindComponentByTypeName(bot, "Rust.Ai.Gen2.RustNavMeshAgent");
+
+            if (agent == null)
+            {
+                return "none";
+            }
+
+            var args = new object[] { bot.transform.position, new NavMeshHit() };
+            var navPosition = WorldToNavMeshPosition(bot, bot.transform.position);
+            args[0] = navPosition;
+            var sampled = TryInvokeBool(agent, "IsPositionOnNavmesh", args);
+            return $"gen2:unity={UnityNavMeshAgentStatus(agent)},sample={(sampled ? "on" : "off")}";
+        }
+
+        private string LegacyNavDiagnostics(BaseCombatEntity bot)
+        {
+            var navigator = bot?.GetComponent<BaseNavigator>() ?? bot?.GetComponentInChildren<BaseNavigator>();
+            var npc = bot as NPCPlayer;
+            var parts = new List<string>();
+
+            if (npc != null)
+            {
+                parts.Add($"npcPath={SafeBool(() => npc.HasPath)}");
+                parts.Add($"dormant={SafeBool(() => npc.IsDormant)}");
+            }
+
+            if (navigator != null)
+            {
+                parts.Add($"navPath={SafeBool(() => navigator.HasPath)}");
+                parts.Add($"stuck={SafeBool(() => navigator.StuckOffNavmesh)}");
+                parts.Add($"navType={SafeString(() => navigator.CurrentNavigationType.ToString())}");
+                parts.Add($"dest={FormatVectorSafe(SafeVector(() => navigator.Destination))}");
+            }
+            else
+            {
+                parts.Add("nav=missing");
+            }
+
+            parts.Add(AiConVarStatus());
+            parts.Add(LegacyCombatDiagnostics(bot));
+            return string.Join(",", parts);
+        }
+
+        private string AiConVarStatus()
+        {
+            try
+            {
+                return $"aiMove={ConVar.AI.move},aiNavthink={ConVar.AI.navthink},unityNav={ConVar.AI.useUnityNavmesh},navDisabled={Rust.Ai.AiManager.nav_disable}";
+            }
+            catch
+            {
+                return "aiConvars=unknown";
+            }
+        }
+
+        private string LegacyCombatDiagnostics(BaseCombatEntity bot)
+        {
+            if (bot == null)
+            {
+                return "combat=none";
+            }
+
+            var parts = new List<string>();
+            var target = NearestRealPlayer(bot.transform.position);
+            var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
+            var attacker = bot as IAIAttack;
+
+            if (attacker == null)
+            {
+                try
+                {
+                    attacker = bot.GetComponent<IAIAttack>() ?? bot.GetComponentInChildren<IAIAttack>(true);
+                }
+                catch
+                {
+                }
+            }
+
+            if (brain != null)
+            {
+                parts.Add($"brain={brain.GetType().Name}");
+                parts.Add($"state={SafeString(() => brain.CurrentState?.StateType.ToString() ?? "none")}");
+                parts.Add($"brainSleep={SafeBool(() => brain.sleeping)}");
+
+                var senses = brain.Senses;
+
+                if (senses != null)
+                {
+                    parts.Add($"threat={EntityLabel(SafeEntity(() => senses.GetNearestThreat(1f)), target)}");
+                    parts.Add($"senseTarget={EntityLabel(SafeEntity(() => senses.GetNearestTarget(1f)), target)}");
+                    parts.Add($"los={SafeBool(() => target != null && senses.Memory != null && senses.Memory.IsLOS(target))}");
+                }
+            }
+            else
+            {
+                parts.Add("brain=missing");
+            }
+
+            if (attacker != null)
+            {
+                parts.Add("attackIf=True");
+                parts.Add($"canAttack={SafeBool(() => target != null && attacker.CanAttack(target))}");
+                parts.Add($"inRange={LegacyAttackRangeStatus(attacker, target)}");
+                parts.Add($"ammo={SafeString(() => attacker.GetAmmoFraction().ToString("0.00", CultureInfo.InvariantCulture))}");
+                parts.Add($"cooldown={SafeBool(() => attacker.IsOnCooldown())}");
+                parts.Add($"best={EntityLabel(SafeEntity(() => attacker.GetBestTarget()), target)}");
+            }
+            else
+            {
+                parts.Add("attackIf=False");
+            }
+
+            parts.Add($"held={LegacyHeldWeaponStatus(bot)}");
+            return $"combat:{string.Join("/", parts)}";
+        }
+
+        private string LegacyAttackRangeStatus(IAIAttack attacker, BaseEntity target)
+        {
+            if (attacker == null || target == null)
+            {
+                return "none";
+            }
+
+            try
+            {
+                float distance;
+                return $"{attacker.IsTargetInRange(target, out distance)}@{distance.ToString("0.0", CultureInfo.InvariantCulture)}";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private string LegacyHeldWeaponStatus(BaseCombatEntity bot)
+        {
+            var player = bot as BasePlayer;
+
+            if (player == null)
+            {
+                return "none";
+            }
+
+            try
+            {
+                var activeItem = player.GetActiveItem();
+
+                if (activeItem == null)
+                {
+                    return "none";
+                }
+
+                var held = activeItem.GetHeldEntity();
+                return $"{activeItem.info?.shortname ?? "unknown"}:{held?.GetType().Name ?? "noheld"}";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private BaseEntity SafeEntity(Func<BaseEntity> read)
+        {
+            try
+            {
+                return read();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private string EntityLabel(BaseEntity entity, BasePlayer expectedTarget)
+        {
+            if (entity == null)
+            {
+                return "none";
+            }
+
+            if (expectedTarget != null && entity == expectedTarget)
+            {
+                return "player";
+            }
+
+            return entity.GetType().Name;
+        }
+
+        private bool SafeBool(Func<bool> read)
+        {
+            try
+            {
+                return read();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string SafeString(Func<string> read)
+        {
+            try
+            {
+                return read() ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        private Vector3 SafeVector(Func<Vector3> read)
+        {
+            try
+            {
+                return read();
+            }
+            catch
+            {
+                return Vector3.zero;
+            }
+        }
+
+        private string FormatVectorSafe(Vector3 position)
+        {
+            return position == Vector3.zero ? "none" : FormatVector(position);
+        }
+
+        private string UnityNavMeshAgentStatus(Component rustAgent)
+        {
+            if (!TryGetUnityNavMeshAgent(rustAgent, out var unityAgent))
+            {
+                return "missing";
+            }
+
+            try
+            {
+                return unityAgent.enabled
+                    ? unityAgent.isOnNavMesh ? "on" : "off"
+                    : "disabled";
+            }
+            catch
+            {
+                return "error";
+            }
+        }
+
+        private bool NativeSenseHasTarget(BaseCombatEntity bot)
+        {
+            var sense = FindComponentByTypeName(bot, "Rust.Ai.Gen2.SenseComponent");
+
+            if (sense == null)
+            {
+                return false;
+            }
+
+            var targetField = sense.GetType().GetField("Target", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            if (targetField?.GetValue(sense) is BaseEntity currentTarget && currentTarget != null && !currentTarget.IsDestroyed)
+            {
+                return true;
+            }
+
+            var args = new object[] { null };
+            return TryInvokeBool(sense, "FindTarget", args);
+        }
+
+        private string EntityTypeName(BaseEntity entity)
+        {
+            return entity == null ? "none" : entity.GetType().FullName ?? entity.GetType().Name;
+        }
+
+        private string ShortPrefab(string prefab)
+        {
+            if (string.IsNullOrWhiteSpace(prefab))
+            {
+                return "none";
+            }
+
+            var clean = prefab.Replace("\\", "/").Trim('/');
+            var index = clean.LastIndexOf('/');
+            return index >= 0 ? clean.Substring(index + 1) : clean;
+        }
+
+        private Vector3 WorldToNavMeshPosition(BaseEntity entity, Vector3 position)
+        {
+            if (entity == null)
+            {
+                return position;
+            }
+
+            try
+            {
+                return entity.WorldToNavMeshSpace.MultiplyPoint3x4(position);
+            }
+            catch
+            {
+                return position;
+            }
+        }
+
+        private Vector3 NavMeshToWorldPosition(BaseEntity entity, Vector3 position)
+        {
+            if (entity == null)
+            {
+                return position;
+            }
+
+            try
+            {
+                return entity.NavMeshToWorldSpace.MultiplyPoint3x4(position);
+            }
+            catch
+            {
+                return position;
+            }
         }
 
         private bool IsBlockedSafeZoneSpawn(Vector3 position)
@@ -2482,19 +3682,19 @@ namespace Oxide.Plugins
             return Mathf.Sqrt(x * x + z * z);
         }
 
-        private bool IsLiveBot(BasePlayer bot)
+        private bool IsLiveBot(BaseCombatEntity bot)
         {
             return bot != null && !bot.IsDestroyed && !bot.IsDead();
         }
 
-        private BotRuntime RuntimeFor(BasePlayer player)
+        private BotRuntime RuntimeFor(BaseCombatEntity entity)
         {
-            if (player == null)
+            if (entity == null)
             {
                 return null;
             }
 
-            activeBots.TryGetValue(player, out var runtime);
+            activeBots.TryGetValue(entity, out var runtime);
             return runtime;
         }
 
@@ -2672,7 +3872,7 @@ namespace Oxide.Plugins
             return string.Join(" ", arg.Args.Skip(index).Select(value => value.ToString()).Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
         }
 
-        private List<KeyValuePair<BasePlayer, BotRuntime>> ActiveBotEntries()
+        private List<KeyValuePair<BaseCombatEntity, BotRuntime>> ActiveBotEntries()
         {
             CleanupInactiveBots();
 
@@ -2769,6 +3969,27 @@ namespace Oxide.Plugins
         private string NormalizeSpawnMode(string value)
         {
             return TryNormalizeSpawnMode(value, out var mode) ? mode : SpawnModeNearPlayers;
+        }
+
+        private bool IsGen2NativeMode()
+        {
+            return NormalizeAiRuntimeMode(config?.AiRuntimeMode) == AiRuntimeModeGen2Native;
+        }
+
+        private string NormalizeAiRuntimeMode(string value)
+        {
+            var normalized = (value ?? "")
+                .Trim()
+                .ToLowerInvariant()
+                .Replace("-", "_")
+                .Replace(" ", "_");
+
+            if (normalized == "legacy" || normalized == "legacy_scientist" || normalized == "baseplayer")
+            {
+                return AiRuntimeModeLegacyScientist;
+            }
+
+            return AiRuntimeModeGen2Native;
         }
 
         private bool TryNormalizeSpawnMode(string value, out string mode)

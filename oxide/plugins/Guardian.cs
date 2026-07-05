@@ -10208,8 +10208,26 @@ namespace Oxide.Plugins
 
             public static bool IsFriend(BasePlayer a, BasePlayer b) =>
                 IsFriend(a, b.userID);
-            public static bool IsFriend(BasePlayer player, ulong userid) =>
-                (_instance?.Friends?.Call<bool>("IsFriend", player.userID, userid) ?? false);
+            public static bool IsFriend(BasePlayer player, ulong userid)
+            {
+                var friends = _instance?.Friends;
+
+                if((player == null) || (friends == null) || !friends.IsLoaded)
+                {
+                    return false;
+                }
+
+                var result = friends.Call("IsFriend", player.UserIDString, userid.ToString());
+
+                if(result is bool is_friend)
+                {
+                    return is_friend;
+                }
+
+                result = friends.Call("HasFriend", userid.ToString(), player.UserIDString);
+
+                return (result is bool has_friend) && has_friend;
+            }
 
             public static bool IsInactive(BasePlayer player) =>
                 player.IsDead() || player.IsSleeping() || !player.IsConnected;

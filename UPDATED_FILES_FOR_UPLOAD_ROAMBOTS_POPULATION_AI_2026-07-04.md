@@ -1,60 +1,45 @@
-Raidlands roam bots population, spawn-mode, safe-zone, test-anchor, land-spawn, nav-diagnostic, runtime-toggle, and native-prefab fix - 2026-07-04
+Raidlands Gen2 native land roam bots rollout - 2026-07-04
 
 Context:
-- Live status showed RaidlandsRoamBots enabled=False, target=15, active=130.
-- That means disabled state was not equivalent to no active bots, and the active bot count was far above the intended target.
-- The old config also preferred native NPC spawn groups and native spawn-group prefabs, which can cluster bots at road/monument NPC points and inherit unsuitable native NPC prefab behavior.
-- The current testing direction is to use Rust's newer underwater/deep-sea NPC prefab and spawn bots near connected players.
-- v0.1.12 live testing showed generated near-player positions were not valid for the NPC navigator: "Agent still not on navmesh after a warp."
-- v0.1.13 live testing showed native near-player spawn points could cluster bots at Outpost/safe zones.
-- v0.1.14 live testing still failed navigator placement and needs smaller, targeted tests around one player.
-- v0.1.15 live testing spawned one active bot, but raidbots.goto moved the tester to deep water and no visible land NPC was present.
-- v0.1.16 live testing found valid land scientist prefabs still fail the synchronous navigator placement gate before becoming active.
-- v0.1.17 live testing showed the live config still had Require NPC Navigator Placement=True, so the relaxed navigator test was not actually running.
-- v0.1.18 live testing proved navcheck off allows stationary bots, while navcheck on prevents the current generic scientist prefab from becoming active.
+- Live testing proved the plugin can spawn and teleport to bots, but the accepted legacy scientists can remain stuck standing.
+- The new direction is native AI first: use Rust's Gen2/naval scientist mechanics for land roamers, and keep legacy BasePlayer scientist/Kits behavior only as fallback.
+- v0.2.0 live testing accepted ScientistNPC2 with gen2=True, target=True, and sample navmesh=True, but Unity still logged "ResetPath/DistanceToEdge can only be called on an active agent that has been placed on a NavMesh" and the NPC crouched/stood in place.
+- v0.2.1 live testing proved the Gen2 prefab is not usable at the tested mainland spawn points because the internal Unity NavMeshAgent is not active on navmesh. Legacy fallback spawned, but still needed an explicit movement/target kick.
+- v0.2.2 live testing proved the native spawn-group prefab is tried first and movement kick methods are called, but the bot still stood in place; the old moved=True log did not prove BaseNavigator produced a path.
+- v0.2.3 live testing proved the server had navmesh globally disabled; after `aimanager.nav_disable false`, legacy fallback bots receive valid NavMesh paths and move, but still need an explicit combat/target nudge to shoot.
+- v0.2.4 live testing proved the combat nudge works, but the bot still spawned as a legacy junkpile scientist because the native spawn-group preferred prefab jumped ahead of the Gen2 list; it also spawned too far away for fast MP5 engagement.
+- v0.2.5 live testing proved Gen2 candidates are now first, but mainland placement still fails at Rust's agent layer with "No navmesh areas matching agent type"; the known working junkpile scientist fallback needs to remain in the list.
+- This local repo is a staging tree; live Oxide reload is still the final runtime proof.
 
 Rust server files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
 - oxide/config/RaidlandsRoamBots.json
 
 Important behavior changes:
-- RaidlandsRoamBots is now v0.1.19.
-- The test prefab list now uses land scientist prefabs first and removes the underwater dweller from the active testing config.
-- Spawn mode is now configurable with two saved values: near_players and random.
-- The default/test config uses near_players with native NPC spawn points 80m-300m from connected players.
-- Generated near-player positions are disabled by default because they caused navigator placement failures.
-- raidbots.enable, raidbots.target, and raidbots.mode clear the spawn retry timer so failed-test cooldowns do not block the next test.
-- Disabled config reload now despawns active roam bots.
-- Enabled maintenance trims active bots above the configured target population.
-- The target population is treated as the total active bot cap, and deaths/leashes schedule maintain so bots refill back to target.
-- raidbots.spawn no longer spawns bots while the plugin is disabled.
-- Manual raidbots.spawn is capped by remaining target-population room.
-- Native NPC spawn groups and native spawn-group prefabs are disabled in config by default.
-- Native spawn-group fallback now uses public SpawnGroup fields instead of protected Rust methods.
-- Safe-zone spawn filtering is enabled by default and rejects spawn candidates inside or near safe zones.
-- Players in safe zones are ignored as near-player spawn anchors and ignored as roam-bot combat targets.
-- Bot damage against a real player currently in a safe zone is blocked.
-- Near-player mode can now be anchored to one player by name or SteamID with raidbots.anchor.
-- The testing config is anchored to ababmxking, target population 1, minimum 1, maximum 3, and solo-only bot teams.
-- Spawn failure retry is reduced to 30 seconds for faster test loops.
-- The missing assets/prefabs/npc/scientist/underwaterlabscientist.prefab candidate was removed to keep live test logs focused on real prefabs.
-- Land-spawn filtering is stricter: WaterLevel checks, ocean/deep-water checks, and a final post-navigator position check prevent active bots from being accepted underwater.
-- When land spawns are required, underwaterdweller and tunneldweller prefabs are skipped even if an older live config still contains them.
-- The moving test config now sets Require NPC Navigator Placement=true and Prefer Native Spawn Group Prefabs=true.
-- raidbots.testsetup now applies the moving-NPC profile: one anchored bot, native spawn-group prefabs, land filtering, navcheck on, and debug on.
-- Native preferred prefabs are filtered so tunnel and underwater NPC prefabs are skipped while land spawns are required.
-- Debug Spawn Details is enabled for this test pass.
-- New admin command: raidbots.diag
-- New admin command: raidbots.testsetup [player name or steam id]
-- New admin command: raidbots.navcheck on|off
-- New admin command: raidbots.debug on|off
-- New admin command: raidbots.land on|off
-- New admin command: raidbots.nativeprefabs on|off
-- New admin command: raidbots.target <count>
-- New admin command: raidbots.mode near_players
-- New admin command: raidbots.mode random
-- New admin command: raidbots.anchor <player name or steam id>
-- New admin command: raidbots.anchor clear
+- RaidlandsRoamBots is now v0.2.6.
+- Active roam bots are tracked as BaseCombatEntity, not only BasePlayer, so Gen2 ScientistNPC2 entities can be accepted and managed.
+- Default AI runtime mode is gen2_native.
+- Gen2/native prefab candidates are tried first:
+  - assets/rust.ai/agents/npcplayer/humannpc/scientist/gen2/scientist2.prefab
+  - assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_ptboat.prefab
+  - assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_rhib.prefab
+- Legacy land scientist prefabs remain as fallback when Allow Legacy Scientist Fallback is true.
+- Native Gen2 bots do not strip inventory or call Kits.GiveKit; their stats use kit_name=native_gen2.
+- Legacy BasePlayer fallback bots can still use Kits loadouts.
+- Gen2 activation wakes NpcSleepingComponent before the final placement check, samples/warps the RustNavMeshAgent, verifies the underlying Unity NavMeshAgent is active on navmesh, seeds SenseComponent with a simulated sighting of the nearest real player, sets an initial destination to that target, and force-ticks FSMComponent.
+- Gen2 diagnostics now distinguish the Rust navmesh sample from the internal Unity agent state, for example nav=gen2:unity=on,sample=on.
+- When a native spawn group provides a Gen2/native preferred prefab for its spawn point, that paired native prefab is tried before the generic Gen2 candidate list.
+- In Gen2 mode, legacy spawn-group preferred prefabs no longer jump ahead of the configured Gen2/native prefab candidates.
+- The known working legacy fallback `scientistnpc_junkpile_pistol.prefab` is now explicitly included after the Gen2/native candidates.
+- The moving test setup now uses a 45m-180m near-player window, more native spawn-point attempts, and generated near-player fallback positions so spawning is less brittle.
+- Legacy NPCPlayer fallback bots now move toward shorter 18m-45m nav-sampled hops toward the anchor instead of one long direct destination.
+- Legacy movement kicks now force BaseNavigator destination recalculation with updateInterval=0 and log npcCommand, navCommand, navPath, dormant, stuck, navType, destination, and AI convars.
+- Legacy fallback combat kicks now seed the old scientist brain senses/memory with the nearest real player, call the generic IAIAttack interface, and log attackStarted plus combat diagnostics.
+- Legacy fallback movement is driven every 2 seconds while enabled, and the final navigator command now runs after the combat nudge so attack setup does not clear the movement path.
+- raidbots.testsetup is wrapped with a plugin warning so a future setup failure reports raidbots.testsetup failed: <exception>.
+- raidbots.status now reports AI mode, native/legacy active counts, legacy fallback, native kit behavior, and native roam prefab group count.
+- raidbots.diag and raidbots.list now include entity type, AI mode, Gen2 component presence, nav status, target status, and prefab.
+- Stats file shape is unchanged: oxide/data/RaidlandsRoamBots/stats.json still has players and bots, so WebsiteVipBridge does not need a contract change.
 
 Recommended live RCON order:
 - raidbots.disable
@@ -62,22 +47,29 @@ Recommended live RCON order:
 - Upload oxide/plugins/RaidlandsRoamBots.cs
 - Upload oxide/config/RaidlandsRoamBots.json
 - oxide.reload RaidlandsRoamBots
-- raidbots.status
 - raidbots.testsetup ababmxking
 - raidbots.diag
 - raidbots.enable 1
-- Wait 30 seconds, then run raidbots.status again.
-- If the first bot spawns and behaves, raise slowly with raidbots.target 2, then raidbots.target 3.
+- Wait 1 second for the delayed Gen2 AI kick.
+- raidbots.list ababmxking
+- raidbots.goto ababmxking 1
 
 Expected verification:
-- After reload while disabled: enabled=False, active=0.
-- Status should show mode=near_players, anchor=ababmxking, target=1, and near-player anchors=1 if ababmxking is connected, awake, and outside safe zones.
-- Near-player anchors should not include players who are standing in Outpost, Bandit Camp, or another safe zone.
-- raidbots.diag should show requireNavigator=True, requireLand=True, activePrefabs beginning with the native preferred prefab when a matching spawn group is found, then print anchor/candidate terrain-water-safe-zone details.
-- After raidbots.enable 1, active should settle at or below 1 while the anchor player is eligible.
-- raidbots.list ababmxking should show the bot at a land/road/monument position, not a negative-Y deep-water position.
-- If no real players are connected, near_players mode should wait without spawning instead of falling back to random.
-- If active remains 0, check whether ababmxking is within 300m of any native NPC spawn point; for testing, move near roads/monuments or temporarily raise Near Player Maximum Distance.
-- If active remains 0 while everyone is at Outpost/Bandit, move one tester out of the safe zone and run raidbots.status again.
-- If active is higher than 15 after enable, maintenance should log a trim message and bring it down on the next maintain tick.
-- Watch console for "Failed to compile: RaidlandsRoamBots" after reload; the patched file passed a local compile check against RustDedicated_Data/Managed assemblies.
+- After reload while disabled: enabled=False and active=0.
+- raidbots.status should show ai=gen2_native, target=1, active=0 before enable, legacyFallback=True, and gen2Kits=False.
+- raidbots.diag may show activePrefabs beginning with the native spawn-group prefab when the selected spawn point provides one, followed by the Gen2/naval scientist candidates.
+- After `raidbots.testsetup`, `raidbots.diag` should show activePrefabs beginning with `scientist2.prefab`, not `scientistnpc_junkpile_pistol.prefab`.
+- After raidbots.enable 1, raidbots.list should show a land position and diagnostics like ai=gen2_native, gen2=True, nav=gen2:unity=on,sample=on when the native Gen2 path succeeds.
+- Current live evidence suggests mainland Gen2 may continue to fail with "No navmesh areas matching agent type"; in that case the expected fallback is `ai=legacy_scientist` using `scientistnpc_junkpile_pistol.prefab`.
+- If Gen2 cannot attach to the mainland navmesh, fallback should show ai=legacy_scientist and target=legacy:path after the movement kick.
+- The bot should move, acquire or react to players, and no longer stand inert.
+- If it moves but does not shoot, paste the Legacy move command lines plus raidbots.list output; the important fields are attackStarted, combat, canAttack, inRange, ammo, held, threat, senseTarget, and best.
+- If it still stands inert, paste the Legacy move command lines plus raidbots.list output; the important fields are navCommand, navPath, aiMove, aiNavthink, unityNav, and navDisabled.
+- If diagnostics show sample=on but unity=off, the Rust-side sample is valid but the internal Unity NavMeshAgent is not actually placed; paste the delayed Gen2 AI kick line and any spawn warnings.
+- Killing the bot should increment the bot death count and player npc_kills in oxide/data/RaidlandsRoamBots/stats.json.
+- If Gen2 fails on the live map, legacy fallback may still spawn; raidbots.list will clearly show ai=legacy_scientist.
+- If active remains 0, paste the raidbots.diag output plus the spawn log lines after raidbots.enable 1.
+
+Relevant reloads:
+- oxide.reload RaidlandsRoamBots
+- Optional after behavior verification: oxide.reload WebsiteVipBridge to push the next scheduled stats snapshot sooner.

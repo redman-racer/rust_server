@@ -1,0 +1,12 @@
+{
+  "ApiBaseUrl": "https://raidlands.net",
+  "ServerId": "raidlands-main",
+  "SharedSecret": "",
+  "WipeKey": "",
+  "RenderName": "Icons",
+  "FileType (Jpg, Png)": "Jpg",
+  "ImageResolutionScale": 0.5,
+  "AutoPublishOnRustMapApiReady": true,
+  "AutoPublishDelaySeconds": 10,
+  "WebRequestTimeoutMilliseconds": 60000
+}

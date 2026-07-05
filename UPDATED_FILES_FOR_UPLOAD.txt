@@ -1,47 +1,18 @@
-Raidlands roaming player-like bots upload manifest
-Generated for the RaidlandsRoamBots rollout.
-
-Website files to upload:
-- database/migrations/022_bot_stats.sql
-- includes/stats.php
-- pages/leaderboard.php
-- pages/profile.php
-- server-plugins/WebsiteVipBridge.cs
-
-Website database migration:
-- Make sure existing migrations through database/migrations/021_group_owned_kit_permissions.sql are applied.
-- Then apply database/migrations/022_bot_stats.sql.
+Guardian friend lookup crash fix upload manifest
+Generated for the Guardian OnEntityTakeDamage / OnEntityDeath InvalidCastException fix.
 
 Rust server plugin files to upload:
-- oxide/plugins/RaidlandsRoamBots.cs
-- oxide/plugins/KDRScoreboard.cs
-- oxide/plugins/WebsiteVipBridge.cs
+- oxide/plugins/Guardian.cs
 
-Rust server config/data files to upload:
-- oxide/config/RaidlandsRoamBots.json
-- oxide/data/RaidlandsRoamBots/stats.json
+Reload after upload:
+- oxide.reload Guardian
 
-Reload after upload, in this order:
-- oxide.reload RaidlandsRoamBots
-- oxide.reload KDRScoreboard
-- oxide.reload WebsiteVipBridge
+Live smoke checks:
+- Watch the console for new Guardian errors after player-vs-player damage.
+- Confirm the old error does not return:
+  Failed to call hook 'OnEntityTakeDamage' on plugin 'Guardian v1.7.9' (InvalidCastException: Null object cannot be converted to a value type.)
+- If Guardian aim warnings continue, treat them as investigation signals only until Arkan, DeathNotes, or direct admin observation corroborates the shot.
 
-Disabled-first smoke check:
-- Confirm oxide/config/RaidlandsRoamBots.json has "Enabled": false.
-- Run raidbots.status and verify active=0.
-- Enable a small test population with raidbots.enable 10.
-- Run raidbots.status again and verify population, eligible kits, and team spread.
-
-Live behavior checks:
-- Bots should spawn on land/navmesh positions only and use native scientist NPC movement/awareness.
-- Bots should use eligible default-access gun kits: ak, lr300, m16, mp5, with raid as rare high tier.
-- Bot deaths should drop the equipped kit like a normal NPC corpse.
-- Bot damage, player NPC kills, and deaths by NPCs should not increment normal PvP KDR.
-- Leashed bots should despawn after combat distance/time and be replaced by the population maintainer.
-
-Stats sync checks:
-- Trigger a stats sync with oxide.reload WebsiteVipBridge or wait for the scheduled bridge sync.
-- Verify website ingest accepts npc_kills, deaths_by_npc, and bots in the stats snapshot.
-- Confirm player leaderboards show NPC Kills and Killed by NPCs.
-- Confirm the separate Bot K/D table renders for current wipe and all-time scopes.
-- Confirm in-game Scoreboards exposes NPC Kills, Killed by NPCs, and Bot K/D.
+Investigation note:
+- The refreshed Arkan data only persisted Spunky Unc AIM entries against Scientists at roughly 48-52m.
+- The 1559m SkullySlayer entries were only present in Guardian warnings, and they happened while Guardian's Friends API lookup was crashing.
