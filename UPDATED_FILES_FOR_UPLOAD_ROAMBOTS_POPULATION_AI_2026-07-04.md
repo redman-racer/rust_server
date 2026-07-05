@@ -1,7 +1,11 @@
-Raidlands roam bots player-like health and damage update - 2026-07-05
+Raidlands roam bots stuck-memory resilience update - 2026-07-05
 
 Current update:
-- RaidlandsRoamBots is now v0.3.25.
+- RaidlandsRoamBots is now v0.3.26.
+- Bots now remember recently failed movement destinations instead of repeatedly selecting the same blocked or no-progress point.
+- Failed blocked destinations, base-blocked paths, failed navigator commands, and repeated stuck/no-progress destinations are added to a per-bot bad-spot memory.
+- Recovery, cover, peek, retreat, investigate, flank, regroup, push, and roam destination sampling now avoid remembered bad spots until the memory expires.
+- `raidbots.list` now includes `badspots=...`, and the right-side debug panel now shows `Bad spots: <count> (<last reason>)`.
 - Bot skill health now stays in the player-like `100-120` HP band: casual `100`, average `110`, dangerous `120`.
 - Old high-health skill configs are normalized on plugin load, so stale `125/150/190` HP values should not recreate the endless hide-to-heal loop.
 - Bot healing fractions now use the effective Rust entity max health, so a body capped around `120` HP will not keep trying to heal toward an impossible `190`.
@@ -51,6 +55,9 @@ Current update:
   - `AI -> Grenade Avoidance Seconds`
   - `AI -> Smoke Screen Distance`
   - `AI -> Maximum Active Bot Utility Projectiles`
+  - `AI -> Stuck Memory Seconds`
+  - `AI -> Stuck Memory Radius`
+  - `AI -> Maximum Stuck Memory Points`
 
 Rust server files to upload for this update:
 - oxide/plugins/RaidlandsRoamBots.cs
@@ -65,6 +72,7 @@ Recommended live RCON order for this update:
 - Recheck the jungle/forest sight line from the screenshot at 70m-120m.
 - Shoot a bot after it has placed its first barricade; once the `12s` cooldown opens, it should be eligible to place another barricade if it is still exposed or its current wall is not effective cover.
 - Test a 40m-60m fight while the bot is taking worse trades. If hard cover is within the skill-scaled 3m-8m nearby window, it should move there and heal; if cover is farther, it should prefer barricade first.
+- Put a cliff, large rock, wall, or base edge between the bot and a likely retreat/search/cover route. Once it fails to make progress, `badspots` should increment and the next destination should avoid that remembered area for `AI -> Stuck Memory Seconds`.
 - Break LOS around 12m-42m and hold near cover/last-known position. A bot may choose `throw_grenade`; squadmates should move out of the danger zone instead of standing in the blast lane.
 - Hurt a bot while it is exposed around 10m-55m. A bot may choose `throw_smoke`, then retreat through the screen instead of pushing.
 - `raidbots.list ababmxking`
@@ -78,6 +86,7 @@ Expected verification for this update:
 - A dangerous bot that reaches about `120` HP should leave `cover_heal` / hide-to-heal behavior instead of waiting for an impossible high-health target.
 - Player-vs-bot and bot-vs-player hits should feel like normal Rust damage, with no casual damage penalty, dangerous damage bonus, incoming-damage handicap, or poor-range damage debuff from this plugin.
 - Utility playtests should show concrete `Utility:` reasons in the panel. Expected blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
+- Stuck/pathing playtests should show `badspots=...` in `raidbots.list` and `Bad spots:` in the side panel after a failed destination. The count should decay after the configured memory window.
 - A successful F1 throw should leave the bot in `GrenadeFlush`, spawn a real grenade, then move away or back to cover. A successful smoke throw should leave the bot in `Retreat` and move it away from the threat.
 - If the bot still gets perfect sight through foliage, paste the side panel `Sight:` line plus `raidbots.list ababmxking` from that same angle.
 

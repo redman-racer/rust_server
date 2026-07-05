@@ -1,4 +1,4 @@
-RaidlandsRoamBots v0.3.19 foliage-balance / slope-wall polish - 2026-07-05
+RaidlandsRoamBots v0.3.26 advanced stuck-memory update - 2026-07-05
 
 Rust server plugin files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
@@ -9,6 +9,7 @@ Rust server config files to upload:
 Documentation / handoff files:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 - UPDATED_FILES_FOR_UPLOAD.txt
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_POPULATION_AI_2026-07-04.md
 
 Reload after upload:
 - raidbots.nuke
@@ -16,70 +17,29 @@ Reload after upload:
 - raidbots.squadtest <optional-player-name-or-steamid>
 - raidbots.diag
 - raidbots.enable 3
-
-Squad/base/barricade test mode:
-- raidbots.nuke
-- oxide.reload RaidlandsRoamBots
-- raidbots.squadtest <optional-player-name-or-steamid>
-- raidbots.diag
-- raidbots.enable 3
 - raidbots.list
-- raidbots.diag
-- raidbots.decisions last 10
 
 Local verification:
 - JSON parse passed for oxide/config/RaidlandsRoamBots.json.
-- Roslyn compile check against RustDedicated_Data/Managed passed for RaidlandsRoamBots v0.3.19.
-- Remaining compiler warnings are existing unused future-phase fields and Oxide plugin references populated at runtime.
-- git diff --check only reported the repo's normal LF-to-CRLF warnings.
+- Roslyn compile check against RustDedicated_Data/Managed passed for RaidlandsRoamBots v0.3.26.
+- Remaining compiler warnings are expected unused future-phase fields and Oxide plugin references populated at runtime.
 
 Live smoke checks:
-- Confirm the plugin loads as RaidlandsRoamBots v0.3.19.
-- Confirm raidbots.squadtest refuses an unmatched anchor instead of saving it.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Use Random Land Fallback": false for test setup.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Debug UI Includes Anchor Player": true.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Barricade Cooldown Seconds": 18.0.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Vision Fov Degrees": 220.0, "Close Awareness Radius": 22.0, "Minimum Exposed Target Fraction": 0.25, and "Minimum Exposed Target Fraction To Shoot": 0.25.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Foliage Vision Check Radius": 0.65, "Maximum Clear Vision Through Foliage": 24.0, and "Foliage Hits To Block Vision": 2.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Maximum Active Bot Barricades": 12 and "Recycle Oldest Barricade When Cap Reached": true.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Retreat Wall Cover Distance": 10.0 and "Barricade Fight Commitment Seconds": 10.0.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Cover Arrival Distance": 1.75 and "Effective Cover Max Exposed Fraction": 0.35.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Barricade Prefab": "assets/prefabs/deployable/barricades/barricade.cover.wood_double.prefab".
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Damage Wall Chance Average": 1.0, "Low Health Cover Notice Chance Average": 0.95, and "Low Health Cover Threshold": 0.6.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Low Health Cover Heal Target Fraction": 0.85, "Passive Combat Heal Per Second": 1.5, "Syringe Fire Lock Seconds": 2.2, and "Syringe Cooldown Seconds": 8.0.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Auto Reload Bot Weapons": true.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Hard Stuck Failed Paths To Despawn": 30.
-- Confirm the side debug panel includes Sight: visible/foliage/solid/exposure/no_candidate plus Fire: ready/no_los/etc.
-- Confirm oxide/data/RaidlandsRoamBots/stats.json gains bot clan fields on bots plus a bot_clans aggregate object after bots spawn/fight.
-- Before spawning, confirm raidbots.diag reports anchors=1 or higher and debugViewers=1 or higher for the configured anchor player.
-- If active bots somehow end up outside floating-nameplate range, the static side panel should still show the closest active bot and its distance.
-- Confirm raidbots.list shows clan=<tag> and role=anchor/flanker/pusher in squad test mode.
-- Confirm only bots with their own LOS shoot; clan-shared memory should drive search/flank movement, not wallhack firing.
-- Confirm the side debug panel shows clan, role, base state, and active barricade count.
-- Base test: if the player moves inside a base boundary, bots should hold outside, reposition, or abandon instead of chasing/shooting into the base.
-- Foliage LOS test: put sparse bushes/branches between you and the bots at 40m-120m. Expected: a clearly visible player can still be acquired and fired on, but multiple brush/tree hits should now block or reduce confidence more often than v0.3.18. If dense foliage genuinely blocks the target, the side panel should show Sight: foliage with low/no exposure.
-- Damage wall test: after damaging an exposed average/dangerous bot in open ground, it should select place_barricade quickly, place a full-size real Wooden Barricade Cover, and hold/peek around it. Casual bots can still miss the cue by config.
-- Barricade hold test: after the side panel shows Wall: placed, the bot should move to the hold/tuck point behind the wall, not treat the wall itself as the cover point. Cover should become effective once the bot reaches the hold point, and it should be able to peek/shoot from the wall instead of only retreating.
-- Retreat-wall test: when an average/dangerous bot is low health and its retreat cover is farther than 10m, it should place a wall before trying to cross open ground.
-- Wall commitment test: after placing a wall, the bot should fight from the wall/hold point for the configured commitment window unless cover is compromised, the target moves out of useful range, or survival movement needs to re-plan.
-- Slope-wall test: if a wall is placed on uneven terrain, the bot should only accept a close behind-wall hold point. If no terrain-compatible hold exists, the panel should show Wall: hold_failed_slope and the bot should re-plan instead of running to fake cover 10m-15m away.
-- Always-shoot test: when the side panel shows LOS=Y, exposure at/above the shoot threshold, ammo above 0, and Heal is not syringe_lock, the bot should be able to shoot even if its state/action is Retreat, MoveToCover, Flank, SearchLastKnown, InvestigateSound, Regroup, or BarricadeHold.
-- Immediate-fire test: when a bot first gets LOS/exposure/ammo on a target, it should be able to start shooting from perception after its reaction delay instead of waiting until it has walked nearly into the player.
-- Fire diagnostic test: if Shooting=N while a target is visible, check the side panel's Fire line. Expected blockers are no_ammo, no_los, out_of_range, syringe_lock, target_in_base, no_target, no_attack_interface, or start_failed.
-- Ammo recovery test: active projectile weapons should not stay stuck at Ammo: 0.00. If Auto Reload Bot Weapons is true and the bot has a held gun, the magazine should be refilled before the no-ammo fire gate blocks shooting.
-- Syringe lock test: after an average/dangerous bot drops below 60% HP and reaches effective cover, the side panel may show Heal: syringe_lock for the configured short window. During that lock, Shooting=N is expected. Outside that lock, visible+ammo should allow shooting.
-- Passive heal test: bots below full HP should show Heal: passive and recover slowly while still fighting/moving. If passive healing brings them to roughly 85% before a syringe starts, they should clear low-health cover behavior and return to fight mode.
-- Low-health cover test: after an average/dangerous bot drops below 60% HP, it should still prefer place_barricade/retreat_to_cover for survival, but those movement actions should keep firing when LOS/ammo are valid and no syringe lock is active.
-- Compromised cover test: if a bot is near a remembered cover point but still shows LOS=Y with high exposure, the side panel should say Cover: compromised and the bot should re-plan instead of standing still to heal.
-- Wall diagnostic test: the side panel now includes Wall: placed/cooldown/no_clear_spot/cap_reached/etc. If a bot fails to wall, capture that line.
-- Wall cap / return-fire test: if the cap is reached, urgent wall placement should recycle the oldest bot wall and place the new one. If no_clear_spot is shown and the recent attacker is visible, the bot should stop preferring endless fallback retreat and can switch to acquire_visible_target/return fire while exposed.
-- Retreat loop test: if a retreating bot reaches its destination without effective cover and has no fresh contact, it should re-plan/search/roam instead of staying in Retreat forever.
-- Rear-contact test: shoot a retreating bot from behind while exposed. Recent attackers can now be reacquired outside the forward FOV cone, so LOS should recover when the ray is actually clear.
-- Hard-stuck cleanup test: if a bot sits on stuck=Y with repeated failed paths, it should prioritize stuck recovery; if it remains hard-stuck past the configured threshold, it despawns instead of standing as a fake/dead-shell combatant.
-- Lost-contact test: after contact around 150m-190m, break LOS and confirm clan members keep searching/pushing last-known or damage position during the fresh-contact window instead of immediately returning to neutral regroup.
-- Decision trace test: raidbots.decisions last 10 should summarize recent action, score, advisor status, fallback reason, and candidate counts.
+- Confirm the plugin loads as RaidlandsRoamBots v0.3.26.
+- Confirm oxide/config/RaidlandsRoamBots.json includes "Stuck Memory Seconds": 75.0, "Stuck Memory Radius": 9.0, and "Maximum Stuck Memory Points": 14.
+- Confirm raidbots.list includes badspots=0 on a fresh healthy bot.
+- Force a bot to fail movement against a cliff, large rock, wall, or base edge. Expected: badspots increments after no-progress/path failure.
+- After a bad spot is remembered, keep pressure on the bot. Expected: recovery, retreat, cover, investigate, flank, regroup, push, and roam candidates avoid that same destination until the memory expires.
+- Wait longer than Stuck Memory Seconds. Expected: badspots decays and the area can be reconsidered later.
+- Continue the existing v0.3.25 combat checks: foliage LOS, wall hold, squad roles, base hold-out behavior, low-health cover, auto-reload, grenade/smoke utility, and normal 100-120 HP damage balance.
+
+Relevant reloads:
+- oxide.reload RaidlandsRoamBots
+- Optional after behavior verification: oxide.reload WebsiteVipBridge to push the next scheduled stats snapshot sooner.
 
 Deferred / future-phase issues to leave noted:
-- Grenades and smoke are still scaffolded only; no real projectile utility yet.
-- This pass is not full formation pathing. Clans share memory and bias decisions together, but individual nav/pathing can still look loose until a later formation/leader-follower phase.
-- Base assault is still intentionally out of scope. Bots may hold outside or abandon when a target enters a base; smarter "is this base real/occupied/worth pressure" logic belongs to the future BaseAssaultModule.
+- Cover/peek quality tuning still needs live iteration beyond the baseline.
+- Grenade/smoke arc, damage, and smoke-screen tuning still need live validation.
+- Real med-item animation/use is not implemented; healing is still controlled passive/syringe-style behavior.
+- True formation/path reservation and leader/follower pathing are still future work.
+- Base objective validation/base assault and HTTP/OpenAI advisor behavior are still future work.

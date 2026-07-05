@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.25")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.26")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -449,6 +449,15 @@ namespace Oxide.Plugins
             [JsonProperty("Hard Stuck Failed Paths To Despawn")]
             public int HardStuckFailedPathsToDespawn = 30;
 
+            [JsonProperty("Stuck Memory Seconds")]
+            public float StuckMemorySeconds = 75f;
+
+            [JsonProperty("Stuck Memory Radius")]
+            public float StuckMemoryRadius = 9f;
+
+            [JsonProperty("Maximum Stuck Memory Points")]
+            public int MaxStuckMemoryPoints = 14;
+
             [JsonProperty("Squad Flank Distance")]
             public float SquadFlankDistance = 24f;
 
@@ -867,6 +876,7 @@ namespace Oxide.Plugins
             public string LastUtilityReason = "none";
             public string LastFireBlockReason = "none";
             public string LastSightReason = "none";
+            public string LastStuckMemoryReason = "none";
 
             public bool IsShooting;
             public bool IsInBaseRestrictedArea;
@@ -966,6 +976,15 @@ namespace Oxide.Plugins
             public float LastStuckNotedAt;
             public TacticalActionId LastActionId = TacticalActionId.None;
             public int SameActionFailures;
+            public List<StuckDestinationMemory> AvoidedDestinations = new List<StuckDestinationMemory>();
+        }
+
+        private class StuckDestinationMemory
+        {
+            public Vector3 Position;
+            public float RecordedAt;
+            public int Failures;
+            public string Reason = "";
         }
 
         private class VisionResult
@@ -1108,6 +1127,7 @@ namespace Oxide.Plugins
             public int NearbyAllies;
             public int NearbyKnownEnemies;
             public bool IsStuck;
+            public int StuckMemoryPoints;
             public bool TargetIsInsideBaseRestrictedArea;
             public List<DecisionEvent> RecentEvents = new List<DecisionEvent>();
             public List<TacticalActionCandidate> CandidateActions = new List<TacticalActionCandidate>();
@@ -1615,6 +1635,9 @@ namespace Oxide.Plugins
             config.AI.StuckRecoveryCooldownSeconds = Math.Max(0.5f, config.AI.StuckRecoveryCooldownSeconds);
             config.AI.StuckRecoverySearchRadius = Math.Max(6f, config.AI.StuckRecoverySearchRadius);
             config.AI.HardStuckFailedPathsToDespawn = Clamp(config.AI.HardStuckFailedPathsToDespawn, 0, 200);
+            config.AI.StuckMemorySeconds = Mathf.Clamp(config.AI.StuckMemorySeconds <= 0f ? defaults.AI.StuckMemorySeconds : config.AI.StuckMemorySeconds, 5f, 300f);
+            config.AI.StuckMemoryRadius = Mathf.Clamp(config.AI.StuckMemoryRadius <= 0f ? defaults.AI.StuckMemoryRadius : config.AI.StuckMemoryRadius, 3f, 30f);
+            config.AI.MaxStuckMemoryPoints = Clamp(config.AI.MaxStuckMemoryPoints <= 0 ? defaults.AI.MaxStuckMemoryPoints : config.AI.MaxStuckMemoryPoints, 1, 50);
             config.AI.BaseAvoidanceRadius = Math.Max(1f, config.AI.BaseAvoidanceRadius);
             config.AI.BaseHoldSeconds = Math.Max(2f, config.AI.BaseHoldSeconds);
 
@@ -1910,7 +1933,7 @@ namespace Oxide.Plugins
 
                 var runtime = ConfigureBot(bot, position, teamId, prefab);
                 PrepareNpcBody(bot);
-                runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition);
+                runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition, runtime);
                 MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
                 ScheduleBodyPrepare(bot);
 
@@ -3638,7 +3661,7 @@ namespace Oxide.Plugins
             return false;
         }
 
-        private bool TryFindOutsideBaseHoldPoint(Vector3 botPosition, Vector3 threatPosition, out Vector3 holdPoint)
+        private bool TryFindOutsideBaseHoldPoint(Vector3 botPosition, Vector3 threatPosition, BotRuntime runtime, float now, out Vector3 holdPoint)
         {
             holdPoint = Vector3.zero;
             var away = botPosition - threatPosition;
@@ -3658,7 +3681,7 @@ namespace Oxide.Plugins
                 var direction = Quaternion.Euler(0f, angle, 0f) * away;
                 var candidate = botPosition + direction.normalized * radius;
 
-                if (!TrySampleTacticalPosition(candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), out var sampled))
+                if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
                 {
                     continue;
                 }
@@ -4232,7 +4255,7 @@ namespace Oxide.Plugins
                 + $"\nFire: {(string.IsNullOrWhiteSpace(runtime.LastFireBlockReason) ? "none" : runtime.LastFireBlockReason)}"
                 + $"\nSight: {(string.IsNullOrWhiteSpace(runtime.LastSightReason) ? "none" : runtime.LastSightReason)}"
                 + $"\nMove: {movement}  Shooting: {(runtime.IsShooting ? "Y" : "N")}"
-                + $"\nFailed paths: {runtime.ConsecutiveFailedPaths}  Advisor: {advisor}"
+                + $"\nFailed paths: {runtime.ConsecutiveFailedPaths}  Bad spots: {ActiveStuckMemoryCount(runtime, now)} ({runtime.LastStuckMemoryReason})  Advisor: {advisor}"
                 + $"\nFallback: {fallback}";
         }
 
@@ -4291,7 +4314,8 @@ namespace Oxide.Plugins
                 ? "cover=none"
                 : $"cover={Vector3.Distance(bot.transform.position, runtime.CurrentCover).ToString("0", CultureInfo.InvariantCulture)}m";
             var stuck = runtime.Movement.IsStuck ? "stuck=Y" : "stuck=N";
-            return $"{destination} | {cover} | {stuck}";
+            var badSpots = ActiveStuckMemoryCount(runtime, Time.realtimeSinceStartup);
+            return $"{destination} | {cover} | {stuck} | bad={badSpots}";
         }
 
         private string SecondsAgo(float timestamp, float now)
@@ -4787,7 +4811,7 @@ namespace Oxide.Plugins
 
                 if (ShouldCommandSoundInvestigation(runtime, source.userID, now))
                 {
-                    var destination = SoundInvestigationDestination(bot.transform.position, sourcePosition);
+                    var destination = SoundInvestigationDestination(bot.transform.position, sourcePosition, runtime);
                     var destinationChanged = runtime.CurrentDestination == Vector3.zero
                         || Vector3.Distance(runtime.CurrentDestination, destination) > 6f;
 
@@ -4863,16 +4887,17 @@ namespace Oxide.Plugins
             return Mathf.Clamp01(baseConfidence * Mathf.Lerp(0.35f, 1f, closeness));
         }
 
-        private Vector3 SoundInvestigationDestination(Vector3 origin, Vector3 sourcePosition)
+        private Vector3 SoundInvestigationDestination(Vector3 origin, Vector3 sourcePosition, BotRuntime runtime = null)
         {
             var distance = Vector3.Distance(origin, sourcePosition);
+            var now = Time.realtimeSinceStartup;
 
-            if (distance <= 55f)
+            if (distance <= 55f && !ShouldAvoidDestination(runtime, sourcePosition, now))
             {
                 return sourcePosition;
             }
 
-            return MoveTowardPosition(origin, sourcePosition, Mathf.Clamp(distance * 0.65f, 35f, 85f));
+            return MoveTowardPosition(origin, sourcePosition, Mathf.Clamp(distance * 0.65f, 35f, 85f), runtime);
         }
 
         private bool IsSuppressedWeapon(Item item)
@@ -5001,6 +5026,7 @@ namespace Oxide.Plugins
                 NearbyAllies = NearbyAllies(bot, runtime),
                 NearbyKnownEnemies = NearbyKnownEnemies(runtime, now),
                 IsStuck = IsBotStuck(bot, runtime, now),
+                StuckMemoryPoints = ActiveStuckMemoryCount(runtime, now),
                 TargetIsInsideBaseRestrictedArea = target != null && IsBaseRestrictedPosition(target.transform.position)
             };
 
@@ -5049,6 +5075,7 @@ namespace Oxide.Plugins
                 && SegmentCrossesBaseRestrictedArea(bot.transform.position, knownThreatPosition);
 
             CleanupBotUtilityRefs(now);
+            CleanupStuckDestinationMemory(runtime, now);
 
             if (TryFindUtilityDangerEscapePosition(bot, runtime, now, out var utilityEscapePoint, out var utilityDangerReason))
             {
@@ -5064,7 +5091,7 @@ namespace Oxide.Plugins
                 candidates.Add(recovery);
             }
 
-            if (runtime.IsInBaseRestrictedArea && TryFindOutsideBaseHoldPoint(bot.transform.position, knownThreatPosition, out var escapePoint))
+            if (runtime.IsInBaseRestrictedArea && TryFindOutsideBaseHoldPoint(bot.transform.position, knownThreatPosition, runtime, now, out var escapePoint))
             {
                 var escape = Candidate(TacticalActionId.HoldOutsideBase, 98f, "low", "bot is inside a base-restricted area; move back outside", escapePoint, runtime.Memory.TargetUserId, now);
                 escape.RiskFlags.Add("base_avoidance");
@@ -5078,7 +5105,7 @@ namespace Oxide.Plugins
                     ? config.AI.SquadRegroupDistance * 1.75f
                     : config.AI.SquadRegroupDistance;
 
-                if (distanceFromTeam > regroupDistance && TrySampleTacticalPosition(board.TeamCenter, Math.Max(8f, config.Spawn.NavmeshSampleDistance), out var regroupPoint))
+                if (distanceFromTeam > regroupDistance && TrySampleTacticalPositionAvoidingStuck(runtime, board.TeamCenter, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var regroupPoint))
                 {
                     var regroupScore = squadHasFreshContact ? 50f : 70f;
                     candidates.Add(Candidate(TacticalActionId.RegroupWithSquad, regroupScore, "low", $"too far from clan center as {runtime.SquadRole}", regroupPoint, board.SharedEnemyUserId, now));
@@ -5127,7 +5154,7 @@ namespace Oxide.Plugins
                 }
                 else
                 {
-                    var retreatDestination = FindRetreatPosition(bot.transform.position, knownThreatPosition);
+                    var retreatDestination = FindRetreatPosition(bot.transform.position, knownThreatPosition, runtime);
                     var foundCoverDestination = false;
                     var hasCurrentCoverDestination = !coverCompromised
                         && runtime.CurrentTuckPoint != Vector3.zero
@@ -5208,7 +5235,7 @@ namespace Oxide.Plugins
 
             if (config.AI.DoNotEnterBases && (targetInBase || threatPathCrossesBase) && (hasFreshSeen || hasFreshHeard || target != null))
             {
-                if (TryFindOutsideBaseHoldPoint(bot.transform.position, knownThreatPosition, out var holdPoint))
+                if (TryFindOutsideBaseHoldPoint(bot.transform.position, knownThreatPosition, runtime, now, out var holdPoint))
                 {
                     var hold = Candidate(TacticalActionId.HoldOutsideBase, 91f, "low", targetInBase ? "target is inside base-restricted area" : "path to target crosses base-restricted area", holdPoint, runtime.Memory.TargetUserId, now);
                     hold.RiskFlags.Add("base_avoidance");
@@ -5333,7 +5360,7 @@ namespace Oxide.Plugins
                         pushScore -= 70f;
                     }
 
-                    candidates.Add(Candidate(TacticalActionId.PushTarget, pushScore, "medium", $"target is outside {runtime.Combat.WeaponClass} preferred range", MoveTowardPosition(bot.transform.position, target.transform.position, runtime.Combat.PushDistance), target.userID, now));
+                    candidates.Add(Candidate(TacticalActionId.PushTarget, pushScore, "medium", $"target is outside {runtime.Combat.WeaponClass} preferred range", MoveTowardPosition(bot.transform.position, target.transform.position, runtime.Combat.PushDistance, runtime), target.userID, now));
                 }
 
                 if (config.AI.AllowFlanking
@@ -5353,7 +5380,7 @@ namespace Oxide.Plugins
                         score += 10f;
                     }
 
-                    if (TryFindFlankPosition(bot.transform.position, target.transform.position, side, out var flankPoint))
+                    if (TryFindFlankPosition(bot.transform.position, target.transform.position, side, runtime, now, out var flankPoint))
                     {
                         candidates.Add(Candidate(side > 0f ? TacticalActionId.FlankLeft : TacticalActionId.FlankRight, score, "medium", $"squad {runtime.SquadRole} flank toward shared fight", flankPoint, target.userID, now));
                     }
@@ -5392,7 +5419,7 @@ namespace Oxide.Plugins
                 if (config.AI.AllowFlanking
                     && now >= runtime.NextFlankAt
                     && (runtime.SquadRole == "flanker" || runtime.SquadRole == "pusher")
-                    && TryFindFlankPosition(bot.transform.position, sharedEnemy.LastKnownPosition, runtime.SquadRole == "flanker" ? 1f : -1f, out var sharedFlank))
+                    && TryFindFlankPosition(bot.transform.position, sharedEnemy.LastKnownPosition, runtime.SquadRole == "flanker" ? 1f : -1f, runtime, now, out var sharedFlank))
                 {
                     var sharedFlankScore = (runtime.SquadRole == "flanker" ? 74f : 70f) + runtime.Skill.Aggression * 10f;
                     candidates.Add(Candidate(runtime.SquadRole == "flanker" ? TacticalActionId.FlankLeft : TacticalActionId.FlankRight, sharedFlankScore, "medium", "flank toward clan shared last-known position without shooting", sharedFlank, sharedEnemy.UserId, now));
@@ -5410,14 +5437,14 @@ namespace Oxide.Plugins
                 var soundAge = now - runtime.Memory.LastHeardAt;
                 var soundFreshness = soundMemorySeconds <= 0f ? 0f : 1f - Mathf.Clamp01(soundAge / soundMemorySeconds);
                 var investigateScore = (hasRecentContact ? 98f : 86f) + soundFreshness * 12f + runtime.Skill.Aggression * 8f;
-                var investigateDestination = SoundInvestigationDestination(bot.transform.position, runtime.Memory.LastHeardPosition);
+                var investigateDestination = SoundInvestigationDestination(bot.transform.position, runtime.Memory.LastHeardPosition, runtime);
                 candidates.Add(Candidate(TacticalActionId.InvestigateSound, investigateScore, "medium", "fresh sound stimulus without visual contact", investigateDestination, runtime.Memory.TargetUserId, now));
             }
 
             if (!lowHealthAware && healthFraction < 0.35f && (hasFreshSeen || hasFreshHeard))
             {
                 var awayFrom = runtime.Memory.LastSeenAt >= runtime.Memory.LastHeardAt ? runtime.Memory.LastSeenPosition : runtime.Memory.LastHeardPosition;
-                var retreatDestination = FindRetreatPosition(bot.transform.position, awayFrom);
+                var retreatDestination = FindRetreatPosition(bot.transform.position, awayFrom, runtime);
 
                 if (config.AI.AllowCover && now >= runtime.NextCoverSearchAt && TryFindCoverPlan(bot, runtime, awayFrom, target, out var retreatCover))
                 {
@@ -5428,16 +5455,28 @@ namespace Oxide.Plugins
                 candidates.Add(Candidate(TacticalActionId.RetreatToCover, 88f, "low", "critical health panic while threat is known", retreatDestination, runtime.Memory.TargetUserId, now));
             }
 
-            if (runtime.CurrentDestination == Vector3.zero || Vector3.Distance(bot.transform.position, runtime.CurrentDestination) < 4f)
+            if (runtime.CurrentDestination == Vector3.zero
+                || Vector3.Distance(bot.transform.position, runtime.CurrentDestination) < 4f
+                || ShouldAvoidDestination(runtime, runtime.CurrentDestination, now))
             {
-                runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition);
+                runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition, runtime);
             }
 
             candidates.Add(Candidate(TacticalActionId.RoamToPoint, 15f, "low", "no higher-priority tactical stimulus", runtime.CurrentDestination, 0, now));
-            return candidates
+            var filtered = candidates
+                .Where(candidate => !IsMovementDestinationAction(candidate.ActionId) || !ShouldAvoidDestination(runtime, candidate.Destination, now))
                 .OrderByDescending(candidate => candidate.HeuristicScore)
                 .Take(Math.Max(1, config.DecisionAdvisor.MaxCandidateActions))
                 .ToList();
+
+            if (filtered.Count > 0)
+            {
+                return filtered;
+            }
+
+            var fallback = Candidate(TacticalActionId.RoamToPoint, 8f, "low", "all movement candidates were recently stuck; reset roam destination", FindRoamDestination(bot.transform.position, runtime), 0, now);
+            fallback.RiskFlags.Add("stuck_memory_reset");
+            return new List<TacticalActionCandidate> { fallback };
         }
 
         private bool CanShootVisibleTarget(BaseCombatEntity bot, BotRuntime runtime, float distance, float exposure, float now)
@@ -5887,7 +5926,7 @@ namespace Oxide.Plugins
                 var direction = Quaternion.Euler(0f, angle, 0f) * away;
                 var candidate = bot.transform.position + direction.normalized * radius;
 
-                if (!TrySampleTacticalPosition(candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), out var sampled))
+                if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
                 {
                     continue;
                 }
@@ -5903,7 +5942,7 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            escapePoint = FindRetreatPosition(bot.transform.position, zone.Position);
+            escapePoint = FindRetreatPosition(bot.transform.position, zone.Position, runtime);
             reason = "inside bot grenade danger zone; fallback retreat";
             runtime.LastUtilityReason = "avoid_grenade_fallback";
             return escapePoint != Vector3.zero;
@@ -6094,7 +6133,7 @@ namespace Oxide.Plugins
                 return runtime.CurrentTuckPoint;
             }
 
-            return FindRetreatPosition(bot.transform.position, impactPosition);
+            return FindRetreatPosition(bot.transform.position, impactPosition, runtime);
         }
 
         private TacticalActionCandidate Candidate(TacticalActionId actionId, float score, string risk, string reason, Vector3 destination, ulong targetUserId, float now)
@@ -6334,7 +6373,7 @@ namespace Oxide.Plugins
                             runtime.CurrentTuckPoint = Vector3.zero;
                             runtime.CurrentPeekPoint = Vector3.zero;
                             runtime.BarricadeCommittedUntil = 0f;
-                            runtime.CurrentDestination = FindRetreatPosition(bot.transform.position, barricadeThreatPosition);
+                            runtime.CurrentDestination = FindRetreatPosition(bot.transform.position, barricadeThreatPosition, runtime);
                             MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
                             FacePosition(bot, barricadeThreatPosition);
                             MaintainFireOrStop(bot, runtime, now);
@@ -6343,7 +6382,7 @@ namespace Oxide.Plugins
 
                         runtime.CurrentTuckPoint = holdPoint;
                         runtime.CurrentCover = runtime.CurrentTuckPoint;
-                        runtime.CurrentPeekPoint = BarricadePeekPoint(bot, runtime.CurrentTuckPoint, action.Destination, barricadeThreatPosition, runtime.Memory.Target);
+                        runtime.CurrentPeekPoint = BarricadePeekPoint(bot, runtime.CurrentTuckPoint, action.Destination, barricadeThreatPosition, runtime.Memory.Target, runtime, now);
                         runtime.CurrentDestination = runtime.CurrentTuckPoint;
                         runtime.IsPeeking = false;
                         runtime.CurrentTuckUntil = now + UnityEngine.Random.Range(config.AI.TuckMinSeconds, config.AI.TuckMaxSeconds);
@@ -6388,7 +6427,7 @@ namespace Oxide.Plugins
                     if (TryThrowBotUtility(bot, runtime, action.Destination, true, now))
                     {
                         MarkBotUtilityCooldown(runtime, now);
-                        var retreat = FindRetreatPosition(bot.transform.position, KnownThreatPosition(runtime));
+                        var retreat = FindRetreatPosition(bot.transform.position, KnownThreatPosition(runtime), runtime);
                         runtime.CurrentDestination = retreat;
                         MoveBotTo(bot, runtime, retreat, BaseNavigator.NavigationSpeed.Fast);
                         FacePosition(bot, KnownThreatPosition(runtime));
@@ -6403,7 +6442,7 @@ namespace Oxide.Plugins
                     SetState(runtime, TacticalState.Roam, now);
                     StopBotAttack(bot, runtime);
                     runtime.IsPeeking = false;
-                    runtime.CurrentDestination = action.Destination == Vector3.zero ? FindRoamDestination(runtime.HomePosition) : action.Destination;
+                    runtime.CurrentDestination = action.Destination == Vector3.zero ? FindRoamDestination(runtime.HomePosition, runtime) : action.Destination;
 
                     if (action.RiskFlags.Contains("stuck_recovery"))
                     {
@@ -6423,7 +6462,7 @@ namespace Oxide.Plugins
                     SetState(runtime, TacticalState.Roam, now);
                     StopBotAttack(bot, runtime);
                     runtime.IsPeeking = false;
-                    runtime.CurrentDestination = action.Destination == Vector3.zero ? FindRoamDestination(runtime.HomePosition) : action.Destination;
+                    runtime.CurrentDestination = action.Destination == Vector3.zero ? FindRoamDestination(runtime.HomePosition, runtime) : action.Destination;
                     MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
                     break;
             }
@@ -6693,10 +6732,13 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            var now = Time.realtimeSinceStartup;
+
             if (IsBlockedLandPosition(destination))
             {
                 runtime.ConsecutiveFailedPaths++;
                 runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, destination, "blocked_destination", now);
                 return false;
             }
 
@@ -6706,10 +6748,10 @@ namespace Oxide.Plugins
             {
                 runtime.ConsecutiveFailedPaths++;
                 runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, destination, "base_blocked_path", now);
                 return false;
             }
 
-            var now = Time.realtimeSinceStartup;
             CleanupBotUtilityRefs(now);
 
             if (IsInsideActiveUtilityDanger(destination, now, "grenade")
@@ -6759,6 +6801,7 @@ namespace Oxide.Plugins
             {
                 runtime.ConsecutiveFailedPaths++;
                 runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, destination, "nav_command_failed", now);
             }
 
             return navigatorCommanded || npcCommanded;
@@ -7017,23 +7060,27 @@ namespace Oxide.Plugins
             list.Add(entity);
         }
 
-        private Vector3 FindRoamDestination(Vector3 origin)
+        private Vector3 FindRoamDestination(Vector3 origin, BotRuntime runtime = null)
         {
             var radius = Math.Max(12f, config.Spawn.GroupSpawnRadius * 3f);
-            var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-            var candidate = origin + new Vector3(Mathf.Cos(angle) * radius, 0f, Mathf.Sin(angle) * radius);
-            candidate.y = TerrainHeight(candidate) + 0.25f;
+            var now = Time.realtimeSinceStartup;
 
-            if (NavMesh.SamplePosition(candidate, out var hit, Math.Max(6f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas)
-                && !IsBlockedLandPosition(hit.position))
+            for (var attempt = 0; attempt < 14; attempt++)
             {
-                return hit.position;
+                var attemptRadius = radius * UnityEngine.Random.Range(0.55f, 1.35f);
+                var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+                var candidate = origin + new Vector3(Mathf.Cos(angle) * attemptRadius, 0f, Mathf.Sin(angle) * attemptRadius);
+
+                if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+                {
+                    return sampled;
+                }
             }
 
             return origin;
         }
 
-        private Vector3 MoveTowardPosition(Vector3 origin, Vector3 targetPosition, float maxStep)
+        private Vector3 MoveTowardPosition(Vector3 origin, Vector3 targetPosition, float maxStep, BotRuntime runtime = null)
         {
             var delta = targetPosition - origin;
             delta.y = 0f;
@@ -7043,38 +7090,52 @@ namespace Oxide.Plugins
                 return origin;
             }
 
-            var candidate = origin + delta.normalized * Mathf.Clamp(maxStep, 4f, 45f);
-            candidate.y = TerrainHeight(candidate) + 0.25f;
+            var now = Time.realtimeSinceStartup;
+            var forward = delta.normalized;
+            var step = Mathf.Clamp(maxStep, 4f, 45f);
+            var angles = new[] { 0f, 18f, -18f, 35f, -35f, 55f, -55f };
 
-            if (NavMesh.SamplePosition(candidate, out var hit, Math.Max(12f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas)
-                && !IsBlockedLandPosition(hit.position))
+            foreach (var angle in angles)
             {
-                return hit.position;
+                var direction = Quaternion.Euler(0f, angle, 0f) * forward;
+                var candidate = origin + direction.normalized * step;
+
+                if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(12f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+                {
+                    return sampled;
+                }
             }
 
             return origin;
         }
 
-        private Vector3 FindRetreatPosition(Vector3 origin, Vector3 threatPosition)
+        private Vector3 FindRetreatPosition(Vector3 origin, Vector3 threatPosition, BotRuntime runtime = null)
         {
             var delta = origin - threatPosition;
             delta.y = 0f;
 
             if (delta.sqrMagnitude <= 0.01f)
             {
-                return FindRoamDestination(origin);
+                return FindRoamDestination(origin, runtime);
             }
 
-            var candidate = origin + delta.normalized * Math.Max(18f, config.AI.CoverSearchRadius);
-            candidate.y = TerrainHeight(candidate) + 0.25f;
+            var now = Time.realtimeSinceStartup;
+            var away = delta.normalized;
+            var distance = Math.Max(18f, config.AI.CoverSearchRadius);
+            var angles = new[] { 0f, 25f, -25f, 50f, -50f, 85f, -85f, 135f, -135f, 180f };
 
-            if (NavMesh.SamplePosition(candidate, out var hit, Math.Max(12f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas)
-                && !IsBlockedLandPosition(hit.position))
+            foreach (var angle in angles)
             {
-                return hit.position;
+                var direction = Quaternion.Euler(0f, angle, 0f) * away;
+                var candidate = origin + direction.normalized * distance;
+
+                if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(12f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+                {
+                    return sampled;
+                }
             }
 
-            return FindRoamDestination(origin);
+            return FindRoamDestination(origin, runtime);
         }
 
         private void ApplyCoverPlan(BotRuntime runtime, CoverPlan plan)
@@ -7736,7 +7797,7 @@ namespace Oxide.Plugins
             return bestKnownPosition;
         }
 
-        private bool TryFindFlankPosition(Vector3 origin, Vector3 threatPosition, float sideSign, out Vector3 flankPoint)
+        private bool TryFindFlankPosition(Vector3 origin, Vector3 threatPosition, float sideSign, BotRuntime runtime, float now, out Vector3 flankPoint)
         {
             flankPoint = Vector3.zero;
 
@@ -7765,7 +7826,7 @@ namespace Oxide.Plugins
 
             foreach (var candidate in candidates)
             {
-                if (!TrySampleTacticalPosition(candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), out var sampled))
+                if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
                 {
                     continue;
                 }
@@ -8083,21 +8144,26 @@ namespace Oxide.Plugins
             return false;
         }
 
-        private Vector3 BarricadePeekPoint(BaseCombatEntity bot, Vector3 holdPoint, Vector3 barricadePosition, Vector3 threatPosition, BasePlayer target)
+        private Vector3 BarricadePeekPoint(BaseCombatEntity bot, Vector3 holdPoint, Vector3 barricadePosition, Vector3 threatPosition, BasePlayer target, BotRuntime runtime = null, float now = 0f)
         {
             if (holdPoint == Vector3.zero || threatPosition == Vector3.zero)
             {
                 return Vector3.zero;
             }
 
+            if (now <= 0f)
+            {
+                now = Time.realtimeSinceStartup;
+            }
+
             var firstSide = UnityEngine.Random.value < 0.5f ? 1f : -1f;
 
-            if (TryBuildPeekPoint(bot, holdPoint, threatPosition, target, firstSide, out var firstPeek))
+            if (TryBuildPeekPoint(bot, holdPoint, threatPosition, target, firstSide, runtime, now, out var firstPeek))
             {
                 return firstPeek;
             }
 
-            if (TryBuildPeekPoint(bot, holdPoint, threatPosition, target, -firstSide, out var secondPeek))
+            if (TryBuildPeekPoint(bot, holdPoint, threatPosition, target, -firstSide, runtime, now, out var secondPeek))
             {
                 return secondPeek;
             }
@@ -8114,7 +8180,7 @@ namespace Oxide.Plugins
             var side = Vector3.Cross(Vector3.up, toThreat).normalized * firstSide;
             var fallback = barricadePosition + side * config.AI.PeekOffsetDistance + toThreat * 1.1f;
 
-            return TrySampleTacticalPosition(fallback, Math.Max(6f, config.Spawn.NavmeshSampleDistance), out var sampled)
+            return TrySampleTacticalPositionAvoidingStuck(runtime, fallback, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled)
                 ? sampled
                 : Vector3.zero;
         }
@@ -8164,7 +8230,7 @@ namespace Oxide.Plugins
                 var direction = Quaternion.Euler(0f, angleOffset, 0f) * away;
                 var candidate = origin + direction.normalized * radius;
 
-                if (!TrySampleTacticalPosition(candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), out var sampled))
+                if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), Time.realtimeSinceStartup, out var sampled))
                 {
                     continue;
                 }
@@ -8193,13 +8259,13 @@ namespace Oxide.Plugins
                 var left = Vector3.zero;
                 var right = Vector3.zero;
 
-                if (TryBuildPeekPoint(bot, sampled, threatPosition, target, 1f, out var leftPeek))
+                if (TryBuildPeekPoint(bot, sampled, threatPosition, target, 1f, runtime, Time.realtimeSinceStartup, out var leftPeek))
                 {
                     left = leftPeek;
                     score += 8f;
                 }
 
-                if (TryBuildPeekPoint(bot, sampled, threatPosition, target, -1f, out var rightPeek))
+                if (TryBuildPeekPoint(bot, sampled, threatPosition, target, -1f, runtime, Time.realtimeSinceStartup, out var rightPeek))
                 {
                     right = rightPeek;
                     score += 8f;
@@ -8235,9 +8301,14 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private bool TryBuildPeekPoint(BaseCombatEntity bot, Vector3 coverPoint, Vector3 threatPosition, BasePlayer target, float sideSign, out Vector3 peekPoint)
+        private bool TryBuildPeekPoint(BaseCombatEntity bot, Vector3 coverPoint, Vector3 threatPosition, BasePlayer target, float sideSign, BotRuntime runtime, float now, out Vector3 peekPoint)
         {
             peekPoint = Vector3.zero;
+            if (now <= 0f)
+            {
+                now = Time.realtimeSinceStartup;
+            }
+
             var toThreat = threatPosition - coverPoint;
             toThreat.y = 0f;
 
@@ -8256,7 +8327,7 @@ namespace Oxide.Plugins
             var side = Vector3.Cross(Vector3.up, toThreat).normalized * Mathf.Sign(sideSign);
             var candidate = coverPoint + side * config.AI.PeekOffsetDistance + toThreat * 1.25f;
 
-            if (!TrySampleTacticalPosition(candidate, Math.Max(6f, config.Spawn.NavmeshSampleDistance), out var sampled))
+            if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
             {
                 return false;
             }
@@ -8321,7 +8392,7 @@ namespace Oxide.Plugins
                 {
                     var candidate = origin + direction.normalized * radius * scale;
 
-                    if (!TrySampleTacticalPosition(candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), out var sampled))
+                    if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), Time.realtimeSinceStartup, out var sampled))
                     {
                         continue;
                     }
@@ -8335,7 +8406,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            return FindRoamDestination(origin);
+            return FindRoamDestination(origin, runtime);
         }
 
         private bool TrySampleTacticalPosition(Vector3 candidate, float sampleDistance, out Vector3 sampled)
@@ -8360,6 +8431,135 @@ namespace Oxide.Plugins
 
             sampled = hit.position;
             return true;
+        }
+
+        private bool TrySampleTacticalPositionAvoidingStuck(BotRuntime runtime, Vector3 candidate, float sampleDistance, float now, out Vector3 sampled)
+        {
+            if (!TrySampleTacticalPosition(candidate, sampleDistance, out sampled))
+            {
+                return false;
+            }
+
+            return !ShouldAvoidDestination(runtime, sampled, now);
+        }
+
+        private int ActiveStuckMemoryCount(BotRuntime runtime, float now)
+        {
+            CleanupStuckDestinationMemory(runtime, now);
+            return runtime?.Movement?.AvoidedDestinations?.Count ?? 0;
+        }
+
+        private void RememberBadDestination(BotRuntime runtime, Vector3 destination, string reason, float now)
+        {
+            if (runtime?.Movement == null
+                || destination == Vector3.zero
+                || config?.AI == null
+                || config.AI.MaxStuckMemoryPoints <= 0
+                || config.AI.StuckMemorySeconds <= 0f)
+            {
+                return;
+            }
+
+            if (runtime.Movement.AvoidedDestinations == null)
+            {
+                runtime.Movement.AvoidedDestinations = new List<StuckDestinationMemory>();
+            }
+
+            CleanupStuckDestinationMemory(runtime, now);
+
+            var radius = Math.Max(3f, config.AI.StuckMemoryRadius);
+            var existing = runtime.Movement.AvoidedDestinations
+                .FirstOrDefault(entry => entry != null && Distance2D(entry.Position, destination) <= radius);
+
+            if (existing == null)
+            {
+                runtime.Movement.AvoidedDestinations.Add(new StuckDestinationMemory
+                {
+                    Position = destination,
+                    RecordedAt = now,
+                    Failures = 1,
+                    Reason = reason ?? "path_failed"
+                });
+            }
+            else
+            {
+                existing.Position = destination;
+                existing.RecordedAt = now;
+                existing.Failures++;
+                existing.Reason = reason ?? existing.Reason;
+            }
+
+            runtime.LastStuckMemoryReason = string.IsNullOrWhiteSpace(reason) ? "path_failed" : reason;
+
+            while (runtime.Movement.AvoidedDestinations.Count > config.AI.MaxStuckMemoryPoints)
+            {
+                var oldest = runtime.Movement.AvoidedDestinations
+                    .OrderBy(entry => entry?.RecordedAt ?? float.MaxValue)
+                    .FirstOrDefault();
+
+                if (oldest == null || !runtime.Movement.AvoidedDestinations.Remove(oldest))
+                {
+                    break;
+                }
+            }
+        }
+
+        private void CleanupStuckDestinationMemory(BotRuntime runtime, float now)
+        {
+            if (runtime?.Movement?.AvoidedDestinations == null)
+            {
+                return;
+            }
+
+            var maxAge = Math.Max(5f, config?.AI?.StuckMemorySeconds ?? 75f);
+            runtime.Movement.AvoidedDestinations.RemoveAll(entry => entry == null
+                || entry.Position == Vector3.zero
+                || now - entry.RecordedAt > maxAge);
+
+            if (runtime.Movement.AvoidedDestinations.Count == 0)
+            {
+                runtime.LastStuckMemoryReason = "none";
+            }
+        }
+
+        private bool ShouldAvoidDestination(BotRuntime runtime, Vector3 destination, float now)
+        {
+            if (runtime?.Movement?.AvoidedDestinations == null
+                || destination == Vector3.zero
+                || config?.AI == null
+                || config.AI.MaxStuckMemoryPoints <= 0)
+            {
+                return false;
+            }
+
+            CleanupStuckDestinationMemory(runtime, now);
+            var radius = Math.Max(3f, config.AI.StuckMemoryRadius);
+            return runtime.Movement.AvoidedDestinations.Any(entry => entry != null
+                && Distance2D(entry.Position, destination) <= radius);
+        }
+
+        private bool IsMovementDestinationAction(TacticalActionId actionId)
+        {
+            switch (actionId)
+            {
+                case TacticalActionId.RoamToPoint:
+                case TacticalActionId.InvestigateSound:
+                case TacticalActionId.SearchLastKnown:
+                case TacticalActionId.MoveToCover:
+                case TacticalActionId.PeekLeft:
+                case TacticalActionId.PeekRight:
+                case TacticalActionId.WideSwing:
+                case TacticalActionId.Tuck:
+                case TacticalActionId.FlankLeft:
+                case TacticalActionId.FlankRight:
+                case TacticalActionId.PushTarget:
+                case TacticalActionId.RetreatToCover:
+                case TacticalActionId.RegroupWithSquad:
+                case TacticalActionId.HoldOutsideBase:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private bool IsWorldLineBlocked(Vector3 from, Vector3 to, BaseEntity ignoreA = null, BaseEntity ignoreB = null)
@@ -8810,12 +9010,14 @@ namespace Oxide.Plugins
                 runtime.Movement.LastStuckNotedAt = now;
                 runtime.ConsecutiveFailedPaths++;
                 runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, runtime.CurrentDestination, "stuck_no_progress", now);
             }
             else if (now - runtime.Movement.LastStuckNotedAt > config.AI.StuckDetectionSeconds)
             {
                 runtime.Movement.LastStuckNotedAt = now;
                 runtime.ConsecutiveFailedPaths++;
                 runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, runtime.CurrentDestination, "repeat_stuck_no_progress", now);
             }
 
             return true;
@@ -8884,7 +9086,7 @@ namespace Oxide.Plugins
 
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
-            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, utility={runtime.LastUtilityReason}, stuck={runtime.Movement.IsStuck}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, utility={runtime.LastUtilityReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, Time.realtimeSinceStartup)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
         }
 
         private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)
