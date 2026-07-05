@@ -214,7 +214,7 @@ Do not call the LLM from these ticks directly. The tick should submit a decision
 
 The new config should make the single-mode design obvious.
 
-This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.19. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup.
+This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.24. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup.
 
 ```json
 {
@@ -237,9 +237,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
   ],
 
   "Skill Weights": {
-    "casual": 25,
-    "average": 60,
-    "dangerous": 15
+    "casual": 34,
+    "average": 33,
+    "dangerous": 33
   },
 
   "Skill Definitions": {
@@ -340,9 +340,12 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Minimum Exposed Target Fraction": 0.25,
     "Minimum Exposed Target Fraction To Shoot": 0.25,
     "Foliage Blocks Vision": true,
-    "Foliage Vision Check Radius": 0.65,
-    "Maximum Clear Vision Through Foliage": 24.0,
-    "Foliage Hits To Block Vision": 2,
+    "Foliage Vision Check Radius": 0.9,
+    "Maximum Clear Vision Through Foliage": 14.0,
+    "Foliage Hits To Block Vision": 1,
+    "Foliage Terrain Sampling": true,
+    "Foliage Terrain Sample Step": 6.0,
+    "Foliage Terrain Samples To Block Vision": 4,
     "Foliage Occluder Layer Names": ["Tree", "Resource", "World", "Default"],
     "Target Memory Seconds": 24.0,
     "Search Last Seen Seconds": 38.0,
@@ -352,6 +355,8 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Explosion Hearing Range": 380.0,
     "Melee Or Tool Hearing Range": 45.0,
     "Sprint Hearing Range": 28.0,
+    "Sound Investigation Commitment Seconds": 16.0,
+    "Sound Investigation Command Cooldown Seconds": 1.25,
 
     "Require Line Of Sight To Shoot": true,
     "Allow Hearing": true,
@@ -387,14 +392,44 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
 
     "Grenade Cooldown Seconds": 30.0,
     "Team Grenade Cooldown Seconds": 10.0,
-    "Barricade Cooldown Seconds": 18.0,
+    "Grenade Prefab": "assets/prefabs/weapons/f1 grenade/grenade.f1.deployed.prefab",
+    "Smoke Grenade Prefab": "assets/prefabs/tools/smoke grenade/grenade.smoke.deployed.prefab",
+    "Grenade Minimum Throw Distance": 12.0,
+    "Grenade Maximum Throw Distance": 42.0,
+    "Smoke Minimum Throw Distance": 10.0,
+    "Smoke Maximum Throw Distance": 55.0,
+    "Grenade Throw Velocity": 17.0,
+    "Smoke Throw Velocity": 14.0,
+    "Grenade Fuse Seconds": 3.2,
+    "Grenade Danger Radius": 8.0,
+    "Grenade Ally Avoid Radius": 10.0,
+    "Grenade Avoidance Seconds": 5.0,
+    "Smoke Screen Distance": 8.0,
+    "Maximum Active Bot Utility Projectiles": 8,
+
+    "Barricade Cooldown Seconds": 12.0,
     "Barricade Prefab": "assets/prefabs/deployable/barricades/barricade.cover.wood_double.prefab",
     "Maximum Active Bot Barricades": 12,
     "Recycle Oldest Barricade When Cap Reached": true,
     "Barricade Placement Distance": 4.5,
     "Barricade Hold Seconds": 8.0,
     "Barricade Fight Commitment Seconds": 10.0,
+    "Barricade Followup Memory Seconds": 6.0,
     "Retreat Wall Cover Distance": 10.0,
+
+    "Long Range Defensive Minimum Distance": 40.0,
+    "Long Range Defensive Maximum Distance": 60.0,
+    "Long Range Losing Fight Memory Seconds": 10.0,
+    "Nearby Defensive Cover Minimum Distance": 3.0,
+    "Nearby Defensive Cover Maximum Distance": 8.0,
+    "Long Range Defensive Health Fraction Casual": 0.68,
+    "Long Range Defensive Health Fraction Average": 0.82,
+    "Long Range Defensive Health Fraction Dangerous": 0.92,
+    "Full Health Cover Discipline Chance Casual": 0.55,
+    "Full Health Cover Discipline Chance Average": 0.85,
+    "Full Health Cover Discipline Chance Dangerous": 1.0,
+    "Healing Return Fire Distance": 24.0,
+
     "Damage Wall Reaction Window Seconds": 12.0,
     "Damage Wall Awareness Recheck Seconds": 1.5,
     "Damage Wall Chance Casual": 0.45,
@@ -405,9 +440,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Low Health Cover Notice Chance Average": 0.95,
     "Low Health Cover Notice Chance Dangerous": 1.0,
     "Low Health Cover Recheck Seconds": 4.0,
-    "Low Health Cover Commitment Seconds": 12.0,
+    "Low Health Cover Commitment Seconds": 24.0,
     "Low Health Cover Heal Per Second": 5.0,
-    "Low Health Cover Heal Target Fraction": 0.85,
+    "Low Health Cover Heal Target Fraction": 0.96,
     "Passive Combat Heal Per Second": 1.5,
     "Passive Combat Heal Target Fraction": 1.0,
     "Syringe Fire Lock Seconds": 2.2,
@@ -520,8 +555,9 @@ remove Gen2/naval prefabs
 replace prefab candidates with legacy scientist bodies
 turn generated near-player positions on
 turn random land fallback on
-normalize older visibility and foliage settings to the current v0.3.19 defaults
+normalize older visibility, foliage, hearing, defensive-healing, and utility settings to the current v0.3.24 defaults
 pin barricade prefab to the double Wooden Barricade Cover prefab
+pin grenade and smoke grenade prefabs to the current deployed F1/smoke prefab paths
 preserve kits, bot profiles, population, skill weights, team weights, and stats
 add Decision Advisor config with Provider = none and Mode = fallback_only
 ```
@@ -593,6 +629,10 @@ private class BotRuntime
     public string SkillTier;
     public SkillDefinition Skill;
     public int TeamId;
+    public string SquadRole;
+    public string ClanKey;
+    public string ClanTag;
+    public string ClanName;
 
     public Vector3 SpawnPosition;
     public Vector3 HomePosition;
@@ -615,15 +655,35 @@ private class BotRuntime
     public Vector3 CurrentTuckPoint;
     public Vector3 CurrentPeekPoint;
     public Vector3 CurrentFlankPoint;
+    public Vector3 CurrentBarricadePoint;
+    public bool IsPeeking;
+    public float CurrentPeekUntil;
+    public float CurrentTuckUntil;
+    public float BarricadeCommittedUntil;
 
     public float NextReactionAllowedAt;
     public float NextCoverSearchAt;
     public float NextPeekAt;
+    public float NextFlankAt;
+    public float NextStuckRecoveryAt;
     public float NextGrenadeAt;
     public float NextBarricadeAt;
+    public float LastBarricadePlacedAt;
+    public float DamageBarricadeAwareUntil;
+    public float LowHealthCoverAwareUntil;
+    public float MedicalFireLockedUntil;
+    public float NextSyringeHealAt;
+    public float HoldOutsideBaseUntil;
     public float LastShotAt;
     public float LastDamageTakenAt;
     public float LastDamageDealtAt;
+    public float LastSoundInvestigateCommandAt;
+    public float InvalidPositionSince;
+
+    public string LastBarricadeReason;
+    public string LastUtilityReason;
+    public string LastFireBlockReason;
+    public string LastSightReason;
 
     public bool IsShooting;
     public bool IsInBaseRestrictedArea;
@@ -664,7 +724,17 @@ private class TacticalMemory
 private class SquadBlackboard
 {
     public int TeamId;
+    public string ClanKey;
+    public string ClanTag;
+    public string ClanName;
     public Dictionary<ulong, EnemyMemory> KnownEnemies = new Dictionary<ulong, EnemyMemory>();
+    public Dictionary<string, Vector3> CoverClaims = new Dictionary<string, Vector3>();
+    public int TeamSize;
+    public int MembersWithLineOfSight;
+    public ulong SharedEnemyUserId;
+    public Vector3 SharedEnemyPosition;
+    public float SharedEnemyKnownAt;
+    public bool AnyMemberHasLineOfSight;
     public float NextTeamGrenadeAt;
     public float LastPushCallAt;
     public float LastRegroupCallAt;
@@ -1616,22 +1686,25 @@ Add player-like utility use after baseline shooting/cover/squad behavior works.
 Equipment helpers:
 
 ```csharp
-private bool HasUsableItem(BasePlayer bot, string shortname);
-private bool TryEquipItem(BasePlayer bot, string shortname);
-private bool TryThrowGrenade(BasePlayer bot, Vector3 targetPosition);
-private bool TryThrowSmoke(BasePlayer bot, Vector3 targetPosition);
-private bool TryPlaceBarricade(BasePlayer bot, Vector3 threatPosition);
+private bool TryThrowBotUtility(BaseCombatEntity bot, BotRuntime runtime, Vector3 impactPosition, bool smoke, float now);
+private bool TryAddGrenadeCandidate(List<TacticalActionCandidate> candidates, BaseCombatEntity bot, BotRuntime runtime, BasePlayer target, Vector3 knownThreatPosition, float healthFraction, bool hasFreshSeen, bool hasFreshHeard, bool hasRecentContact, float now);
+private bool TryAddSmokeCandidate(List<TacticalActionCandidate> candidates, BaseCombatEntity bot, BotRuntime runtime, BasePlayer target, Vector3 knownThreatPosition, float healthFraction, bool lowHealthAware, bool atCover, bool hasFreshSeen, bool hasFreshHeard, bool hasRecentContact, float now);
+private bool TryPlaceBarricade(BaseCombatEntity bot, BotRuntime runtime, Vector3 position, Vector3 threatPosition);
 ```
+
+As of v0.3.24, grenade and smoke utility is real-entity utility driven by config and tactical legality, not by bot inventory item ownership. Real med-item/inventory animation is still later work.
 
 Grenade conditions:
 
 ```text
 target last seen recently
 target is behind cover
-range 8m-35m
+range 12m-42m by default
 team grenade cooldown ready
 no teammate near blast point
-bot has grenade or config allows virtual grenade
+no non-target bystander player near blast point
+target point is not base-restricted and the path to it does not cross a base-restricted area
+active bot utility projectile cap has room
 ```
 
 Smoke conditions:
@@ -1640,6 +1713,10 @@ Smoke conditions:
 crossing open ground
 retreating from long-range fire
 regrouping under pressure
+hurt or under pressure
+not already in effective cover
+range 10m-55m by default
+target screen point is not base-restricted and does not cross a base-restricted path
 ```
 
 Barricade conditions:
@@ -1667,6 +1744,9 @@ push, flank, retreat, or fight from cover
 ### Done when
 
 - Bots occasionally throw grenades in plausible situations.
+- Bots occasionally throw smoke when hurt or pressured in the open.
+- Bots avoid throwing grenades onto teammates or bystanders.
+- Bots inside fresh bot grenade danger zones try to move clear.
 - Bots place barricades when caught in open ground.
 - Entities remain real.
 - Cooldowns prevent spam.
@@ -2774,7 +2854,7 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.19 Foliage-Balance / Slope-Wall Polish
+## Current Progress Through v0.3.24 Tactical Utility / Danger-Zone Baseline
 
 ### Files updated
 
@@ -2788,7 +2868,7 @@ UPDATED_FILES_FOR_UPLOAD.txt
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.19
+Plugin version: RaidlandsRoamBots v0.3.24
 Brain mode: playerlike_tactical_brain
 Current checked-in config: disabled by default, target=3, min=1, max=3
 Current checked-in test profile: near-player squad test anchored to ababmxking, random land fallback disabled, debug nameplates and side panel enabled
@@ -2823,7 +2903,7 @@ raidbots.goto <player-name-or-steamid> [bot-number]
 raidbots.killall
 ```
 
-Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, cover/flank points, active barricade count, stuck/nav details, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Sight`, `Fire`, and `Heal` details.
+Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, cover/flank points, active barricade count, utility status, stuck/nav details, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, and `Heal` details.
 
 ### Implemented
 
@@ -2891,7 +2971,13 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
 - Phase 13 partial:
   - Added bounded real barricade placement for damaged/exposed bots caught in open ground.
   - Added the double Wooden Barricade Cover prefab, max-active-barricade cap, oldest-wall recycling, placement distance, hold/fight-commitment time, retreat-wall distance, and cooldown config.
-  - Grenade and smoke action IDs remain scaffolded, but real projectile use is still deferred until after this barricade/base/squad pass is live-tested.
+
+- Phase 13/10 utility baseline:
+  - v0.3.24 adds real F1 grenade and smoke grenade utility actions behind deterministic candidate checks.
+  - `throw_grenade` can flush covered or last-known targets inside the configured throw range, while avoiding base-restricted positions, same-team bots, and non-target bystander players.
+  - `throw_smoke` can screen a hurt or pressured bot's retreat lane when the bot is not already in effective cover.
+  - Utility throws use a shared per-bot cooldown, team cooldown, active utility projectile cap, creator/owner attribution, and side-panel/`raidbots.list` utility diagnostics.
+  - Fresh bot F1 throws create short-lived danger zones; bots inside the zone get a high-priority escape candidate, and movement commands avoid active grenade danger destinations.
 
 - Phase 14 baseline:
   - Added conservative base-restricted position detection around cupboards, building blocks, doors, and owned base-like deployables.
@@ -2953,11 +3039,13 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Live-test polish on 2026-07-05: v0.3.19 tightens foliage back from the v0.3.18 overcorrection. It keeps the no-shoot fix, but changes foliage to a 0.65m cast, two foliage blockers, and 24m clear-through range so bots are less aggressive through brush.
   - Live-test fix on 2026-07-05: v0.3.19 validates barricade hold points before accepting a wall. Hold points must stay close to the wall and terrain-aligned, so navmesh sampling on slopes cannot drag the bot to fake cover 10m-15m away.
   - Live-test helper on 2026-07-05: v0.3.19 adds `Wall: hold_failed_slope` for cases where a wall spawned but no valid behind-wall position exists; the bot re-plans instead of treating the wall as usable cover.
+  - Live-test polish on 2026-07-05: v0.3.20-v0.3.23 added sound-investigation improvements, stricter foliage handling for dense jungle/forest sight lines, skill-scaled long-range defensive healing, nearby-cover preference, and fuller heal-to-cover discipline.
+  - Live-test feature on 2026-07-05: v0.3.24 adds real F1/smoke utility actions, utility cooldown/cap config, squad/bystander safety checks, grenade danger-zone avoidance, and `Utility:` diagnostics in the side panel plus `utility=` in `raidbots.list`.
 
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.19.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.24.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
 
@@ -2970,12 +3058,12 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 - raidbots.enable 1 spawned a tracked bot after the first two legacy body prefabs failed navigator placement and the known-working scientistnpc_junkpile_pistol prefab was accepted.
 - Follow-up body preparation showed the Raidlands kit weapon applied: weapon=rifle:rifle.ak, ammo=1.00, held=rifle.ak:BaseProjectile.
 - raidbots.list showed the new diagnostics surface: exposure=0.00(0/0), weapon=rifle:rifle.ak, cover=none, stuck=False, navPath=True, navDisabled=False.
-- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.19 foliage, wall-hold, squad, cover, healing, auto-reload, and hard-stuck behavior still need in-game combat/pathing retests after upload/reload.
+- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.24 foliage, wall-hold, squad, cover, healing, auto-reload, hard-stuck, grenade, smoke, and grenade danger-zone behavior still need in-game combat/pathing retests after upload/reload.
 ```
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.19 before I implement real grenade/smoke throws, true formation pathing, base assault logic, or LLM advisor calls. This pass polishes the implemented squad/clan coordination, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, first-pass damage/low-health survival reactions, effective-cover validation, barricade hold/peek behavior, retreat-loop escape, state-independent visible shooting, passive combat healing, syringe-lock healing, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, and hard-stuck cleanup, which should be validated in-game before adding more entity/projectile utility.
+Please live-test v0.3.24 before I implement true formation pathing, base assault logic, real med-item use, or LLM advisor calls. This pass polishes the implemented squad/clan coordination, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, damage/low-health survival reactions, effective-cover validation, barricade hold/peek behavior, retreat-loop escape, state-independent visible shooting, passive combat healing, syringe-lock healing, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, real F1/smoke utility, and grenade danger-zone avoidance.
 
 Recommended first test ladder:
 
@@ -3028,7 +3116,7 @@ Baseline cover/range/stuck retest:
 9. Expected: when a cover point is found, the bot moves to cover, tucks, peeks briefly, and only fires when the peek/exposure gate passes.
 ```
 
-v0.3.19 clan/foliage/base/barricade/low-health/ammo retest:
+v0.3.24 clan/foliage/base/barricade/low-health/ammo/utility retest:
 
 ```text
 1. raidbots.nuke
@@ -3058,15 +3146,19 @@ v0.3.19 clan/foliage/base/barricade/low-health/ammo retest:
 25. Expected: a clearly visible player should no longer be hidden by one branch or a wide near-miss sphere cast, but multiple foliage hits should now suppress fire more often than v0.3.18. If the bot still does not shoot, capture `Sight:` and `Fire:` together.
 26. Force a wall on uneven terrain or across elevation.
 27. Expected: the bot should only use the wall if a close behind-wall hold point exists. If not, the panel should show `Wall: hold_failed_slope` and it should re-plan instead of running to fake cover far away.
+28. Break LOS or hold near cover around 12m-42m after contact.
+29. Expected: a bot may choose `throw_grenade`, spawn a real F1, enter `GrenadeFlush`, and then move away or back to cover. Squadmates inside the danger radius should choose an escape move instead of standing in the blast lane.
+30. Hurt a bot while exposed around 10m-55m.
+31. Expected: a bot may choose `throw_smoke`, spawn a real smoke grenade, enter `Retreat`, and move away through the screen.
+32. If utility does not happen, expected `Utility:` blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
 ```
 
 ### Known not-yet-implemented
 
 ```text
 cover/peek quality tuning beyond the baseline
-grenade and smoke real projectile utility
-real med-item animation/use; v0.3.19 health recovery is still a controlled passive/syringe-style approximation
-grenade danger-zone avoidance
+grenade/smoke throw arc, damage, and smoke-screen tuning beyond the baseline after live validation
+real med-item animation/use; v0.3.24 health recovery is still a controlled passive/syringe-style approximation
 true formation/path reservation and leader/follower pathing
 base objective validation, base assault, and smarter "is this base worth holding" logic
 advanced stuck memory for avoiding the same failed destination over longer windows

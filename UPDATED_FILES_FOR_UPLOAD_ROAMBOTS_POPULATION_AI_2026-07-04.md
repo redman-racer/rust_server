@@ -1,7 +1,17 @@
-Raidlands roam bots foliage and barricade update - 2026-07-05
+Raidlands roam bots tactical utility, defensive healing, foliage, and barricade update - 2026-07-05
 
 Current update:
-- RaidlandsRoamBots is now v0.3.22.
+- RaidlandsRoamBots is now v0.3.24.
+- Bots can now choose real F1 grenade throws as a tactical `throw_grenade` action when a covered or last-known target is within the configured throw window.
+- Bots can now choose real smoke grenade throws as a `throw_smoke` action when hurt or under pressure and needing a retreat/screen lane.
+- Bot utility throws use shared bot/team cooldowns, cap active bot utility projectiles, avoid throwing F1 grenades onto squadmates or non-target bystander players, and refuse utility throws into base-restricted paths/positions.
+- Fresh bot F1 throws create short-lived danger zones. Bots inside one should pick a high-priority retreat/escape move and movement commands avoid destinations inside active grenade danger zones.
+- `raidbots.list` and the right-side debug panel now include `utility=...` / `Utility:` so playtests can distinguish `grenade_candidate`, `grenade_thrown`, `smoke_thrown`, cooldown, range, ally-close, bystander-close, or base-blocked utility decisions.
+- Skill testing is now more even by default: `casual=34`, `average=33`, `dangerous=33`.
+- Long-range defensive healing is now skill-scaled. Around `40m-60m`, bots that are losing the exchange or below their skill's defensive health threshold will prefer to get healthy before continuing the fight.
+- Defensive cover selection now prefers nearby hard cover first. The nearby-cover cutoff scales from `3m` for lower-skill bots to `8m` for higher-skill bots; if cover is farther than that, bots prefer to place a barricade before continuing the heal-cover process.
+- Bots now try to hold cover until close to full health (`AI -> Low Health Cover Heal Target Fraction` is `0.96`) and the cover-heal commitment is longer (`24s`).
+- Bots can still fire while moving to cover, holding cover, or after placing a barricade. The only intentional no-fire window remains the syringe/fire-lock window, and close pushes can break the hold-cover preference so the bot shoots back.
 - Bots now keep fresh damage-wall awareness through the active barricade cooldown when they are shot again at or after their current barricade placement, so a follow-up wall can happen once the cooldown opens instead of the damage reaction expiring early.
 - The default barricade cooldown is now `12s` instead of `18s`, with a new `AI -> Barricade Followup Memory Seconds` value of `6s` to keep the follow-up window tight without making bots spam walls.
 - Foliage LOS is stricter for long jungle/forest sight lines like the screenshot case where a bot 90m+ away reported `LOS: Y` and `Exposure: 1.00 (6/6)` through dense leaf cover.
@@ -17,6 +27,26 @@ Current update:
   - `AI -> Sound Investigation Commitment Seconds`
   - `AI -> Sound Investigation Command Cooldown Seconds`
   - `AI -> Barricade Followup Memory Seconds`
+  - `AI -> Long Range Defensive Minimum Distance`
+  - `AI -> Long Range Defensive Maximum Distance`
+  - `AI -> Long Range Losing Fight Memory Seconds`
+  - `AI -> Nearby Defensive Cover Minimum Distance`
+  - `AI -> Nearby Defensive Cover Maximum Distance`
+  - `AI -> Long Range Defensive Health Fraction Casual/Average/Dangerous`
+  - `AI -> Full Health Cover Discipline Chance Casual/Average/Dangerous`
+  - `AI -> Healing Return Fire Distance`
+  - `AI -> Grenade Prefab`
+  - `AI -> Smoke Grenade Prefab`
+  - `AI -> Grenade Minimum/Maximum Throw Distance`
+  - `AI -> Smoke Minimum/Maximum Throw Distance`
+  - `AI -> Grenade Throw Velocity`
+  - `AI -> Smoke Throw Velocity`
+  - `AI -> Grenade Fuse Seconds`
+  - `AI -> Grenade Danger Radius`
+  - `AI -> Grenade Ally Avoid Radius`
+  - `AI -> Grenade Avoidance Seconds`
+  - `AI -> Smoke Screen Distance`
+  - `AI -> Maximum Active Bot Utility Projectiles`
 
 Rust server files to upload for this update:
 - oxide/plugins/RaidlandsRoamBots.cs
@@ -29,6 +59,9 @@ Recommended live RCON order for this update:
 - `raidbots.list ababmxking`
 - Recheck the jungle/forest sight line from the screenshot at 70m-120m.
 - Shoot a bot after it has placed its first barricade; once the `12s` cooldown opens, it should be eligible to place another barricade if it is still exposed or its current wall is not effective cover.
+- Test a 40m-60m fight while the bot is taking worse trades. If hard cover is within the skill-scaled 3m-8m nearby window, it should move there and heal; if cover is farther, it should prefer barricade first.
+- Break LOS around 12m-42m and hold near cover/last-known position. A bot may choose `throw_grenade`; squadmates should move out of the danger zone instead of standing in the blast lane.
+- Hurt a bot while it is exposed around 10m-55m. A bot may choose `throw_smoke`, then retreat through the screen instead of pushing.
 - `raidbots.list ababmxking`
 
 Expected verification for this update:
@@ -36,6 +69,9 @@ Expected verification for this update:
 - Expected good outcomes are either `LOS: N` with `Sight: foliage ...`, or a reduced exposure count below the shoot threshold.
 - In a cleaner lane with only light brush or a short gap, bots can still reacquire once enough target probes are genuinely visible.
 - A repeatedly pressured bot should show a shorter barricade cooldown and should not lose the second wall opportunity just because the original damage reaction window expired.
+- A healing bot should avoid pushing/flanking until close to full health, but should still shoot if the player closes distance during the heal process.
+- Utility playtests should show concrete `Utility:` reasons in the panel. Expected blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
+- A successful F1 throw should leave the bot in `GrenadeFlush`, spawn a real grenade, then move away or back to cover. A successful smoke throw should leave the bot in `Retreat` and move it away from the threat.
 - If the bot still gets perfect sight through foliage, paste the side panel `Sight:` line plus `raidbots.list ababmxking` from that same angle.
 
 Previous Gen2/native land roam bots rollout - 2026-07-04
