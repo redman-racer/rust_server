@@ -214,7 +214,7 @@ Do not call the LLM from these ticks directly. The tick should submit a decision
 
 The new config should make the single-mode design obvious.
 
-This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.24. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup.
+This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.25. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup.
 
 ```json
 {
@@ -244,9 +244,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
 
   "Skill Definitions": {
     "casual": {
-      "Health": 125.0,
-      "DamageScale": 0.78,
-      "IncomingDamageScale": 1.15,
+      "Health": 100.0,
+      "DamageScale": 1.0,
+      "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.75,
       "ReactionMaxSeconds": 1.35,
       "AimErrorDegrees": 5.0,
@@ -255,7 +255,7 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
       "TacticalNoise": 0.25
     },
     "average": {
-      "Health": 150.0,
+      "Health": 110.0,
       "DamageScale": 1.0,
       "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.40,
@@ -266,9 +266,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
       "TacticalNoise": 0.15
     },
     "dangerous": {
-      "Health": 190.0,
-      "DamageScale": 1.18,
-      "IncomingDamageScale": 0.9,
+      "Health": 120.0,
+      "DamageScale": 1.0,
+      "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.18,
       "ReactionMaxSeconds": 0.45,
       "AimErrorDegrees": 1.5,
@@ -555,7 +555,7 @@ remove Gen2/naval prefabs
 replace prefab candidates with legacy scientist bodies
 turn generated near-player positions on
 turn random land fallback on
-normalize older visibility, foliage, hearing, defensive-healing, and utility settings to the current v0.3.24 defaults
+normalize older visibility, foliage, hearing, defensive-healing, utility, health, and damage settings to the current v0.3.25 defaults
 pin barricade prefab to the double Wooden Barricade Cover prefab
 pin grenade and smoke grenade prefabs to the current deployed F1/smoke prefab paths
 preserve kits, bot profiles, population, skill weights, team weights, and stats
@@ -1692,7 +1692,7 @@ private bool TryAddSmokeCandidate(List<TacticalActionCandidate> candidates, Base
 private bool TryPlaceBarricade(BaseCombatEntity bot, BotRuntime runtime, Vector3 position, Vector3 threatPosition);
 ```
 
-As of v0.3.24, grenade and smoke utility is real-entity utility driven by config and tactical legality, not by bot inventory item ownership. Real med-item/inventory animation is still later work.
+As of v0.3.25, grenade and smoke utility is real-entity utility driven by config and tactical legality, not by bot inventory item ownership. Real med-item/inventory animation is still later work.
 
 Grenade conditions:
 
@@ -2854,7 +2854,7 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.24 Tactical Utility / Danger-Zone Baseline
+## Current Progress Through v0.3.25 Player-Like Health / Damage Balance
 
 ### Files updated
 
@@ -2868,7 +2868,7 @@ UPDATED_FILES_FOR_UPLOAD.txt
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.24
+Plugin version: RaidlandsRoamBots v0.3.25
 Brain mode: playerlike_tactical_brain
 Current checked-in config: disabled by default, target=3, min=1, max=3
 Current checked-in test profile: near-player squad test anchored to ababmxking, random land fallback disabled, debug nameplates and side panel enabled
@@ -2956,7 +2956,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
 - Phase 10 baseline:
   - Added weapon-derived combat profiles for shotgun, pistol, SMG, rifle, marksman, sniper, and LMG-style weapons.
   - Bots now prefer pushing closer when their weapon is outside preferred/ideal range instead of always standing still and firing.
-  - Poor-range bot damage is scaled down so long SMG/pistol fire behaves more like low-quality harassment; as of v0.3.16 poor range no longer gates whether a visible in-range bot fires at all.
+  - Poor range affects action scoring and repositioning only; bot weapon damage is left at Rust's normal hit damage.
 
 - Phase 11 baseline:
   - Fixed stuck detection so repeated commands to the same destination no longer reset movement progress.
@@ -3041,11 +3041,12 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Live-test helper on 2026-07-05: v0.3.19 adds `Wall: hold_failed_slope` for cases where a wall spawned but no valid behind-wall position exists; the bot re-plans instead of treating the wall as usable cover.
   - Live-test polish on 2026-07-05: v0.3.20-v0.3.23 added sound-investigation improvements, stricter foliage handling for dense jungle/forest sight lines, skill-scaled long-range defensive healing, nearby-cover preference, and fuller heal-to-cover discipline.
   - Live-test feature on 2026-07-05: v0.3.24 adds real F1/smoke utility actions, utility cooldown/cap config, squad/bystander safety checks, grenade danger-zone avoidance, and `Utility:` diagnostics in the side panel plus `utility=` in `raidbots.list`.
+  - Live-test balance fix on 2026-07-05: v0.3.25 moves skill health to player-like values (`casual=100`, `average=110`, `dangerous=120`), migrates old high-health configs on reload, and removes bot outgoing/incoming damage scaling so hits use normal Rust damage.
 
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.24.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.25.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
 
@@ -3058,12 +3059,12 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 - raidbots.enable 1 spawned a tracked bot after the first two legacy body prefabs failed navigator placement and the known-working scientistnpc_junkpile_pistol prefab was accepted.
 - Follow-up body preparation showed the Raidlands kit weapon applied: weapon=rifle:rifle.ak, ammo=1.00, held=rifle.ak:BaseProjectile.
 - raidbots.list showed the new diagnostics surface: exposure=0.00(0/0), weapon=rifle:rifle.ak, cover=none, stuck=False, navPath=True, navDisabled=False.
-- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.24 foliage, wall-hold, squad, cover, healing, auto-reload, hard-stuck, grenade, smoke, and grenade danger-zone behavior still need in-game combat/pathing retests after upload/reload.
+- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.25 foliage, wall-hold, squad, cover, healing, auto-reload, hard-stuck, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
 ```
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.24 before I implement true formation pathing, base assault logic, real med-item use, or LLM advisor calls. This pass polishes the implemented squad/clan coordination, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, damage/low-health survival reactions, effective-cover validation, barricade hold/peek behavior, retreat-loop escape, state-independent visible shooting, passive combat healing, syringe-lock healing, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, real F1/smoke utility, and grenade danger-zone avoidance.
+Please live-test v0.3.25 before I implement true formation pathing, base assault logic, real med-item use, or LLM advisor calls. This pass polishes the implemented squad/clan coordination, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, damage/low-health survival reactions, effective-cover validation, barricade hold/peek behavior, retreat-loop escape, state-independent visible shooting, passive combat healing, syringe-lock healing, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, and normal unscaled damage.
 
 Recommended first test ladder:
 
@@ -3109,14 +3110,14 @@ Baseline cover/range/stuck retest:
 2. Crest a hill so only a tiny part of your head is visible.
 3. Expected: raidbots.list should show low exposure and the bot should not instantly hard-lock and fire from one head ray.
 4. Fight a pistol/SMG bot at 70m-100m.
-5. Expected: it may harass in short windows, but should prefer pushing/repositioning closer and deal reduced poor-range damage.
+5. Expected: it may harass in short windows, but should prefer pushing/repositioning closer; landed hits should use normal Rust damage.
 6. Put a cliff/rock/wall between you and the bot's destination.
 7. Expected: stuck eventually becomes true, a stuck_recovery trace is written, and the bot chooses another nearby navmesh point instead of staring forever.
 8. Fight near rocks/terrain.
 9. Expected: when a cover point is found, the bot moves to cover, tucks, peeks briefly, and only fires when the peek/exposure gate passes.
 ```
 
-v0.3.24 clan/foliage/base/barricade/low-health/ammo/utility retest:
+v0.3.25 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest:
 
 ```text
 1. raidbots.nuke
@@ -3158,7 +3159,7 @@ v0.3.24 clan/foliage/base/barricade/low-health/ammo/utility retest:
 ```text
 cover/peek quality tuning beyond the baseline
 grenade/smoke throw arc, damage, and smoke-screen tuning beyond the baseline after live validation
-real med-item animation/use; v0.3.24 health recovery is still a controlled passive/syringe-style approximation
+real med-item animation/use; v0.3.25 health recovery is still a controlled passive/syringe-style approximation
 true formation/path reservation and leader/follower pathing
 base objective validation, base assault, and smarter "is this base worth holding" logic
 advanced stuck memory for avoiding the same failed destination over longer windows

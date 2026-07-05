@@ -37,9 +37,9 @@
   },
   "Skill Definitions": {
     "casual": {
-      "Health": 125.0,
-      "DamageScale": 0.78,
-      "IncomingDamageScale": 1.15,
+      "Health": 100.0,
+      "DamageScale": 1.0,
+      "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.75,
       "ReactionMaxSeconds": 1.35,
       "AimErrorDegrees": 5.0,
@@ -48,7 +48,7 @@
       "TacticalNoise": 0.25
     },
     "average": {
-      "Health": 150.0,
+      "Health": 110.0,
       "DamageScale": 1.0,
       "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.4,
@@ -59,9 +59,9 @@
       "TacticalNoise": 0.15
     },
     "dangerous": {
-      "Health": 190.0,
-      "DamageScale": 1.18,
-      "IncomingDamageScale": 0.9,
+      "Health": 120.0,
+      "DamageScale": 1.0,
+      "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.18,
       "ReactionMaxSeconds": 0.45,
       "AimErrorDegrees": 1.5,

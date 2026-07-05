@@ -1,7 +1,11 @@
-Raidlands roam bots tactical utility, defensive healing, foliage, and barricade update - 2026-07-05
+Raidlands roam bots player-like health and damage update - 2026-07-05
 
 Current update:
-- RaidlandsRoamBots is now v0.3.24.
+- RaidlandsRoamBots is now v0.3.25.
+- Bot skill health now stays in the player-like `100-120` HP band: casual `100`, average `110`, dangerous `120`.
+- Old high-health skill configs are normalized on plugin load, so stale `125/150/190` HP values should not recreate the endless hide-to-heal loop.
+- Bot healing fractions now use the effective Rust entity max health, so a body capped around `120` HP will not keep trying to heal toward an impossible `190`.
+- Bot outgoing and incoming damage are no longer scaled by skill tier or poor-range damage multipliers. Skill still affects aim, reaction, courage, and tactics; landed hits use normal Rust damage.
 - Bots can now choose real F1 grenade throws as a tactical `throw_grenade` action when a covered or last-known target is within the configured throw window.
 - Bots can now choose real smoke grenade throws as a `throw_smoke` action when hurt or under pressure and needing a retreat/screen lane.
 - Bot utility throws use shared bot/team cooldowns, cap active bot utility projectiles, avoid throwing F1 grenades onto squadmates or non-target bystander players, and refuse utility throws into base-restricted paths/positions.
@@ -57,6 +61,7 @@ Recommended live RCON order for this update:
 - Upload `oxide/config/RaidlandsRoamBots.json`
 - `oxide.reload RaidlandsRoamBots`
 - `raidbots.list ababmxking`
+- Confirm spawned bots report HP caps in the `100-120` range in the side panel / `raidbots.list` instead of `125/150/190`.
 - Recheck the jungle/forest sight line from the screenshot at 70m-120m.
 - Shoot a bot after it has placed its first barricade; once the `12s` cooldown opens, it should be eligible to place another barricade if it is still exposed or its current wall is not effective cover.
 - Test a 40m-60m fight while the bot is taking worse trades. If hard cover is within the skill-scaled 3m-8m nearby window, it should move there and heal; if cover is farther, it should prefer barricade first.
@@ -70,6 +75,8 @@ Expected verification for this update:
 - In a cleaner lane with only light brush or a short gap, bots can still reacquire once enough target probes are genuinely visible.
 - A repeatedly pressured bot should show a shorter barricade cooldown and should not lose the second wall opportunity just because the original damage reaction window expired.
 - A healing bot should avoid pushing/flanking until close to full health, but should still shoot if the player closes distance during the heal process.
+- A dangerous bot that reaches about `120` HP should leave `cover_heal` / hide-to-heal behavior instead of waiting for an impossible high-health target.
+- Player-vs-bot and bot-vs-player hits should feel like normal Rust damage, with no casual damage penalty, dangerous damage bonus, incoming-damage handicap, or poor-range damage debuff from this plugin.
 - Utility playtests should show concrete `Utility:` reasons in the panel. Expected blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
 - A successful F1 throw should leave the bot in `GrenadeFlush`, spawn a real grenade, then move away or back to cover. A successful smoke throw should leave the bot in `Retreat` and move it away from the threat.
 - If the bot still gets perfect sight through foliage, paste the side panel `Sight:` line plus `raidbots.list ababmxking` from that same angle.

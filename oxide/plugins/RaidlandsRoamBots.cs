@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.24")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.25")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -31,6 +31,10 @@ namespace Oxide.Plugins
         private const float RetreatFallbackReturnFireAfterSeconds = 2.5f;
         private const float RetreatFallbackTimeoutSeconds = 8f;
         private const float MinimumAmmoFractionToShoot = 0.01f;
+        private const float BotMinPlayerLikeHealth = 100f;
+        private const float BotMaxPlayerLikeHealth = 120f;
+        private const float BotDefaultAverageHealth = 110f;
+        private const float PlayerLikeDamageScale = 1f;
         private const int ForestSplatMask = 32;
         private const string ScoreboardNpcKills = "NPC Kills";
         private const string ScoreboardDeathsByNpc = "Killed by NPCs";
@@ -109,9 +113,9 @@ namespace Oxide.Plugins
             [JsonProperty("Skill Definitions")]
             public Dictionary<string, SkillDefinition> SkillDefinitions = new Dictionary<string, SkillDefinition>(StringComparer.OrdinalIgnoreCase)
             {
-                ["casual"] = new SkillDefinition { Health = 125f, DamageScale = 0.78f, IncomingDamageScale = 1.15f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 5f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f },
-                ["average"] = new SkillDefinition { Health = 150f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 3f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f },
-                ["dangerous"] = new SkillDefinition { Health = 190f, DamageScale = 1.18f, IncomingDamageScale = 0.9f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 1.5f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f }
+                ["casual"] = new SkillDefinition { Health = 100f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 5f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f },
+                ["average"] = new SkillDefinition { Health = 110f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 3f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f },
+                ["dangerous"] = new SkillDefinition { Health = 120f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 1.5f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f }
             };
 
             [JsonProperty("High Tier Kit Weight")]
@@ -278,7 +282,7 @@ namespace Oxide.Plugins
 
         private class SkillDefinition
         {
-            public float Health = 150f;
+            public float Health = BotDefaultAverageHealth;
             public float DamageScale = 1f;
             public float IncomingDamageScale = 1f;
             public float ReactionMinSeconds = 0.4f;
@@ -1353,20 +1357,35 @@ namespace Oxide.Plugins
                 config.SkillWeights = defaults.SkillWeights;
             }
 
-            if (config.SkillDefinitions == null)
+            if (config.SkillDefinitions == null || config.SkillDefinitions.Count == 0)
             {
                 config.SkillDefinitions = defaults.SkillDefinitions;
             }
-            else
+
+            var normalizedSkillDefinitions = new Dictionary<string, SkillDefinition>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in config.SkillDefinitions)
             {
-                foreach (var entry in defaults.SkillDefinitions)
+                var key = (entry.Key ?? "").Trim().ToLowerInvariant();
+
+                if (string.IsNullOrWhiteSpace(key))
                 {
-                    if (!config.SkillDefinitions.ContainsKey(entry.Key))
-                    {
-                        config.SkillDefinitions[entry.Key] = entry.Value;
-                    }
+                    continue;
+                }
+
+                defaults.SkillDefinitions.TryGetValue(key, out var fallback);
+                normalizedSkillDefinitions[key] = NormalizeSkillDefinition(key, entry.Value, fallback);
+            }
+
+            foreach (var entry in defaults.SkillDefinitions)
+            {
+                if (!normalizedSkillDefinitions.ContainsKey(entry.Key))
+                {
+                    normalizedSkillDefinitions[entry.Key] = NormalizeSkillDefinition(entry.Key, null, entry.Value);
                 }
             }
+
+            config.SkillDefinitions = normalizedSkillDefinitions;
 
             if (config.Kits == null)
             {
@@ -2157,7 +2176,6 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null && IsRealPlayer(attacker))
             {
-                info.damageTypes.ScaleAll(victimRuntime.Skill.IncomingDamageScale);
                 victimRuntime.LastDamageTakenAt = now;
                 victimRuntime.LastDamageBarricadeAwarenessCheckAt = 0f;
                 victimRuntime.NextLowHealthAwarenessCheckAt = 0f;
@@ -2191,8 +2209,6 @@ namespace Oxide.Plugins
             if (attackerRuntime != null && IsRealPlayer(victimPlayer))
             {
                 RefreshCombatProfile(attackerEntity, attackerRuntime);
-                var distance = attackerEntity == null ? 0f : Vector3.Distance(attackerEntity.transform.position, victimPlayer.transform.position);
-                info.damageTypes.ScaleAll(attackerRuntime.Skill.DamageScale * WeaponRangeDamageMultiplier(attackerRuntime, distance));
                 attackerRuntime.LastDamageDealtAt = now;
                 attackerRuntime.Memory.Target = victimPlayer;
                 attackerRuntime.Memory.TargetUserId = victimPlayer.userID;
@@ -3203,21 +3219,90 @@ namespace Oxide.Plugins
 
         private SkillDefinition SkillFor(string tier)
         {
+            var fallback = DefaultSkillDefinition(tier);
+
             if (config.SkillDefinitions != null && config.SkillDefinitions.TryGetValue(tier, out var definition) && definition != null)
             {
-                definition.Health = Math.Max(1f, definition.Health);
-                definition.DamageScale = Math.Max(0.1f, definition.DamageScale);
-                definition.IncomingDamageScale = Math.Max(0.1f, definition.IncomingDamageScale);
-                definition.ReactionMinSeconds = Math.Max(0f, definition.ReactionMinSeconds);
-                definition.ReactionMaxSeconds = Math.Max(definition.ReactionMinSeconds, definition.ReactionMaxSeconds);
-                definition.AimErrorDegrees = Math.Max(0f, definition.AimErrorDegrees);
-                definition.Aggression = Mathf.Clamp01(definition.Aggression);
-                definition.Courage = Mathf.Clamp01(definition.Courage);
-                definition.TacticalNoise = Mathf.Clamp01(definition.TacticalNoise);
-                return definition;
+                return NormalizeSkillDefinition(tier, definition, fallback);
             }
 
-            return new SkillDefinition();
+            return NormalizeSkillDefinition(tier, null, fallback);
+        }
+
+        private SkillDefinition NormalizeSkillDefinition(string tier, SkillDefinition definition, SkillDefinition fallback = null)
+        {
+            var normalized = definition ?? CloneSkillDefinition(fallback) ?? new SkillDefinition();
+            var fallbackHealth = fallback?.Health ?? DefaultHealthForTier(tier);
+
+            if (normalized.Health < BotMinPlayerLikeHealth || normalized.Health > BotMaxPlayerLikeHealth)
+            {
+                normalized.Health = Mathf.Clamp(fallbackHealth, BotMinPlayerLikeHealth, BotMaxPlayerLikeHealth);
+            }
+            else
+            {
+                normalized.Health = Mathf.Clamp(normalized.Health, BotMinPlayerLikeHealth, BotMaxPlayerLikeHealth);
+            }
+
+            normalized.DamageScale = PlayerLikeDamageScale;
+            normalized.IncomingDamageScale = PlayerLikeDamageScale;
+            normalized.ReactionMinSeconds = Math.Max(0f, normalized.ReactionMinSeconds);
+            normalized.ReactionMaxSeconds = Math.Max(normalized.ReactionMinSeconds, normalized.ReactionMaxSeconds);
+            normalized.AimErrorDegrees = Math.Max(0f, normalized.AimErrorDegrees);
+            normalized.Aggression = Mathf.Clamp01(normalized.Aggression);
+            normalized.Courage = Mathf.Clamp01(normalized.Courage);
+            normalized.TacticalNoise = Mathf.Clamp01(normalized.TacticalNoise);
+            return normalized;
+        }
+
+        private SkillDefinition CloneSkillDefinition(SkillDefinition source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            return new SkillDefinition
+            {
+                Health = source.Health,
+                DamageScale = source.DamageScale,
+                IncomingDamageScale = source.IncomingDamageScale,
+                ReactionMinSeconds = source.ReactionMinSeconds,
+                ReactionMaxSeconds = source.ReactionMaxSeconds,
+                AimErrorDegrees = source.AimErrorDegrees,
+                Aggression = source.Aggression,
+                Courage = source.Courage,
+                TacticalNoise = source.TacticalNoise
+            };
+        }
+
+        private SkillDefinition DefaultSkillDefinition(string tier)
+        {
+            if (string.Equals(tier, "casual", StringComparison.OrdinalIgnoreCase))
+            {
+                return new SkillDefinition { Health = 100f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 5f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f };
+            }
+
+            if (string.Equals(tier, "dangerous", StringComparison.OrdinalIgnoreCase))
+            {
+                return new SkillDefinition { Health = 120f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 1.5f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f };
+            }
+
+            return new SkillDefinition { Health = BotDefaultAverageHealth, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 3f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f };
+        }
+
+        private float DefaultHealthForTier(string tier)
+        {
+            if (string.Equals(tier, "casual", StringComparison.OrdinalIgnoreCase))
+            {
+                return 100f;
+            }
+
+            if (string.Equals(tier, "dangerous", StringComparison.OrdinalIgnoreCase))
+            {
+                return 120f;
+            }
+
+            return BotDefaultAverageHealth;
         }
 
         private string ChooseProfileName()
@@ -4121,7 +4206,7 @@ namespace Oxide.Plugins
             var stats = EnsureBotStats(runtime);
             var kd = stats.deaths <= 0 ? stats.kills.ToString(CultureInfo.InvariantCulture) : (stats.kills / (float)Math.Max(1, stats.deaths)).ToString("0.00", CultureInfo.InvariantCulture);
             var health = bot.Health().ToString("0", CultureInfo.InvariantCulture);
-            var maxHealth = Math.Max(1f, runtime.Skill.Health).ToString("0", CultureInfo.InvariantCulture);
+            var maxHealth = BotMaxHealth(bot, runtime).ToString("0", CultureInfo.InvariantCulture);
             var ammo = AmmoFraction(bot).ToString("0.00", CultureInfo.InvariantCulture);
             var target = runtime.Memory.Target == null ? BotTargetStatus(bot, runtime) : PlayerName(runtime.Memory.Target);
             var advisor = string.IsNullOrWhiteSpace(runtime.Decisions.LastAdvisorStatus) ? "none" : runtime.Decisions.LastAdvisorStatus;
@@ -4904,7 +4989,7 @@ namespace Oxide.Plugins
                 ClanTag = runtime.ClanTag,
                 State = runtime.State.ToString(),
                 SkillTier = runtime.SkillTier,
-                HealthFraction = Mathf.Clamp01(bot.Health() / Math.Max(1f, runtime.Skill.Health)),
+                HealthFraction = Mathf.Clamp01(bot.Health() / BotMaxHealth(bot, runtime)),
                 WeaponShortname = ActiveWeaponShortname(bot),
                 AmmoFraction = AmmoFraction(bot),
                 HasLineOfSight = runtime.Memory.HasLineOfSight,
@@ -4929,7 +5014,7 @@ namespace Oxide.Plugins
             var hasFreshSeen = runtime.Memory.LastSeenAt > 0f && now - runtime.Memory.LastSeenAt <= config.AI.SearchLastSeenSeconds;
             var soundMemorySeconds = Math.Min(config.AI.TargetMemorySeconds, config.AI.SoundInvestigationCommitmentSeconds);
             var hasFreshHeard = config.AI.AllowHearing && runtime.Memory.LastHeardAt > 0f && now - runtime.Memory.LastHeardAt <= soundMemorySeconds;
-            var healthFraction = Mathf.Clamp01(bot.Health() / Math.Max(1f, runtime.Skill.Health));
+            var healthFraction = Mathf.Clamp01(bot.Health() / BotMaxHealth(bot, runtime));
             var board = SquadBoardFor(runtime);
             var squadHasFreshContact = SquadHasFreshContact(board, now);
             var hasRecentContact = HasRecentContact(runtime, now);
@@ -7061,6 +7146,35 @@ namespace Oxide.Plugins
             return IsAtCover(bot, runtime) ? "compromised" : "moving";
         }
 
+        private float BotMaxHealth(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            var configured = Mathf.Clamp(runtime?.Skill?.Health ?? BotDefaultAverageHealth, BotMinPlayerLikeHealth, BotMaxPlayerLikeHealth);
+
+            if (bot != null)
+            {
+                try
+                {
+                    var entityMax = bot.MaxHealth();
+                    var current = bot.Health();
+
+                    if (entityMax > 1f)
+                    {
+                        var observedCap = Math.Max(entityMax, current);
+
+                        if (observedCap < configured)
+                        {
+                            return Math.Max(1f, observedCap);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return Math.Max(1f, configured);
+        }
+
         private string MedicalStatus(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
             if (bot == null || runtime == null)
@@ -7073,7 +7187,7 @@ namespace Oxide.Plugins
                 return $"syringe_lock {Math.Max(0f, runtime.MedicalFireLockedUntil - now).ToString("0.0", CultureInfo.InvariantCulture)}s";
             }
 
-            var maxHealth = Math.Max(1f, runtime.Skill.Health);
+            var maxHealth = BotMaxHealth(bot, runtime);
             var healthFraction = Mathf.Clamp01(bot.Health() / maxHealth);
 
             if (runtime.LowHealthCoverAwareUntil > now && healthFraction < config.AI.LowHealthCoverHealTargetFraction)
@@ -7495,7 +7609,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var maxHealth = Math.Max(1f, runtime.Skill.Health);
+            var maxHealth = BotMaxHealth(bot, runtime);
             var targetHealth = maxHealth * config.AI.PassiveCombatHealTargetFraction;
             var currentHealth = bot.Health();
 
@@ -7522,7 +7636,7 @@ namespace Oxide.Plugins
 
         private void ApplySyringeCoverHeal(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
-            var maxHealth = Math.Max(1f, runtime.Skill.Health);
+            var maxHealth = BotMaxHealth(bot, runtime);
             var targetHealth = maxHealth * Math.Max(config.AI.LowHealthCoverThreshold, config.AI.LowHealthCoverHealTargetFraction);
             var currentHealth = bot.Health();
 
@@ -8453,26 +8567,6 @@ namespace Oxide.Plugins
             }
 
             return false;
-        }
-
-        private float PoorRangeFireChance(BotRuntime runtime)
-        {
-            var skill = runtime?.Skill ?? new SkillDefinition();
-            return Mathf.Clamp(Mathf.Lerp(0.36f, 0.12f, skill.Courage) + skill.TacticalNoise * 0.22f, 0.08f, 0.48f);
-        }
-
-        private float WeaponRangeDamageMultiplier(BotRuntime runtime, float distance)
-        {
-            var rangeScore = WeaponRangeScore(runtime, distance);
-
-            if (rangeScore >= 0.98f)
-            {
-                return 1f;
-            }
-
-            var skill = runtime?.Skill ?? new SkillDefinition();
-            var skillFloor = Mathf.Lerp(0.18f, 0.42f, skill.Courage);
-            return Mathf.Clamp(skillFloor + rangeScore * Mathf.Lerp(0.45f, 0.72f, skill.Courage), 0.15f, 1f);
         }
 
         private string ActiveWeaponShortname(BaseCombatEntity bot)
