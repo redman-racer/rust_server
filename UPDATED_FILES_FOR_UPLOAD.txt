@@ -1,4 +1,4 @@
-RaidlandsRoamBots v0.3.26 advanced stuck-memory update - 2026-07-05
+RaidlandsRoamBots v0.3.29 terrain-layer spawn guard update - 2026-07-05
 
 Rust server plugin files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
@@ -9,7 +9,6 @@ Rust server config files to upload:
 Documentation / handoff files:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 - UPDATED_FILES_FOR_UPLOAD.txt
-- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_POPULATION_AI_2026-07-04.md
 
 Reload after upload:
 - raidbots.nuke
@@ -21,17 +20,23 @@ Reload after upload:
 
 Local verification:
 - JSON parse passed for oxide/config/RaidlandsRoamBots.json.
-- Roslyn compile check against RustDedicated_Data/Managed passed for RaidlandsRoamBots v0.3.26.
+- Roslyn compile check against RustDedicated_Data/Managed passed for RaidlandsRoamBots v0.3.29.
 - Remaining compiler warnings are expected unused future-phase fields and Oxide plugin references populated at runtime.
 
 Live smoke checks:
-- Confirm the plugin loads as RaidlandsRoamBots v0.3.26.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Stuck Memory Seconds": 75.0, "Stuck Memory Radius": 9.0, and "Maximum Stuck Memory Points": 14.
+- Confirm the plugin loads as RaidlandsRoamBots v0.3.29.
+- Confirm oxide/config/RaidlandsRoamBots.json includes "Stuck Memory Seconds": 75.0, "Stuck Memory Radius": 9.0, "Maximum Stuck Memory Points": 14, "Squad Destination Reservation Radius": 7.5, "Grant Bot Medical Items": true, "Use Physics Surface Spawn Checks": true, and "Maximum Physical Surface Mismatch": 1.25.
 - Confirm raidbots.list includes badspots=0 on a fresh healthy bot.
+- Confirm raidbots.list includes formation=<reason> and heal=<reason> on active bots.
+- Confirm debug overhead names and the closest-bot side panel color bot names by skill: casual green, average yellow, dangerous red.
+- Spawn near hilly/mountain terrain that previously produced the under-surface bubble. Expected: bad lower-layer navmesh positions are skipped or invalid bots despawn quickly instead of remaining as protected shooters.
+- With Debug Spawn Details enabled, spawn logs should include physicalSurface=... and belowPhysical=False for accepted bots.
 - Force a bot to fail movement against a cliff, large rock, wall, or base edge. Expected: badspots increments after no-progress/path failure.
 - After a bad spot is remembered, keep pressure on the bot. Expected: recovery, retreat, cover, investigate, flank, regroup, push, and roam candidates avoid that same destination until the memory expires.
 - Wait longer than Stuck Memory Seconds. Expected: badspots decays and the area can be reconsidered later.
-- Continue the existing v0.3.25 combat checks: foliage LOS, wall hold, squad roles, base hold-out behavior, low-health cover, auto-reload, grenade/smoke utility, and normal 100-120 HP damage balance.
+- During a trio fight, watch for formation=...offset... or side-panel Formation: ...offset... when squadmates would otherwise choose the same shared search/flank/regroup point.
+- Damage a bot below the low-health threshold after it reaches effective cover. Expected: Heal shows real:syringe.medical lock ... while medical items remain, or fallback:<reason> if no usable item is available.
+- Continue the existing combat checks: foliage LOS, wall hold, squad roles, base hold-out behavior, low-health cover, auto-reload, grenade/smoke utility, and normal 100-120 HP damage balance.
 
 Relevant reloads:
 - oxide.reload RaidlandsRoamBots
@@ -40,6 +45,6 @@ Relevant reloads:
 Deferred / future-phase issues to leave noted:
 - Cover/peek quality tuning still needs live iteration beyond the baseline.
 - Grenade/smoke arc, damage, and smoke-screen tuning still need live validation.
-- Real med-item animation/use is not implemented; healing is still controlled passive/syringe-style behavior.
-- True formation/path reservation and leader/follower pathing are still future work.
+- Full native med-item animation/effect parity is not implemented; v0.3.29 consumes real medical inventory but still applies a controlled heal budget.
+- Full leader/follower pathing is still future work; v0.3.29 implements first-pass destination reservation and formation offsets.
 - Base objective validation/base assault and HTTP/OpenAI advisor behavior are still future work.

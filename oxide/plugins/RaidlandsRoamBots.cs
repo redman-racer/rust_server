@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.26")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.29")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -249,6 +249,15 @@ namespace Oxide.Plugins
             [JsonProperty("Maximum Below Terrain Tolerance")]
             public float MaximumBelowTerrainTolerance = 0.75f;
 
+            [JsonProperty("Use Physics Surface Spawn Checks")]
+            public bool UsePhysicsSurfaceSpawnChecks = true;
+
+            [JsonProperty("Physics Surface Raycast Height")]
+            public float PhysicsSurfaceRaycastHeight = 160f;
+
+            [JsonProperty("Maximum Physical Surface Mismatch")]
+            public float MaximumPhysicalSurfaceMismatch = 1.25f;
+
             [JsonProperty("Runtime Invalid Position Despawn Seconds")]
             public float RuntimeInvalidPositionDespawnSeconds = 2f;
 
@@ -470,6 +479,15 @@ namespace Oxide.Plugins
             [JsonProperty("Flank Cooldown Seconds")]
             public float FlankCooldownSeconds = 7f;
 
+            [JsonProperty("Squad Destination Reservation Radius")]
+            public float SquadDestinationReservationRadius = 7.5f;
+
+            [JsonProperty("Squad Formation Spacing")]
+            public float SquadFormationSpacing = 8f;
+
+            [JsonProperty("Squad Formation Offset Attempts")]
+            public int SquadFormationOffsetAttempts = 10;
+
             [JsonProperty("Grenade Cooldown Seconds")]
             public float GrenadeCooldownSeconds = 30f;
 
@@ -631,6 +649,24 @@ namespace Oxide.Plugins
 
             [JsonProperty("Syringe Cooldown Seconds")]
             public float SyringeCooldownSeconds = 8f;
+
+            [JsonProperty("Grant Bot Medical Items")]
+            public bool GrantBotMedicalItems = true;
+
+            [JsonProperty("Bot Medical Item Shortname")]
+            public string BotMedicalItemShortname = "syringe.medical";
+
+            [JsonProperty("Bot Medical Item Amount")]
+            public int BotMedicalItemAmount = 2;
+
+            [JsonProperty("Use Real Medical Items For Cover Heal")]
+            public bool UseRealMedicalItemsForCoverHeal = true;
+
+            [JsonProperty("Real Medical Item Heal Amount")]
+            public float RealMedicalItemHealAmount = 15f;
+
+            [JsonProperty("Real Medical Item Shortnames")]
+            public List<string> RealMedicalItemShortnames = new List<string> { "syringe.medical", "largemedkit", "bandage" };
 
             [JsonProperty("Auto Reload Bot Weapons")]
             public bool AutoReloadBotWeapons = true;
@@ -865,6 +901,8 @@ namespace Oxide.Plugins
             public float LastPassiveHealAt;
             public float MedicalFireLockedUntil;
             public float NextSyringeHealAt;
+            public float PendingMedicalHealRemaining;
+            public string LastMedicalUseReason = "none";
             public float HoldOutsideBaseUntil;
             public float LastShotAt;
             public float LastDamageTakenAt;
@@ -877,6 +915,7 @@ namespace Oxide.Plugins
             public string LastFireBlockReason = "none";
             public string LastSightReason = "none";
             public string LastStuckMemoryReason = "none";
+            public string LastFormationReason = "none";
 
             public bool IsShooting;
             public bool IsInBaseRestrictedArea;
@@ -1035,6 +1074,7 @@ namespace Oxide.Plugins
             public string ClanName = "";
             public Dictionary<ulong, EnemyMemory> KnownEnemies = new Dictionary<ulong, EnemyMemory>();
             public Dictionary<string, Vector3> CoverClaims = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, Vector3> DestinationClaims = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
             public int TeamSize;
             public int MembersWithLineOfSight;
             public ulong SharedEnemyUserId;
@@ -1443,6 +1483,8 @@ namespace Oxide.Plugins
             config.Spawn.MinimumAboveWater = Math.Max(0f, config.Spawn.MinimumAboveWater);
             config.Spawn.MinimumLandHeight = Math.Max(-100f, config.Spawn.MinimumLandHeight);
             config.Spawn.MaximumBelowTerrainTolerance = Math.Max(0f, config.Spawn.MaximumBelowTerrainTolerance);
+            config.Spawn.PhysicsSurfaceRaycastHeight = Mathf.Clamp(config.Spawn.PhysicsSurfaceRaycastHeight <= 0f ? defaults.Spawn.PhysicsSurfaceRaycastHeight : config.Spawn.PhysicsSurfaceRaycastHeight, 24f, 320f);
+            config.Spawn.MaximumPhysicalSurfaceMismatch = Mathf.Clamp(config.Spawn.MaximumPhysicalSurfaceMismatch <= 0f ? defaults.Spawn.MaximumPhysicalSurfaceMismatch : config.Spawn.MaximumPhysicalSurfaceMismatch, 0.25f, 5f);
             config.Spawn.RuntimeInvalidPositionDespawnSeconds = Math.Max(0.5f, config.Spawn.RuntimeInvalidPositionDespawnSeconds);
             config.Spawn.GroupSpawnRadius = Math.Max(1f, config.Spawn.GroupSpawnRadius);
             config.Spawn.NearPlayerMinDistance = Math.Max(25f, config.Spawn.NearPlayerMinDistance);
@@ -1568,6 +1610,9 @@ namespace Oxide.Plugins
             config.AI.SquadRegroupDistance = Mathf.Clamp(config.AI.SquadRegroupDistance, 20f, 140f);
             config.AI.SquadContactCommitmentSeconds = Mathf.Clamp(config.AI.SquadContactCommitmentSeconds, config.AI.TargetMemorySeconds, 90f);
             config.AI.FlankCooldownSeconds = Math.Max(1f, config.AI.FlankCooldownSeconds);
+            config.AI.SquadDestinationReservationRadius = Mathf.Clamp(config.AI.SquadDestinationReservationRadius <= 0f ? defaults.AI.SquadDestinationReservationRadius : config.AI.SquadDestinationReservationRadius, 3f, 18f);
+            config.AI.SquadFormationSpacing = Mathf.Clamp(config.AI.SquadFormationSpacing <= 0f ? defaults.AI.SquadFormationSpacing : config.AI.SquadFormationSpacing, 3f, 22f);
+            config.AI.SquadFormationOffsetAttempts = Clamp(config.AI.SquadFormationOffsetAttempts <= 0 ? defaults.AI.SquadFormationOffsetAttempts : config.AI.SquadFormationOffsetAttempts, 3, 24);
             config.AI.GrenadeCooldownSeconds = Math.Max(1f, config.AI.GrenadeCooldownSeconds);
             config.AI.TeamGrenadeCooldownSeconds = Math.Max(1f, config.AI.TeamGrenadeCooldownSeconds);
             config.AI.GrenadePrefab = F1GrenadePrefab;
@@ -1626,6 +1671,19 @@ namespace Oxide.Plugins
             config.AI.PassiveCombatHealTargetFraction = Mathf.Clamp(config.AI.PassiveCombatHealTargetFraction, config.AI.LowHealthCoverThreshold, 1f);
             config.AI.SyringeFireLockSeconds = Mathf.Clamp(config.AI.SyringeFireLockSeconds, 0.5f, 6f);
             config.AI.SyringeCooldownSeconds = Mathf.Clamp(config.AI.SyringeCooldownSeconds, 1f, 30f);
+            config.AI.BotMedicalItemShortname = string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname) ? defaults.AI.BotMedicalItemShortname : config.AI.BotMedicalItemShortname.Trim();
+            config.AI.BotMedicalItemAmount = Clamp(config.AI.BotMedicalItemAmount, 0, 12);
+            config.AI.RealMedicalItemHealAmount = Mathf.Clamp(config.AI.RealMedicalItemHealAmount <= 0f ? defaults.AI.RealMedicalItemHealAmount : config.AI.RealMedicalItemHealAmount, 1f, 50f);
+            if (config.AI.RealMedicalItemShortnames == null || config.AI.RealMedicalItemShortnames.Count == 0)
+            {
+                config.AI.RealMedicalItemShortnames = defaults.AI.RealMedicalItemShortnames;
+            }
+
+            config.AI.RealMedicalItemShortnames = config.AI.RealMedicalItemShortnames
+                .Where(shortname => !string.IsNullOrWhiteSpace(shortname))
+                .Select(shortname => shortname.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             config.AI.PeekOffsetDistance = Mathf.Clamp(config.AI.PeekOffsetDistance, 1f, 8f);
             config.AI.PeekExposureMinSeconds = Math.Max(0.1f, config.AI.PeekExposureMinSeconds);
             config.AI.PeekExposureMaxSeconds = Math.Max(config.AI.PeekExposureMinSeconds, config.AI.PeekExposureMaxSeconds);
@@ -2052,6 +2110,11 @@ namespace Oxide.Plugins
                 ApplyKit(playerBot, kit.Name);
             }
 
+            if (playerBot != null)
+            {
+                GiveBotMedicalItems(playerBot);
+            }
+
             RefreshCombatProfile(bot, runtime);
             bot.SendNetworkUpdateImmediate();
             return runtime;
@@ -2075,6 +2138,34 @@ namespace Oxide.Plugins
             if (result is string message && !string.IsNullOrWhiteSpace(message))
             {
                 PrintWarning($"Kits plugin could not give {kitName} to {bot.displayName}: {message}");
+            }
+        }
+
+        private void GiveBotMedicalItems(BasePlayer bot)
+        {
+            if (bot == null
+                || config?.AI?.GrantBotMedicalItems != true
+                || config.AI.BotMedicalItemAmount <= 0
+                || string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+            {
+                return;
+            }
+
+            var item = ItemManager.CreateByName(config.AI.BotMedicalItemShortname, config.AI.BotMedicalItemAmount);
+
+            if (item == null)
+            {
+                if (config.Debug.DebugSpawnDetails)
+                {
+                    PrintWarning($"Could not create roam bot medical item '{config.AI.BotMedicalItemShortname}'.");
+                }
+
+                return;
+            }
+
+            if (!item.MoveToContainer(bot.inventory?.containerBelt) && !item.MoveToContainer(bot.inventory?.containerMain))
+            {
+                bot.GiveItem(item);
             }
         }
 
@@ -3434,7 +3525,10 @@ namespace Oxide.Plugins
                 var offset = new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
                 var candidate = player.transform.position + offset;
 
-                candidate.y = TerrainHeight(candidate) + 0.25f;
+                if (!TryProjectToLandSurface(ref candidate))
+                {
+                    continue;
+                }
 
                 if (IsBlockedLandPosition(candidate))
                 {
@@ -3474,7 +3568,10 @@ namespace Oxide.Plugins
                     UnityEngine.Random.Range(-half, half)
                 );
 
-                candidate.y = TerrainHeight(candidate) + 0.25f;
+                if (!TryProjectToLandSurface(ref candidate))
+                {
+                    continue;
+                }
 
                 if (IsBlockedLandPosition(candidate))
                 {
@@ -3507,7 +3604,10 @@ namespace Oxide.Plugins
             {
                 var offset = UnityEngine.Random.insideUnitCircle * config.Spawn.GroupSpawnRadius;
                 var candidate = origin + new Vector3(offset.x, 0f, offset.y);
-                candidate.y = TerrainHeight(candidate) + 0.25f;
+                if (!TryProjectToLandSurface(ref candidate))
+                {
+                    continue;
+                }
 
                 if (IsBlockedLandPosition(candidate))
                 {
@@ -3533,6 +3633,92 @@ namespace Oxide.Plugins
             return TerrainMeta.HeightMap != null ? TerrainMeta.HeightMap.GetHeight(position) : position.y;
         }
 
+        private bool TryProjectToLandSurface(ref Vector3 position, float verticalOffset = 0.25f)
+        {
+            position.y = TerrainHeight(position) + verticalOffset;
+
+            if (config?.Spawn?.UsePhysicsSurfaceSpawnChecks != true)
+            {
+                return true;
+            }
+
+            if (!TryGetPhysicalLandSurface(position, out var hit))
+            {
+                return true;
+            }
+
+            var tolerance = Math.Max(0.25f, config.Spawn.MaximumPhysicalSurfaceMismatch);
+
+            if (hit.point.y > position.y - tolerance)
+            {
+                position.y = hit.point.y + verticalOffset;
+                return true;
+            }
+
+            return position.y - hit.point.y <= tolerance;
+        }
+
+        private bool TryGetPhysicalLandSurface(Vector3 position, out RaycastHit hit)
+        {
+            hit = default(RaycastHit);
+
+            if (config?.Spawn?.UsePhysicsSurfaceSpawnChecks != true)
+            {
+                return false;
+            }
+
+            var mask = LayerMask.GetMask("Terrain", "World");
+
+            if (mask == 0)
+            {
+                return false;
+            }
+
+            var height = Math.Max(24f, config.Spawn.PhysicsSurfaceRaycastHeight);
+            var originY = Math.Max(position.y, TerrainHeight(position)) + height;
+            var distance = height + Math.Max(32f, config.Spawn.NavmeshSampleDistance + 16f);
+            var origin = new Vector3(position.x, originY, position.z);
+
+            try
+            {
+                return Physics.Raycast(origin, Vector3.down, out hit, distance, mask, QueryTriggerInteraction.Ignore);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsBelowPhysicalSurface(Vector3 position)
+        {
+            if (config?.Spawn?.RequireLandSpawns != true || config.Spawn.UsePhysicsSurfaceSpawnChecks != true)
+            {
+                return false;
+            }
+
+            if (!TryGetPhysicalLandSurface(position, out var hit))
+            {
+                return false;
+            }
+
+            return hit.point.y - position.y > Math.Max(0.25f, config.Spawn.MaximumPhysicalSurfaceMismatch);
+        }
+
+        private string PhysicalSurfaceDiagnostics(Vector3 position)
+        {
+            if (config?.Spawn?.UsePhysicsSurfaceSpawnChecks != true)
+            {
+                return "disabled";
+            }
+
+            if (!TryGetPhysicalLandSurface(position, out var hit))
+            {
+                return "none";
+            }
+
+            return $"{hit.point.y:0.0}, physDelta={(position.y - hit.point.y):0.0}";
+        }
+
         private string PositionDiagnostics(Vector3 position)
         {
             var terrain = TerrainHeight(position);
@@ -3550,7 +3736,7 @@ namespace Oxide.Plugins
 
             var sampled = NavMesh.SamplePosition(position, out var hit, config.Spawn.NavmeshSampleDistance, NavMesh.AllAreas);
             var sample = sampled ? FormatVector(hit.position) : "none";
-            return $"terrain={terrain:0.0}, terrainDelta={terrainDelta:0.0}, belowTerrain={IsBelowTerrain(position)}, waterMap={(float.IsNaN(waterMap) ? "n/a" : waterMap.ToString("0.0", CultureInfo.InvariantCulture))}, waterSurface={(float.IsNaN(waterSurface) ? "n/a" : waterSurface.ToString("0.0", CultureInfo.InvariantCulture))}, underwater={IsUnderWater(position)}, safeZone={IsBlockedSafeZoneSpawn(position)}, baseRestricted={IsBaseRestrictedPosition(position)}, unityNavSample={sample}";
+            return $"terrain={terrain:0.0}, terrainDelta={terrainDelta:0.0}, physicalSurface={PhysicalSurfaceDiagnostics(position)}, belowTerrain={IsBelowTerrain(position)}, belowPhysical={IsBelowPhysicalSurface(position)}, waterMap={(float.IsNaN(waterMap) ? "n/a" : waterMap.ToString("0.0", CultureInfo.InvariantCulture))}, waterSurface={(float.IsNaN(waterSurface) ? "n/a" : waterSurface.ToString("0.0", CultureInfo.InvariantCulture))}, underwater={IsUnderWater(position)}, safeZone={IsBlockedSafeZoneSpawn(position)}, baseRestricted={IsBaseRestrictedPosition(position)}, unityNavSample={sample}";
         }
 
         private bool IsUnderWater(Vector3 position)
@@ -3610,7 +3796,7 @@ namespace Oxide.Plugins
 
         private bool IsBlockedLandPosition(Vector3 position)
         {
-            return IsUnderWater(position) || IsBelowTerrain(position) || IsBlockedSafeZoneSpawn(position) || IsBaseRestrictedPosition(position);
+            return IsUnderWater(position) || IsBelowTerrain(position) || IsBelowPhysicalSurface(position) || IsBlockedSafeZoneSpawn(position) || IsBaseRestrictedPosition(position);
         }
 
         private bool IsBaseRestrictedPosition(Vector3 position)
@@ -3767,6 +3953,7 @@ namespace Oxide.Plugins
 
             return IsUnderWater(bot.transform.position)
                 || IsBelowTerrain(bot.transform.position)
+                || IsBelowPhysicalSurface(bot.transform.position)
                 || IsNavigatorOffNavmesh(bot);
         }
 
@@ -4002,6 +4189,11 @@ namespace Oxide.Plugins
                         board.CoverClaims[runtime.BotKey] = runtime.CurrentCover;
                     }
 
+                    if (runtime.CurrentDestination != Vector3.zero)
+                    {
+                        board.DestinationClaims[runtime.BotKey] = runtime.CurrentDestination;
+                    }
+
                     if (runtime.Memory.HasLineOfSight && runtime.Memory.TargetUserId != 0)
                     {
                         board.AnyMemberHasLineOfSight = true;
@@ -4126,8 +4318,9 @@ namespace Oxide.Plugins
 
                     var position = bot.transform.position + Vector3.up * config.Debug.DebugNameplateHeight;
                     var distanceLabel = distance.ToString("0", CultureInfo.InvariantCulture);
-                    var text = $"<size={config.Debug.DebugNameplateFontSize}><color=#ffde59>{BotClanLabel(runtime)}</color> <color=#ffffff>{runtime.State} {distanceLabel}m</color></size>";
-                    viewer.SendConsoleCommand("ddraw.text", duration, Color.yellow, position, text);
+                    var skillColor = SkillNameplateColorHex(runtime);
+                    var text = $"<size={config.Debug.DebugNameplateFontSize}><color={skillColor}>{BotClanLabel(runtime)}</color> <color=#ffffff>{runtime.State} {distanceLabel}m</color></size>";
+                    viewer.SendConsoleCommand("ddraw.text", duration, SkillNameplateDrawColor(runtime), position, text);
                 }
 
                 if (config.Debug.DebugBotSidePanel == true && closestBot != null)
@@ -4236,15 +4429,16 @@ namespace Oxide.Plugins
             var fallback = string.IsNullOrWhiteSpace(runtime.Decisions.LastFallbackReason) ? "none" : runtime.Decisions.LastFallbackReason;
             var coverStatus = CoverStatus(bot, runtime);
             var medicalStatus = MedicalStatus(bot, runtime, now);
+            var skillColor = SkillNameplateColorHex(runtime);
             CleanupBotPlacedEntityRefs();
 
             return "<b>Closest Raidlands Bot</b>"
-                + $"\n<color=#ffde59>{runtime.DisplayName}</color>  {distance.ToString("0", CultureInfo.InvariantCulture)}m"
+                + $"\n<color={skillColor}>{runtime.DisplayName}</color>  {distance.ToString("0", CultureInfo.InvariantCulture)}m"
                 + $"\nState: {runtime.State}  Prev: {runtime.PreviousState}"
                 + $"\nSignal: {signal}  Target: {target}"
                 + $"\nAction: {action}"
                 + $"\nLOS: {(runtime.Memory.HasLineOfSight ? "Y" : "N")}  Exposure: {runtime.Memory.TargetExposureFraction:0.00} ({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints})"
-                + $"\nSkill: {runtime.SkillTier}  Kit: {runtime.KitName}"
+                + $"\nSkill: <color={skillColor}>{runtime.SkillTier}</color>  Kit: {runtime.KitName}"
                 + $"\nHP: {health}/{maxHealth}  Weapon: {weapon}  Ammo: {ammo}"
                 + $"\nClan: {BotClanLabel(runtime)}"
                 + $"\nK/D: {stats.kills}/{stats.deaths} ({kd})  Team: {runtime.TeamId}  Role: {runtime.SquadRole}"
@@ -4254,9 +4448,44 @@ namespace Oxide.Plugins
                 + $"\nHeal: {medicalStatus}"
                 + $"\nFire: {(string.IsNullOrWhiteSpace(runtime.LastFireBlockReason) ? "none" : runtime.LastFireBlockReason)}"
                 + $"\nSight: {(string.IsNullOrWhiteSpace(runtime.LastSightReason) ? "none" : runtime.LastSightReason)}"
-                + $"\nMove: {movement}  Shooting: {(runtime.IsShooting ? "Y" : "N")}"
+                + $"\nMove: {movement}  Formation: {(string.IsNullOrWhiteSpace(runtime.LastFormationReason) ? "none" : runtime.LastFormationReason)}"
+                + $"\nShooting: {(runtime.IsShooting ? "Y" : "N")}"
                 + $"\nFailed paths: {runtime.ConsecutiveFailedPaths}  Bad spots: {ActiveStuckMemoryCount(runtime, now)} ({runtime.LastStuckMemoryReason})  Advisor: {advisor}"
                 + $"\nFallback: {fallback}";
+        }
+
+        private string SkillNameplateColorHex(BotRuntime runtime)
+        {
+            var tier = (runtime?.SkillTier ?? "").Trim();
+
+            if (string.Equals(tier, "casual", StringComparison.OrdinalIgnoreCase))
+            {
+                return "#7ee787";
+            }
+
+            if (string.Equals(tier, "dangerous", StringComparison.OrdinalIgnoreCase))
+            {
+                return "#ff5c5c";
+            }
+
+            return "#ffde59";
+        }
+
+        private Color SkillNameplateDrawColor(BotRuntime runtime)
+        {
+            var tier = (runtime?.SkillTier ?? "").Trim();
+
+            if (string.Equals(tier, "casual", StringComparison.OrdinalIgnoreCase))
+            {
+                return new Color(0.49f, 0.91f, 0.53f, 1f);
+            }
+
+            if (string.Equals(tier, "dangerous", StringComparison.OrdinalIgnoreCase))
+            {
+                return new Color(1f, 0.36f, 0.36f, 1f);
+            }
+
+            return new Color(1f, 0.87f, 0.35f, 1f);
         }
 
         private string NameplateSignal(BotRuntime runtime, float now)
@@ -5463,6 +5692,7 @@ namespace Oxide.Plugins
             }
 
             candidates.Add(Candidate(TacticalActionId.RoamToPoint, 15f, "low", "no higher-priority tactical stimulus", runtime.CurrentDestination, 0, now));
+            ApplySquadDestinationReservations(bot, runtime, candidates, now);
             var filtered = candidates
                 .Where(candidate => !IsMovementDestinationAction(candidate.ActionId) || !ShouldAvoidDestination(runtime, candidate.Destination, now))
                 .OrderByDescending(candidate => candidate.HeuristicScore)
@@ -5876,7 +6106,11 @@ namespace Oxide.Plugins
             var distance = toThreat.magnitude;
             var screenDistance = Mathf.Clamp(config.AI.SmokeScreenDistance, 2f, Math.Max(2f, distance - 2f));
             var candidate = botPosition + toThreat.normalized * screenDistance;
-            candidate.y = TerrainHeight(candidate) + 0.25f;
+            if (!TryProjectToLandSurface(ref candidate))
+            {
+                return Vector3.zero;
+            }
+
             return IsBlockedLandPosition(candidate) ? Vector3.zero : candidate;
         }
 
@@ -6789,13 +7023,17 @@ namespace Oxide.Plugins
             runtime.Movement.LastCommandAt = now;
             runtime.Movement.LastCommandDestination = destination;
 
-            if (navigatorCommanded || npcCommanded)
+            var movedOk = navigatorCommanded || npcCommanded;
+
+            if (movedOk)
             {
                 runtime.Movement.LastActionId = runtime.Decisions.LastActionId;
                 if (destinationChanged || runtime.Movement.LastProgressAt <= 0f)
                 {
                     runtime.Movement.LastProgressAt = now;
                 }
+
+                RecordSquadDestinationClaim(runtime, destination);
             }
             else
             {
@@ -6804,7 +7042,24 @@ namespace Oxide.Plugins
                 RememberBadDestination(runtime, destination, "nav_command_failed", now);
             }
 
-            return navigatorCommanded || npcCommanded;
+            return movedOk;
+        }
+
+        private void RecordSquadDestinationClaim(BotRuntime runtime, Vector3 destination)
+        {
+            if (runtime == null || destination == Vector3.zero)
+            {
+                return;
+            }
+
+            var board = SquadBoardFor(runtime);
+
+            if (board == null)
+            {
+                return;
+            }
+
+            board.DestinationClaims[runtime.BotKey] = destination;
         }
 
         private bool CommandNavigator(BaseCombatEntity bot, BaseNavigator navigator, Vector3 destination, BaseNavigator.NavigationSpeed speed)
@@ -7245,7 +7500,8 @@ namespace Oxide.Plugins
 
             if (IsMedicalFireLocked(runtime, now))
             {
-                return $"syringe_lock {Math.Max(0f, runtime.MedicalFireLockedUntil - now).ToString("0.0", CultureInfo.InvariantCulture)}s";
+                var source = string.IsNullOrWhiteSpace(runtime.LastMedicalUseReason) ? "unknown" : runtime.LastMedicalUseReason;
+                return $"{source} lock {Math.Max(0f, runtime.MedicalFireLockedUntil - now).ToString("0.0", CultureInfo.InvariantCulture)}s";
             }
 
             var maxHealth = BotMaxHealth(bot, runtime);
@@ -7256,7 +7512,8 @@ namespace Oxide.Plugins
                 var nextSyringe = runtime.NextSyringeHealAt > now
                     ? $" next_syringe {Math.Max(0f, runtime.NextSyringeHealAt - now).ToString("0", CultureInfo.InvariantCulture)}s"
                     : "";
-                return $"cover_heal{nextSyringe}";
+                var source = string.IsNullOrWhiteSpace(runtime.LastMedicalUseReason) ? "none" : runtime.LastMedicalUseReason;
+                return $"cover_heal {source}{nextSyringe}";
             }
 
             if (config.AI.PassiveCombatHealPerSecond > 0f && healthFraction < config.AI.PassiveCombatHealTargetFraction)
@@ -7368,6 +7625,249 @@ namespace Oxide.Plugins
             return board != null
                 && board.SharedEnemyKnownAt > 0f
                 && now - board.SharedEnemyKnownAt <= config.AI.SquadContactCommitmentSeconds;
+        }
+
+        private void ApplySquadDestinationReservations(BaseCombatEntity bot, BotRuntime runtime, List<TacticalActionCandidate> candidates, float now)
+        {
+            if (bot == null
+                || runtime == null
+                || candidates == null
+                || config?.AI == null
+                || config.AI.SquadDestinationReservationRadius <= 0f)
+            {
+                return;
+            }
+
+            var board = SquadBoardFor(runtime);
+
+            if (board == null || board.TeamSize <= 1)
+            {
+                runtime.LastFormationReason = "solo";
+                return;
+            }
+
+            runtime.LastFormationReason = "clear";
+
+            foreach (var candidate in candidates)
+            {
+                if (!ShouldApplySquadDestinationReservation(candidate))
+                {
+                    continue;
+                }
+
+                if (!IsSquadDestinationReserved(runtime, candidate.Destination, out var blocker))
+                {
+                    continue;
+                }
+
+                if (TryFindSquadFormationOffset(bot, candidate.Destination, runtime, candidate.ActionId, now, out var adjusted))
+                {
+                    candidate.Destination = adjusted;
+                    candidate.RiskFlags.Add("formation_offset");
+                    candidate.ReasonFromCode = $"{candidate.ReasonFromCode}; formation offset away from {blocker}";
+                    runtime.LastFormationReason = $"{candidate.Id}:offset_from_{blocker}";
+                }
+                else
+                {
+                    candidate.RiskFlags.Add("formation_reserved");
+                    runtime.LastFormationReason = $"{candidate.Id}:reserved_by_{blocker}";
+                }
+            }
+        }
+
+        private bool ShouldApplySquadDestinationReservation(TacticalActionCandidate candidate)
+        {
+            if (candidate == null || candidate.Destination == Vector3.zero)
+            {
+                return false;
+            }
+
+            switch (candidate.ActionId)
+            {
+                case TacticalActionId.RoamToPoint:
+                case TacticalActionId.InvestigateSound:
+                case TacticalActionId.SearchLastKnown:
+                case TacticalActionId.FlankLeft:
+                case TacticalActionId.FlankRight:
+                case TacticalActionId.PushTarget:
+                case TacticalActionId.RegroupWithSquad:
+                case TacticalActionId.HoldOutsideBase:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool IsSquadDestinationReserved(BotRuntime runtime, Vector3 destination, out string blocker)
+        {
+            blocker = "";
+
+            if (runtime == null || destination == Vector3.zero || config?.AI == null)
+            {
+                return false;
+            }
+
+            var board = SquadBoardFor(runtime);
+
+            if (board == null || board.TeamSize <= 1)
+            {
+                return false;
+            }
+
+            var radius = Math.Max(3f, config.AI.SquadDestinationReservationRadius);
+
+            foreach (var claim in board.DestinationClaims)
+            {
+                if (string.Equals(claim.Key, runtime.BotKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (claim.Value != Vector3.zero && Distance2D(claim.Value, destination) <= radius)
+                {
+                    blocker = $"dest:{claim.Key}";
+                    return true;
+                }
+            }
+
+            foreach (var claim in board.CoverClaims)
+            {
+                if (string.Equals(claim.Key, runtime.BotKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (claim.Value != Vector3.zero && Distance2D(claim.Value, destination) <= radius)
+                {
+                    blocker = $"cover:{claim.Key}";
+                    return true;
+                }
+            }
+
+            foreach (var entry in activeBots)
+            {
+                var teammate = entry.Value;
+
+                if (teammate == null
+                    || entry.Key == null
+                    || !IsLiveBot(entry.Key)
+                    || teammate.TeamId != runtime.TeamId
+                    || string.Equals(teammate.BotKey, runtime.BotKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (Distance2D(entry.Key.transform.position, destination) <= radius * 0.75f)
+                {
+                    blocker = $"body:{teammate.BotKey}";
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryFindSquadFormationOffset(BaseCombatEntity bot, Vector3 desired, BotRuntime runtime, TacticalActionId actionId, float now, out Vector3 adjusted)
+        {
+            adjusted = Vector3.zero;
+
+            if (bot == null || runtime == null || desired == Vector3.zero)
+            {
+                return false;
+            }
+
+            var origin = bot.transform.position;
+            var forward = desired - KnownThreatPosition(runtime);
+            forward.y = 0f;
+
+            if (forward.sqrMagnitude <= 0.01f)
+            {
+                forward = desired - origin;
+                forward.y = 0f;
+            }
+
+            if (forward.sqrMagnitude <= 0.01f)
+            {
+                forward = bot.transform.forward;
+                forward.y = 0f;
+            }
+
+            if (forward.sqrMagnitude <= 0.01f)
+            {
+                forward = Vector3.forward;
+            }
+
+            forward.Normalize();
+            var right = Vector3.Cross(Vector3.up, forward).normalized;
+            var spacing = Math.Max(3f, config.AI.SquadFormationSpacing);
+            var side = SquadFormationSide(runtime, actionId);
+            var primarySide = Mathf.Abs(side) <= 0.01f ? 1f : side;
+            var candidates = new List<Vector3>
+            {
+                desired + right * primarySide * spacing,
+                desired - right * primarySide * spacing,
+                desired + right * primarySide * spacing + forward * (spacing * 0.55f),
+                desired + right * primarySide * spacing - forward * (spacing * 0.55f),
+                desired + forward * spacing,
+                desired - forward * spacing
+            };
+
+            var attempts = Math.Max(3, config.AI.SquadFormationOffsetAttempts);
+
+            for (var index = candidates.Count; index < attempts; index++)
+            {
+                var angle = (360f / attempts) * index;
+                var direction = Quaternion.Euler(0f, angle, 0f) * forward;
+                candidates.Add(desired + direction.normalized * spacing);
+            }
+
+            foreach (var candidate in candidates.Take(attempts))
+            {
+                if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+                {
+                    continue;
+                }
+
+                if (SegmentCrossesBaseRestrictedArea(origin, sampled))
+                {
+                    continue;
+                }
+
+                if (IsSquadDestinationReserved(runtime, sampled, out _))
+                {
+                    continue;
+                }
+
+                adjusted = sampled;
+                return true;
+            }
+
+            return false;
+        }
+
+        private float SquadFormationSide(BotRuntime runtime, TacticalActionId actionId)
+        {
+            switch (actionId)
+            {
+                case TacticalActionId.FlankLeft:
+                    return 1f;
+                case TacticalActionId.FlankRight:
+                    return -1f;
+            }
+
+            var role = runtime?.SquadRole ?? "";
+
+            if (role.Equals("flanker", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1f;
+            }
+
+            if (role.Equals("pusher", StringComparison.OrdinalIgnoreCase))
+            {
+                return -1f;
+            }
+
+            return 0f;
         }
 
         private float RecentContactAt(BotRuntime runtime)
@@ -7704,7 +8204,13 @@ namespace Oxide.Plugins
             if (config.AI.LowHealthCoverHealPerSecond <= 0f || runtime.LowHealthCoverAwareUntil <= now)
             {
                 runtime.LastLowHealthHealAt = 0f;
+                runtime.PendingMedicalHealRemaining = 0f;
                 return;
+            }
+
+            if (!IsMedicalFireLocked(runtime, now) && runtime.PendingMedicalHealRemaining > 0f)
+            {
+                runtime.PendingMedicalHealRemaining = 0f;
             }
 
             if (currentHealth >= targetHealth)
@@ -7712,6 +8218,7 @@ namespace Oxide.Plugins
                 runtime.LowHealthCoverAwareUntil = 0f;
                 runtime.LastLowHealthHealAt = 0f;
                 runtime.MedicalFireLockedUntil = Math.Min(runtime.MedicalFireLockedUntil, now);
+                runtime.PendingMedicalHealRemaining = 0f;
                 SetState(runtime, TacticalState.FightFromCover, now);
                 MaintainFireOrStop(bot, runtime, now);
                 return;
@@ -7741,6 +8248,17 @@ namespace Oxide.Plugins
                 runtime.MedicalFireLockedUntil = now + config.AI.SyringeFireLockSeconds;
                 runtime.NextSyringeHealAt = runtime.MedicalFireLockedUntil + config.AI.SyringeCooldownSeconds;
                 runtime.LastLowHealthHealAt = now;
+                runtime.PendingMedicalHealRemaining = 0f;
+                if (TryConsumeBotMedicalItem(bot, out var medicalItemShortname, out var medicalHealAmount, out var medicalReason))
+                {
+                    runtime.PendingMedicalHealRemaining = medicalHealAmount;
+                    runtime.LastMedicalUseReason = $"real:{medicalItemShortname}";
+                }
+                else
+                {
+                    runtime.LastMedicalUseReason = $"fallback:{medicalReason}";
+                }
+
                 StopBotAttack(bot, runtime);
                 return;
             }
@@ -7759,7 +8277,75 @@ namespace Oxide.Plugins
                 return;
             }
 
-            bot.SetHealth(Math.Min(targetHealth, currentHealth + config.AI.LowHealthCoverHealPerSecond * elapsed));
+            var healAmount = config.AI.LowHealthCoverHealPerSecond * elapsed;
+
+            if (runtime.PendingMedicalHealRemaining > 0f)
+            {
+                var realMedicalRate = Math.Max(config.AI.LowHealthCoverHealPerSecond, config.AI.RealMedicalItemHealAmount / Math.Max(0.1f, config.AI.SyringeFireLockSeconds));
+                healAmount = Math.Min(runtime.PendingMedicalHealRemaining, realMedicalRate * elapsed);
+                runtime.PendingMedicalHealRemaining = Math.Max(0f, runtime.PendingMedicalHealRemaining - healAmount);
+            }
+            else if ((runtime.LastMedicalUseReason ?? "").StartsWith("real:", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            bot.SetHealth(Math.Min(targetHealth, currentHealth + healAmount));
+        }
+
+        private bool TryConsumeBotMedicalItem(BaseCombatEntity bot, out string itemShortname, out float healAmount, out string reason)
+        {
+            itemShortname = "";
+            healAmount = 0f;
+            reason = "disabled";
+
+            if (config?.AI?.UseRealMedicalItemsForCoverHeal != true)
+            {
+                return false;
+            }
+
+            var player = bot as BasePlayer;
+
+            if (player?.inventory == null)
+            {
+                reason = "no_inventory";
+                return false;
+            }
+
+            var allowed = new HashSet<string>(config.AI.RealMedicalItemShortnames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+
+            if (allowed.Count == 0)
+            {
+                reason = "no_medical_shortnames";
+                return false;
+            }
+
+            foreach (var container in new[] { player.inventory.containerBelt, player.inventory.containerMain })
+            {
+                if (container?.itemList == null)
+                {
+                    continue;
+                }
+
+                foreach (var item in container.itemList.ToList())
+                {
+                    var shortname = item?.info?.shortname ?? "";
+
+                    if (item == null || item.amount <= 0 || !allowed.Contains(shortname))
+                    {
+                        continue;
+                    }
+
+                    itemShortname = shortname;
+                    healAmount = config.AI.RealMedicalItemHealAmount;
+                    item.UseItem(1);
+                    reason = "used";
+                    return true;
+                }
+            }
+
+            reason = "no_item";
+            return false;
         }
 
         private Vector3 KnownThreatPosition(BotRuntime runtime)
@@ -7959,7 +8545,10 @@ namespace Oxide.Plugins
                 foreach (var sideOffset in sideOffsets)
                 {
                     var candidate = origin + toThreat * distance + side * sideOffset;
-                    candidate.y = TerrainHeight(candidate) + 0.05f;
+                    if (!TryProjectToLandSurface(ref candidate, 0.05f))
+                    {
+                        continue;
+                    }
 
                     if (IsBlockedLandPosition(candidate) || SegmentCrossesBaseRestrictedArea(origin, candidate) || !HasBarricadePlacementClearance(candidate))
                     {
@@ -8111,7 +8700,10 @@ namespace Oxide.Plugins
                 foreach (var sideOffset in sideOffsets)
                 {
                     var candidate = barricadePosition + awayFromThreat * distance + side * sideOffset;
-                    candidate.y = TerrainHeight(candidate) + 0.25f;
+                    if (!TryProjectToLandSurface(ref candidate))
+                    {
+                        continue;
+                    }
 
                     if (Math.Abs(TerrainHeight(candidate) - barricadeTerrain) > 2.2f)
                     {
@@ -8412,7 +9004,10 @@ namespace Oxide.Plugins
         private bool TrySampleTacticalPosition(Vector3 candidate, float sampleDistance, out Vector3 sampled)
         {
             sampled = Vector3.zero;
-            candidate.y = TerrainHeight(candidate) + 0.25f;
+            if (!TryProjectToLandSurface(ref candidate))
+            {
+                return false;
+            }
 
             if (IsBlockedLandPosition(candidate))
             {
@@ -9086,7 +9681,7 @@ namespace Oxide.Plugins
 
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
-            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, utility={runtime.LastUtilityReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, Time.realtimeSinceStartup)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, utility={runtime.LastUtilityReason}, heal={runtime.LastMedicalUseReason}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, Time.realtimeSinceStartup)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
         }
 
         private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)

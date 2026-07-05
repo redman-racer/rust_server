@@ -214,7 +214,7 @@ Do not call the LLM from these ticks directly. The tick should submit a decision
 
 The new config should make the single-mode design obvious.
 
-This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.26. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup.
+This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.29. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup.
 
 ```json
 {
@@ -311,6 +311,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Require Land Spawns": true,
     "Minimum Land Height": 0.0,
     "Maximum Below Terrain Tolerance": 0.75,
+    "Use Physics Surface Spawn Checks": true,
+    "Physics Surface Raycast Height": 160.0,
+    "Maximum Physical Surface Mismatch": 1.25,
     "Runtime Invalid Position Despawn Seconds": 2.0,
     "Group Spawn Radius": 12.0,
     "Use Generated Positions Near Players": true,
@@ -392,6 +395,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Squad Regroup Distance": 55.0,
     "Squad Contact Commitment Seconds": 35.0,
     "Flank Cooldown Seconds": 7.0,
+    "Squad Destination Reservation Radius": 7.5,
+    "Squad Formation Spacing": 8.0,
+    "Squad Formation Offset Attempts": 10,
 
     "Grenade Cooldown Seconds": 30.0,
     "Team Grenade Cooldown Seconds": 10.0,
@@ -450,6 +456,12 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Passive Combat Heal Target Fraction": 1.0,
     "Syringe Fire Lock Seconds": 2.2,
     "Syringe Cooldown Seconds": 8.0,
+    "Grant Bot Medical Items": true,
+    "Bot Medical Item Shortname": "syringe.medical",
+    "Bot Medical Item Amount": 2,
+    "Use Real Medical Items For Cover Heal": true,
+    "Real Medical Item Heal Amount": 15.0,
+    "Real Medical Item Shortnames": ["syringe.medical", "largemedkit", "bandage"],
     "Auto Reload Bot Weapons": true,
 
     "Do Not Enter Bases": true,
@@ -558,7 +570,7 @@ remove Gen2/naval prefabs
 replace prefab candidates with legacy scientist bodies
 turn generated near-player positions on
 turn random land fallback on
-normalize older visibility, foliage, hearing, defensive-healing, utility, health, damage, and stuck-memory settings to the current v0.3.26 defaults
+normalize older visibility, foliage, hearing, defensive-healing, utility, health, damage, stuck-memory, squad-reservation, medical-item, and physics-surface spawn settings to the current v0.3.29 defaults
 pin barricade prefab to the double Wooden Barricade Cover prefab
 pin grenade and smoke grenade prefabs to the current deployed F1/smoke prefab paths
 preserve kits, bot profiles, population, skill weights, team weights, and stats
@@ -1695,7 +1707,7 @@ private bool TryAddSmokeCandidate(List<TacticalActionCandidate> candidates, Base
 private bool TryPlaceBarricade(BaseCombatEntity bot, BotRuntime runtime, Vector3 position, Vector3 threatPosition);
 ```
 
-As of v0.3.25, grenade and smoke utility is real-entity utility driven by config and tactical legality, not by bot inventory item ownership. Real med-item/inventory animation is still later work.
+As of v0.3.25, grenade and smoke utility is real-entity utility driven by config and tactical legality, not by bot inventory item ownership. As of v0.3.27, low-health cover healing grants bots a small configurable stack of real medical items and consumes an allowed medical item when the cover-heal lock starts, falling back to the controlled syringe-style heal if no item is available. Full native medical animation/effect parity is still later work.
 
 Grenade conditions:
 
@@ -2857,7 +2869,7 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.26 Advanced Stuck Memory
+## Current Progress Through v0.3.29 Terrain-Layer Spawn Guard
 
 ### Files updated
 
@@ -2866,13 +2878,12 @@ oxide/plugins/RaidlandsRoamBots.cs
 oxide/config/RaidlandsRoamBots.json
 Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 UPDATED_FILES_FOR_UPLOAD.txt
-UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_POPULATION_AI_2026-07-04.md
 ```
 
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.26
+Plugin version: RaidlandsRoamBots v0.3.29
 Brain mode: playerlike_tactical_brain
 Current checked-in config: disabled by default, target=3, min=1, max=3
 Current checked-in test profile: near-player squad test anchored to ababmxking, random land fallback disabled, debug nameplates and side panel enabled
@@ -2907,7 +2918,7 @@ raidbots.goto <player-name-or-steamid> [bot-number]
 raidbots.killall
 ```
 
-Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, cover/flank points, active barricade count, utility status, stuck/nav details, remembered bad destination counts, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, and `Bad spots` details.
+Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, cover/flank points, active barricade count, utility status, medical source, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Formation`, and `Bad spots` details.
 
 ### Implemented
 
@@ -2973,6 +2984,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Squads share last-known enemy positions and LOS counts without granting magical shooting; only a bot with its own plugin-confirmed LOS can fire.
   - Flanker/pusher bots can choose flank points from either direct contact or squad-shared last-known memory.
   - Teammates avoid claiming the same nearby cover point when the cover planner can find alternatives.
+  - v0.3.27 adds a first deterministic squad destination-reservation pass. The squad board tracks current destination claims, candidate generation soft-offsets roam, investigate, search, flank, push, regroup, and hold-outside-base destinations away from teammate destination/body/cover claims, and `raidbots.list` / the side panel expose `formation=` / `Formation:` diagnostics. This is not full leader/follower pathing yet.
 
 - Phase 13 partial:
   - Added bounded real barricade placement for damaged/exposed bots caught in open ground.
@@ -2984,10 +2996,12 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - `throw_smoke` can screen a hurt or pressured bot's retreat lane when the bot is not already in effective cover.
   - Utility throws use a shared per-bot cooldown, team cooldown, active utility projectile cap, creator/owner attribution, and side-panel/`raidbots.list` utility diagnostics.
   - Fresh bot F1 throws create short-lived danger zones; bots inside the zone get a high-priority escape candidate, and movement commands avoid active grenade danger destinations.
+  - v0.3.27 adds inventory-backed medical support for low-health cover healing. Bots can receive a configurable real medical item stack after kit application, consume allowed medical items when the cover-heal fire lock begins, apply the configured real-med heal budget during the lock, and report `Heal: real:<shortname>` or `fallback:<reason>` in diagnostics.
 
 - Phase 14 baseline:
   - Added conservative base-restricted position detection around cupboards, building blocks, doors, and owned base-like deployables.
   - Spawn, tactical destination sampling, and movement commands now avoid base-restricted areas.
+  - v0.3.29 adds physics surface validation for spawn and tactical destination sampling, rejecting navmesh points that sit underneath higher terrain/world geometry and reporting `physicalSurface` / `belowPhysical` in spawn diagnostics.
   - If a target is inside a base boundary or the path would cross one, the bot chooses `HoldOutsideBase` / abandon behavior instead of chasing or shooting inside.
 
 - Phase 15 partial:
@@ -3049,11 +3063,13 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Live-test feature on 2026-07-05: v0.3.24 adds real F1/smoke utility actions, utility cooldown/cap config, squad/bystander safety checks, grenade danger-zone avoidance, and `Utility:` diagnostics in the side panel plus `utility=` in `raidbots.list`.
   - Live-test balance fix on 2026-07-05: v0.3.25 moves skill health to player-like values (`casual=100`, `average=110`, `dangerous=120`), migrates old high-health configs on reload, and removes bot outgoing/incoming damage scaling so hits use normal Rust damage.
   - Live-test resilience fix on 2026-07-05: v0.3.26 adds configurable stuck destination memory (`Stuck Memory Seconds`, `Stuck Memory Radius`, `Maximum Stuck Memory Points`) and exposes `Bad spots` / `badspots=` diagnostics.
+  - Deterministic polish on 2026-07-05: v0.3.27 adds squad destination reservation/formation offsets plus inventory-backed medical item grants/consumption for cover healing.
+  - Spawn reliability fix on 2026-07-05: v0.3.29 rejects lower-layer navmesh samples hidden under hilly/mountain terrain and despawns runtime positions that later report as below the physical terrain/world surface.
 
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.26.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.29.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
 
@@ -3066,12 +3082,12 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 - raidbots.enable 1 spawned a tracked bot after the first two legacy body prefabs failed navigator placement and the known-working scientistnpc_junkpile_pistol prefab was accepted.
 - Follow-up body preparation showed the Raidlands kit weapon applied: weapon=rifle:rifle.ak, ammo=1.00, held=rifle.ak:BaseProjectile.
 - raidbots.list showed the new diagnostics surface: exposure=0.00(0/0), weapon=rifle:rifle.ak, cover=none, stuck=False, navPath=True, navDisabled=False.
-- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.26 foliage, wall-hold, squad, cover, healing, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
+- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, foliage, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
 ```
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.26 before I implement true formation pathing, base assault logic, real med-item use, or LLM advisor calls. This pass polishes the implemented squad/clan coordination, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, damage/low-health survival reactions, effective-cover validation, barricade hold/peek behavior, retreat-loop escape, state-independent visible shooting, passive combat healing, syringe-lock healing, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, stuck destination memory, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, and normal unscaled damage.
+Please live-test v0.3.29 before I implement AI advisor calls, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass polishes the implemented squad/clan coordination, first-pass destination reservation, terrain-layer spawn rejection, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, damage/low-health survival reactions, effective-cover validation, barricade hold/peek behavior, retreat-loop escape, state-independent visible shooting, passive combat healing, inventory-backed cover medical use, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, stuck destination memory, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, and normal unscaled damage.
 
 Recommended first test ladder:
 
@@ -3087,6 +3103,17 @@ Recommended first test ladder:
 9. Damage it from cover and confirm it investigates the damage/heard position.
 10. Check oxide/data/RaidlandsRoamBots/decision_traces.jsonl for fallback traces when hard decisions trigger.
 11. Use raidbots.list while fighting and watch exposure=X.XX(Y/Z), weapon=<class>, cover=<point>, and stuck=<bool>.
+```
+
+v0.3.29 terrain-layer spawn retest:
+
+```text
+1. Reload the plugin with Debug Spawn Details enabled.
+2. Move the near-player anchor or tester to hilly/mountain terrain where bots previously spawned into the lower hidden bubble.
+3. Run raidbots.nuke, then raidbots.squadtest <optional-player-name-or-steamid> and raidbots.enable 3.
+4. Expected: accepted spawn diagnostics include physicalSurface=... and belowPhysical=False.
+5. Expected: bots either spawn on the playable upper surface, pick a different valid nearby position, or despawn quickly if their runtime position becomes invalid.
+6. Regression case: no bot should remain alive as a protected shooter under the visible terrain/world surface.
 ```
 
 Additional retest after the 2026-07-05 visibility fix:
@@ -3124,7 +3151,7 @@ Baseline cover/range/stuck retest:
 9. Expected: when a cover point is found, the bot moves to cover, tucks, peeks briefly, and only fires when the peek/exposure gate passes.
 ```
 
-v0.3.26 stuck-memory retest:
+v0.3.29 stuck-memory retest:
 
 ```text
 1. Reload the plugin and spawn one bot near the anchor.
@@ -3136,7 +3163,7 @@ v0.3.26 stuck-memory retest:
 7. Expected: the bad spot count decays back down, allowing that area to be reconsidered later if the fight context changes.
 ```
 
-v0.3.26 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest:
+v0.3.29 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest:
 
 ```text
 1. raidbots.nuke
@@ -3144,7 +3171,7 @@ v0.3.26 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest
 3. raidbots.squadtest <optional-player-name-or-steamid>
 4. raidbots.enable 3
 5. raidbots.list
-6. Expected: bots show clan=<tag> and role=anchor/flanker/pusher, share last-known info, and only bots with their own LOS shoot.
+6. Expected: bots show clan=<tag>, role=anchor/flanker/pusher, formation=<reason>, share last-known info, and only bots with their own LOS shoot.
 7. Fight near cover and watch for search_last_known, flank_left/flank_right, or regroup_with_squad traces via raidbots.decisions last 10.
 8. Enter a player base or stand just inside a base boundary.
 9. Expected: bots hold outside, reposition, or abandon instead of chasing/shooting through the base.
@@ -3156,7 +3183,7 @@ v0.3.26 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest
 15. Put bushes/trees between you and the bots at 40m-120m.
 16. Expected: `raidbots.list` / the side panel should not show `LOS: Y` with high exposure while the bot is visually hidden by dense foliage. It may search or reposition, but should not keep firing through the bush.
 17. Break LOS around 150m-190m after contact.
-18. Expected: clan members should keep searching/pushing the last-known or damage position during the fresh-contact window instead of immediately scattering back to a neutral regroup.
+18. Expected: clan members should keep searching/pushing the last-known or damage position during the fresh-contact window instead of immediately scattering back to a neutral regroup. When two bots would choose the same shared destination, later decisions should show `formation=...offset...` or the side panel should show `Formation: ...offset...`, and bots should spread instead of stacking directly on one point.
 19. If a bot stands in place with `stuck=Y`, watch the panel and `raidbots.list`. Expected: it should select stuck recovery; if failed paths continue past the hard-stuck threshold, the tracked bot despawns instead of remaining as a fake/dead-shell combatant.
 20. Damage a low-health bot while its nearest retreat cover is farther than 10m.
 21. Expected: it should choose `place_barricade` before crossing the open field, then fight from the wall for the configured short commitment unless the wall is compromised or the target leaves useful range.
@@ -3170,7 +3197,9 @@ v0.3.26 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest
 29. Expected: a bot may choose `throw_grenade`, spawn a real F1, enter `GrenadeFlush`, and then move away or back to cover. Squadmates inside the danger radius should choose an escape move instead of standing in the blast lane.
 30. Hurt a bot while exposed around 10m-55m.
 31. Expected: a bot may choose `throw_smoke`, spawn a real smoke grenade, enter `Retreat`, and move away through the screen.
-32. If utility does not happen, expected `Utility:` blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
+32. Damage a bot below the low-health threshold after it reaches effective cover.
+33. Expected: `Heal:` should show `real:syringe.medical lock ...` if the bot still has the granted medical item, or `fallback:<reason>` if inventory use is unavailable. Bot loot/corpse should reflect consumed medical items because these are real inventory items.
+34. If utility does not happen, expected `Utility:` blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
 ```
 
 ### Known not-yet-implemented
@@ -3178,8 +3207,8 @@ v0.3.26 clan/foliage/base/barricade/low-health/ammo/utility/health/damage retest
 ```text
 cover/peek quality tuning beyond the baseline
 grenade/smoke throw arc, damage, and smoke-screen tuning beyond the baseline after live validation
-real med-item animation/use; v0.3.26 health recovery is still a controlled passive/syringe-style approximation
-true formation/path reservation and leader/follower pathing
+full native med-item animation/effect parity; v0.3.29 consumes real medical inventory for cover healing but still applies a controlled heal budget
+full leader/follower pathing and path reservation; v0.3.29 has first-pass destination reservation/formation offsets only
 base objective validation, base assault, and smarter "is this base worth holding" logic
 HTTP/OpenAI-compatible advisor
 shadow/canary LLM behavior
