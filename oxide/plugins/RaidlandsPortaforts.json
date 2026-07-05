@@ -1,0 +1,29 @@
+{
+  "Token Item": {
+    "Shortname": "wrappedgift",
+    "Display Name": "Portafort Token",
+    "Skin": 0,
+    "Require Display Name Match": true
+  },
+  "CopyPaste File": "raidlands_portafort",
+  "CopyPaste Arguments": [
+    "deployables",
+    "true",
+    "inventories",
+    "false",
+    "autoheight",
+    "true",
+    "blockcollision",
+    "3"
+  ],
+  "Use Actions": [
+    "unwrap",
+    "open",
+    "use"
+  ],
+  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
+  "Kit Grants": {
+    "custom.pending.portafort": 1,
+    "pack_portafort": 1
+  }
+}

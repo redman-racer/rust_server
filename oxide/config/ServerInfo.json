@@ -28,6 +28,7 @@
             "ImageSettings": []
           }
         ],
+        "SubTabs": [],
         "TabButtonAnchor": 4,
         "TabButtonFontSize": 15,
         "HeaderAnchor": 0,
@@ -62,6 +63,7 @@
             "ImageSettings": []
           }
         ],
+        "SubTabs": [],
         "TabButtonAnchor": 4,
         "TabButtonFontSize": 15,
         "HeaderAnchor": 0,
@@ -74,13 +76,6 @@
         "ButtonText": "/commands",
         "HeaderText": "RAIDLANDS COMMAND INDEX",
         "Pages": [],
-        "TabButtonAnchor": 4,
-        "TabButtonFontSize": 15,
-        "HeaderAnchor": 0,
-        "HeaderFontSize": 28,
-        "TextFontSize": 14,
-        "TextAnchor": 3,
-        "OxideGroup": "",
         "SubTabs": [
           {
             "ButtonText": "Common",
@@ -108,14 +103,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Travel",
@@ -154,14 +149,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Base",
@@ -201,14 +196,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Econ",
@@ -245,14 +240,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Social",
@@ -291,14 +286,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Combat",
@@ -322,14 +317,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Vehicles",
@@ -367,14 +362,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Utility",
@@ -414,14 +409,14 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           },
           {
             "ButtonText": "Staff",
@@ -524,16 +519,23 @@
                 "ImageSettings": []
               }
             ],
+            "SubTabs": [],
             "TabButtonAnchor": 4,
             "TabButtonFontSize": 13,
             "HeaderAnchor": 0,
             "HeaderFontSize": 28,
             "TextFontSize": 14,
             "TextAnchor": 3,
-            "OxideGroup": "",
-            "SubTabs": []
+            "OxideGroup": ""
           }
-        ]
+        ],
+        "TabButtonAnchor": 4,
+        "TabButtonFontSize": 15,
+        "HeaderAnchor": 0,
+        "HeaderFontSize": 28,
+        "TextFontSize": 14,
+        "TextAnchor": 3,
+        "OxideGroup": ""
       }
     ],
     "CommandCatalog": [
@@ -541,180 +543,2791 @@
         "ButtonText": "Common",
         "HeaderText": "COMMON COMMANDS",
         "Commands": [
-          { "Command": "help", "Aliases": [ "help" ], "Plugin": "ServerInfo", "Description": "Open this menu" },
-          { "Command": "commands", "Aliases": [ "commands" ], "Plugin": "ServerInfo", "Description": "Open this command index" },
-          { "Command": "info", "Aliases": [ "info" ], "Plugin": "ServerInfo", "Description": "Open the briefing tab" },
-          { "Command": "kit", "Aliases": [ "kit" ], "Plugin": "Kits", "Description": "Open available kits" },
-          { "Command": "s", "Aliases": [ "s", "shop" ], "Plugin": "ServerRewards", "Description": "Open the rewards store" },
-          { "Command": "tpr", "Aliases": [ "tpr" ], "Plugin": "NTeleportation", "Description": "Request teleport to a player", "AnyPermission": [ "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpr" ] },
-          { "Command": "home", "Aliases": [ "home" ], "Plugin": "NTeleportation", "Description": "Teleport to a saved home", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "home" ] },
-          { "Command": "bgrade", "Aliases": [ "bgrade", "grade" ], "Plugin": "BGrade", "Description": "Auto-upgrade placed building blocks", "AnyPermission": [ "bgrade.all", "bgrade.0", "bgrade.1", "bgrade.2", "bgrade.3", "bgrade.4" ] },
-          { "Command": "remove", "Aliases": [ "remove" ], "Plugin": "RemoverTool", "Description": "Start remover mode", "AnyPermission": [ "removertool.normal", "removertool.all", "removertool.admin" ] },
-          { "Command": "mymini", "Aliases": [ "mymini" ], "Plugin": "SpawnHeli", "Description": "Spawn your minicopter", "AnyPermission": [ "spawnheli.minicopter.spawn", "spawnheli.all.spawn" ] },
-          { "Command": "skin", "Aliases": [ "skin", "skins" ], "Plugin": "Skins", "Description": "Open item skins", "AnyPermission": [ "skins.use" ] },
-          { "Command": "clanhelp", "Aliases": [ "clanhelp" ], "Plugin": "Clans", "Description": "Clan command help" },
-          { "Command": "auth", "Aliases": [ "auth", "authenticate" ], "Plugin": "DiscordAuth", "Description": "Link Discord", "AnyPermission": [ "discordauth.auth" ] },
-          { "Command": "trade", "Aliases": [ "trade" ], "Plugin": "Trade", "Description": "Send a trade request", "AnyPermission": [ "trade.use" ] }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "help",
+            "Description": "Open this menu",
+            "Plugin": "ServerInfo",
+            "Aliases": [
+              "help"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "commands",
+            "Description": "Open this command index",
+            "Plugin": "ServerInfo",
+            "Aliases": [
+              "commands"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "info",
+            "Description": "Open the briefing tab",
+            "Plugin": "ServerInfo",
+            "Aliases": [
+              "info"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "kit",
+            "Description": "Open available kits",
+            "Plugin": "Kits",
+            "Aliases": [
+              "kit"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "s",
+            "Description": "Open the rewards store",
+            "Plugin": "ServerRewards",
+            "Aliases": [
+              "s",
+              "shop"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpr",
+            "Description": "Request teleport to a player",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpr"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpr"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tpr"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "home",
+            "Description": "Teleport to a saved home",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "home"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.home"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "home"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "bgrade",
+            "Description": "Auto-upgrade placed building blocks",
+            "Plugin": "BGrade",
+            "Aliases": [
+              "bgrade",
+              "grade"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "bgrade.all",
+              "bgrade.0",
+              "bgrade.1",
+              "bgrade.2",
+              "bgrade.3",
+              "bgrade.4"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "remove",
+            "Description": "Start remover mode",
+            "Plugin": "RemoverTool",
+            "Aliases": [
+              "remove"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "removertool.normal",
+              "removertool.all",
+              "removertool.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "mymini",
+            "Description": "Spawn your minicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "mymini"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.minicopter.spawn",
+              "spawnheli.all.spawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "skin",
+            "Description": "Open item skins",
+            "Plugin": "Skins",
+            "Aliases": [
+              "skin",
+              "skins"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "skins.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "clanhelp",
+            "Description": "Clan command help",
+            "Plugin": "Clans",
+            "Aliases": [
+              "clanhelp"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "auth",
+            "Description": "Link Discord",
+            "Plugin": "DiscordAuth",
+            "Aliases": [
+              "auth",
+              "authenticate"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "discordauth.auth"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "trade",
+            "Description": "Send a trade request",
+            "Plugin": "Trade",
+            "Aliases": [
+              "trade"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "trade.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Travel",
         "HeaderText": "TRAVEL AND HOMES",
         "Commands": [
-          { "Command": "tpr", "Aliases": [ "tpr" ], "Plugin": "NTeleportation", "Description": "Request teleport to a player", "AnyPermission": [ "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpr" ] },
-          { "Command": "tpa", "Aliases": [ "tpa" ], "Plugin": "NTeleportation", "Description": "Accept a teleport request", "AnyPermission": [ "nteleportation.tpa", "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpa" ] },
-          { "Command": "tpc", "Aliases": [ "tpc" ], "Plugin": "NTeleportation", "Description": "Cancel an active teleport", "AnyPermission": [ "nteleportation.tpr" ], "DisabledCommandKeys": [ "tpc" ] },
-          { "Command": "tpb", "Aliases": [ "tpb" ], "Plugin": "NTeleportation", "Description": "Teleport back after a teleport", "AnyPermission": [ "nteleportation.tpb" ], "DisabledCommandKeys": [ "tpb" ] },
-          { "Command": "home", "Aliases": [ "home" ], "Plugin": "NTeleportation", "Description": "Teleport to a saved home", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "home" ] },
-          { "Command": "sethome", "Aliases": [ "sethome" ], "Plugin": "NTeleportation", "Description": "Save your current home point", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "sethome" ] },
-          { "Command": "listhomes", "Aliases": [ "listhomes" ], "Plugin": "NTeleportation", "Description": "List saved homes", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "listhomes" ] },
-          { "Command": "removehome", "Aliases": [ "removehome" ], "Plugin": "NTeleportation", "Description": "Delete a saved home", "AnyPermission": [ "nteleportation.home" ], "DisabledCommandKeys": [ "removehome" ] },
-          { "Command": "outpost", "Aliases": [ "outpost" ], "Plugin": "NTeleportation", "Description": "Teleport to Outpost", "AnyPermission": [ "nteleportation.tpoutpost" ], "DisabledCommandKeys": [ "outpost" ] },
-          { "Command": "bandit", "Aliases": [ "bandit" ], "Plugin": "NTeleportation", "Description": "Teleport to Bandit Camp", "AnyPermission": [ "nteleportation.tpbandit" ], "DisabledCommandKeys": [ "bandit" ] },
-          { "Command": "tpt", "Aliases": [ "tpt", "atp", "tpat" ], "Plugin": "NTeleportation", "Description": "Toggle accepting team, clan, or friend teleport requests", "AnyPermission": [ "nteleportation.tpt" ], "DisabledCommandKeys": [ "tpt", "atp", "tpat" ] },
-          { "Command": "tphelp", "Aliases": [ "tphelp" ], "Plugin": "NTeleportation", "Description": "Teleportation help" },
-          { "Command": "tpinfo", "Aliases": [ "tpinfo" ], "Plugin": "NTeleportation", "Description": "Teleportation plugin info" },
-          { "Command": "toggletpmarker", "Aliases": [ "toggletpmarker" ], "Plugin": "NTeleportation", "Description": "Toggle teleport map markers", "AnyPermission": [ "nteleportation.tpmarker" ], "DisabledCommandKeys": [ "toggletpmarker" ] }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpr",
+            "Description": "Request teleport to a player",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpr"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpr"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tpr"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpa",
+            "Description": "Accept a teleport request",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpa"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpa",
+              "nteleportation.tpr"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tpa"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpc",
+            "Description": "Cancel an active teleport",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpc"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpr"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tpc"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpb",
+            "Description": "Teleport back after a teleport",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpb"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpb"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tpb"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "home",
+            "Description": "Teleport to a saved home",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "home"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.home"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "home"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sethome",
+            "Description": "Save your current home point",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "sethome"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.home"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "sethome"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "listhomes",
+            "Description": "List saved homes",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "listhomes"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.home"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "listhomes"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "removehome",
+            "Description": "Delete a saved home",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "removehome"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.home"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "removehome"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "outpost",
+            "Description": "Teleport to Outpost",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "outpost"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpoutpost"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "outpost"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "bandit",
+            "Description": "Teleport to Bandit Camp",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "bandit"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpbandit"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "bandit"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpt",
+            "Description": "Toggle accepting team, clan, or friend teleport requests",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpt",
+              "atp",
+              "tpat"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpt"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tpt",
+              "atp",
+              "tpat"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tphelp",
+            "Description": "Teleportation help",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tphelp"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tpinfo",
+            "Description": "Teleportation plugin info",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tpinfo"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "toggletpmarker",
+            "Description": "Toggle teleport map markers",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "toggletpmarker"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpmarker"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "toggletpmarker"
+            ],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Base",
         "HeaderText": "BASE, BUILDING, AND DEFENSE",
         "Commands": [
-          { "Command": "bgrade", "Aliases": [ "bgrade", "grade" ], "Plugin": "BGrade", "Description": "Auto-upgrade placed blocks", "AnyPermission": [ "bgrade.all", "bgrade.0", "bgrade.1", "bgrade.2", "bgrade.3", "bgrade.4" ] },
-          { "Command": "remove", "Aliases": [ "remove" ], "Plugin": "RemoverTool", "Description": "Remove placed structures", "AnyPermission": [ "removertool.normal", "removertool.all", "removertool.admin" ] },
-          { "Command": "bskin", "Aliases": [ "bskin", "building.skin" ], "Plugin": "BuildingSkins", "Description": "Change building block skins", "AnyPermission": [ "buildingskins.use", "buildingskins.build", "buildingskins.tc", "buildingskins.all" ] },
-          { "Command": "skin", "Aliases": [ "skin", "skins" ], "Plugin": "Skins", "Description": "Open item skin selector", "AnyPermission": [ "skins.use" ] },
-          { "Command": "br", "Aliases": [ "br" ], "Plugin": "BaseRepair", "Description": "Toggle base repair mode", "AnyPermission": [ "baserepair.use" ], "AdminBypassesPermissions": true },
-          { "Command": "tc", "Aliases": [ "tc" ], "Plugin": "CupboardLimiter", "Description": "Tool cupboard info and limits" },
-          { "Command": "buildinglimits", "Aliases": [ "buildinglimits", "limits", "limit", "blimit" ], "Plugin": "EntityLimit", "Description": "Building limit controls" },
-          { "Command": "ad", "Aliases": [ "ad", "autodoor" ], "Plugin": "AutoDoors", "Description": "Auto-door settings" },
-          { "Command": "autoauth", "Aliases": [ "autoauth", "autoauthui" ], "Plugin": "AutomaticAuthorization", "Description": "Share authorization with team, friends, or clan", "AnyPermission": [ "automaticauthorization.use" ] },
-          { "Command": "sd", "Aliases": [ "sd" ], "Plugin": "SharedDoors", "Description": "Shared Doors controls" },
-          { "Command": "turret", "Aliases": [ "turret" ], "Plugin": "PowerlessTurrets", "Description": "Toggle targeted turret power", "AnyPermission": [ "powerlessturrets.use" ] },
-          { "Command": "turret.tc", "Aliases": [ "turret.tc" ], "Plugin": "PowerlessTurrets", "Description": "Toggle turrets in TC range", "AnyPermission": [ "powerlessturrets.radius" ] },
-          { "Command": "sam.tc", "Aliases": [ "sam.tc" ], "Plugin": "PowerlessTurrets", "Description": "Toggle SAMs in TC range", "AnyPermission": [ "powerlessturrets.samradius" ] }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "bgrade",
+            "Description": "Auto-upgrade placed blocks",
+            "Plugin": "BGrade",
+            "Aliases": [
+              "bgrade",
+              "grade"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "bgrade.all",
+              "bgrade.0",
+              "bgrade.1",
+              "bgrade.2",
+              "bgrade.3",
+              "bgrade.4"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "remove",
+            "Description": "Remove placed structures",
+            "Plugin": "RemoverTool",
+            "Aliases": [
+              "remove"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "removertool.normal",
+              "removertool.all",
+              "removertool.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "bskin",
+            "Description": "Change building block skins",
+            "Plugin": "BuildingSkins",
+            "Aliases": [
+              "bskin",
+              "building.skin"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "buildingskins.use",
+              "buildingskins.build",
+              "buildingskins.tc",
+              "buildingskins.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "skin",
+            "Description": "Open item skin selector",
+            "Plugin": "Skins",
+            "Aliases": [
+              "skin",
+              "skins"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "skins.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "br",
+            "Description": "Toggle base repair mode",
+            "Plugin": "BaseRepair",
+            "Aliases": [
+              "br"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "baserepair.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": true
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tc",
+            "Description": "Tool cupboard info and limits",
+            "Plugin": "CupboardLimiter",
+            "Aliases": [
+              "tc"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "buildinglimits",
+            "Description": "Building limit controls",
+            "Plugin": "EntityLimit",
+            "Aliases": [
+              "buildinglimits",
+              "limits",
+              "limit",
+              "blimit"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "ad",
+            "Description": "Auto-door settings",
+            "Plugin": "AutoDoors",
+            "Aliases": [
+              "ad",
+              "autodoor"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "autoauth",
+            "Description": "Share authorization with team, friends, or clan",
+            "Plugin": "AutomaticAuthorization",
+            "Aliases": [
+              "autoauth",
+              "autoauthui"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "automaticauthorization.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sd",
+            "Description": "Shared Doors controls",
+            "Plugin": "SharedDoors",
+            "Aliases": [
+              "sd"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "turret",
+            "Description": "Toggle targeted turret power",
+            "Plugin": "PowerlessTurrets",
+            "Aliases": [
+              "turret"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "powerlessturrets.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "turret.tc",
+            "Description": "Toggle turrets in TC range",
+            "Plugin": "PowerlessTurrets",
+            "Aliases": [
+              "turret.tc"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "powerlessturrets.radius"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sam.tc",
+            "Description": "Toggle SAMs in TC range",
+            "Plugin": "PowerlessTurrets",
+            "Aliases": [
+              "sam.tc"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "powerlessturrets.samradius"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Econ",
         "HeaderText": "ECONOMY AND PROGRESSION",
         "Commands": [
-          { "Command": "kit", "Aliases": [ "kit" ], "Plugin": "Kits", "Description": "Open available kits" },
-          { "Command": "s", "Aliases": [ "s", "shop" ], "Plugin": "ServerRewards", "Description": "Open the Raidlands rewards store" },
-          { "Command": "playtime", "Aliases": [ "playtime" ], "Plugin": "PlaytimeTracker", "Description": "View playtime" },
-          { "Command": "refer", "Aliases": [ "refer" ], "Plugin": "PlaytimeTracker", "Description": "Referral command" },
-          { "Command": "srnpc", "Aliases": [ "srnpc" ], "Plugin": "ServerRewards", "Description": "ServerRewards NPC command", "RequireAdmin": true },
-          { "Command": "xp", "Aliases": [ "xp" ], "Plugin": "ServerRewards", "Description": "ServerRewards point management", "RequireAdmin": true },
-          { "Command": "clearrpdata", "Aliases": [ "clearrpdata" ], "Plugin": "ServerRewardsWipe", "Description": "Clear reward point data", "AnyPermission": [ "serverrewardswipe.admin" ], "RequireStaff": true },
-          { "Command": "bpunlock", "Aliases": [ "bpunlock", "bpunlockall", "bpremove", "bpreset", "bpwipeall" ], "Plugin": "BlueprintManager", "Description": "Blueprint admin controls", "AnyPermission": [ "blueprintmanager.admin" ], "RequireStaff": true }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "kit",
+            "Description": "Open available kits",
+            "Plugin": "Kits",
+            "Aliases": [
+              "kit"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "s",
+            "Description": "Open the Raidlands rewards store",
+            "Plugin": "ServerRewards",
+            "Aliases": [
+              "s",
+              "shop"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "playtime",
+            "Description": "View playtime",
+            "Plugin": "PlaytimeTracker",
+            "Aliases": [
+              "playtime"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "refer",
+            "Description": "Referral command",
+            "Plugin": "PlaytimeTracker",
+            "Aliases": [
+              "refer"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "srnpc",
+            "Description": "ServerRewards NPC command",
+            "Plugin": "ServerRewards",
+            "Aliases": [
+              "srnpc"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": true,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "xp",
+            "Description": "ServerRewards point management",
+            "Plugin": "ServerRewards",
+            "Aliases": [
+              "xp"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": true,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "clearrpdata",
+            "Description": "Clear reward point data",
+            "Plugin": "ServerRewardsWipe",
+            "Aliases": [
+              "clearrpdata"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "serverrewardswipe.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "bpunlock",
+            "Description": "Blueprint admin controls",
+            "Plugin": "BlueprintManager",
+            "Aliases": [
+              "bpunlock",
+              "bpunlockall",
+              "bpremove",
+              "bpreset",
+              "bpwipeall"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "blueprintmanager.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Social",
         "HeaderText": "SOCIAL, CLANS, AND LINKING",
         "Commands": [
-          { "Command": "clanhelp", "Aliases": [ "clanhelp" ], "Plugin": "Clans", "Description": "Clan help" },
-          { "Command": "clan", "Aliases": [ "clan" ], "Plugin": "Clans", "Description": "Clan management" },
-          { "Command": "c", "Aliases": [ "c" ], "Plugin": "Clans", "Description": "Clan chat" },
-          { "Command": "a", "Aliases": [ "a" ], "Plugin": "Clans", "Description": "Ally chat" },
-          { "Command": "ally", "Aliases": [ "ally" ], "Plugin": "Clans", "Description": "Alliance controls" },
-          { "Command": "cinfo", "Aliases": [ "cinfo" ], "Plugin": "Clans", "Description": "Clan information" },
-          { "Command": "pm", "Aliases": [ "pm", "r", "pmhistory" ], "Plugin": "PrivateMessages", "Description": "Private messages and history", "AnyPermission": [ "privatemessages.allow" ] },
-          { "Command": "trade", "Aliases": [ "trade" ], "Plugin": "Trade", "Description": "Request a trade", "AnyPermission": [ "trade.use" ] },
-          { "Command": "trade accept", "Aliases": [ "trade accept" ], "Plugin": "Trade", "Description": "Accept a trade request", "AnyPermission": [ "trade.accept" ] },
-          { "Command": "auth", "Aliases": [ "auth", "authenticate" ], "Plugin": "DiscordAuth", "Description": "Link Discord", "AnyPermission": [ "discordauth.auth" ] },
-          { "Command": "deauth", "Aliases": [ "deauth", "deauthenticate" ], "Plugin": "DiscordAuth", "Description": "Unlink Discord", "AnyPermission": [ "discordauth.deauth" ] },
-          { "Command": "chat", "Aliases": [ "chat" ], "Plugin": "BetterChat", "Description": "BetterChat admin controls", "AnyPermission": [ "betterchat.admin" ], "RequireStaff": true }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "clanhelp",
+            "Description": "Clan help",
+            "Plugin": "Clans",
+            "Aliases": [
+              "clanhelp"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "clan",
+            "Description": "Clan management",
+            "Plugin": "Clans",
+            "Aliases": [
+              "clan"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "c",
+            "Description": "Clan chat",
+            "Plugin": "Clans",
+            "Aliases": [
+              "c"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "a",
+            "Description": "Ally chat",
+            "Plugin": "Clans",
+            "Aliases": [
+              "a"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "ally",
+            "Description": "Alliance controls",
+            "Plugin": "Clans",
+            "Aliases": [
+              "ally"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "cinfo",
+            "Description": "Clan information",
+            "Plugin": "Clans",
+            "Aliases": [
+              "cinfo"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "pm",
+            "Description": "Private messages and history",
+            "Plugin": "PrivateMessages",
+            "Aliases": [
+              "pm",
+              "r",
+              "pmhistory"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "privatemessages.allow"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "trade",
+            "Description": "Request a trade",
+            "Plugin": "Trade",
+            "Aliases": [
+              "trade"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "trade.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "trade accept",
+            "Description": "Accept a trade request",
+            "Plugin": "Trade",
+            "Aliases": [
+              "trade accept"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "trade.accept"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "auth",
+            "Description": "Link Discord",
+            "Plugin": "DiscordAuth",
+            "Aliases": [
+              "auth",
+              "authenticate"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "discordauth.auth"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "deauth",
+            "Description": "Unlink Discord",
+            "Plugin": "DiscordAuth",
+            "Aliases": [
+              "deauth",
+              "deauthenticate"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "discordauth.deauth"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "chat",
+            "Description": "BetterChat admin controls",
+            "Plugin": "BetterChat",
+            "Aliases": [
+              "chat"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "betterchat.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Combat",
         "HeaderText": "COMBAT AND SERVER FEEDBACK",
         "Commands": [
-          { "Command": "stats", "Aliases": [ "stats" ], "Plugin": "KDRScoreboard", "Description": "View KDR and combat stats" },
-          { "Command": "leaderboard", "Aliases": [ "leaderboard" ], "Plugin": "Scoreboards", "Description": "Open scoreboards", "AnyPermission": [ "scoreboards.admin" ], "RequireStaff": true },
-          { "Command": "gather", "Aliases": [ "gather" ], "Plugin": "GatherManager", "Description": "View gather rates" },
-          { "Command": "dn", "Aliases": [ "dn" ], "Plugin": "DeathNotes", "Description": "DeathNotes command" },
-          { "Command": "fr", "Aliases": [ "fr" ], "Plugin": "RocketFire", "Description": "Rocket fire command", "AnyPermission": [ "rocketfire.use" ], "AdminBypassesPermissions": true },
-          { "Command": "wipe", "Aliases": [ "wipe" ], "Plugin": "AutoLock", "Description": "View next wipe timing" }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "stats",
+            "Description": "View KDR and combat stats",
+            "Plugin": "KDRScoreboard",
+            "Aliases": [
+              "stats"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "leaderboard",
+            "Description": "Open scoreboards",
+            "Plugin": "Scoreboards",
+            "Aliases": [
+              "leaderboard"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "scoreboards.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "gather",
+            "Description": "View gather rates",
+            "Plugin": "GatherManager",
+            "Aliases": [
+              "gather"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "dn",
+            "Description": "DeathNotes command",
+            "Plugin": "DeathNotes",
+            "Aliases": [
+              "dn"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "fr",
+            "Description": "Rocket fire command",
+            "Plugin": "RocketFire",
+            "Aliases": [
+              "fr"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "rocketfire.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": true
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "wipe",
+            "Description": "View next wipe timing",
+            "Plugin": "AutoLock",
+            "Aliases": [
+              "wipe"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Vehicles",
         "HeaderText": "VEHICLE COMMANDS",
         "Commands": [
-          { "Command": "mymini", "Aliases": [ "mymini" ], "Plugin": "SpawnHeli", "Description": "Spawn minicopter", "AnyPermission": [ "spawnheli.minicopter.spawn", "spawnheli.all.spawn" ] },
-          { "Command": "fmini", "Aliases": [ "fmini" ], "Plugin": "SpawnHeli", "Description": "Fetch minicopter", "AnyPermission": [ "spawnheli.minicopter.fetch", "spawnheli.all.fetch" ] },
-          { "Command": "nomini", "Aliases": [ "nomini" ], "Plugin": "SpawnHeli", "Description": "Despawn minicopter", "AnyPermission": [ "spawnheli.minicopter.despawn", "spawnheli.all.despawn" ] },
-          { "Command": "myheli", "Aliases": [ "myheli" ], "Plugin": "SpawnHeli", "Description": "Spawn scrap transport helicopter", "AnyPermission": [ "spawnheli.scraptransport.spawn", "spawnheli.all.spawn" ] },
-          { "Command": "fheli", "Aliases": [ "fheli" ], "Plugin": "SpawnHeli", "Description": "Fetch scrap transport helicopter", "AnyPermission": [ "spawnheli.scraptransport.fetch", "spawnheli.all.fetch" ] },
-          { "Command": "noheli", "Aliases": [ "noheli" ], "Plugin": "SpawnHeli", "Description": "Despawn scrap transport helicopter", "AnyPermission": [ "spawnheli.scraptransport.despawn", "spawnheli.all.despawn" ] },
-          { "Command": "myattack", "Aliases": [ "myattack" ], "Plugin": "SpawnHeli", "Description": "Spawn attack helicopter", "AnyPermission": [ "spawnheli.attackhelicopter.spawn", "spawnheli.all.spawn" ] },
-          { "Command": "fattack", "Aliases": [ "fattack" ], "Plugin": "SpawnHeli", "Description": "Fetch attack helicopter", "AnyPermission": [ "spawnheli.attackhelicopter.fetch", "spawnheli.all.fetch" ] },
-          { "Command": "noattack", "Aliases": [ "noattack" ], "Plugin": "SpawnHeli", "Description": "Despawn attack helicopter", "AnyPermission": [ "spawnheli.attackhelicopter.despawn", "spawnheli.all.despawn" ] }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "mymini",
+            "Description": "Spawn minicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "mymini"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.minicopter.spawn",
+              "spawnheli.all.spawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "fmini",
+            "Description": "Fetch minicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "fmini"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.minicopter.fetch",
+              "spawnheli.all.fetch"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "nomini",
+            "Description": "Despawn minicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "nomini"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.minicopter.despawn",
+              "spawnheli.all.despawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "myheli",
+            "Description": "Spawn scrap transport helicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "myheli"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.scraptransport.spawn",
+              "spawnheli.all.spawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "fheli",
+            "Description": "Fetch scrap transport helicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "fheli"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.scraptransport.fetch",
+              "spawnheli.all.fetch"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "noheli",
+            "Description": "Despawn scrap transport helicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "noheli"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.scraptransport.despawn",
+              "spawnheli.all.despawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "myattack",
+            "Description": "Spawn attack helicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "myattack"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.attackhelicopter.spawn",
+              "spawnheli.all.spawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "fattack",
+            "Description": "Fetch attack helicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "fattack"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.attackhelicopter.fetch",
+              "spawnheli.all.fetch"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "noattack",
+            "Description": "Despawn attack helicopter",
+            "Plugin": "SpawnHeli",
+            "Aliases": [
+              "noattack"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "spawnheli.attackhelicopter.despawn",
+              "spawnheli.all.despawn"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Utility",
         "HeaderText": "UTILITY COMMANDS",
         "Commands": [
-          { "Command": "backpack", "Aliases": [ "backpack", "backpack.open" ], "Plugin": "Backpacks", "Description": "Open backpack", "AnyPermission": [ "backpacks.use" ] },
-          { "Command": "backpack.next", "Aliases": [ "backpack.next" ], "Plugin": "Backpacks", "Description": "Next backpack page", "AnyPermission": [ "backpacks.use" ] },
-          { "Command": "backpack.previous", "Aliases": [ "backpack.previous", "backpack.prev" ], "Plugin": "Backpacks", "Description": "Previous backpack page", "AnyPermission": [ "backpacks.use" ] },
-          { "Command": "backpack.fetch", "Aliases": [ "backpack.fetch" ], "Plugin": "Backpacks", "Description": "Fetch backpack contents", "AnyPermission": [ "backpacks.fetch" ] },
-          { "Command": "backpackgui", "Aliases": [ "backpackgui" ], "Plugin": "Backpacks", "Description": "Toggle backpack GUI", "AnyPermission": [ "backpacks.gui" ] },
-          { "Command": "backpack.setgathermode", "Aliases": [ "backpack.setgathermode" ], "Plugin": "Backpacks", "Description": "Set gather mode", "RequiredPermissions": [ "backpacks.use", "backpacks.gather" ] },
-          { "Command": "backpack.ui.togglegather", "Aliases": [ "backpack.ui.togglegather" ], "Plugin": "Backpacks", "Description": "Toggle gather UI", "RequiredPermissions": [ "backpacks.use", "backpacks.gather" ] },
-          { "Command": "backpack.ui.toggleretrieve", "Aliases": [ "backpack.ui.toggleretrieve" ], "Plugin": "Backpacks", "Description": "Toggle retrieve UI", "RequiredPermissions": [ "backpacks.use", "backpacks.retrieve" ] },
-          { "Command": "tod", "Aliases": [ "tod" ], "Plugin": "TimeOfDay", "Description": "View time-of-day settings" },
-          { "Command": "sl", "Aliases": [ "sl" ], "Plugin": "SimpleLogo", "Description": "Toggle the simple logo" },
-          { "Command": "ismelt", "Aliases": [ "ismelt" ], "Plugin": "InstantSmelt", "Description": "Toggle instant smelt behavior", "AnyPermission": [ "instantsmelt.use" ] },
-          { "Command": "sortbutton", "Aliases": [ "sortbutton", "sortbutton.order", "sortbutton.sort" ], "Plugin": "SortButton", "Description": "Sort button settings", "AnyPermission": [ "sortbutton.use" ] },
-          { "Command": "viewbackpack", "Aliases": [ "viewbackpack" ], "Plugin": "Backpacks", "Description": "View another player's backpack", "AnyPermission": [ "backpacks.admin", "backpacks.admin.view", "backpacks.admin.edit" ], "RequireStaff": true },
-          { "Command": "backpack.erase", "Aliases": [ "backpack.erase" ], "Plugin": "Backpacks", "Description": "Erase backpack data", "AnyPermission": [ "backpacks.admin", "backpacks.admin.edit" ], "RequireStaff": true },
-          { "Command": "backpack.resize", "Aliases": [ "backpack.addsize", "backpack.setsize" ], "Plugin": "Backpacks", "Description": "Resize backpacks", "AnyPermission": [ "backpacks.admin", "backpacks.admin.resize" ], "RequireStaff": true }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack",
+            "Description": "Open backpack",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack",
+              "backpack.open"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.next",
+            "Description": "Next backpack page",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.next"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.previous",
+            "Description": "Previous backpack page",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.previous",
+              "backpack.prev"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.fetch",
+            "Description": "Fetch backpack contents",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.fetch"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.fetch"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpackgui",
+            "Description": "Toggle backpack GUI",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpackgui"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.gui"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.setgathermode",
+            "Description": "Set gather mode",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.setgathermode"
+            ],
+            "RequiredPermissions": [
+              "backpacks.use",
+              "backpacks.gather"
+            ],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.ui.togglegather",
+            "Description": "Toggle gather UI",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.ui.togglegather"
+            ],
+            "RequiredPermissions": [
+              "backpacks.use",
+              "backpacks.gather"
+            ],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.ui.toggleretrieve",
+            "Description": "Toggle retrieve UI",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.ui.toggleretrieve"
+            ],
+            "RequiredPermissions": [
+              "backpacks.use",
+              "backpacks.retrieve"
+            ],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tod",
+            "Description": "View time-of-day settings",
+            "Plugin": "TimeOfDay",
+            "Aliases": [
+              "tod"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sl",
+            "Description": "Toggle the simple logo",
+            "Plugin": "SimpleLogo",
+            "Aliases": [
+              "sl"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "ismelt",
+            "Description": "Toggle instant smelt behavior",
+            "Plugin": "InstantSmelt",
+            "Aliases": [
+              "ismelt"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "instantsmelt.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sortbutton",
+            "Description": "Sort button settings",
+            "Plugin": "SortButton",
+            "Aliases": [
+              "sortbutton",
+              "sortbutton.order",
+              "sortbutton.sort"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "sortbutton.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "viewbackpack",
+            "Description": "View another player's backpack",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "viewbackpack"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.admin",
+              "backpacks.admin.view",
+              "backpacks.admin.edit"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.erase",
+            "Description": "Erase backpack data",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.erase"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.admin",
+              "backpacks.admin.edit"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.resize",
+            "Description": "Resize backpacks",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.addsize",
+              "backpack.setsize"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.admin",
+              "backpacks.admin.resize"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       },
       {
         "ButtonText": "Staff",
         "HeaderText": "STAFF AND INTEGRATION COMMANDS",
         "Commands": [
-          { "Command": "tp", "Aliases": [ "tp", "tpn", "tpl", "tpsave", "tpremove", "tnt" ], "Plugin": "NTeleportation", "Description": "Staff teleport controls", "RequireStaff": true, "AnyPermission": [ "nteleportation.tp", "nteleportation.tpn", "nteleportation.tpl", "nteleportation.tpsave", "nteleportation.tpremove", "nteleportation.admin" ], "AdminBypassesPermissions": true, "DisabledCommandKeys": [ "tp", "tpn", "tpl", "tpsave", "tpremove", "tnt" ] },
-          { "Command": "homeadmin", "Aliases": [ "radiushome", "deletehome", "tphome", "homehomes", "wipehomes" ], "Plugin": "NTeleportation", "Description": "Staff home lookup and cleanup", "RequireStaff": true, "AnyPermission": [ "nteleportation.admin", "nteleportation.radiushome", "nteleportation.deletehome", "nteleportation.homehomes", "nteleportation.wipehomes" ], "AdminBypassesPermissions": true, "DisabledCommandKeys": [ "radiushome", "deletehome", "tphome", "homehomes", "wipehomes" ] },
-          { "Command": "teleport.console", "Aliases": [ "teleport.toplayer", "teleport.topos", "teleport.importhomes", "spm", "nteleportationinfo" ], "Plugin": "NTeleportation", "Description": "Teleport import and console-style tools", "RequireStaff": true, "AnyPermission": [ "nteleportation.tpconsole", "nteleportation.importhomes", "nteleportation.admin" ], "AdminBypassesPermissions": true, "DisabledCommandKeys": [ "teleport.toplayer", "teleport.topos", "teleport.importhomes", "spm", "nteleportationinfo" ] },
-          { "Command": "ban", "Aliases": [ "ban", "playerban", "sa.ban", "banid", "clanban" ], "Plugin": "ServerArmour", "Description": "Ban player or clan members", "RequireStaff": true, "AnyPermission": [ "serverarmour.ban" ] },
-          { "Command": "unban", "Aliases": [ "unban", "playerunban", "sa.unban" ], "Plugin": "ServerArmour", "Description": "Unban player", "RequireStaff": true, "AnyPermission": [ "serverarmour.unban" ] },
-          { "Command": "sa.check", "Aliases": [ "sa.cp", "sa.clb", "getreport", "sa.mapupload", "sa.map.upload" ], "Plugin": "ServerArmour", "Description": "ServerArmour checks, reports, and map upload", "RequireStaff": true },
-          { "Command": "sa.radar", "Aliases": [ "sa.radar" ], "Plugin": "ServerArmour", "Description": "ServerArmour radar", "RequireStaff": true, "AnyPermission": [ "serverarmour.radar" ] },
-          { "Command": "arkan", "Aliases": [ "arkan", "arkaninfo", "arkannr", "arkanaim", "arkanaimr", "arkanir", "arkan.nr", "arkan.aim", "arkan.ir" ], "Plugin": "Arkan", "Description": "Anti-cheat views and reports", "RequireAdmin": true, "AnyPermission": [ "arkan.allowed" ] },
-          { "Command": "arkan.data", "Aliases": [ "arkanclear", "arkansave", "arkanload", "arkan.clear", "arkan.save", "arkan.load" ], "Plugin": "Arkan", "Description": "Arkan data controls", "RequireAdmin": true, "AnyPermission": [ "arkan.allowed" ] },
-          { "Command": "guardian", "Aliases": [ "guardian", "guardian.help", "g.help" ], "Plugin": "Guardian", "Description": "Guardian help", "RequireStaff": true, "AnyPermission": [ "guardian.admin", "guardian.all" ] },
-          { "Command": "guardian.config", "Aliases": [ "g.config", "guardian.config" ], "Plugin": "Guardian", "Description": "Guardian config", "RequireStaff": true, "AnyPermission": [ "guardian.command.config", "guardian.all" ] },
-          { "Command": "guardian.ip", "Aliases": [ "g.ip", "guardian.ip" ], "Plugin": "Guardian", "Description": "Guardian IP tools", "RequireStaff": true, "AnyPermission": [ "guardian.command.ip", "guardian.all" ] },
-          { "Command": "guardian.server", "Aliases": [ "g.server", "guardian.server", "g.log", "guardian.log" ], "Plugin": "Guardian", "Description": "Guardian server checks and logs", "RequireStaff": true, "AnyPermission": [ "guardian.command.server", "guardian.all" ] },
-          { "Command": "guardian.tp", "Aliases": [ "g.tp", "g.tpv", "guardian.tp", "guardian.tpv" ], "Plugin": "Guardian", "Description": "Guardian teleport tools", "RequireStaff": true, "AnyPermission": [ "guardian.command.teleport", "guardian.all" ] },
-          { "Command": "guardian.user", "Aliases": [ "g.user", "guardian.user" ], "Plugin": "Guardian", "Description": "Guardian user checks", "RequireStaff": true, "AnyPermission": [ "guardian.admin", "guardian.all" ] },
-          { "Command": "guardian.vpn", "Aliases": [ "g.vpn", "guardian.vpn" ], "Plugin": "Guardian", "Description": "Guardian VPN checks", "RequireStaff": true, "AnyPermission": [ "guardian.command.vpn", "guardian.all" ] },
-          { "Command": "god", "Aliases": [ "god", "godmode" ], "Plugin": "Godmode", "Description": "Toggle godmode", "RequireStaff": true, "AnyPermission": [ "godmode.toggle", "godmode.admin" ] },
-          { "Command": "gods", "Aliases": [ "gods", "godlist" ], "Plugin": "Godmode", "Description": "List godmode players", "RequireStaff": true, "AnyPermission": [ "godmode.admin" ] },
-          { "Command": "betterloot", "Aliases": [ "looty", "blacklist", "bl-backup", "bl-restore" ], "Plugin": "BetterLoot", "Description": "BetterLoot UI, blacklist, and backups", "RequireStaff": true, "AnyPermission": [ "betterloot.admin" ] },
-          { "Command": "fancydrop", "Aliases": [ "droprandom", "droptopos", "droptoplayer", "dropdirect", "dropspace", "dropmass", "droptomass" ], "Plugin": "FancyDrop", "Description": "FancyDrop controls", "RequireAdmin": true },
-          { "Command": "timeofday.admin", "Aliases": [ "tod.daylength", "tod.nightlength", "tod.freezetime", "tod.skipday", "tod.skipnight" ], "Plugin": "TimeOfDay", "Description": "Time-of-day admin controls", "RequireStaff": true, "MinimumAuthLevel": 1 },
-          { "Command": "lockedcratetimer.conf", "Aliases": [ "lockedcratetimer.conf" ], "Plugin": "LockedCrateTimer", "Description": "Locked crate timer config", "RequireStaff": true, "AnyPermission": [ "lockedcratetimer.conf.use" ] },
-          { "Command": "stacksizecontroller", "Aliases": [ "stacksizecontroller.setstack", "stacksizecontroller.setstackcat", "stacksizecontroller.setallstacks", "stacksizecontroller.itemsearch", "stacksizecontroller.listcategories", "stacksizecontroller.listcategoryitems", "stacksizecontroller.vd" ], "Plugin": "StackSizeController", "Description": "Stack size controller commands", "RequireStaff": true, "AnyPermission": [ "stacksizecontroller.setstack", "stacksizecontroller.setstackcat", "stacksizecontroller.setallstacks", "stacksizecontroller.itemsearch", "stacksizecontroller.listcategories", "stacksizecontroller.listcategoryitems", "stacksizecontroller.vd" ] },
-          { "Command": "dw", "Aliases": [ "dw" ], "Plugin": "DiscordWipe", "Description": "Discord wipe protocol command", "RequireStaff": true },
-          { "Command": "dcr.forcecheck", "Aliases": [ "dcr.forcecheck" ], "Plugin": "DiscordRoles", "Description": "Discord roles force check", "RequireStaff": true },
-          { "Command": "placeholderapi", "Aliases": [ "placeholderapi.list", "placeholderapi.test" ], "Plugin": "PlaceholderAPI", "Description": "PlaceholderAPI tools", "RequireStaff": true, "AnyPermission": [ "placeholderapi.list", "placeholderapi.test" ], "AdminBypassesPermissions": true },
-          { "Command": "customvendingsetup.ui", "Aliases": [ "customvendingsetup.ui" ], "Plugin": "CustomVendingSetup", "Description": "Custom vending setup UI", "RequireStaff": true },
-          { "Command": "testmessage", "Aliases": [ "testmessage" ], "Plugin": "EntityLimit", "Description": "Entity limit test message", "RequireStaff": true },
-          { "Command": "ptt.restorenames", "Aliases": [ "ptt.restorenames" ], "Plugin": "PlaytimeTracker", "Description": "PlaytimeTracker name restore", "RequireStaff": true },
-          { "Command": "backpack.debug", "Aliases": [ "backpack.debug.size", "backpack.debug.capacity", "backpack.debug.gather" ], "Plugin": "Backpacks", "Description": "Backpack debug tools", "RequireStaff": true, "AnyPermission": [ "backpacks.admin", "backpacks.admin.debug" ] }
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "tp",
+            "Description": "Staff teleport controls",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "tp",
+              "tpn",
+              "tpl",
+              "tpsave",
+              "tpremove",
+              "tnt"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tp",
+              "nteleportation.tpn",
+              "nteleportation.tpl",
+              "nteleportation.tpsave",
+              "nteleportation.tpremove",
+              "nteleportation.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "tp",
+              "tpn",
+              "tpl",
+              "tpsave",
+              "tpremove",
+              "tnt"
+            ],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": true
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "homeadmin",
+            "Description": "Staff home lookup and cleanup",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "radiushome",
+              "deletehome",
+              "tphome",
+              "homehomes",
+              "wipehomes"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.admin",
+              "nteleportation.radiushome",
+              "nteleportation.deletehome",
+              "nteleportation.homehomes",
+              "nteleportation.wipehomes"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "radiushome",
+              "deletehome",
+              "tphome",
+              "homehomes",
+              "wipehomes"
+            ],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": true
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "teleport.console",
+            "Description": "Teleport import and console-style tools",
+            "Plugin": "NTeleportation",
+            "Aliases": [
+              "teleport.toplayer",
+              "teleport.topos",
+              "teleport.importhomes",
+              "spm",
+              "nteleportationinfo"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "nteleportation.tpconsole",
+              "nteleportation.importhomes",
+              "nteleportation.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [
+              "teleport.toplayer",
+              "teleport.topos",
+              "teleport.importhomes",
+              "spm",
+              "nteleportationinfo"
+            ],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": true
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "ban",
+            "Description": "Ban player or clan members",
+            "Plugin": "ServerArmour",
+            "Aliases": [
+              "ban",
+              "playerban",
+              "sa.ban",
+              "banid",
+              "clanban"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "serverarmour.ban"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "unban",
+            "Description": "Unban player",
+            "Plugin": "ServerArmour",
+            "Aliases": [
+              "unban",
+              "playerunban",
+              "sa.unban"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "serverarmour.unban"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sa.check",
+            "Description": "ServerArmour checks, reports, and map upload",
+            "Plugin": "ServerArmour",
+            "Aliases": [
+              "sa.cp",
+              "sa.clb",
+              "getreport",
+              "sa.mapupload",
+              "sa.map.upload"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "sa.radar",
+            "Description": "ServerArmour radar",
+            "Plugin": "ServerArmour",
+            "Aliases": [
+              "sa.radar"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "serverarmour.radar"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "arkan",
+            "Description": "Anti-cheat views and reports",
+            "Plugin": "Arkan",
+            "Aliases": [
+              "arkan",
+              "arkaninfo",
+              "arkannr",
+              "arkanaim",
+              "arkanaimr",
+              "arkanir",
+              "arkan.nr",
+              "arkan.aim",
+              "arkan.ir"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "arkan.allowed"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": true,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "arkan.data",
+            "Description": "Arkan data controls",
+            "Plugin": "Arkan",
+            "Aliases": [
+              "arkanclear",
+              "arkansave",
+              "arkanload",
+              "arkan.clear",
+              "arkan.save",
+              "arkan.load"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "arkan.allowed"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": true,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian",
+            "Description": "Guardian help",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "guardian",
+              "guardian.help",
+              "g.help"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.admin",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian.config",
+            "Description": "Guardian config",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "g.config",
+              "guardian.config"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.command.config",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian.ip",
+            "Description": "Guardian IP tools",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "g.ip",
+              "guardian.ip"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.command.ip",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian.server",
+            "Description": "Guardian server checks and logs",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "g.server",
+              "guardian.server",
+              "g.log",
+              "guardian.log"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.command.server",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian.tp",
+            "Description": "Guardian teleport tools",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "g.tp",
+              "g.tpv",
+              "guardian.tp",
+              "guardian.tpv"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.command.teleport",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian.user",
+            "Description": "Guardian user checks",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "g.user",
+              "guardian.user"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.admin",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "guardian.vpn",
+            "Description": "Guardian VPN checks",
+            "Plugin": "Guardian",
+            "Aliases": [
+              "g.vpn",
+              "guardian.vpn"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "guardian.command.vpn",
+              "guardian.all"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "god",
+            "Description": "Toggle godmode",
+            "Plugin": "Godmode",
+            "Aliases": [
+              "god",
+              "godmode"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "godmode.toggle",
+              "godmode.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "gods",
+            "Description": "List godmode players",
+            "Plugin": "Godmode",
+            "Aliases": [
+              "gods",
+              "godlist"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "godmode.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "betterloot",
+            "Description": "BetterLoot UI, blacklist, and backups",
+            "Plugin": "BetterLoot",
+            "Aliases": [
+              "looty",
+              "blacklist",
+              "bl-backup",
+              "bl-restore"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "betterloot.admin"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "fancydrop",
+            "Description": "FancyDrop controls",
+            "Plugin": "FancyDrop",
+            "Aliases": [
+              "droprandom",
+              "droptopos",
+              "droptoplayer",
+              "dropdirect",
+              "dropspace",
+              "dropmass",
+              "droptomass"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": false,
+            "RequireAdmin": true,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "timeofday.admin",
+            "Description": "Time-of-day admin controls",
+            "Plugin": "TimeOfDay",
+            "Aliases": [
+              "tod.daylength",
+              "tod.nightlength",
+              "tod.freezetime",
+              "tod.skipday",
+              "tod.skipnight"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 1,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "lockedcratetimer.conf",
+            "Description": "Locked crate timer config",
+            "Plugin": "LockedCrateTimer",
+            "Aliases": [
+              "lockedcratetimer.conf"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "lockedcratetimer.conf.use"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "stacksizecontroller",
+            "Description": "Stack size controller commands",
+            "Plugin": "StackSizeController",
+            "Aliases": [
+              "stacksizecontroller.setstack",
+              "stacksizecontroller.setstackcat",
+              "stacksizecontroller.setallstacks",
+              "stacksizecontroller.itemsearch",
+              "stacksizecontroller.listcategories",
+              "stacksizecontroller.listcategoryitems",
+              "stacksizecontroller.vd"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "stacksizecontroller.setstack",
+              "stacksizecontroller.setstackcat",
+              "stacksizecontroller.setallstacks",
+              "stacksizecontroller.itemsearch",
+              "stacksizecontroller.listcategories",
+              "stacksizecontroller.listcategoryitems",
+              "stacksizecontroller.vd"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "dw",
+            "Description": "Discord wipe protocol command",
+            "Plugin": "DiscordWipe",
+            "Aliases": [
+              "dw"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "dcr.forcecheck",
+            "Description": "Discord roles force check",
+            "Plugin": "DiscordRoles",
+            "Aliases": [
+              "dcr.forcecheck"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "placeholderapi",
+            "Description": "PlaceholderAPI tools",
+            "Plugin": "PlaceholderAPI",
+            "Aliases": [
+              "placeholderapi.list",
+              "placeholderapi.test"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "placeholderapi.list",
+              "placeholderapi.test"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": true
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "customvendingsetup.ui",
+            "Description": "Custom vending setup UI",
+            "Plugin": "CustomVendingSetup",
+            "Aliases": [
+              "customvendingsetup.ui"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "testmessage",
+            "Description": "Entity limit test message",
+            "Plugin": "EntityLimit",
+            "Aliases": [
+              "testmessage"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "ptt.restorenames",
+            "Description": "PlaytimeTracker name restore",
+            "Plugin": "PlaytimeTracker",
+            "Aliases": [
+              "ptt.restorenames"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          },
+          {
+            "Enabled": true,
+            "Text": "",
+            "Command": "backpack.debug",
+            "Description": "Backpack debug tools",
+            "Plugin": "Backpacks",
+            "Aliases": [
+              "backpack.debug.size",
+              "backpack.debug.capacity",
+              "backpack.debug.gather"
+            ],
+            "RequiredPermissions": [],
+            "AnyPermission": [
+              "backpacks.admin",
+              "backpacks.admin.debug"
+            ],
+            "RequiredGroups": [],
+            "AnyGroup": [],
+            "DisabledCommandKeys": [],
+            "RequireStaff": true,
+            "RequireAdmin": false,
+            "MinimumAuthLevel": 0,
+            "AdminBypassesPermissions": false
+          }
         ]
       }
     ],
-    "StaffGroups": [ "admin", "moderator", "staff", "owner" ],
-    "AdminGroups": [ "admin", "owner" ],
+    "StaffGroups": [
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner",
+      "admin",
+      "moderator",
+      "staff",
+      "owner"
+    ],
+    "AdminGroups": [
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner",
+      "admin",
+      "owner"
+    ],
     "CommandCatalogUsesPluginLoadedChecks": false,
     "CommandCatalogUsesPermissionChecks": false,
     "CommandCatalogAdminsBypassPermissionChecks": true,

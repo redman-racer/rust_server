@@ -1,3 +1,4 @@
+
 {
   "Backpack size": {
     "Default size": 6,
@@ -39,7 +40,7 @@
       ]
     }
   },
-  "Drop on Death (true/false)": true,
+  "Drop on Death (true/false)": false,
   "Erase on Death (true/false)": false,
   "Minimum Despawn Time (Seconds)": 300.0,
   "GUI Button": {

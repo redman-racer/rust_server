@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
 using ProtoBuf;
@@ -58,6 +59,7 @@ namespace Oxide.Plugins
         private const ulong NpcVendingMachineSkinId = 861142659;
 
         private static readonly Regex KeyValueRegex = new(@"^([^:]+):(.+(?:\n[^:\n]+$)*)", RegexOptions.Compiled | RegexOptions.Multiline);
+        private static readonly FieldInfo NpcVendingMachineAllSalesDataField = typeof(NPCVendingMachine).GetField("allSalesData", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private static readonly object True = true;
         private static readonly object False = false;
@@ -94,6 +96,16 @@ namespace Oxide.Plugins
             _paymentProviderResolver = new PaymentProviderResolver(this);
             _inaccessibleVendingMachines = new DynamicHookSubscriber<VendingController>(this, nameof(CanAccessVendingMachine));
             _playersNeedingFakeInventory = new DynamicHookSubscriber<BasePlayer>(this, nameof(OnEntitySaved), nameof(OnInventoryNetworkUpdate));
+        }
+
+        private static NPCVendingMachine.SalesData[] GetAllSalesData(NPCVendingMachine vendingMachine)
+        {
+            return NpcVendingMachineAllSalesDataField?.GetValue(vendingMachine) as NPCVendingMachine.SalesData[];
+        }
+
+        private static void SetAllSalesData(NPCVendingMachine vendingMachine, NPCVendingMachine.SalesData[] salesData)
+        {
+            NpcVendingMachineAllSalesDataField?.SetValue(vendingMachine, salesData);
         }
 
         #endregion
@@ -3073,7 +3085,7 @@ namespace Oxide.Plugins
                 playerLoot.MarkDirty();
                 playerLoot.AddContainer(containerEntity.inventory);
                 playerLoot.SendImmediate();
-                player.ClientRPCPlayer(null, player, "RPC_OpenLootPanel", containerEntity.panelName);
+                player.ClientRPC(RpcTarget.Player("RPC_OpenLootPanel", player), containerEntity.panelName);
             }
 
             public BasePlayer EditorPlayer { get; }
@@ -3594,17 +3606,18 @@ namespace Oxide.Plugins
 
             private void FixDynamicSalesDirection()
             {
-                if (_vendingMachine.allSalesData == null)
+                var allSalesData = GetAllSalesData(_vendingMachine);
+                if (allSalesData == null)
                     return;
 
                 // Whether scrap is the merchandise needs to be stored in sales data metadata so that the multiplier
                 // is correctly increased or decreased at the end of each sales period. Otherwise, the dynamic price
                 // might decrease when it should increase or vice versa.
-                for (var i = 0; i < _vendingMachine.allSalesData.Length; i++)
+                for (var i = 0; i < allSalesData.Length; i++)
                 {
                     var sellOrder = _vendingMachine.sellOrders.sellOrders.ElementAtOrDefault(i);
                     var isForReceivedCurrency = sellOrder?.itemToSellID == NPCVendingMachine.ScrapItem.itemid;
-                    _vendingMachine.allSalesData[i].IsForReceivedCurrency = isForReceivedCurrency;
+                    allSalesData[i].IsForReceivedCurrency = isForReceivedCurrency;
                 }
             }
 
@@ -4513,7 +4526,7 @@ namespace Oxide.Plugins
                 return new VendingMachineState
                 {
                     EntityId = vendingMachine.net.ID.Value,
-                    SalesData = vendingMachine.allSalesData?.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
+                    SalesData = GetAllSalesData(vendingMachine)?.Select(CustomSalesData.FromVendingMachineSalesData).ToArray(),
                     Position = vendingMachine.transform.position,
                 };
             }
@@ -4536,7 +4549,7 @@ namespace Oxide.Plugins
                         .Take(vendingMachine.sellOrders.sellOrders.Count)
                         .ToArray() ?? Array.Empty<NPCVendingMachine.SalesData>();
 
-                vendingMachine.allSalesData = salesData;
+                SetAllSalesData(vendingMachine, salesData);
             }
         }
 

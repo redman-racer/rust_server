@@ -1,0 +1,136 @@
+{
+  "Enabled": false,
+  "Target Population": 1,
+  "Minimum Allowed Population": 1,
+  "Maximum Allowed Population": 3,
+  "Team Size Weights": {
+    "solo": 100,
+    "duo": 0,
+    "trio": 0
+  },
+  "Skill Weights": {
+    "casual": 25,
+    "average": 60,
+    "dangerous": 15
+  },
+  "Skill Definitions": {
+    "casual": {
+      "Health": 125.0,
+      "DamageScale": 0.78,
+      "IncomingDamageScale": 1.15,
+      "LeashDistance": 95.0,
+      "LeashSeconds": 35.0
+    },
+    "average": {
+      "Health": 150.0,
+      "DamageScale": 1.0,
+      "IncomingDamageScale": 1.0,
+      "LeashDistance": 120.0,
+      "LeashSeconds": 45.0
+    },
+    "dangerous": {
+      "Health": 190.0,
+      "DamageScale": 1.22,
+      "IncomingDamageScale": 0.9,
+      "LeashDistance": 150.0,
+      "LeashSeconds": 55.0
+    }
+  },
+  "High Tier Kit Weight": 5,
+  "Kit Selection": {
+    "Default Group": "default",
+    "Eligible Kit Names": [
+      "ak",
+      "lr300",
+      "m16",
+      "mp5"
+    ],
+    "Rare High Tier Kit Names": [
+      "raid"
+    ],
+    "Weapon Shortnames": [
+      "rifle.ak",
+      "rifle.lr300",
+      "m16a2",
+      "smg.mp5",
+      "lmg.m249",
+      "rifle.m39",
+      "rifle.semiauto",
+      "rifle.bolt",
+      "rifle.l96",
+      "smg.thompson",
+      "smg.2",
+      "pistol.python",
+      "pistol.semiauto",
+      "pistol.m92"
+    ]
+  },
+  "Spawn Settings": {
+    "Spawn Mode": "near_players",
+    "Prefer Native NPC Spawn Groups": false,
+    "Only Use Native BasePlayer Spawn Groups": true,
+    "Prefer Native Spawn Group Prefabs": true,
+    "Use Random Land Fallback": false,
+    "Native NPC Spawn Group Attempts": 40,
+    "Max Position Attempts": 80,
+    "Navmesh Sample Distance": 12.0,
+    "Minimum Above Water": 1.5,
+    "Require Land Spawns": true,
+    "Minimum Land Height": 0.0,
+    "Group Spawn Radius": 12.0,
+    "Prefer Native NPC Spawn Points Near Players": true,
+    "Use Generated Positions Near Players": false,
+    "Near Player Minimum Distance": 80.0,
+    "Near Player Maximum Distance": 300.0,
+    "Near Player Native Spawn Point Attempts": 300,
+    "Near Player Attempts Per Bot": 48,
+    "Near Player Anchor Name Or SteamID": "ababmxking",
+    "Avoid Safe Zone Spawns": true,
+    "Ignore Players In Safe Zones": true,
+    "Safe Zone Spawn Buffer Distance": 75.0
+  },
+  "Prefab Candidates In Order": [
+    "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_roam.prefab",
+    "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_full_any.prefab",
+    "assets/rust.ai/agents/npcplayer/humannpc/scientist/gen2/scientist2.prefab"
+  ],
+  "Use Gen2 Scientist Fallback": false,
+  "Require NPC Navigator Placement": true,
+  "Debug Spawn Details": true,
+  "Spawn Failure Retry Seconds": 30.0,
+  "Bot Profiles": [
+    "LaunchLoot",
+    "BlueCarded",
+    "ColdFurnace",
+    "RoadsignMain",
+    "HarborEcho",
+    "StoneCeiling",
+    "OxideSeven",
+    "NorthOil",
+    "DepotMains",
+    "TwigLaw",
+    "CratePilot",
+    "FuseBox",
+    "RoofMuted",
+    "BanditQueue",
+    "CargoLeft",
+    "RedKeycard",
+    "BenchTier3",
+    "WipeClock",
+    "RecyclerOne",
+    "OilDock",
+    "HazzyStep",
+    "GarageDoor",
+    "MonumentRun",
+    "MetalNode",
+    "WorkbenchTwo",
+    "TrainYard",
+    "BradleyLane",
+    "OutpostEdge",
+    "LaunchStairs",
+    "FurnaceBase"
+  ],
+  "Maintain Interval Seconds": 20.0,
+  "Scoreboard Interval Seconds": 60.0,
+  "Respawn Delay Seconds": 20.0
+}

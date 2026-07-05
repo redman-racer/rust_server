@@ -1267,13 +1267,13 @@ namespace Oxide.Plugins
 
             public void Draw(BasePlayer player)
             {
-                CommunityEntity.ServerInstance.ClientRPCEx(new Network.SendInfo() { connection = player.net.connection }, null, "AddUI", JsonConvert.SerializeObject(ui).Replace("{NEWLINE}", Environment.NewLine));
+                CommunityEntity.ServerInstance.ClientRPC(RpcTarget.Player("AddUI", player), JsonConvert.SerializeObject(ui).Replace("{NEWLINE}", Environment.NewLine));
             }
 
             public void Destroy(BasePlayer player)
             {
                 foreach (string uiName in objectList)
-                    CommunityEntity.ServerInstance.ClientRPCEx(new Network.SendInfo() { connection = player.net.connection }, null, "DestroyUI", uiName);
+                    CommunityEntity.ServerInstance.ClientRPC(RpcTarget.Player("DestroyUI", player), uiName);
             }
 
             public string AddText(string name, double left, double top, double width, double height, string color, string text, int textsize = 15, string parent = "Hud", int alignmode = 0, float fadeIn = 0f, float fadeOut = 0f)

@@ -31,7 +31,7 @@
     },
     "Instant takeoff": {
       "Enabled": true,
-      "Require permission": true
+      "Require permission": false
     },
     "Only owner and team can mount": false,
     "Spawn health": 750.0,

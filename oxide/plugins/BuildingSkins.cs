@@ -162,7 +162,7 @@ namespace Oxide.Plugins
             if (!playerData.ChangeHammer || block.health != block.MaxHealth() && !playerData.NeedsRepair) return;
             block.skinID = skinID;
             block.ChangeGradeAndSkin(block.grade, skinID, true, true);
-            if (playerData.EnableAnimation) block.ClientRPC(null, "DoUpgradeEffect", (int)block.grade, skinID);
+            if (playerData.EnableAnimation) block.ClientRPC(RpcTarget.NetworkGroup("DoUpgradeEffect"), (int)block.grade, skinID);
         }
 
         private object OnStructureUpgrade(BuildingBlock block, BasePlayer player, BuildingGrade.Enum grade, ulong skin)
@@ -185,7 +185,7 @@ namespace Oxide.Plugins
                 if (block == null || block.IsDestroyed) return;
                 block.skinID = skinID;
                 block.ChangeGradeAndSkin(block.grade, skinID, true, true);
-                if (playerData.EnableAnimation) block.ClientRPC(null, "DoUpgradeEffect", (int)block.grade, skinID);
+                if (playerData.EnableAnimation) block.ClientRPC(RpcTarget.NetworkGroup("DoUpgradeEffect"), (int)block.grade, skinID);
                 ///for plugin BuildingGrades
                 if (block.skinID != 0 && grade.ToString() == "Metal" && !playerData.RandomColor) block.SetCustomColour((uint)player.GetInfoInt("client.SelectedShippingContainerBlockColour", 0));
             });

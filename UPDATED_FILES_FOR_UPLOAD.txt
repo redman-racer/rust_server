@@ -1,136 +1,47 @@
-Raidlands VIP kits, groups, permissions rollout upload manifest
-Generated from raidlands_vip_kits_permissions_mapping_with_claimables_plugin_aligned.xlsx.
-
-Do not manually edit oxide/data/oxide.groups.data or oxide/data/oxide.users.data.
-Website tables plus WebsiteVipBridge own the live group/permission state.
+Raidlands roaming player-like bots upload manifest
+Generated for the RaidlandsRoamBots rollout.
 
 Website files to upload:
-- database/migrations/019_raidlands_vip_kits_permissions_seed.sql
-- includes/config.php
-- includes/kits.php
-- includes/permissions.php
-- includes/permissions-vip-rollout.php
-- includes/store.php
-- includes/store-vip-rollout-catalog.php
+- database/migrations/022_bot_stats.sql
+- includes/stats.php
+- pages/leaderboard.php
+- pages/profile.php
 - server-plugins/WebsiteVipBridge.cs
-- server-plugins/WebsiteVipBridge.config.example.json
 
-Website media to confirm/upload:
-- assets/media/kits/build-kit.png
-- assets/media/kits/build-kit.webp
-- assets/media/kits/cards-kit.png
-- assets/media/kits/cards-kit.webp
-- assets/media/kits/raid-kit.png
-- assets/media/kits/raid-kit.webp
-- assets/media/kits/medical-kit.png
-- assets/media/kits/medical-kit.webp
-- assets/media/kits/comps-kit.png
-- assets/media/kits/comps-kit.webp
-- assets/media/kits/scuba-kit.png
-- assets/media/kits/scuba-kit.webp
-- assets/media/kits/portafort-token.png
-- assets/media/kits/portafort-token.webp
-
-Website database migrations:
-- Make sure existing migrations through 018_store_bundle_offer_matrix.sql are applied.
-- If the database is behind, apply these prerequisite migrations in order:
-  - database/migrations/012_rp_shop.sql
-  - database/migrations/013_pvp_kit_permission_cleanup.sql
-  - database/migrations/014_kit_group_delete_tombstones.sql
-  - database/migrations/018_store_bundle_offer_matrix.sql
-- Then apply:
-  - database/migrations/019_raidlands_vip_kits_permissions_seed.sql
-
-Rust server data files to upload:
-- oxide/data/Kits/kits_data.json
-- oxide/data/ServerRewards/products.json
-- oxide/data/BetterChat.json
-
-Rust server config files to upload:
-- oxide/config/Backpacks.json
-- oxide/config/CupboardLimiter.json
-- oxide/config/ImageLibrary.json
-- oxide/config/Kits.json
-- oxide/config/NTeleportation.json
-- oxide/config/PlaytimeTracker.json
-- oxide/config/ServerRewards.json
-- oxide/config/SpawnHeli.json
-- oxide/config/WebsiteVipBridge.json
-- oxide/config/CopyPaste.json
-- oxide/config/Friends.json
-- oxide/config/RaidlandsConsumables.json
-- oxide/config/RaidlandsPortaforts.json
-- oxide/config/RaidlandsVehicleTokens.json
-- oxide/config/SignArtist.json
-- oxide/config/VehicleLicence.json
+Website database migration:
+- Make sure existing migrations through database/migrations/021_group_owned_kit_permissions.sql are applied.
+- Then apply database/migrations/022_bot_stats.sql.
 
 Rust server plugin files to upload:
-- oxide/plugins/Kits.cs
-- oxide/plugins/ServerRewards.cs
+- oxide/plugins/RaidlandsRoamBots.cs
+- oxide/plugins/KDRScoreboard.cs
 - oxide/plugins/WebsiteVipBridge.cs
-- oxide/plugins/RaidlandsPermissionReset.cs
-- oxide/plugins/BypassQueue.cs
-- oxide/plugins/CopyPaste.cs
-- oxide/plugins/Friends.cs
-- oxide/plugins/RaidlandsConsumables.cs
-- oxide/plugins/RaidlandsPortaforts.cs
-- oxide/plugins/RaidlandsVehicleTokens.cs
-- oxide/plugins/SignArtist.cs
-- oxide/plugins/VehicleLicence.cs
 
-Local planning artifacts, not live uploads:
-- outputs/kit-plan-plugin-alignment/apply_vip_rollout.py
-- outputs/kit-plan-plugin-alignment/workbook-extract.json
-- outputs/kit-plan-plugin-alignment/raidlands_vip_kits_permissions_mapping_with_claimables_plugin_aligned.xlsx
+Rust server config/data files to upload:
+- oxide/config/RaidlandsRoamBots.json
+- oxide/data/RaidlandsRoamBots/stats.json
 
 Reload after upload, in this order:
-- oxide.reload ImageLibrary
-- oxide.reload CopyPaste
-- oxide.reload Kits
-- oxide.reload ServerRewards
-- oxide.reload Backpacks
-- oxide.reload PlaytimeTracker
-- oxide.reload CupboardLimiter
-- oxide.reload SpawnHeli
-- oxide.reload NTeleportation
-- oxide.reload BetterChat
-- oxide.reload VehicleLicence
-- oxide.reload RaidlandsPortaforts
-- oxide.reload RaidlandsVehicleTokens
-- oxide.reload RaidlandsConsumables
-- oxide.reload BypassQueue
-- oxide.reload SignArtist
+- oxide.reload RaidlandsRoamBots
+- oxide.reload KDRScoreboard
 - oxide.reload WebsiteVipBridge
-- oxide.reload RaidlandsPermissionReset
-- oxide.unload RaidlandsPermissionReset
 
-Bridge sync commands after website migration and reload:
-- websitevip.kits.sync
-- websitevip.permissions.sync
-- websitevip.kits.status
-- websitevip.permissions.status
+Disabled-first smoke check:
+- Confirm oxide/config/RaidlandsRoamBots.json has "Enabled": false.
+- Run raidbots.status and verify active=0.
+- Enable a small test population with raidbots.enable 10.
+- Run raidbots.status again and verify population, eligible kits, and team spread.
 
-Verify key groups and permissions:
-- oxide.show group rank_vip
-- oxide.show group rank_diamond_vip
-- oxide.show group rank_titan_vip
-- oxide.show group vip_bronze
-- oxide.show group vip_gold
-- oxide.show group vip_elite
-- oxide.show group claim_discord_booster
-- oxide.show perm kits.vip.diamond
-- oxide.show perm kits.vipplus.diamond
-- oxide.show perm kits.portafort
-- oxide.show perm kits.vehicle
-- oxide.show perm raidlands.vehicle.hp.150
-- oxide.show perm bypassqueue.allow
-- oxide.show perm signartist.url
+Live behavior checks:
+- Bots should spawn on land/navmesh positions only and use native scientist NPC movement/awareness.
+- Bots should use eligible default-access gun kits: ak, lr300, m16, mp5, with raid as rare high tier.
+- Bot deaths should drop the equipped kit like a normal NPC corpse.
+- Bot damage, player NPC kills, and deaths by NPCs should not increment normal PvP KDR.
+- Leashed bots should despawn after combat distance/time and be replaced by the population maintainer.
 
-In-game smoke checks:
-- /kit shows the default claim kit and rank kits expected for the test player.
-- rank_diamond_vip receives kit_vip_diamond and kit_vip_plus_diamond cooldowns, not the normal 1-hour VIP cadence.
-- redeem-pack-portafort / pack_portafort grants five grenade.smoke Portafort Token items and does not double-grant through RaidlandsPortaforts config.
-- redeem-pack-vehicle / pack_vehicle grants five each of the nine wrappedgift vehicle token names.
-- kit_titan_vip grants Super Serum as maxhealthtea.pure named "Super Serum".
-- ServerRewards kit purchases call Kits PurchaseKit and respect cooldown, max uses, inventory space, wipe reset usage, and OnKitRedeemed.
-- Reloaded RaidlandsPermissionReset logs that it is retired, then remains unloaded after verification.
+Stats sync checks:
+- Trigger a stats sync with oxide.reload WebsiteVipBridge or wait for the scheduled bridge sync.
+- Verify website ingest accepts npc_kills, deaths_by_npc, and bots in the stats snapshot.
+- Confirm player leaderboards show NPC Kills and Killed by NPCs.
+- Confirm the separate Bot K/D table renders for current wipe and all-time scopes.
+- Confirm in-game Scoreboards exposes NPC Kills, Killed by NPCs, and Bot K/D.

@@ -1,0 +1,22 @@
+{
+  "Config": {
+    "Admin Can Bypass Build Restrictions": false,
+    "Disable All Turrets": false
+  },
+  "Limits": {
+    "Individual Control": {
+      "AutoTurret": {
+        "Maximum": 35
+      },
+      "Flame Turret": {
+        "Maximum": 100
+      },
+      "Sam Site Turret": {
+        "Maximum": 6
+      },
+      "Shotgun Trap": {
+        "Maximum": 200
+      }
+    }
+  }
+}

@@ -132,10 +132,16 @@ namespace Oxide.Plugins
                 {
                     info = TryGetLastWounded(player.userID, info);
                 }
+
+                var initiatorPlayer = info.Initiator as BasePlayer;
+                if (player.IsNpc || initiatorPlayer == null || initiatorPlayer.IsNpc) return;
+
                 if (info.Initiator is BasePlayer)
                 {
                     PlayerData victimData = PlayerData.Find(player);
-                    PlayerData attackerData = PlayerData.Find((BasePlayer)info.Initiator);
+                    PlayerData attackerData = PlayerData.Find(initiatorPlayer);
+
+                    if (victimData == null || attackerData == null) return;
 
                     victimData.deaths++;
                     attackerData.kills++;

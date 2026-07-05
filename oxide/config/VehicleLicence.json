@@ -2,7 +2,7 @@
   "Settings": {
     "Store Vehicle On Plugin Unloaded / Server Restart": true,
     "Clear Vehicle Data On Map Wipe": false,
-    "Interval to check vehicle for wipe (Seconds)": 300,
+    "Interval to check vehicle for wipe (Seconds)": 300.0,
     "Spawn vehicle in the direction you are looking at": true,
     "Automatically claim vehicles purchased from vehicle vendors": false,
     "Vehicle vendor purchases will unlock the license for the player": false,
@@ -53,7 +53,7 @@
   "Allow vehicles to be spawned/recalled in the deepsea": false,
   "Normal Vehicle Settings": {
     "Tugboat Vehicle": {
-      "Speed Multiplier": 1,
+      "Speed Multiplier": 1.0,
       "Auto Auth Teammates on spawn/recall": true,
       "Purchasable": true,
       "No Damage": false,
@@ -62,14 +62,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.tug",
       "Bypass Cost Permission": "vehiclelicence.tugfree",
-      "Distance To Spawn": 10,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 10.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [
         "tugboat",
@@ -85,12 +85,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 450,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 450.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 60,
-          "recallCooldown": 10
+          "spawnCooldown": 60.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -105,14 +105,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.sedan",
       "Bypass Cost Permission": "vehiclelicence.sedanfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -125,12 +125,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -142,14 +142,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.chinook",
       "Bypass Cost Permission": "vehiclelicence.chinookfree",
-      "Distance To Spawn": 15,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 15.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 6,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 6.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -162,12 +162,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 3000,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 3000.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 1500,
-          "recallCooldown": 10
+          "spawnCooldown": 1500.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -179,14 +179,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.rowboat",
       "Bypass Cost Permission": "vehiclelicence.rowboatfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -199,12 +199,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -222,14 +222,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.rhib",
       "Bypass Cost Permission": "vehiclelicence.rhibfree",
-      "Distance To Spawn": 10,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 10.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [
         "rhib"
@@ -244,12 +244,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 450,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 450.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 225,
-          "recallCooldown": 10
+          "spawnCooldown": 225.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -267,14 +267,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.hotairballoon",
       "Bypass Cost Permission": "vehiclelicence.hotairballoonfree",
-      "Distance To Spawn": 20,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 20.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 5,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 5.0,
       "Remove License Once Crashed": false,
       "Commands": [
         "hab",
@@ -290,12 +290,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 900,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 900.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 450,
-          "recallCooldown": 10
+          "spawnCooldown": 450.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -313,14 +313,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.armoredhotairballoon",
       "Bypass Cost Permission": "vehiclelicence.armoredhotairballoonfree",
-      "Distance To Spawn": 10,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 10.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 5,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 5.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -333,12 +333,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1000,
-      "Recall Cooldown (Seconds)": 40,
+      "Spawn Cooldown (Seconds)": 1000.0,
+      "Recall Cooldown (Seconds)": 40.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 550,
-          "recallCooldown": 20
+          "spawnCooldown": 550.0,
+          "recallCooldown": 20.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -370,14 +370,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.ridablehorse",
       "Bypass Cost Permission": "vehiclelicence.ridablehorsefree",
-      "Distance To Spawn": 6,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 6.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 1,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 1.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -390,12 +390,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 3000,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 3000.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 1500,
-          "recallCooldown": 10
+          "spawnCooldown": 1500.0,
+          "recallCooldown": 10.0
         }
       },
       "Refund Inventory On Kill": true,
@@ -403,7 +403,7 @@
       "Drop Inventory Items When Vehicle Recall": false
     },
     "Mini Copter Vehicle": {
-      "Rotation Scale": 1,
+      "Rotation Scale": 1.0,
       "Lift Fraction": 0.25,
       "Seconds to pause flyhack when dismount from Mini Copter.": 0,
       "Instant Engine Start-up (instant take-off)": false,
@@ -415,14 +415,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.minicopter",
       "Bypass Cost Permission": "vehiclelicence.minicopterfree",
-      "Distance To Spawn": 8,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 8.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -435,12 +435,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 1800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -451,7 +451,7 @@
       "Drop Inventory Items When Vehicle Recall": false
     },
     "Attack Helicopter Vehicle": {
-      "Rotation Scale": 1,
+      "Rotation Scale": 1.0,
       "Lift Fraction": 0.33,
       "Seconds to pause flyhack when dismount from Attack Helicopter.": 0,
       "Instant Engine Start-up (instant take-off)": false,
@@ -465,14 +465,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.attackhelicopter",
       "Bypass Cost Permission": "vehiclelicence.attackhelicopterfree",
-      "Distance To Spawn": 8,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 8.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -485,12 +485,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 1800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -502,7 +502,7 @@
     },
     "Transport Helicopter Vehicle": {
       "Lift Fraction": 0.25,
-      "Rotation Scale": 1,
+      "Rotation Scale": 1.0,
       "Seconds to pause flyhack when dismount from Transport Scrap Helicopter.": 0,
       "Instant Engine Start-up (instant take-off)": false,
       "Flare Spawn Amount": 0,
@@ -513,14 +513,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.transportcopter",
       "Bypass Cost Permission": "vehiclelicence.transportcopterfree",
-      "Distance To Spawn": 7,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 7.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 4,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 4.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -533,12 +533,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 2400,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 2400.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 1200,
-          "recallCooldown": 10
+          "spawnCooldown": 1200.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -556,14 +556,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.workcart",
       "Bypass Cost Permission": "vehiclelicence.workcartfree",
-      "Distance To Spawn": 12,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 12.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 6,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 6.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -576,12 +576,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 1800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -596,14 +596,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.sedanrail",
       "Bypass Cost Permission": "vehiclelicence.sedanrailfree",
-      "Distance To Spawn": 6,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 6.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -616,12 +616,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 600,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 600.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 300,
-          "recallCooldown": 10
+          "spawnCooldown": 300.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -636,14 +636,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.magnetcrane",
       "Bypass Cost Permission": "vehiclelicence.magnetcranefree",
-      "Distance To Spawn": 16,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 16.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 8,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 8.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -656,12 +656,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 600,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 600.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 300,
-          "recallCooldown": 10
+          "spawnCooldown": 300.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -676,14 +676,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.submarinesolo",
       "Bypass Cost Permission": "vehiclelicence.submarinesolofree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [
         "subsolo",
@@ -699,12 +699,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Ammo To Spawn": 0,
@@ -723,14 +723,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.submarineduo",
       "Bypass Cost Permission": "vehiclelicence.submarineduofree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [
         "subduo",
@@ -746,12 +746,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Ammo To Spawn": 0,
@@ -770,14 +770,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.snowmobile",
       "Bypass Cost Permission": "vehiclelicence.snowmobilefree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [
         "snow",
@@ -793,12 +793,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -816,14 +816,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.tomahasnowmobile",
       "Bypass Cost Permission": "vehiclelicence.tomahasnowmobilefree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -836,12 +836,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -859,14 +859,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.pedalbike",
       "Bypass Cost Permission": "vehiclelicence.pedalbikefree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -879,12 +879,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -896,14 +896,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.pedaltrike",
       "Bypass Cost Permission": "vehiclelicence.pedaltrikefree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -916,12 +916,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -933,14 +933,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.motorbike",
       "Bypass Cost Permission": "vehiclelicence.motorbikefree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -953,12 +953,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -973,14 +973,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.motorbikesidecar",
       "Bypass Cost Permission": "vehiclelicence.motorbikesidecarfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -993,12 +993,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 150,
-          "recallCooldown": 10
+          "spawnCooldown": 150.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1013,14 +1013,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.kayak",
       "Bypass Cost Permission": "vehiclelicence.kayakfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1033,12 +1033,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -1050,14 +1050,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.dpv",
       "Bypass Cost Permission": "vehiclelicence.dpvfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1070,12 +1070,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1090,14 +1090,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.siegetower",
       "Bypass Cost Permission": "vehiclelicence.siegetowerfree",
-      "Distance To Spawn": 15,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 15.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1110,12 +1110,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -1127,14 +1127,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.catapult",
       "Bypass Cost Permission": "vehiclelicence.catapultfree",
-      "Distance To Spawn": 15,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 15.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1147,12 +1147,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -1164,14 +1164,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.batteringram",
       "Bypass Cost Permission": "vehiclelicence.batteringramfree",
-      "Distance To Spawn": 15,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 15.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1184,12 +1184,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1204,14 +1204,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.ballista",
       "Bypass Cost Permission": "vehiclelicence.ballistafree",
-      "Distance To Spawn": 15,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 15.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1224,12 +1224,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       }
     },
@@ -1241,14 +1241,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.ptboat",
       "Bypass Cost Permission": "vehiclelicence.ptboatfree",
-      "Distance To Spawn": 15,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 15.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 2,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 2.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1261,12 +1261,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 300,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 300.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 30,
-          "recallCooldown": 10
+          "spawnCooldown": 30.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1286,14 +1286,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.smallmodularcar",
       "Bypass Cost Permission": "vehiclelicence.smallmodularcarfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1316,12 +1316,12 @@
       },
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 7200,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 7200.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 3600,
-          "recallCooldown": 10
+          "spawnCooldown": 3600.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1338,33 +1338,33 @@
       "Vehicle Module Items": [
         {
           "shortName": "vehicle.1mod.cockpit.with.engine",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         },
         {
           "shortName": "vehicle.1mod.storage",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         }
       ],
       "Vehicle Engine Items": [
         {
           "shortName": "carburetor1",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "crankshaft1",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "piston1",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "sparkplug1",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "valve1",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         }
       ]
     },
@@ -1376,14 +1376,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.mediumodularcar",
       "Bypass Cost Permission": "vehiclelicence.mediumodularcarfree",
-      "Distance To Spawn": 5,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 5.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1406,12 +1406,12 @@
       },
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 9000,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 9000.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 4500,
-          "recallCooldown": 10
+          "spawnCooldown": 4500.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1428,37 +1428,37 @@
       "Vehicle Module Items": [
         {
           "shortName": "vehicle.1mod.cockpit.with.engine",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         },
         {
           "shortName": "vehicle.1mod.rear.seats",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         },
         {
           "shortName": "vehicle.1mod.flatbed",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         }
       ],
       "Vehicle Engine Items": [
         {
           "shortName": "carburetor2",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "crankshaft2",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "piston2",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "sparkplug2",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         },
         {
           "shortName": "valve2",
-          "conditionPercentage": 20
+          "conditionPercentage": 20.0
         }
       ]
     },
@@ -1470,14 +1470,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.largemodularcar",
       "Bypass Cost Permission": "vehiclelicence.largemodularcarfree",
-      "Distance To Spawn": 6,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 6.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 3,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 3.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1500,12 +1500,12 @@
       },
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 10800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 10800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 5400,
-          "recallCooldown": 10
+          "spawnCooldown": 5400.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1522,53 +1522,53 @@
       "Vehicle Module Items": [
         {
           "shortName": "vehicle.1mod.engine",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         },
         {
           "shortName": "vehicle.1mod.cockpit.armored",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         },
         {
           "shortName": "vehicle.1mod.passengers.armored",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         },
         {
           "shortName": "vehicle.1mod.storage",
-          "healthPercentage": 50
+          "healthPercentage": 50.0
         }
       ],
       "Vehicle Engine Items": [
         {
           "shortName": "carburetor3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "crankshaft3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "piston3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "piston3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "sparkplug3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "sparkplug3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "valve3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         },
         {
           "shortName": "valve3",
-          "conditionPercentage": 10
+          "conditionPercentage": 10.0
         }
       ]
     }
@@ -1582,14 +1582,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.workcartaboveground",
       "Bypass Cost Permission": "vehiclelicence.workcartabovegroundfree",
-      "Distance To Spawn": 12,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 12.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 6,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 6.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1602,12 +1602,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 1800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1627,14 +1627,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.coveredworkcart",
       "Bypass Cost Permission": "vehiclelicence.coveredworkcartfree",
-      "Distance To Spawn": 12,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 12.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 6,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 6.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1647,12 +1647,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 1800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1672,14 +1672,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.completetrain",
       "Bypass Cost Permission": "vehiclelicence.completetrainfree",
-      "Distance To Spawn": 12,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 12.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 6,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 6.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1692,12 +1692,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 3600,
-      "Recall Cooldown (Seconds)": 60,
+      "Spawn Cooldown (Seconds)": 3600.0,
+      "Recall Cooldown (Seconds)": 60.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,
@@ -1732,14 +1732,14 @@
       "Use Permission": true,
       "Permission": "vehiclelicence.locomotive",
       "Bypass Cost Permission": "vehiclelicence.locomotivefree",
-      "Distance To Spawn": 12,
-      "Spawn Height": 0,
-      "Time Before Vehicle Wipe (Seconds)": 0,
+      "Distance To Spawn": 12.0,
+      "Spawn Height": 0.0,
+      "Time Before Vehicle Wipe (Seconds)": 0.0,
       "Exclude cupboard zones when wiping": false,
-      "Maximum Health": 0,
-      "Can Recall Maximum Distance": 0,
-      "Can Kill Maximum Distance": 0,
-      "Minimum distance from player to recall or spawn": 6,
+      "Maximum Health": 0.0,
+      "Can Recall Maximum Distance": 0.0,
+      "Can Kill Maximum Distance": 0.0,
+      "Minimum distance from player to recall or spawn": 6.0,
       "Remove License Once Crashed": false,
       "Commands": [],
       "Purchase Prices": {
@@ -1752,12 +1752,12 @@
       "Recall Prices": {},
       "Recall Cooldown Bypass Prices": {},
       "Spawn Cooldown Bypass Prices": {},
-      "Spawn Cooldown (Seconds)": 1800,
-      "Recall Cooldown (Seconds)": 30,
+      "Spawn Cooldown (Seconds)": 1800.0,
+      "Recall Cooldown (Seconds)": 30.0,
       "Cooldown Permissions": {
         "vehiclelicence.vip": {
-          "spawnCooldown": 900,
-          "recallCooldown": 10
+          "spawnCooldown": 900.0,
+          "recallCooldown": 10.0
         }
       },
       "Amount Of Fuel To Spawn": 0,

@@ -1854,18 +1854,18 @@ namespace Oxide.Plugins
 				ulong playerID = 0;
         
                 if (arg.Args.Length == 2)
-                    if (arg.Args[1] == "0")
+                    if (arg.Args[1].ToString() == "0")
                     {
 						txtConsole += Lang("ShowD1", null) + "\n";
 						RconLog = new AdminConfig();
                     }
                     else
-                        s = arg.Args[1];
+                        s = arg.Args[1].ToString();
         
-                string user = arg.Args[0];
+                string user = arg.Args[0].ToString();
         
                 if (user.Contains("765"))
-                    ulong.TryParse(arg.Args[0], out id);
+                    ulong.TryParse(arg.Args[0].ToString(), out id);
         
                 foreach (KeyValuePair<ulong, PlayerViolationsData> list in PlayersViolations.Players)
                     if (PlayersViolations.Players[list.Key].PlayerID == id || PlayersViolations.Players[list.Key].PlayerName.Contains(user, CompareOptions.IgnoreCase))
@@ -1986,19 +1986,19 @@ namespace Oxide.Plugins
         
                 if (arg.Args.Length == 2)
                 {
-                    if (arg.Args[1] == "0")
+                    if (arg.Args[1].ToString() == "0")
                     {
 						txtConsole += Lang("ShowD1", null) + "\n";
 						RconLog.violationsLog = new ViolationsLog();
                     }
                     else
-                        s = arg.Args[1];
+                        s = arg.Args[1].ToString();
                 }
         
-                string user = arg.Args[0];
+                string user = arg.Args[0].ToString();
         
                 if (user.Contains("765"))
-                    ulong.TryParse(arg.Args[0], out id);
+                    ulong.TryParse(arg.Args[0].ToString(), out id);
         
                 foreach (KeyValuePair<ulong, PlayerViolationsData> list in PlayersViolations.Players)
                     if (PlayersViolations.Players[list.Key].PlayerID == id || PlayersViolations.Players[list.Key].PlayerName.Contains(user, CompareOptions.IgnoreCase))
@@ -2139,18 +2139,18 @@ namespace Oxide.Plugins
 				ulong playerID = 0;
         
                 if (arg.Args.Length == 2)
-                    if (arg.Args[1] == "0")
+                    if (arg.Args[1].ToString() == "0")
                     {
 						txtConsole += Lang("ShowD1", null) + "\n";
 						RconLog = new AdminConfig();
                     }
                     else
-                        s = arg.Args[1];
+                        s = arg.Args[1].ToString();
         
-                string user = arg.Args[0];
+                string user = arg.Args[0].ToString();
         
                 if (user.Contains("765"))
-                    ulong.TryParse(arg.Args[0], out id);
+                    ulong.TryParse(arg.Args[0].ToString(), out id);
         
                 foreach (KeyValuePair<ulong, PlayerViolationsData> list in PlayersViolations.Players)
                     if (PlayersViolations.Players[list.Key].PlayerID == id || PlayersViolations.Players[list.Key].PlayerName.Contains(user, CompareOptions.IgnoreCase))
@@ -2241,7 +2241,7 @@ namespace Oxide.Plugins
                 string fileName = serverTimeStamp;
         
                 if (arg.HasArgs(1))
-                    fileName = arg.Args[0];
+                    fileName = arg.Args[0].ToString();
         
                 PlayersViolations.lastSaveTime = DateTime.Now;
                 Interface.Oxide.DataFileSystem.WriteObject("Arkan/" + fileName, PlayersViolations);
@@ -2260,7 +2260,7 @@ namespace Oxide.Plugins
                 string fileName = serverTimeStamp;
         
                 if (arg.HasArgs(1))
-                    fileName = arg.Args[0];
+                    fileName = arg.Args[0].ToString();
         
                 if (Interface.Oxide.DataFileSystem.ExistsDatafile("Arkan/" + fileName))
                 {

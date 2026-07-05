@@ -1,0 +1,62 @@
+{
+  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
+  "Super Serum Item": {
+    "Shortname": "maxhealthtea.pure",
+    "Display Name": "Super Serum",
+    "Skin": 0,
+    "Require Display Name Match": true
+  },
+  "Use Actions": [
+    "consume",
+    "eat",
+    "drink",
+    "use"
+  ],
+  "Refresh Interval Seconds": 30.0,
+  "Modifier Values": {
+    "Max_Health": 50.0,
+    "Ore_Yield": 1.0,
+    "Wood_Yield": 1.0,
+    "Scrap_Yield": 1.0,
+    "Radiation_Resistance": 1.0,
+    "Radiation_Exposure_Resistance": 1.0,
+    "Comfort": 1.0,
+    "Crafting_Quality": 1.0
+  },
+  "Metabolism Refresh": {
+    "Enabled": true,
+    "Minimum Calories": 500.0,
+    "Minimum Hydration": 250.0,
+    "Minimum Oxygen": 1.0,
+    "Clear Radiation": true,
+    "Clear Bleeding": true,
+    "Instant Heal On Consume": 100.0
+  },
+  "Source Buff Items": [
+    "maxhealthtea.pure",
+    "oretea.pure",
+    "woodtea.pure",
+    "scraptea.pure",
+    "pureharvestingtea",
+    "purecoolingtea",
+    "purewarmingtea",
+    "radiationresisttea.pure",
+    "radiationremovetea.pure",
+    "healingtea.pure",
+    "purecraftingtea_quality",
+    "pie.apple",
+    "pie.bear",
+    "pie.bigcat",
+    "pie.chicken",
+    "pie.crocodile",
+    "pie.fish",
+    "pie.hunters",
+    "pie.pork",
+    "pie.pumpkin",
+    "pie.survivors"
+  ],
+  "Kit Grants": {
+    "custom.pending.super_serum": 1,
+    "pack_super_serum": 1
+  }
+}

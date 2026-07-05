@@ -69,6 +69,7 @@
     "pie.survivors"
   ],
   "Kit Grants": {
-    "custom.pending.super_serum": 1
+    "custom.pending.super_serum": 1,
+    "pack_super_serum": 1
   }
 }

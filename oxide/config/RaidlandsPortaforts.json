@@ -54,6 +54,7 @@
   "Token Icon ImageLibrary Key": "RaidlandsPortafortToken",
   "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
   "Kit Grants": {
-    "custom.pending.portafort": 1
+    "custom.pending.portafort": 1,
+    "pack_portafort": 1
   }
 }

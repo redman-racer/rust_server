@@ -2,7 +2,7 @@
   "Kit chat command": "kit",
   "Currency used for purchase costs (Scrap, Economics, ServerRewards)": "ServerRewards",
   "Log kits given": false,
-  "Wipe player data when the server is wiped": true,
+  "Wipe player data when the server is wiped": false,
   "Use the Kits UI menu": true,
   "Only show/give players skins that they are allowed to use (requires PlayerDLCAPI)": true,
   "Allow NPCs to use skins in kits": true,
@@ -13,7 +13,10 @@
     "autokit",
     "OtherKitName"
   ],
-  "Post wipe cooldowns (kit name | seconds)": {},
+  "Post wipe cooldowns (kit name | seconds)": {
+    "ExampleKitName": 3600,
+    "OtherKitName": 600
+  },
   "Parameters used when pasting a building via CopyPaste": [
     "deployables",
     "true",

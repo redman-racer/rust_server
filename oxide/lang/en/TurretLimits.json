@@ -1,0 +1,9 @@
+{
+  "NoAdminLimits": "Admins do not have turret limits enabled.",
+  "CannotDeployWithoutTC": "Cannot deploy turret without tool cupboard access.",
+  "TurretsDisabled": "Turrets are disabled on this server.",
+  "TurretLimitReached_AutoTurret": "Autoturret limit reached. You have already deployed {0} or more autoturrets in this base.",
+  "TurretLimitReached_FlameTurret": "Flame turret limit reached. You have already deployed {0} or more flame turrets in this base.",
+  "TurretLimitReached_ShotgunTrap": "Shotgun trap limit reached. You have already deployed {0} or more shotgun traps in this base.",
+  "TurretLimitReached_SamSite": "Sam Site Turret limit reached. You have already deployed {0} or more shotgun traps in this base."
+}

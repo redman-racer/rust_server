@@ -818,13 +818,13 @@ namespace Oxide.Plugins
                 send = send.Replace ("{targetitems}", "");
             }
 
-            CommunityEntity.ServerInstance.ClientRPCEx (new Network.SendInfo { connection = player.net.connection }, null, "AddUI", send);
+            CommunityEntity.ServerInstance.ClientRPC(RpcTarget.Player("AddUI", player), send);
         }
 
         private void HideTrade (BasePlayer player)
         {
             if (player.IsConnected) {
-                CommunityEntity.ServerInstance.ClientRPCEx (new Network.SendInfo { connection = player.net.connection }, null, "DestroyUI", "TradeMsg");
+                CommunityEntity.ServerInstance.ClientRPC(RpcTarget.Player("DestroyUI", player), "TradeMsg");
             }
         }
 

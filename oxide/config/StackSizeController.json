@@ -1267,7 +1267,11 @@
     "industrial.torch": 1,
     "krieg.chainsword": 1,
     "krieg.shotgun": 1,
-    "wooden.shield": 1
+    "wooden.shield": 1,
+    "apartment.master_key": 1,
+    "charity.plushy.03": 1,
+    "charity.plushy.04": 1,
+    "charity.plushie.05": 1
   },
   "VersionNumber": {
     "Major": 4,

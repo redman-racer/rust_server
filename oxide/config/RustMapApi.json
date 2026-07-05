@@ -322,6 +322,12 @@
       "Height": 90,
       "ImageUrl": "",
       "Show": false
+    },
+    "Apartment Complex": {
+      "Width": 90,
+      "Height": 90,
+      "ImageUrl": "",
+      "Show": false
     }
   },
   "Custom Icons": [

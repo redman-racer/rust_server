@@ -27,7 +27,7 @@ namespace Oxide.Plugins
 			
 			if (player.inventory.containerMain.IsFull() && player.inventory.containerBelt.IsFull()) return null;
 
-            machine.ClientRPC<int>(null, "CLIENT_StartVendingSounds", sellOrderID);
+            machine.ClientRPC(RpcTarget.NetworkGroup("CLIENT_StartVendingSounds"), sellOrderID);
             machine.DoTransaction(player, sellOrderID, amount);
             return false;
         }

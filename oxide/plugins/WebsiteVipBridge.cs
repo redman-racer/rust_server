@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.5.2")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.5.5")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -38,9 +38,11 @@ namespace Oxide.Plugins
         private const string SecretsConfigName = "Secrets.local";
         private const string RpPurchaseDataFile = "WebsiteVipBridge/rp_purchases";
         private const string DeletedGroupsDataFile = "WebsiteVipBridge/deleted_groups";
+        private const string StorefrontOverridesDataFile = "WebsiteVipBridge/storefront_overrides";
         private string secretsConfigSource;
         private RpPurchaseLedger rpPurchaseData;
         private DeletedGroupState deletedGroupState;
+        private StorefrontOverrideState storefrontOverrideState;
         private bool rpPurchasePollInFlight;
         private readonly HashSet<string> rpResultPostsInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -54,6 +56,84 @@ namespace Oxide.Plugins
             "discord",
             "authenticated"
         };
+
+        private static readonly string[] StorefrontRankGroups =
+        {
+            "rank_vip",
+            "rank_vip_plus",
+            "rank_mvp",
+            "rank_golden_vip",
+            "rank_diamond_vip",
+            "rank_ultimate_vip",
+            "rank_titan_vip"
+        };
+
+        private static readonly string[] StorefrontPerkGroups =
+        {
+            "perk_queue_priority",
+            "perk_teleport_instant",
+            "perk_home_5s",
+            "perk_sign_art",
+            "perk_chat_title",
+            "perk_backpack_36",
+            "perk_backpack_42",
+            "perk_backpack_48",
+            "perk_backpack_keep_death",
+            "perk_backpack_keep_wipe",
+            "perk_vehicle_hp_125",
+            "perk_vehicle_hp_150",
+            "perk_tc_12",
+            "perk_minicopter_instant_takeoff"
+        };
+
+        private static Dictionary<string, StorefrontGroupBundle> DefaultStorefrontBundles()
+        {
+            var bundles = new Dictionary<string, StorefrontGroupBundle>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["vip"] = Bundle("VIP", "rank_vip"),
+                ["vip_plus"] = Bundle("VIP+", "rank_vip_plus"),
+                ["mvp"] = Bundle("MVP", "rank_mvp"),
+                ["golden_vip"] = Bundle("Golden VIP", "rank_golden_vip"),
+                ["diamond_vip"] = Bundle("Diamond VIP", "rank_diamond_vip"),
+                ["ultimate_vip"] = Bundle("Ultimate VIP", "rank_ultimate_vip"),
+                ["titan_vip"] = Bundle("Titan VIP", "rank_titan_vip"),
+                ["queue_priority"] = Bundle("Queue Priority", "perk_queue_priority"),
+                ["teleport_instant"] = Bundle("Instant Teleport", "perk_teleport_instant"),
+                ["home_5s"] = Bundle("5 Second Home Teleport", "perk_home_5s"),
+                ["sign_art"] = Bundle("Custom Sign Art", "perk_sign_art"),
+                ["chat_title"] = Bundle("Custom Chat Title", "perk_chat_title"),
+                ["backpack_36"] = Bundle("Backpack 36 Slots", "perk_backpack_36"),
+                ["backpack_42"] = Bundle("Backpack 42 Slots", "perk_backpack_42"),
+                ["backpack_48"] = Bundle("Backpack 48 Slots", "perk_backpack_48"),
+                ["backpack_keep_death"] = Bundle("Keep Backpack on Death", "perk_backpack_keep_death"),
+                ["backpack_keep_wipe"] = Bundle("Keep Backpack on Wipe", "perk_backpack_keep_wipe"),
+                ["vehicle_hp_125"] = Bundle("Shop Vehicle HP 1.25x", "perk_vehicle_hp_125"),
+                ["vehicle_hp_150"] = Bundle("Shop Vehicle HP 1.5x", "perk_vehicle_hp_150"),
+                ["tc_12"] = Bundle("TC Limit 12", "perk_tc_12"),
+                ["minicopter_instant_takeoff"] = Bundle("Instant Minicopter Takeoff", "perk_minicopter_instant_takeoff"),
+                ["shop_ranks"] = Bundle("All Storefront Ranks", StorefrontRankGroups),
+                ["shop_perks"] = Bundle("All Storefront Perks", StorefrontPerkGroups),
+                ["shop_all"] = Bundle("All Storefront Ranks and Perks", StorefrontRankGroups.Concat(StorefrontPerkGroups).ToArray()),
+                ["all"] = Bundle("All Storefront Ranks and Perks", StorefrontRankGroups.Concat(StorefrontPerkGroups).ToArray())
+            };
+
+            return bundles;
+        }
+
+        private static StorefrontGroupBundle Bundle(string title, params string[] groups)
+        {
+            return new StorefrontGroupBundle
+            {
+                Title = title,
+                Groups = groups?.Where(group => !string.IsNullOrWhiteSpace(group)).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? new List<string>()
+            };
+        }
+
+        private class StorefrontGroupBundle
+        {
+            public string Title = "";
+            public List<string> Groups = new List<string>();
+        }
 
         private class Configuration
         {
@@ -81,6 +161,8 @@ namespace Oxide.Plugins
             public int KitSyncIntervalSeconds = 180;
             public bool PermissionSyncEnabled = true;
             public int PermissionSyncIntervalSeconds = 180;
+            public int PermissionSnapshotDebounceSeconds = 10;
+            public int PermissionSnapshotSettledDelaySeconds = 120;
             public int KitDataBackupCount = 8;
             public List<string> KitPermissionManagedGroups = new List<string>
             {
@@ -143,6 +225,7 @@ namespace Oxide.Plugins
                 "claim_discord_member",
                 "claim_discord_booster"
             };
+            public Dictionary<string, StorefrontGroupBundle> StorefrontBundles = DefaultStorefrontBundles();
         }
 
         private class AssetPaths
@@ -261,6 +344,17 @@ namespace Oxide.Plugins
             public List<string> groups = new List<string>();
         }
 
+        private class StorefrontOverrideState
+        {
+            public Dictionary<string, StorefrontOverrideEntry> players = new Dictionary<string, StorefrontOverrideEntry>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class StorefrontOverrideEntry
+        {
+            public List<string> groups = new List<string>();
+            public string updated_at;
+        }
+
         private class RpPurchaseLedgerEntry
         {
             public string request_id;
@@ -290,6 +384,7 @@ namespace Oxide.Plugins
             public string wipe_started_at;
             public string generated_at;
             public List<StatsPlayer> players = new List<StatsPlayer>();
+            public List<StatsBot> bots = new List<StatsBot>();
         }
 
         private class StatusHeartbeat
@@ -328,15 +423,51 @@ namespace Oxide.Plugins
             public string display_name;
             public int kills;
             public int deaths;
+            public int npc_kills;
+            public int deaths_by_npc;
             public int playtime_seconds;
             public int afk_seconds;
             public int reward_points;
+        }
+
+        private class StatsBot
+        {
+            public string bot_key;
+            public string display_name;
+            public string kit_name;
+            public string skill_tier;
+            public int kills;
+            public int deaths;
         }
 
         private class KdrData
         {
             public ulong id;
             public string name;
+            public int kills;
+            public int deaths;
+        }
+
+        private class RoamBotStatsData
+        {
+            public Dictionary<string, RoamBotPlayerStats> players = new Dictionary<string, RoamBotPlayerStats>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, RoamBotBotStats> bots = new Dictionary<string, RoamBotBotStats>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class RoamBotPlayerStats
+        {
+            public string steam_id64;
+            public string display_name;
+            public int npc_kills;
+            public int deaths_by_npc;
+        }
+
+        private class RoamBotBotStats
+        {
+            public string bot_key;
+            public string display_name;
+            public string kit_name;
+            public string skill_tier;
             public int kills;
             public int deaths;
         }
@@ -443,6 +574,16 @@ namespace Oxide.Plugins
                 config.PermissionSyncIntervalSeconds = defaults.PermissionSyncIntervalSeconds;
             }
 
+            if (config.PermissionSnapshotDebounceSeconds <= 0)
+            {
+                config.PermissionSnapshotDebounceSeconds = defaults.PermissionSnapshotDebounceSeconds;
+            }
+
+            if (config.PermissionSnapshotSettledDelaySeconds <= 0)
+            {
+                config.PermissionSnapshotSettledDelaySeconds = defaults.PermissionSnapshotSettledDelaySeconds;
+            }
+
             if (config.KitDataBackupCount <= 0)
             {
                 config.KitDataBackupCount = defaults.KitDataBackupCount;
@@ -458,6 +599,12 @@ namespace Oxide.Plugins
                 config.KitPermissionPrefixes = defaults.KitPermissionPrefixes;
             }
 
+            if (config.StorefrontBundles == null)
+            {
+                config.StorefrontBundles = new Dictionary<string, StorefrontGroupBundle>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            MergeStorefrontBundleDefaults(config.StorefrontBundles, defaults.StorefrontBundles);
             SaveConfig();
         }
 
@@ -469,6 +616,7 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             LoadDeletedGroupState();
+            LoadStorefrontOverrides();
             EnsureManagedGroups(config.ManagedGroups);
             SyncBrandConfigs();
             LogBridgeSecretDiagnostics();
@@ -507,6 +655,7 @@ namespace Oxide.Plugins
             rpPurchaseTimer?.Destroy();
             SaveRpPurchaseData();
             SaveDeletedGroupState();
+            SaveStorefrontOverrides();
         }
 
         private void OnUserConnected(IPlayer player)
@@ -530,6 +679,16 @@ namespace Oxide.Plugins
         private void OnPointsUpdated(ulong userId, int balance)
         {
             QueueStatsSync();
+        }
+
+        private void OnPluginLoaded(Plugin plugin)
+        {
+            QueuePermissionSnapshotForPluginChange("Plugin loaded", plugin);
+        }
+
+        private void OnPluginUnloaded(Plugin plugin)
+        {
+            QueuePermissionSnapshotForPluginChange("Plugin unloaded", plugin);
         }
 
         private bool CanRunBridgeCommand(IPlayer player)
@@ -574,6 +733,100 @@ namespace Oxide.Plugins
             }
 
             Puts(message);
+        }
+
+        [Command("websitevip.storefront.list")]
+        private void StorefrontListCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            var bundles = StorefrontBundleMap()
+                .OrderBy(entry => entry.Key)
+                .Select(entry => $"{entry.Key}: {entry.Value.Title} [{string.Join(", ", entry.Value.Groups)}]");
+
+            ReplyBridge(player, "Storefront bundles:\n" + string.Join("\n", bundles));
+        }
+
+        [Command("websitevip.storefront.show")]
+        private void StorefrontShowCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            if (args == null || args.Length == 0 || !IsSteamId64(args[0]))
+            {
+                ReplyBridge(player, "Usage: websitevip.storefront.show <steamid64>");
+                return;
+            }
+
+            var steamId = args[0].Trim();
+            var manualGroups = ManualStorefrontGroupsFor(steamId).OrderBy(group => group).ToList();
+            var currentGroups = KnownStorefrontGroups()
+                .Where(group => permission.UserHasGroup(steamId, group))
+                .OrderBy(group => group)
+                .ToList();
+
+            ReplyBridge(player, $"Storefront groups for {steamId}\nCurrent: {FormatGroupList(currentGroups)}\nManual bridge overrides: {FormatGroupList(manualGroups)}");
+        }
+
+        [Command("websitevip.storefront.add")]
+        private void StorefrontAddCommand(IPlayer player, string command, string[] args)
+        {
+            StorefrontGrantCommand(player, command, args);
+        }
+
+        [Command("websitevip.storefront.grant")]
+        private void StorefrontGrantCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            RunStorefrontBundleCommand(player, args, true);
+        }
+
+        [Command("websitevip.storefront.remove")]
+        private void StorefrontRemoveCommand(IPlayer player, string command, string[] args)
+        {
+            StorefrontRevokeCommand(player, command, args);
+        }
+
+        [Command("websitevip.storefront.revoke")]
+        private void StorefrontRevokeCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            RunStorefrontBundleCommand(player, args, false);
+        }
+
+        [Command("websitevip.storefront.clear")]
+        private void StorefrontClearCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            if (args == null || args.Length == 0 || !IsSteamId64(args[0]))
+            {
+                ReplyBridge(player, "Usage: websitevip.storefront.clear <steamid64>");
+                return;
+            }
+
+            var steamId = args[0].Trim();
+            var groups = KnownStorefrontGroups().ToList();
+            var changedOverrides = RemoveStorefrontOverrideGroups(steamId, groups, true);
+            var changedGroups = SetUserStorefrontGroups(steamId, groups, false);
+            ReplyBridge(player, $"Removed bridge storefront overrides and current storefront groups from {steamId}. Changed groups={changedGroups}, changed overrides={changedOverrides}. Website-owned entitlements may re-apply on the next sync.");
         }
 
         [Command("websitevip.kits.snapshot")]
@@ -727,6 +980,414 @@ namespace Oxide.Plugins
             }
 
             Puts(message);
+        }
+
+        private void RunStorefrontBundleCommand(IPlayer player, string[] args, bool grant)
+        {
+            if (args == null || args.Length < 2 || !IsSteamId64(args[0]))
+            {
+                ReplyBridge(player, $"Usage: websitevip.storefront.{(grant ? "add" : "remove")} <steamid64> <bundle-or-group> [more-bundles]");
+                return;
+            }
+
+            var steamId = args[0].Trim();
+            var tokens = StorefrontCommandTokens(args.Skip(1)).ToList();
+
+            if (tokens.Count == 0)
+            {
+                ReplyBridge(player, $"Usage: websitevip.storefront.{(grant ? "add" : "remove")} <steamid64> <bundle-or-group> [more-bundles]");
+                return;
+            }
+
+            List<string> selected;
+            List<string> unknown;
+            var groups = ResolveStorefrontGroups(tokens, out selected, out unknown);
+
+            if (unknown.Count > 0)
+            {
+                ReplyBridge(player, $"Unknown storefront bundle/group: {string.Join(", ", unknown)}. Run websitevip.storefront.list for available bundles.");
+                return;
+            }
+
+            if (groups.Count == 0)
+            {
+                ReplyBridge(player, "No storefront groups matched that request.");
+                return;
+            }
+
+            var changedOverrides = grant
+                ? AddStorefrontOverrideGroups(steamId, groups)
+                : RemoveStorefrontOverrideGroups(steamId, groups);
+            var changedGroups = SetUserStorefrontGroups(steamId, groups, grant);
+            var action = grant ? "Granted" : "Removed";
+            var note = grant
+                ? "Bridge sync will keep these manual overrides until you remove or clear them."
+                : "Website-owned entitlements may re-apply on the next sync.";
+
+            ReplyBridge(player, $"{action} storefront bundle(s) {string.Join(", ", selected.Distinct(StringComparer.OrdinalIgnoreCase))} for {steamId}. Groups: {FormatGroupList(groups)}. Changed groups={changedGroups}, changed overrides={changedOverrides}. {note}");
+        }
+
+        private IEnumerable<string> StorefrontCommandTokens(IEnumerable<string> args)
+        {
+            foreach (var arg in args ?? new string[0])
+            {
+                foreach (var token in (arg ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var trimmed = token.Trim();
+
+                    if (!string.IsNullOrWhiteSpace(trimmed))
+                    {
+                        yield return trimmed;
+                    }
+                }
+            }
+        }
+
+        private Dictionary<string, StorefrontGroupBundle> StorefrontBundleMap()
+        {
+            var result = new Dictionary<string, StorefrontGroupBundle>(StringComparer.OrdinalIgnoreCase);
+            var source = config?.StorefrontBundles ?? DefaultStorefrontBundles();
+
+            foreach (var entry in source)
+            {
+                var key = NormalizeStorefrontKey(entry.Key);
+                var groups = CleanStorefrontGroups(entry.Value?.Groups).ToList();
+
+                if (string.IsNullOrWhiteSpace(key) || groups.Count == 0)
+                {
+                    continue;
+                }
+
+                result[key] = new StorefrontGroupBundle
+                {
+                    Title = string.IsNullOrWhiteSpace(entry.Value?.Title) ? key : entry.Value.Title.Trim(),
+                    Groups = groups
+                };
+            }
+
+            if (result.Count == 0)
+            {
+                foreach (var entry in DefaultStorefrontBundles())
+                {
+                    result[NormalizeStorefrontKey(entry.Key)] = entry.Value;
+                }
+            }
+
+            return result;
+        }
+
+        private HashSet<string> ResolveStorefrontGroups(IEnumerable<string> tokens, out List<string> selected, out List<string> unknown)
+        {
+            var bundles = StorefrontBundleMap();
+            var knownGroups = KnownStorefrontGroups();
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            selected = new List<string>();
+            unknown = new List<string>();
+
+            foreach (var token in tokens ?? new string[0])
+            {
+                var key = NormalizeStorefrontKey(token);
+                StorefrontGroupBundle bundle;
+                string bundleKey;
+
+                if (TryResolveStorefrontBundle(bundles, key, out bundleKey, out bundle))
+                {
+                    selected.Add(bundleKey);
+
+                    foreach (var group in bundle.Groups)
+                    {
+                        groups.Add(group);
+                    }
+
+                    continue;
+                }
+
+                var directGroup = knownGroups.FirstOrDefault(group =>
+                    string.Equals(group, token, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(NormalizeStorefrontKey(group), key, StringComparison.OrdinalIgnoreCase));
+
+                if (!string.IsNullOrWhiteSpace(directGroup))
+                {
+                    selected.Add(directGroup);
+                    groups.Add(directGroup);
+                    continue;
+                }
+
+                unknown.Add(token);
+            }
+
+            return groups;
+        }
+
+        private bool TryResolveStorefrontBundle(Dictionary<string, StorefrontGroupBundle> bundles, string key, out string bundleKey, out StorefrontGroupBundle bundle)
+        {
+            bundleKey = "";
+            bundle = null;
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return false;
+            }
+
+            if (bundles.TryGetValue(key, out bundle))
+            {
+                bundleKey = key;
+                return true;
+            }
+
+            var alias = StorefrontBundleAlias(key);
+
+            if (!string.Equals(alias, key, StringComparison.OrdinalIgnoreCase) && bundles.TryGetValue(alias, out bundle))
+            {
+                bundleKey = alias;
+                return true;
+            }
+
+            return false;
+        }
+
+        private string StorefrontBundleAlias(string key)
+        {
+            switch (NormalizeStorefrontKey(key))
+            {
+                case "ranks":
+                case "all_ranks":
+                    return "shop_ranks";
+                case "perks":
+                case "all_perks":
+                    return "shop_perks";
+                case "everything":
+                case "all_shop":
+                case "storefront_all":
+                    return "shop_all";
+                case "rank_vip":
+                    return "vip";
+                case "rank_vip_plus":
+                    return "vip_plus";
+                case "mvp":
+                case "rank_mvp":
+                    return "mvp";
+                case "golden":
+                case "golden_vip":
+                case "rank_golden_vip":
+                    return "golden_vip";
+                case "diamond":
+                case "diamond_vip":
+                case "rank_diamond_vip":
+                    return "diamond_vip";
+                case "ultimate":
+                case "ultimate_vip":
+                case "rank_ultimate_vip":
+                    return "ultimate_vip";
+                case "titan":
+                case "titan_vip":
+                case "rank_titan_vip":
+                    return "titan_vip";
+                default:
+                    return key;
+            }
+        }
+
+        private HashSet<string> KnownStorefrontGroups()
+        {
+            return new HashSet<string>(StorefrontBundleMap().Values.SelectMany(bundle => bundle.Groups), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private IEnumerable<string> CleanStorefrontGroups(IEnumerable<string> groups)
+        {
+            return (groups ?? new string[0])
+                .Select(group => (group ?? "").Trim())
+                .Where(group => IsManageableGroupName(group) && !IsDeletedManagedGroup(group))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group);
+        }
+
+        private int SetUserStorefrontGroups(string steamId, IEnumerable<string> groups, bool grant)
+        {
+            var cleanGroups = CleanStorefrontGroups(groups).ToList();
+            var changed = 0;
+
+            if (grant)
+            {
+                EnsureDefaultUserGroup(steamId);
+                EnsureManagedGroups(cleanGroups);
+            }
+
+            foreach (var group in cleanGroups)
+            {
+                var hasGroup = permission.UserHasGroup(steamId, group);
+
+                if (grant && !hasGroup)
+                {
+                    permission.AddUserGroup(steamId, group);
+                    changed++;
+                    continue;
+                }
+
+                if (!grant && hasGroup)
+                {
+                    permission.RemoveUserGroup(steamId, group);
+                    changed++;
+                }
+            }
+
+            return changed;
+        }
+
+        private int AddStorefrontOverrideGroups(string steamId, IEnumerable<string> groups)
+        {
+            LoadStorefrontOverrides();
+
+            if (!storefrontOverrideState.players.TryGetValue(steamId, out var entry) || entry == null)
+            {
+                entry = new StorefrontOverrideEntry();
+                storefrontOverrideState.players[steamId] = entry;
+            }
+
+            var current = new HashSet<string>(CleanStorefrontGroups(entry.groups), StringComparer.OrdinalIgnoreCase);
+            var changed = 0;
+
+            foreach (var group in CleanStorefrontGroups(groups))
+            {
+                if (current.Add(group))
+                {
+                    changed++;
+                }
+            }
+
+            if (changed > 0)
+            {
+                entry.groups = current.OrderBy(group => group).ToList();
+                entry.updated_at = DateTime.UtcNow.ToString("o");
+                SaveStorefrontOverrides();
+            }
+
+            return changed;
+        }
+
+        private int RemoveStorefrontOverrideGroups(string steamId, IEnumerable<string> groups, bool clearAll = false)
+        {
+            LoadStorefrontOverrides();
+
+            if (!storefrontOverrideState.players.TryGetValue(steamId, out var entry) || entry == null)
+            {
+                return 0;
+            }
+
+            var current = new HashSet<string>(CleanStorefrontGroups(entry.groups), StringComparer.OrdinalIgnoreCase);
+            var before = current.Count;
+
+            if (clearAll)
+            {
+                current.Clear();
+            }
+            else
+            {
+                foreach (var group in CleanStorefrontGroups(groups))
+                {
+                    current.Remove(group);
+                }
+            }
+
+            var changed = before - current.Count;
+
+            if (changed <= 0)
+            {
+                return 0;
+            }
+
+            if (current.Count == 0)
+            {
+                storefrontOverrideState.players.Remove(steamId);
+            }
+            else
+            {
+                entry.groups = current.OrderBy(group => group).ToList();
+                entry.updated_at = DateTime.UtcNow.ToString("o");
+            }
+
+            SaveStorefrontOverrides();
+            return changed;
+        }
+
+        private List<string> ManualStorefrontGroupsFor(string steamId)
+        {
+            LoadStorefrontOverrides();
+
+            if (storefrontOverrideState.players.TryGetValue(steamId, out var entry) && entry != null)
+            {
+                return CleanStorefrontGroups(entry.groups).ToList();
+            }
+
+            return new List<string>();
+        }
+
+        private void LoadStorefrontOverrides()
+        {
+            if (storefrontOverrideState != null)
+            {
+                return;
+            }
+
+            storefrontOverrideState = ReadDataFile<StorefrontOverrideState>(StorefrontOverridesDataFile) ?? new StorefrontOverrideState();
+
+            if (storefrontOverrideState.players == null)
+            {
+                storefrontOverrideState.players = new Dictionary<string, StorefrontOverrideEntry>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var normalized = new Dictionary<string, StorefrontOverrideEntry>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in storefrontOverrideState.players)
+            {
+                if (!IsSteamId64(entry.Key) || entry.Value == null)
+                {
+                    continue;
+                }
+
+                var groups = CleanStorefrontGroups(entry.Value.groups).ToList();
+
+                if (groups.Count == 0)
+                {
+                    continue;
+                }
+
+                normalized[entry.Key.Trim()] = new StorefrontOverrideEntry
+                {
+                    groups = groups,
+                    updated_at = entry.Value.updated_at
+                };
+            }
+
+            storefrontOverrideState.players = normalized;
+        }
+
+        private void SaveStorefrontOverrides()
+        {
+            if (storefrontOverrideState == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Interface.Oxide.DataFileSystem.WriteObject(StorefrontOverridesDataFile, storefrontOverrideState, true);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write data file {StorefrontOverridesDataFile}: {ex.Message}");
+            }
+        }
+
+        private static string FormatGroupList(IEnumerable<string> groups)
+        {
+            var list = (groups ?? new string[0])
+                .Where(group => !string.IsNullOrWhiteSpace(group))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group)
+                .ToList();
+
+            return list.Count == 0 ? "(none)" : string.Join(", ", list);
         }
 
         private void SyncPlayer(string steamId)
@@ -1625,7 +2286,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                Puts($"Stats snapshot synced for {snapshot.players.Count} players.");
+                Puts($"Stats snapshot synced for {snapshot.players.Count} players and {snapshot.bots.Count} bots.");
             });
         }
 
@@ -1638,6 +2299,7 @@ namespace Oxide.Plugins
             AddPlaytimeStats(playersById);
             AddRewardPoints(playersById);
             AddConnectedPlayers(playersById);
+            var botStats = AddRoamBotStats(playersById);
 
             return new StatsSnapshot
             {
@@ -1648,7 +2310,8 @@ namespace Oxide.Plugins
                     .OrderByDescending(player => player.kills)
                     .ThenByDescending(player => player.playtime_seconds)
                     .ThenBy(player => player.steam_id64)
-                    .ToList()
+                    .ToList(),
+                bots = botStats
             };
         }
 
@@ -1758,6 +2421,70 @@ namespace Oxide.Plugins
                 var statsPlayer = EnsureStatsPlayer(playersById, player.Id);
                 statsPlayer.display_name = FirstNonEmpty(statsPlayer.display_name, player.Name);
             }
+        }
+
+        private List<StatsBot> AddRoamBotStats(Dictionary<string, StatsPlayer> playersById)
+        {
+            var data = ReadDataFile<RoamBotStatsData>("RaidlandsRoamBots/stats");
+            var bots = new List<StatsBot>();
+
+            if (data == null)
+            {
+                return bots;
+            }
+
+            foreach (var entry in data.players ?? new Dictionary<string, RoamBotPlayerStats>())
+            {
+                var source = entry.Value;
+                var steamId = source?.steam_id64;
+
+                if (string.IsNullOrWhiteSpace(steamId))
+                {
+                    steamId = entry.Key;
+                }
+
+                if (!IsSteamId64(steamId))
+                {
+                    continue;
+                }
+
+                var player = EnsureStatsPlayer(playersById, steamId);
+                player.display_name = FirstNonEmpty(player.display_name, source?.display_name);
+                player.npc_kills = Math.Max(0, source?.npc_kills ?? 0);
+                player.deaths_by_npc = Math.Max(0, source?.deaths_by_npc ?? 0);
+            }
+
+            foreach (var entry in data.bots ?? new Dictionary<string, RoamBotBotStats>())
+            {
+                var source = entry.Value;
+                var botKey = source?.bot_key;
+
+                if (string.IsNullOrWhiteSpace(botKey))
+                {
+                    botKey = entry.Key;
+                }
+
+                if (string.IsNullOrWhiteSpace(botKey))
+                {
+                    continue;
+                }
+
+                bots.Add(new StatsBot
+                {
+                    bot_key = botKey,
+                    display_name = source?.display_name ?? botKey,
+                    kit_name = source?.kit_name ?? "",
+                    skill_tier = source?.skill_tier ?? "",
+                    kills = Math.Max(0, source?.kills ?? 0),
+                    deaths = Math.Max(0, source?.deaths ?? 0)
+                });
+            }
+
+            return bots
+                .OrderByDescending(bot => bot.kills)
+                .ThenBy(bot => bot.deaths)
+                .ThenBy(bot => bot.bot_key)
+                .ToList();
         }
 
         private StatsPlayer EnsureStatsPlayer(Dictionary<string, StatsPlayer> playersById, string steamId)
@@ -2335,10 +3062,38 @@ namespace Oxide.Plugins
             }
 
             var interval = Math.Max(60, config.PermissionSyncIntervalSeconds);
-            pendingPermissionSnapshotTimer = timer.Once(20f, () => RunScheduled("Initial permission snapshot", PostPermissionSnapshot));
+            QueuePermissionSnapshot("Initial permission registry snapshot", 20f);
+            timer.Once(Math.Max(45, config.PermissionSnapshotSettledDelaySeconds), () => QueuePermissionSnapshot("Settled permission registry snapshot", 1f));
             timer.Once(30f, () => RunScheduled("Initial permission sync", SyncPermissions));
             permissionSyncTimer = timer.Every(interval, () => RunScheduled("Permission sync timer", SyncPermissions));
             Puts($"WebsiteVipBridge syncing permissions every {interval} seconds.");
+        }
+
+        private void QueuePermissionSnapshotForPluginChange(string context, Plugin plugin)
+        {
+            if (plugin == null || string.Equals(plugin.Name, Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            QueuePermissionSnapshot($"{context} permission registry snapshot ({plugin.Name})");
+        }
+
+        private void QueuePermissionSnapshot(string context, float delaySeconds = -1f)
+        {
+            if (config == null || !config.PermissionSyncEnabled)
+            {
+                return;
+            }
+
+            pendingPermissionSnapshotTimer?.Destroy();
+            var delay = delaySeconds > 0 ? delaySeconds : Math.Max(5, config.PermissionSnapshotDebounceSeconds);
+
+            pendingPermissionSnapshotTimer = timer.Once(delay, () =>
+            {
+                pendingPermissionSnapshotTimer = null;
+                RunScheduled(context, PostPermissionSnapshot);
+            });
         }
 
         private void PostPermissionSnapshot()
@@ -2350,13 +3105,16 @@ namespace Oxide.Plugins
 
             try
             {
+                var groups = CurrentPermissionGroups();
+                var permissions = CurrentRegisteredPermissions();
+                var groupPermissions = CurrentPermissionGroupMap();
                 var body = new JObject
                 {
                     ["server_id"] = config.ServerId,
                     ["generated_at"] = DateTime.UtcNow.ToString("o"),
-                    ["groups"] = JArray.FromObject(CurrentPermissionGroups()),
-                    ["permissions"] = JArray.FromObject(CurrentRegisteredPermissions()),
-                    ["group_permissions"] = JObject.FromObject(CurrentPermissionGroupMap())
+                    ["groups"] = JArray.FromObject(groups),
+                    ["permissions"] = JArray.FromObject(permissions),
+                    ["group_permissions"] = JObject.FromObject(groupPermissions)
                 }.ToString(Formatting.None);
                 var url = $"{TrimSlash(config.ApiBaseUrl)}/api/server/permissions-snapshot.php";
 
@@ -2376,7 +3134,7 @@ namespace Oxide.Plugins
                         return;
                     }
 
-                    Puts("Posted permission snapshot to website.");
+                    Puts($"Posted permission snapshot to website ({permissions.Count} permissions, {groups.Count} groups).");
                 });
             }
             catch (Exception ex)
@@ -4209,6 +4967,16 @@ namespace Oxide.Plugins
 
             var desired = new HashSet<string>((desiredGroups ?? new List<string>())
                 .Where(group => IsManageableGroupName(group) && !IsDeletedManagedGroup(group)), StringComparer.OrdinalIgnoreCase);
+            var manualStorefrontGroups = ManualStorefrontGroupsFor(steamId);
+
+            foreach (var group in manualStorefrontGroups)
+            {
+                if (IsManageableGroupName(group) && !IsDeletedManagedGroup(group))
+                {
+                    managed.Add(group);
+                    desired.Add(group);
+                }
+            }
 
             EnsureManagedGroups(managed.ToList());
 
@@ -4320,6 +5088,33 @@ namespace Oxide.Plugins
             assets.SearchIcon = ConfiguredOrDefault(assets.SearchIcon, defaults.SearchIcon);
         }
 
+        private static void MergeStorefrontBundleDefaults(Dictionary<string, StorefrontGroupBundle> bundles, Dictionary<string, StorefrontGroupBundle> defaults)
+        {
+            if (bundles == null || defaults == null)
+            {
+                return;
+            }
+
+            var existingKeys = new HashSet<string>(bundles.Keys.Select(NormalizeStorefrontKey), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in defaults)
+            {
+                var key = NormalizeStorefrontKey(entry.Key);
+
+                if (string.IsNullOrWhiteSpace(key) || existingKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                bundles[entry.Key] = new StorefrontGroupBundle
+                {
+                    Title = entry.Value?.Title ?? "",
+                    Groups = entry.Value?.Groups?.ToList() ?? new List<string>()
+                };
+                existingKeys.Add(key);
+            }
+        }
+
         private int ToInt(double value)
         {
             if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0)
@@ -4357,6 +5152,30 @@ namespace Oxide.Plugins
         private static string NormalizeBrandKey(string value)
         {
             return string.Concat((value ?? "").Where(char.IsLetterOrDigit)).ToLowerInvariant();
+        }
+
+        private static string NormalizeStorefrontKey(string value)
+        {
+            var builder = new StringBuilder();
+            var previousUnderscore = false;
+
+            foreach (var character in (value ?? "").Trim().Replace("+", "_plus"))
+            {
+                if (char.IsLetterOrDigit(character))
+                {
+                    builder.Append(char.ToLowerInvariant(character));
+                    previousUnderscore = false;
+                    continue;
+                }
+
+                if ((character == '_' || character == '-' || character == '.' || char.IsWhiteSpace(character)) && !previousUnderscore && builder.Length > 0)
+                {
+                    builder.Append('_');
+                    previousUnderscore = true;
+                }
+            }
+
+            return builder.ToString().Trim('_');
         }
 
         private static string Sha256(string value)

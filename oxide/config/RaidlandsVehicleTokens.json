@@ -154,7 +154,1636 @@
         "hotairballoon",
         "balloon"
       ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
+    },
+    {
+      "Key": "minicopter",
+      "Display Name": "Minicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnMinicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Minicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "mini",
+        "minicopter"
+      ]
+    },
+    {
+      "Key": "scrap_transport_helicopter",
+      "Display Name": "Scrap Transport Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnScrapTransportHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Scrap Transport Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "scrapheli",
+        "scrap",
+        "scraptransport"
+      ]
+    },
+    {
+      "Key": "attack_helicopter",
+      "Display Name": "Attack Helicopter",
+      "Enabled": true,
+      "Backend": "SpawnHeli",
+      "SpawnHeli API Hook": "API_SpawnAttackHelicopter",
+      "VehicleLicence Type": null,
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Attack Helicopter Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "attackheli",
+        "attack"
+      ]
+    },
+    {
+      "Key": "rhib",
+      "Display Name": "RHIB",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "RHIB",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "RHIB Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "rhib"
+      ]
+    },
+    {
+      "Key": "tugboat",
+      "Display Name": "Tugboat",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Tugboat",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Tugboat Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "tug",
+        "tugboat"
+      ]
+    },
+    {
+      "Key": "solo_submarine",
+      "Display Name": "Solo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineSolo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Solo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subsolo",
+        "solo",
+        "solosub"
+      ]
+    },
+    {
+      "Key": "duo_submarine",
+      "Display Name": "Duo Submarine",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "SubmarineDuo",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Duo Submarine Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "subduo",
+        "duo",
+        "duosub"
+      ]
+    },
+    {
+      "Key": "snowmobile",
+      "Display Name": "Snowmobile",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "Snowmobile",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Snowmobile Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "snow",
+        "snowmobile"
+      ]
+    },
+    {
+      "Key": "hot_air_balloon",
+      "Display Name": "Hot Air Balloon",
+      "Enabled": true,
+      "Backend": "VehicleLicence",
+      "SpawnHeli API Hook": null,
+      "VehicleLicence Type": "HotAirBalloon",
+      "Token Shortname": "wrappedgift",
+      "Token Display Name": "Hot Air Balloon Token",
+      "Token Skin": 0,
+      "Require Display Name Match": true,
+      "Aliases": [
+        "hab",
+        "hotairballoon",
+        "balloon"
+      ]
     }
   ],
-  "Kit Grants": {}
+  "Kit Grants": {
+    "pack_vehicle": {
+      "minicopter": 5,
+      "scrap_transport_helicopter": 5,
+      "attack_helicopter": 5,
+      "rhib": 5,
+      "tugboat": 5,
+      "solo_submarine": 5,
+      "duo_submarine": 5,
+      "snowmobile": 5,
+      "hot_air_balloon": 5
+    }
+  }
 }

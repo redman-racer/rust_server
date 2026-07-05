@@ -1,0 +1,11 @@
+{
+  "ApiBaseUrl": "https://raidlands.net",
+  "ServerId": "raidlands-main",
+  "SharedSecret": "${WEBSITE_VIP_SHARED_SECRET}",
+  "ClanActionsEnabled": true,
+  "SnapshotSyncEnabled": true,
+  "PollIntervalSeconds": 30,
+  "SnapshotIntervalSeconds": 180,
+  "SnapshotDebounceSeconds": 8,
+  "ActionBatchSize": 25
+}

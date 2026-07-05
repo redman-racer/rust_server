@@ -7,14 +7,18 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsVehicleTokens", "Raidlands", "1.0.3")]
+    [Info("RaidlandsVehicleTokens", "Raidlands", "1.0.4")]
     [Description("Provides Raidlands vehicle token items backed by SpawnHeli and VehicleLicence spawns.")]
     public class RaidlandsVehicleTokens : RustPlugin
     {
-        private const string AdminPermission = "raidlands.vehicletokens.admin";
-        private const string BypassPermission = "raidlands.vehicletokens.bypass";
-        private const string VehicleHp125Permission = "raidlands.vehicle.hp.125";
-        private const string VehicleHp150Permission = "raidlands.vehicle.hp.150";
+        private const string AdminPermission = "raidlandsvehicletokens.admin";
+        private const string BypassPermission = "raidlandsvehicletokens.bypass";
+        private const string VehicleHp125Permission = "raidlandsvehicletokens.vehicle.hp.125";
+        private const string VehicleHp150Permission = "raidlandsvehicletokens.vehicle.hp.150";
+        private const string LegacyAdminPermission = "raidlands.vehicletokens.admin";
+        private const string LegacyBypassPermission = "raidlands.vehicletokens.bypass";
+        private const string LegacyVehicleHp125Permission = "raidlands.vehicle.hp.125";
+        private const string LegacyVehicleHp150Permission = "raidlands.vehicle.hp.150";
 
         [PluginReference]
         private Plugin SpawnHeli;
@@ -324,7 +328,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            if (player.IsAdmin || permission.UserHasPermission(player.UserIDString, BypassPermission))
+            if (player.IsAdmin || HasPlayerPermission(player, BypassPermission, LegacyBypassPermission))
             {
                 return null;
             }
@@ -790,12 +794,12 @@ namespace Oxide.Plugins
 
         private float GetVehicleHealthMultiplier(BasePlayer player)
         {
-            if (permission.UserHasPermission(player.UserIDString, VehicleHp150Permission))
+            if (HasPlayerPermission(player, VehicleHp150Permission, LegacyVehicleHp150Permission))
             {
                 return 1.5f;
             }
 
-            return permission.UserHasPermission(player.UserIDString, VehicleHp125Permission) ? 1.25f : 1f;
+            return HasPlayerPermission(player, VehicleHp125Permission, LegacyVehicleHp125Permission) ? 1.25f : 1f;
         }
 
         private bool HasVehicleLicence(ulong playerId, string vehicleType)
@@ -915,7 +919,19 @@ namespace Oxide.Plugins
             }
 
             var player = arg.Connection.player as BasePlayer;
-            return player != null && permission.UserHasPermission(player.UserIDString, AdminPermission);
+            return HasPlayerPermission(player, AdminPermission, LegacyAdminPermission);
+        }
+
+        private bool HasPlayerPermission(BasePlayer player, string permissionName, string legacyPermissionName = null)
+        {
+            if (player == null)
+            {
+                return false;
+            }
+
+            var userId = player.UserIDString;
+            return permission.UserHasPermission(userId, permissionName)
+                || (!string.IsNullOrEmpty(legacyPermissionName) && permission.UserHasPermission(userId, legacyPermissionName));
         }
 
         private BasePlayer FindPlayer(string value)

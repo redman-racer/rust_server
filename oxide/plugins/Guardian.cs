@@ -389,7 +389,7 @@ namespace Oxide.Plugins
 
                                 if(!deflection)
                                 {
-                                    var deflectors = Pool.GetList<BaseEntity>();
+                                    var deflectors = Pool.Get<List<BaseEntity>>();
 
                                     Vis.Entities(position, aim_distance, deflectors);
 
@@ -405,7 +405,7 @@ namespace Oxide.Plugins
                                         }
                                     }
 
-                                    Pool.FreeList(ref deflectors);
+                                    Pool.FreeUnmanaged(ref deflectors);
                                 }
 
                                 if(!deflection || (angle > spin_angle))
@@ -813,7 +813,7 @@ namespace Oxide.Plugins
 
                     bool flying = true;
 
-                    var entities = Pool.GetList<BaseEntity>();
+                    var entities = Pool.Get<List<BaseEntity>>();
 
                     Vis.Entities(position, sensitivity_hi, entities);
 
@@ -858,7 +858,7 @@ namespace Oxide.Plugins
                                     flying = false;
                                 }
                             }
-                            else if((entity is BaseHelicopterVehicle) || (entity is SupplyDrop) || (entity is TreeEntity))
+                            else if((entity is BaseHelicopter) || (entity is SupplyDrop) || (entity is TreeEntity))
                             {
                                 flying = false;
                             }
@@ -891,7 +891,7 @@ namespace Oxide.Plugins
                         flying = false;
                     }
 
-                    Pool.FreeList(ref entities);
+                    Pool.FreeUnmanaged(ref entities);
 
                     return flying;
                 }
@@ -6187,7 +6187,7 @@ namespace Oxide.Plugins
 
                 public static bool IsNearby(Vector3 position, bool check_privilege = true)
                 {
-                    var blocks = Pool.GetList<BuildingBlock>();
+                    var blocks = Pool.Get<List<BuildingBlock>>();
 
                     Vis.Entities(position, 16.0f, blocks, Layers.Mask.Construction, QueryTriggerInteraction.Ignore);
 
@@ -6208,7 +6208,7 @@ namespace Oxide.Plugins
                         }
                     }
 
-                    Pool.FreeList(ref blocks);
+                    Pool.FreeUnmanaged(ref blocks);
 
                     return nearby;
                 }
@@ -6287,13 +6287,13 @@ namespace Oxide.Plugins
             {
                 public static bool InRange(Vector3 position, float radius = 3.0f)
                 {
-                    var entities = Pool.GetList<DecayEntity>();
+                    var entities = Pool.Get<List<DecayEntity>>();
 
                     Vis.Entities(position, radius, entities);
 
                     bool nearby = entities.Count > 0;
 
-                    Pool.FreeList(ref entities);
+                    Pool.FreeUnmanaged(ref entities);
 
                     return nearby;
                 }
@@ -9695,7 +9695,7 @@ namespace Oxide.Plugins
 
                 attacker.MovePosition(position);
 
-                attacker.ClientRPCPlayer(null, attacker, "ForcePositionTo", position);
+                attacker.ClientRPC(RpcTarget.Player("ForcePositionTo", attacker), position);
 
                 attacker.SendNetworkUpdateImmediate();
 

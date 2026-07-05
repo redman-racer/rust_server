@@ -998,7 +998,7 @@ namespace Oxide.Plugins
                 loot.AddContainer(Container);
                 loot.SendImmediate();
 
-                Owner.ClientRPCPlayer(null, Owner, "RPC_OpenLootPanel", _ins._config.Panel);
+                Owner.ClientRPC(RpcTarget.Player("RPC_OpenLootPanel", Owner), _ins._config.Panel);
             }
 
             #region Can Show

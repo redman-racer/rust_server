@@ -4,8 +4,7 @@
     "TPB": {
       "Block TPB To Specific Monuments": [],
       "VIP Countdowns": {
-        "nteleportation.vip": 0,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 0
       },
       "Countdown": 0,
       "Available After X Seconds": 0
@@ -152,12 +151,10 @@
       "nteleportation.vip": 5000
     },
     "VIP Cooldowns": {
-      "nteleportation.vip": 5,
-      "nteleportation.home.5s": 5
+      "nteleportation.vip": 5
     },
     "VIP Countdowns": {
-      "nteleportation.vip": 5,
-      "nteleportation.home.5s": 5
+      "nteleportation.vip": 5
     },
     "Location Radius": 25,
     "Force On Top Of Foundation": true,
@@ -218,12 +215,10 @@
       "nteleportation.vip": 5
     },
     "VIP Cooldowns": {
-      "nteleportation.vip": 5,
-      "nteleportation.instant": 0
+      "nteleportation.vip": 5
     },
     "VIP Countdowns": {
-      "nteleportation.vip": 5,
-      "nteleportation.instant": 0
+      "nteleportation.vip": 5
     },
     "Enable Request UI": false,
     "Request Duration": 30,
@@ -255,12 +250,10 @@
         "nteleportation.vip": 5
       },
       "VIP Cooldowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "VIP Countdowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "Location": "0 0 0",
       "Locations": [],
@@ -286,12 +279,10 @@
         "nteleportation.vip": 5
       },
       "VIP Cooldowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "VIP Countdowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "Location": "0 0 0",
       "Locations": [],
@@ -317,12 +308,10 @@
         "nteleportation.vip": 5
       },
       "VIP Cooldowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "VIP Countdowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "Location": "289.4454 21.55 -1296.901",
       "Locations": [
@@ -367,12 +356,10 @@
         "nteleportation.vip": 5
       },
       "VIP Cooldowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "VIP Countdowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "Location": "354.6935 22.59542 -22.58627",
       "Locations": [
@@ -408,43 +395,45 @@
         "nteleportation.vip": 5
       },
       "VIP Cooldowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
       "VIP Countdowns": {
-        "nteleportation.vip": 5,
-        "nteleportation.instant": 0
+        "nteleportation.vip": 5
       },
-      "Location": "-5474.267 14.716 -337.5953",
+      "Location": "-6286.286 3.133511 121.1309",
       "Locations": [
-        "-5416.051 2.3 -251.1265",
-        "-5432.702 1.503789 -244.7037",
-        "-5443.486 3.2795 -284.9109",
-        "-5444.073 9.015961 -288.7164",
-        "-5447.455 6.077001 -284.4392",
-        "-5437.99 6.107 -252.1945",
-        "-5450.401 6.083 -247.7855",
-        "-5422.426 3.133511 -255.172",
-        "-5422.519 6.100135 -268.8977",
-        "-5423.688 6.100135 -268.3076",
-        "-5426.336 4.061 -267.1755",
-        "-5406.423 5.17974 -340.6345",
-        "-5409.366 2.211804 -345.725",
-        "-5409.079 2.186492 -346.7809",
-        "-5421.642 5.68359 -341.5777",
-        "-5443.876 2.287 -353.4315",
-        "-5460.37 3.28 -356.6867",
-        "-5462.891 4.6325 -329.154",
-        "-5461.123 3.295 -355.3959",
-        "-5465.561 6.979 -367.1554",
-        "-5486.684 6.095876 -357.1067",
-        "-5487.051 6.088 -357.8434",
-        "-5481.032 4.063037 -364.9681",
-        "-5473.408 13.60007 -333.5283",
-        "-5473.077 13.60007 -334.1498",
-        "-5469.901 13.6149 -339.8878",
-        "-5472.859 13.60007 -335.809",
-        "-5474.267 14.716 -337.5953"
+        "-6204.445 10.109 161.1116",
+        "-6207.332 3.108661 166.8043",
+        "-6205.229 12.11872 154.686",
+        "-6214.576 3.108661 169.4177",
+        "-6213.681 12.10257 157.6193",
+        "-6224.318 1.3467 174.3353",
+        "-6212.732 12.10735 147.5434",
+        "-6212.141 12.101 146.5722",
+        "-6245.551 6.979 205.363",
+        "-6244.468 4.063037 189.7751",
+        "-6270.991 13.60007 165.2032",
+        "-6270.432 13.60007 163.6257",
+        "-6269.979 13.60007 163.0868",
+        "-6269.986 14.716 167.2435",
+        "-6250.182 6.088 182.4039",
+        "-6250.979 6.095876 182.6102",
+        "-6243.278 12.2795 160.7956",
+        "-6287.555 3.28 183.0213",
+        "-6286.55 3.295 181.9157",
+        "-6274.734 13.6149 168.5762",
+        "-6279.354 4.6325 156.6176",
+        "-6242.913 15.077 156.8164",
+        "-6235.729 3.10866 137.7396",
+        "-6236.821 3.108659 137.6748",
+        "-6241.262 6.099703 141.5113",
+        "-6243.47 6.1 126.4155",
+        "-6257.364 6.083 120.2809",
+        "-6288.036 6.100135 134.2105",
+        "-6289.308 6.100135 134.52",
+        "-6285.2 4.061 133.7084",
+        "-6270.452 6.107 121.7606",
+        "-6286.286 3.133511 121.1309"
       ],
       "Teleport To Random Location": true,
       "Usable Out Of Building Blocked": false,

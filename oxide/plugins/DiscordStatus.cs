@@ -11,19 +11,12 @@ using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
 using Oxide.Ext.Discord;
 using Oxide.Ext.Discord.Attributes;
+using Oxide.Ext.Discord.Clients;
+using Oxide.Ext.Discord.Connections;
 using Oxide.Ext.Discord.Constants;
 using Oxide.Ext.Discord.Entities;
-using Oxide.Ext.Discord.Entities.Activities;
-using Oxide.Ext.Discord.Entities.Applications;
-using Oxide.Ext.Discord.Entities.Channels;
-using Oxide.Ext.Discord.Entities.Gatway;
-using Oxide.Ext.Discord.Entities.Gatway.Commands;
-using Oxide.Ext.Discord.Entities.Gatway.Events;
-using Oxide.Ext.Discord.Entities.Guilds;
-using Oxide.Ext.Discord.Entities.Messages;
-using Oxide.Ext.Discord.Entities.Messages.Embeds;
-using Oxide.Ext.Discord.Entities.Permissions;
-using Oxide.Ext.Discord.Libraries.Linking;
+using Oxide.Ext.Discord.Interfaces;
+using Oxide.Ext.Discord.Libraries;
 using Oxide.Ext.Discord.Logging;
 using Random = Oxide.Core.Random;
 
@@ -32,17 +25,16 @@ namespace Oxide.Plugins
     [Info("Discord Status", "Gonzi", "4.0.1")]
     [Description("Shows server information as a discord bot status")]
 
-    public class DiscordStatus : CovalencePlugin
+    public class DiscordStatus : CovalencePlugin, IDiscordPlugin
     {
         private string seperatorText = string.Join("-", new string[25 + 1]);
         private bool enableChatSeparators;
 
         #region Fields
 
-        [DiscordClient]
-        private DiscordClient Client;
+        public DiscordClient Client { get; set; }
 
-        private readonly DiscordSettings _settings = new DiscordSettings
+        private readonly BotConnection _settings = new BotConnection
         {
             Intents = GatewayIntents.Guilds | GatewayIntents.GuildMessages | GatewayIntents.GuildMembers
         };
@@ -175,7 +167,7 @@ namespace Oxide.Plugins
             return embed;
         }
         
-        [HookMethod(DiscordHooks.OnDiscordGuildMessageCreated)]
+        [HookMethod(DiscordExtHooks.OnDiscordGuildMessageCreated)]
         void OnDiscordGuildMessageCreated(DiscordMessage message)
         {
             if (message.Author.Bot == true) return;
@@ -222,22 +214,23 @@ namespace Oxide.Plugins
                             list += $"[{player.displayName}](https://steamcommunity.com/profiles/{player.UserIDString}/) \n";
                         }
 
-                        DiscordChannel.GetChannel(Client, message.ChannelId, channel =>
-                        {
-                            channel.CreateMessage(Client, ServerStats(Lang("Players", BasePlayer.activePlayerList.Count, ConVar.Server.maxplayers, list)));
-                        });
+                        var channel = Client.Bot.GetChannel(message.ChannelId, message.GuildId);
+                        channel?.CreateMessage(Client, ServerStats(Lang("Players", BasePlayer.activePlayerList.Count, ConVar.Server.maxplayers, list)));
                         break;
                     }
                 case "ip":
                     {
-                        DiscordChannel.GetChannel(Client, message.ChannelId, channel =>
+                        var channel = Client.Bot.GetChannel(message.ChannelId, message.GuildId);
+                        if (channel == null)
                         {
-                            webrequest.Enqueue("http://icanhazip.com", "", (code, response) =>
-                            {
-                                string ip = response.Trim();
-                                channel.CreateMessage(Client, Lang("IPAddress", ip, ConVar.Server.port));
-                            }, this);
-                        });
+                            return;
+                        }
+
+                        webrequest.Enqueue("http://icanhazip.com", "", (code, response) =>
+                        {
+                            string ip = response.Trim();
+                            channel.CreateMessage(Client, Lang("IPAddress", ip, ConVar.Server.port));
+                        }, this);
                     }
                     break;
             }
@@ -260,7 +253,7 @@ namespace Oxide.Plugins
             timer.Every(config.UpdateInterval, () => UpdateStatus());
         }
         
-        [HookMethod(DiscordHooks.OnDiscordGatewayReady)]
+        [HookMethod(DiscordExtHooks.OnDiscordGatewayReady)]
         private void OnDiscordGatewayReady(GatewayReadyEvent ready)
         {
             if (ready.Guilds.Count == 0)
@@ -312,7 +305,7 @@ namespace Oxide.Plugins
 
                 var index = GetStatusIndex();
 
-                Client.Bot.UpdateStatus(new UpdatePresenceCommand
+                Client.UpdateStatus(new UpdatePresenceCommand
                 {
                     Activities = new List<DiscordActivity>
                     {
@@ -395,7 +388,7 @@ namespace Oxide.Plugins
             return message;
         }
 
-        private int GetAuthCount() => _link.GetLinkedCount();
+        private int GetAuthCount() => _link.LinkedCount;
 
         #endregion
     }
