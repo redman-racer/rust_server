@@ -214,7 +214,7 @@ Do not call the LLM from these ticks directly. The tick should submit a decision
 
 The new config should make the single-mode design obvious.
 
-This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.38. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup or staged live-release profile.
+This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.40. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup or staged live-release profile.
 
 ```json
 {
@@ -249,7 +249,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
       "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.75,
       "ReactionMaxSeconds": 1.35,
-      "AimErrorDegrees": 5.0,
+      "AimErrorDegrees": 1.5,
+      "AimWarmupSeconds": 2.5,
+      "AimWarmupInitialExtraDegrees": 3.0,
       "Aggression": 0.35,
       "Courage": 0.35,
       "TacticalNoise": 0.25
@@ -260,7 +262,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
       "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.40,
       "ReactionMaxSeconds": 0.85,
-      "AimErrorDegrees": 3.0,
+      "AimErrorDegrees": 0.75,
+      "AimWarmupSeconds": 1.75,
+      "AimWarmupInitialExtraDegrees": 1.5,
       "Aggression": 0.55,
       "Courage": 0.55,
       "TacticalNoise": 0.15
@@ -271,7 +275,9 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
       "IncomingDamageScale": 1.0,
       "ReactionMinSeconds": 0.18,
       "ReactionMaxSeconds": 0.45,
-      "AimErrorDegrees": 1.5,
+      "AimErrorDegrees": 0.2,
+      "AimWarmupSeconds": 1.0,
+      "AimWarmupInitialExtraDegrees": 0.4,
       "Aggression": 0.8,
       "Courage": 0.8,
       "TacticalNoise": 0.06
@@ -610,7 +616,7 @@ remove Gen2/naval prefabs
 replace prefab candidates with legacy scientist bodies
 turn generated near-player positions on
 turn random land fallback on
-normalize older visibility, foliage, hearing, defensive-healing, protection-damage, utility, health, damage, stuck-memory, squad-reservation, medical-item, bot-clan-war, killfeed, quiet-console, barricade-anchor, and physics-surface spawn settings to the current v0.3.38 defaults
+normalize older visibility, foliage, hearing, defensive-healing, protection-damage, utility, health, damage, aim-warmup, stuck-memory, squad-reservation, medical-item, bot-clan-war, killfeed, quiet-console, barricade-anchor, and physics-surface spawn settings to the current v0.3.40 defaults
 pin barricade prefab to the double Wooden Barricade Cover prefab
 pin grenade and smoke grenade prefabs to the current deployed F1/smoke prefab paths
 preserve kits, bot profiles, population, skill weights, team weights, and stats
@@ -2909,7 +2915,7 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.38 Debug UI Menu Suppression Hotfix
+## Current Progress Through v0.3.40 Sharper Skill Aim Tuning
 
 ### Files updated
 
@@ -2924,7 +2930,7 @@ UPDATED_FILES_FOR_UPLOAD.txt
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.38
+Plugin version: RaidlandsRoamBots v0.3.40
 Brain mode: playerlike_tactical_brain
 Current checked-in config: disabled by default, target=50, min=0, max=200
 Current checked-in release profile: near-player spawning around any active non-safe-zone player, no hardcoded tester anchor, random land fallback disabled, debug UI disabled, debug console logs disabled, bot clan wars enabled
@@ -2963,7 +2969,7 @@ raidbots.goto <player-name-or-steamid> [bot-number]
 raidbots.killall
 ```
 
-Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, cover/flank points, active barricade count, utility status, protection trigger/source, barricade-anchor state, medical source/fire lock, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Protect`, `Anchor`, `Formation`, and `Bad spots` details.
+Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, aim warmup/error, cover/flank points, active barricade count, utility status, protection trigger/source, barricade-anchor state, medical source/fire lock, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Protect`, `Anchor`, `Formation`, and `Bad spots` details.
 
 ### Implemented
 
@@ -3022,6 +3028,8 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Added weapon-derived combat profiles for shotgun, pistol, SMG, rifle, marksman, sniper, and LMG-style weapons.
   - Bots now prefer pushing closer when their weapon is outside preferred/ideal range instead of always standing still and firing.
   - Poor range affects action scoring and repositioning only; bot weapon damage is left at Rust's normal hit damage.
+  - v0.3.39 wires skill `AimErrorDegrees` into bot projectile velocity and adds skill-specific aim warmup. Casual bots start with 10 extra degrees and settle over 5s, average bots start with 6 extra degrees and settle over 3s, and dangerous bots start with 3 extra degrees and settle over 1.5s. Hits that still land keep normal Rust weapon damage.
+  - v0.3.40 tightens aim substantially after live feedback: casual settles to 1.5 degrees after 2.5s, average settles to 0.75 degrees after 1.75s, and dangerous settles to 0.2 degrees after 1s. Warmup extras are now 3.0, 1.5, and 0.4 degrees respectively.
 
 - Phase 11 baseline plus advanced stuck memory:
   - Fixed stuck detection so repeated commands to the same destination no longer reset movement progress.
@@ -3128,6 +3136,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - v0.3.36 keeps the right-side debug panel root stable and refreshes only its text child. Opening the `/raidbots admin` CUI clears and suppresses the side panel until the admin CUI is closed, but later live testing showed that text refreshes could still be re-stacked above third-party CUI menus.
   - v0.3.37 suppresses and destroys the right-side debug side panel when common menu/admin UI commands fire, including Kits editor commands such as `kits.creator`, so the next debug refresh does not re-add the side panel above another plugin's menu. Close commands use a short suppression window so the panel can return shortly after the menu closes.
   - v0.3.38 fixes the v0.3.37 close-window bug where `kits.close` could not shorten an existing menu suppression timer. Normal menu commands now use a shorter fallback suppression window, while close commands actively release the side panel after a brief delay.
+  - v0.3.39 adds `Aim:` to the debug side panel and `aim=` to `raidbots.list`, showing current projectile cone error and warmup progress for the active target.
 
 - Bot kill integration:
   - v0.3.31 adds player-like roam bot kill chat, tracked-bot DeathNotes suppression, and optional ServerRewards RP payout for real players who kill roam bots.
@@ -3136,7 +3145,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.38.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.40.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
 
@@ -3149,12 +3158,12 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 - raidbots.enable 1 spawned a tracked bot after the first two legacy body prefabs failed navigator placement and the known-working scientistnpc_junkpile_pistol prefab was accepted.
 - Follow-up body preparation showed the Raidlands kit weapon applied: weapon=rifle:rifle.ak, ammo=1.00, held=rifle.ak:BaseProjectile.
 - raidbots.list showed the new diagnostics surface: exposure=0.00(0/0), weapon=rifle:rifle.ak, cover=none, stuck=False, navPath=True, navDisabled=False.
-- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, v0.3.30 advisor adapter commands, v0.3.31 kill chat/RP integration, v0.3.32 release defaults, v0.3.33 admin panel/high-cap defaults, v0.3.34 enhanced killfeed/quiet-console/clan-war behavior, v0.3.35 protection/healing/barricade-anchor polish, foliage, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
+- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, v0.3.30 advisor adapter commands, v0.3.31 kill chat/RP integration, v0.3.32 release defaults, v0.3.33 admin panel/high-cap defaults, v0.3.34 enhanced killfeed/quiet-console/clan-war behavior, v0.3.35 protection/healing/barricade-anchor polish, v0.3.40 sharper aim tuning, foliage, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
 ```
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.38 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, keeps external advisor plumbing opt-in for live release, and still needs live validation for the implemented squad/clan coordination, different-clan bot combat, first-pass destination reservation, terrain-layer spawn rejection, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, cumulative protection-damage reactions, skill-distance cover/barricade preference, categorized medical behavior, long-range barricade anchor mode, effective-cover validation, retreat-loop escape, state-independent visible shooting, inventory-backed medical item use, retreat-wall placement, wall-cap recycling, weapon auto-reload, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, stuck destination memory, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, normal unscaled damage, enhanced player-like kill/RP output, quiet-console behavior, and the `/raidbots admin` CUI.
+Please live-test v0.3.40 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, keeps external advisor plumbing opt-in for live release, and still needs live validation for the implemented squad/clan coordination, different-clan bot combat, first-pass destination reservation, terrain-layer spawn rejection, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, cumulative protection-damage reactions, skill-distance cover/barricade preference, categorized medical behavior, long-range barricade anchor mode, effective-cover validation, retreat-loop escape, state-independent visible shooting, inventory-backed medical item use, retreat-wall placement, wall-cap recycling, weapon auto-reload, aim warmup, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, stuck destination memory, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, normal unscaled damage, enhanced player-like kill/RP output, quiet-console behavior, and the `/raidbots admin` CUI.
 
 Recommended first test ladder:
 

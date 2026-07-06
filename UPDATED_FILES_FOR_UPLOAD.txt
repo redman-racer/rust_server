@@ -1,15 +1,18 @@
-Raidlands bots debug UI and LiveAdmin command catalog - 2026-07-06
+Raidlands RoamBots sharper skill aim tuning - 2026-07-06
 
 What changed:
-- RaidlandsRoamBots v0.3.38 suppresses and destroys the right-side debug panel when common menu/admin CUI commands fire, including Kits editor commands such as `kits.creator`, so the one-second debug refresh does not re-add the side panel above another plugin's menu.
-- Explicit close commands such as `kits.close` now actively shorten an existing menu suppression window, so the debug side panel can return shortly after the other menu closes.
-- Normal menu commands now use a shorter fallback suppression window if no close command is seen.
-- Opening the `/raidbots admin` CUI clears and suppresses the right-side debug panel until the admin CUI is closed.
-- LiveAdmin v0.4.5 adds a Commands nav tab with separate Slash Commands and Console Commands pages, filter support, paging, plugin/source columns, and a short cache over the local plugin source scan.
+- RaidlandsRoamBots v0.3.40 keeps bot hit damage at normal Rust weapon damage and makes misses real by applying a much tighter skill-scaled projectile aim cone.
+- Skill `AimErrorDegrees` now actively affects fired bot projectiles instead of only existing in config.
+- Bots still start a new aim warmup whenever they switch to a target, but the opening slop is much smaller and settles faster.
+- Default v0.3.40 warmup tuning:
+  - casual: 1.5 base degrees, +3.0 initial warmup degrees, settles over 2.5 seconds
+  - average: 0.75 base degrees, +1.5 initial warmup degrees, settles over 1.75 seconds
+  - dangerous: 0.2 base degrees, +0.4 initial warmup degrees, settles over 1.0 seconds
+- The debug side panel now shows `Aim:` and `raidbots.list` now shows `aim=`, with current cone error and warmup progress.
 
-Rust server plugin files to upload:
+Rust server plugin/config files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
-- oxide/plugins/LiveAdmin.cs
+- oxide/config/RaidlandsRoamBots.json
 
 Docs/reference files to upload or keep with the repo handoff:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
@@ -17,20 +20,14 @@ Docs/reference files to upload or keep with the repo handoff:
 
 Reload after upload:
 - oxide.reload RaidlandsRoamBots
-- oxide.reload LiveAdmin
-
-Optional permissions if non-owner staff should see the new LiveAdmin command catalog:
-- oxide.grant group admin liveadmin.commands.view
-- oxide.grant group moderator liveadmin.commands.view
 
 Live smoke checks:
-- Run `raidbots.debug on`, spawn or keep at least one tracked bot, then open the Kits editor. Expected: the right-side debug panel should disappear when Kits opens or when a Kits editor control fires, and it should not jump back above the Kit Editor on the next debug refresh.
-- Close the Kits editor with its X button. Expected: the right-side debug panel can return after the short close suppression window if debug side panel mode remains enabled.
-- If the Kits UI is dismissed without firing `kits.close`, wait for the fallback suppression window. Expected: the right-side debug panel can return automatically instead of staying hidden indefinitely.
-- Open `/raidbots admin`. Expected: the RoamBots debug side panel clears while the admin CUI is open, then can return after the admin CUI closes if debug side panel mode remains enabled.
-- Open `/admin`, select Commands, then switch between Slash Commands and Console Commands. Expected: both pages list commands from the installed plugin source files and the filter narrows by command, plugin, or source.
+- Run `raidbots.debug on`, spawn or keep at least one tracked bot, then run `raidbots.list`.
+- Expected: each bot line includes `aim=<degrees>deg/<percent>%`.
+- Start a fresh fight or force a target switch. Expected: aim starts above the skill's base error but settles quickly; dangerous bots should feel close to player-accurate after roughly one second.
+- Confirm hits still feel like the held weapon's normal Rust damage; the balance change is misses/accuracy, not fake lower damage on successful hits.
 
 Local verification:
-- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.38 against `RustDedicated_Data/Managed`; remaining warnings are expected plugin-reference/future-field warnings.
-- Roslyn compile check passed for `oxide/plugins/LiveAdmin.cs` v0.4.5 against `RustDedicated_Data/Managed`; remaining warning is the existing `Title(string)` helper hiding the inherited plugin `Title` member.
+- `oxide/config/RaidlandsRoamBots.json` parsed successfully.
 - `git diff --check` passed for the edited handoff files, with only the repo's normal LF-to-CRLF working-copy warnings.
+- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.40 against `RustDedicated_Data/Managed`; remaining warnings are expected plugin-reference/future-field warnings.

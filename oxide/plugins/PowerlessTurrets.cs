@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Powerless Turrets", "August", "3.2.10")]
+    [Info("Powerless Turrets", "August/Raidlands", "3.2.11")]
     [Description("Allows SAMs and autoturrets to operate without electricity")]
     public class PowerlessTurrets : RustPlugin
     {
@@ -313,7 +313,20 @@ namespace Oxide.Plugins
             {
                 try
                 {
-                    if ((turret.inputs?.Length ?? 0) == 0) return; // corrupted IO on turret
+                    if ((turret.inputs?.Length ?? 0) == 0)
+                    {
+                        if (turret is NPCAutoTurret)
+                        {
+                            PowerNpcTurret(turret, true);
+                            if (!_onlineTurrets.Contains(turret))
+                            {
+                                _onlineTurrets.Add(turret);
+                            }
+                        }
+
+                        return;
+                    }
+
                     turret.SetFlag(BaseEntity.Flags.Reserved8, true);
                     turret.InitiateStartup();
                     turret.UpdateFromInput(11, 0);
@@ -323,7 +336,7 @@ namespace Oxide.Plugins
                         _onlineTurrets.Add(turret);
                     }
                 }
-                catch 
+                catch
                 {
                     UnityEngine.Debug.Log("PowerlessTurret issue trying to turn on turret (ex. copypaste old base)");
                 }
@@ -331,9 +344,22 @@ namespace Oxide.Plugins
 
             private void PowerTurretOff(AutoTurret turret)
             {
-                try 
+                try
                 {
-                    if ((turret.inputs?.Length ?? 0) == 0) return; // corrupted IO on turret
+                    if ((turret.inputs?.Length ?? 0) == 0)
+                    {
+                        if (turret is NPCAutoTurret)
+                        {
+                            PowerNpcTurret(turret, false);
+                            if (_onlineTurrets.Contains(turret))
+                            {
+                                _onlineTurrets.Remove(turret);
+                            }
+                        }
+
+                        return;
+                    }
+
                     turret.SetFlag(BaseEntity.Flags.Reserved8, false);
                     turret.InitiateShutdown();
                     turret.UpdateFromInput(0, 0);
@@ -343,10 +369,30 @@ namespace Oxide.Plugins
                         _onlineTurrets.Remove(turret);
                     }
                 }
-                catch 
+                catch
                 {
                     UnityEngine.Debug.Log("PowerlessTurret issue trying to turn off turret (ex. copypaste old base)");
                 }
+            }
+
+            private void PowerNpcTurret(AutoTurret turret, bool online)
+            {
+                turret.SetFlag(IOEntity.Flag_HasPower, online);
+                turret.SetFlag(BaseEntity.Flags.Reserved8, online);
+
+                if (online)
+                {
+                    turret.InitiateStartup();
+                    turret.SetIsOnline(true);
+                }
+                else
+                {
+                    turret.InitiateShutdown();
+                    turret.SetIsOnline(false);
+                    turret.target = null;
+                }
+
+                turret.SendNetworkUpdate();
             }
 
             public void ToggleTurretsInTcRange(BasePlayer player, string arg)

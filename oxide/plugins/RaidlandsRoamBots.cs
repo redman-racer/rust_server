@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.38")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.40")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -189,9 +189,9 @@ namespace Oxide.Plugins
             [JsonProperty("Skill Definitions")]
             public Dictionary<string, SkillDefinition> SkillDefinitions = new Dictionary<string, SkillDefinition>(StringComparer.OrdinalIgnoreCase)
             {
-                ["casual"] = new SkillDefinition { Health = 100f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 5f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f },
-                ["average"] = new SkillDefinition { Health = 110f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 3f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f },
-                ["dangerous"] = new SkillDefinition { Health = 120f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 1.5f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f }
+                ["casual"] = new SkillDefinition { Health = 100f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 1.5f, AimWarmupSeconds = 2.5f, AimWarmupInitialExtraDegrees = 3f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f },
+                ["average"] = new SkillDefinition { Health = 110f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 0.75f, AimWarmupSeconds = 1.75f, AimWarmupInitialExtraDegrees = 1.5f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f },
+                ["dangerous"] = new SkillDefinition { Health = 120f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 0.2f, AimWarmupSeconds = 1f, AimWarmupInitialExtraDegrees = 0.4f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f }
             };
 
             [JsonProperty("High Tier Kit Weight")]
@@ -375,7 +375,9 @@ namespace Oxide.Plugins
             public float IncomingDamageScale = 1f;
             public float ReactionMinSeconds = 0.4f;
             public float ReactionMaxSeconds = 0.85f;
-            public float AimErrorDegrees = 3f;
+            public float AimErrorDegrees = 0.75f;
+            public float AimWarmupSeconds = 1.75f;
+            public float AimWarmupInitialExtraDegrees = 1.5f;
             public float Aggression = 0.55f;
             public float Courage = 0.55f;
             public float TacticalNoise = 0.15f;
@@ -1116,6 +1118,9 @@ namespace Oxide.Plugins
             public float LastDamageDealtAt;
             public float LastSoundInvestigateCommandAt;
             public float LastSoundDebugAt;
+            public ulong AimWarmupTargetUserId;
+            public float AimWarmupStartedAt;
+            public float CurrentAimErrorDegrees;
             public float InvalidPositionSince;
             public string LastBarricadeReason = "none";
             public string LastUtilityReason = "none";
@@ -1462,6 +1467,8 @@ namespace Oxide.Plugins
             public string SkillTier;
             public float HealthFraction;
             public string WeaponShortname;
+            public float AimErrorDegrees;
+            public float AimWarmupProgress;
             public float AmmoFraction;
             public bool HasLineOfSight;
             public float TargetExposureFraction;
@@ -2946,6 +2953,14 @@ namespace Oxide.Plugins
 
         private void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectileShoot)
         {
+            var botRuntime = RuntimeFor(player);
+
+            if (botRuntime != null)
+            {
+                ApplyBotAimError(projectileShoot, player, botRuntime, Time.realtimeSinceStartup);
+                return;
+            }
+
             if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
             {
                 return;
@@ -2967,6 +2982,94 @@ namespace Oxide.Plugins
                     : "gunshot";
 
             BroadcastPlayerSound(player, player.transform.position, range, soundType, quietProjectile ? 0.42f : suppressed ? 0.7f : 1f, 0.08f);
+        }
+
+        private void ApplyBotAimError(ProtoBuf.ProjectileShoot projectileShoot, BasePlayer bot, BotRuntime runtime, float now)
+        {
+            if (projectileShoot?.projectiles == null || projectileShoot.projectiles.Count == 0 || bot == null || runtime == null)
+            {
+                return;
+            }
+
+            var errorDegrees = AimErrorDegreesAt(runtime, now);
+            runtime.CurrentAimErrorDegrees = errorDegrees;
+
+            if (errorDegrees <= 0.01f)
+            {
+                return;
+            }
+
+            foreach (var firedProjectile in projectileShoot.projectiles)
+            {
+                if (firedProjectile == null)
+                {
+                    continue;
+                }
+
+                var velocity = firedProjectile.startVel;
+                var speed = velocity.magnitude;
+
+                if (speed <= 0.01f)
+                {
+                    continue;
+                }
+
+                var direction = velocity.sqrMagnitude > 0.0001f
+                    ? velocity.normalized
+                    : AimDirectionFromShot(bot, runtime, firedProjectile.startPos);
+
+                firedProjectile.startVel = RandomDirectionInCone(direction, errorDegrees) * speed;
+            }
+
+            if (config.Debug.DebugPerception)
+            {
+                DebugLog($"bot-aim:{runtime.BotKey}", $"{runtime.DisplayName} fired with aim error {errorDegrees:0.0} degrees ({AimWarmupProgress(runtime, now) * 100f:0}% warm).", 1f);
+            }
+        }
+
+        private Vector3 AimDirectionFromShot(BasePlayer bot, BotRuntime runtime, Vector3 startPosition)
+        {
+            var target = runtime?.Memory?.Target;
+
+            if (target != null)
+            {
+                var targetPoint = EyePosition(target);
+
+                if (targetPoint != Vector3.zero)
+                {
+                    var toTarget = targetPoint - startPosition;
+
+                    if (toTarget.sqrMagnitude > 0.0001f)
+                    {
+                        return toTarget.normalized;
+                    }
+                }
+            }
+
+            return bot?.eyes != null ? bot.eyes.HeadForward() : Vector3.forward;
+        }
+
+        private Vector3 RandomDirectionInCone(Vector3 direction, float degrees)
+        {
+            if (direction.sqrMagnitude <= 0.0001f || degrees <= 0.01f)
+            {
+                return direction.sqrMagnitude <= 0.0001f ? Vector3.forward : direction.normalized;
+            }
+
+            direction.Normalize();
+            var tangent = Vector3.Cross(direction, Vector3.up);
+
+            if (tangent.sqrMagnitude <= 0.0001f)
+            {
+                tangent = Vector3.Cross(direction, Vector3.right);
+            }
+
+            tangent.Normalize();
+            var bitangent = Vector3.Cross(direction, tangent).normalized;
+            var spin = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            var axis = (tangent * Mathf.Cos(spin) + bitangent * Mathf.Sin(spin)).normalized;
+            var angle = degrees * Mathf.Sqrt(UnityEngine.Random.Range(0f, 1f));
+            return (Quaternion.AngleAxis(angle, axis) * direction).normalized;
         }
 
         private void OnRocketLaunched(BasePlayer player, BaseEntity entity)
@@ -4471,7 +4574,9 @@ namespace Oxide.Plugins
             normalized.IncomingDamageScale = PlayerLikeDamageScale;
             normalized.ReactionMinSeconds = Math.Max(0f, normalized.ReactionMinSeconds);
             normalized.ReactionMaxSeconds = Math.Max(normalized.ReactionMinSeconds, normalized.ReactionMaxSeconds);
-            normalized.AimErrorDegrees = Math.Max(0f, normalized.AimErrorDegrees);
+            normalized.AimErrorDegrees = Mathf.Clamp(normalized.AimErrorDegrees, 0f, 45f);
+            normalized.AimWarmupSeconds = Mathf.Clamp(normalized.AimWarmupSeconds, 0f, 5f);
+            normalized.AimWarmupInitialExtraDegrees = Mathf.Clamp(normalized.AimWarmupInitialExtraDegrees, 0f, 45f);
             normalized.Aggression = Mathf.Clamp01(normalized.Aggression);
             normalized.Courage = Mathf.Clamp01(normalized.Courage);
             normalized.TacticalNoise = Mathf.Clamp01(normalized.TacticalNoise);
@@ -4493,6 +4598,8 @@ namespace Oxide.Plugins
                 ReactionMinSeconds = source.ReactionMinSeconds,
                 ReactionMaxSeconds = source.ReactionMaxSeconds,
                 AimErrorDegrees = source.AimErrorDegrees,
+                AimWarmupSeconds = source.AimWarmupSeconds,
+                AimWarmupInitialExtraDegrees = source.AimWarmupInitialExtraDegrees,
                 Aggression = source.Aggression,
                 Courage = source.Courage,
                 TacticalNoise = source.TacticalNoise
@@ -4503,15 +4610,15 @@ namespace Oxide.Plugins
         {
             if (string.Equals(tier, "casual", StringComparison.OrdinalIgnoreCase))
             {
-                return new SkillDefinition { Health = 100f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 5f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f };
+                return new SkillDefinition { Health = 100f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.75f, ReactionMaxSeconds = 1.35f, AimErrorDegrees = 1.5f, AimWarmupSeconds = 2.5f, AimWarmupInitialExtraDegrees = 3f, Aggression = 0.35f, Courage = 0.35f, TacticalNoise = 0.25f };
             }
 
             if (string.Equals(tier, "dangerous", StringComparison.OrdinalIgnoreCase))
             {
-                return new SkillDefinition { Health = 120f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 1.5f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f };
+                return new SkillDefinition { Health = 120f, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.18f, ReactionMaxSeconds = 0.45f, AimErrorDegrees = 0.2f, AimWarmupSeconds = 1f, AimWarmupInitialExtraDegrees = 0.4f, Aggression = 0.8f, Courage = 0.8f, TacticalNoise = 0.06f };
             }
 
-            return new SkillDefinition { Health = BotDefaultAverageHealth, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 3f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f };
+            return new SkillDefinition { Health = BotDefaultAverageHealth, DamageScale = 1f, IncomingDamageScale = 1f, ReactionMinSeconds = 0.4f, ReactionMaxSeconds = 0.85f, AimErrorDegrees = 0.75f, AimWarmupSeconds = 1.75f, AimWarmupInitialExtraDegrees = 1.5f, Aggression = 0.55f, Courage = 0.55f, TacticalNoise = 0.15f };
         }
 
         private float DefaultHealthForTier(string tier)
@@ -4527,6 +4634,63 @@ namespace Oxide.Plugins
             }
 
             return BotDefaultAverageHealth;
+        }
+
+        private void StartAimWarmup(BotRuntime runtime, ulong targetUserId, float now)
+        {
+            if (runtime == null || targetUserId == 0UL)
+            {
+                return;
+            }
+
+            if (runtime.AimWarmupTargetUserId == targetUserId && runtime.AimWarmupStartedAt > 0f)
+            {
+                return;
+            }
+
+            runtime.AimWarmupTargetUserId = targetUserId;
+            runtime.AimWarmupStartedAt = now;
+            runtime.CurrentAimErrorDegrees = AimErrorDegreesAt(runtime, now);
+        }
+
+        private float AimWarmupProgress(BotRuntime runtime, float now)
+        {
+            var duration = runtime?.Skill == null ? 0f : runtime.Skill.AimWarmupSeconds;
+
+            if (duration <= 0.01f)
+            {
+                return 1f;
+            }
+
+            var startedAt = runtime.AimWarmupStartedAt > 0f ? runtime.AimWarmupStartedAt : runtime.Memory.LastTargetSwitchAt;
+
+            if (startedAt <= 0f)
+            {
+                return 1f;
+            }
+
+            return Mathf.Clamp01((now - startedAt) / duration);
+        }
+
+        private float AimErrorDegreesAt(BotRuntime runtime, float now)
+        {
+            var skill = runtime?.Skill ?? DefaultSkillDefinition(runtime?.SkillTier);
+            var baseError = Mathf.Clamp(skill?.AimErrorDegrees ?? 0f, 0f, 45f);
+            var warmupExtra = Mathf.Clamp(skill?.AimWarmupInitialExtraDegrees ?? 0f, 0f, 45f);
+            var progress = AimWarmupProgress(runtime, now);
+            return Mathf.Clamp(baseError + warmupExtra * (1f - progress), 0f, 45f);
+        }
+
+        private string AimStatus(BotRuntime runtime, float now)
+        {
+            if (runtime == null)
+            {
+                return "none";
+            }
+
+            var error = AimErrorDegreesAt(runtime, now);
+            runtime.CurrentAimErrorDegrees = error;
+            return $"{error.ToString("0.0", CultureInfo.InvariantCulture)}deg/{(AimWarmupProgress(runtime, now) * 100f).ToString("0", CultureInfo.InvariantCulture)}%";
         }
 
         private string ChooseProfileName()
@@ -6086,6 +6250,7 @@ namespace Oxide.Plugins
             var medicalStatus = MedicalStatus(bot, runtime, now);
             var protectionStatus = string.IsNullOrWhiteSpace(runtime.LastProtectionReason) ? "none" : runtime.LastProtectionReason;
             var anchorStatus = BarricadeAnchorStatus(runtime, now);
+            var aimStatus = AimStatus(runtime, now);
             var skillColor = SkillNameplateColorHex(runtime);
             CleanupBotPlacedEntityRefs();
 
@@ -6095,7 +6260,7 @@ namespace Oxide.Plugins
                 + $"\nSignal: {signal}  Target: {target}"
                 + $"\nAction: {action}"
                 + $"\nLOS: {(runtime.Memory.HasLineOfSight ? "Y" : "N")}  Exposure: {runtime.Memory.TargetExposureFraction:0.00} ({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints})"
-                + $"\nSkill: <color={skillColor}>{runtime.SkillTier}</color>  Kit: {runtime.KitName}"
+                + $"\nSkill: <color={skillColor}>{runtime.SkillTier}</color>  Kit: {runtime.KitName}  Aim: {aimStatus}"
                 + $"\nHP: {health}/{maxHealth}  Weapon: {weapon}  Ammo: {ammo}"
                 + $"\nClan: {BotClanLabel(runtime)}"
                 + $"\nK/D: {stats.kills}/{stats.deaths} ({kd})  Team: {runtime.TeamId}  Role: {runtime.SquadRole}"
@@ -6239,7 +6404,12 @@ namespace Oxide.Plugins
                 if (switched)
                 {
                     runtime.Memory.LastTargetSwitchAt = now;
+                    StartAimWarmup(runtime, visibleTargetId, now);
                     runtime.NextReactionAllowedAt = now + UnityEngine.Random.Range(runtime.Skill.ReactionMinSeconds, runtime.Skill.ReactionMaxSeconds);
+                }
+                else if (runtime.AimWarmupTargetUserId == 0UL)
+                {
+                    StartAimWarmup(runtime, visibleTargetId, now);
                 }
 
                 if (config.Debug.DebugPerception)
@@ -6949,6 +7119,8 @@ namespace Oxide.Plugins
                 SkillTier = runtime.SkillTier,
                 HealthFraction = Mathf.Clamp01(bot.Health() / BotMaxHealth(bot, runtime)),
                 WeaponShortname = ActiveWeaponShortname(bot),
+                AimErrorDegrees = AimErrorDegreesAt(runtime, now),
+                AimWarmupProgress = AimWarmupProgress(runtime, now),
                 AmmoFraction = AmmoFraction(bot),
                 HasLineOfSight = runtime.Memory.HasLineOfSight,
                 TargetExposureFraction = runtime.Memory.TargetExposureFraction,
@@ -7015,6 +7187,8 @@ namespace Oxide.Plugins
                 ["skill_tier"] = request.SkillTier ?? "",
                 ["health_fraction"] = request.HealthFraction,
                 ["weapon_shortname"] = request.WeaponShortname ?? "",
+                ["aim_error_degrees"] = request.AimErrorDegrees,
+                ["aim_warmup_progress"] = request.AimWarmupProgress,
                 ["ammo_fraction"] = request.AmmoFraction,
                 ["has_line_of_sight"] = request.HasLineOfSight,
                 ["target_exposure_fraction"] = request.TargetExposureFraction,
@@ -9074,6 +9248,9 @@ namespace Oxide.Plugins
             runtime.Memory.TargetExposureFraction = 0f;
             runtime.Memory.TargetVisibleProbePoints = 0;
             runtime.Memory.TargetTotalProbePoints = 0;
+            runtime.AimWarmupTargetUserId = 0UL;
+            runtime.AimWarmupStartedAt = 0f;
+            runtime.CurrentAimErrorDegrees = AimErrorDegreesAt(runtime, Time.realtimeSinceStartup);
         }
 
         private void QueueDecisionTrace(DecisionTrace trace)
@@ -9524,6 +9701,7 @@ namespace Oxide.Plugins
             }
 
             EnsureBotWeaponLoaded(bot);
+            StartAimWarmup(runtime, CombatTargetId(target), Time.realtimeSinceStartup);
             ConfigureBrainForTarget(bot, target);
             var attacker = GetAttackInterface(bot);
             var started = false;
@@ -12612,7 +12790,7 @@ namespace Oxide.Plugins
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
             var now = Time.realtimeSinceStartup;
-            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
         }
 
         private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)

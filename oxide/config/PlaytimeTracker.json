@@ -8,8 +8,8 @@
     "Reward plugin (ServerRewards, Economics)": "ServerRewards",
     "Playtime rewards": {
       "Issue rewards for playtime": true,
-      "Reward interval (seconds)": 300,
-      "Reward amount": 100
+      "Reward interval (seconds)": 900,
+      "Reward amount": 25
     },
     "Referral rewards": {
       "Issue rewards for player referrals": true,

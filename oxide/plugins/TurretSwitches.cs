@@ -4,10 +4,19 @@ using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("Turret Switches", "ziptie", 1.5)]
+    [Info("Turret Switches", "ziptie/Raidlands", 1.7)]
     [Description("Spawns switches on turrets and SAM sites for players with permission.")]
     public class TurretSwitches : CovalencePlugin
     {
+        private const string SwitchPrefab = "assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab";
+        private static readonly Vector3 VanillaTurretSwitchOffset = new Vector3(0f, -0.65f, 0.3f);
+        private static readonly Vector3[] NpcSentryLegSwitchOffsets =
+        {
+            new Vector3(0f, -0.62f, 0.9f),
+            new Vector3(0.78f, -0.62f, -0.46f),
+            new Vector3(-0.78f, -0.62f, -0.46f)
+        };
+
         #region Config
         public static TurretSwitchesConfig config;
         protected override void LoadDefaultConfig()
@@ -85,19 +94,11 @@ namespace Oxide.Plugins
         }
         void OnEntitySpawned(AutoTurret entity)
         {
-            ElectricSwitch s = GameManager.server.CreateEntity("assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab", new Vector3(0, -0.65f, .3f), Quaternion.identity) as ElectricSwitch;
-            s.Spawn();
-            s.SetParent(entity);
-            s.gameObject.AddComponent<TurretSwitch>().Turret = entity;
-            s.SetFlag(IOEntity.Flag_HasPower, true);
-            s.InitializeHealth(float.MaxValue, float.MaxValue);
-            GameObject.Destroy(s.GetComponent<GroundWatch>());
-            GameObject.Destroy(s.GetComponent<DestroyOnGroundMissing>());
-            switches.Add(s);
+            AddSwitchToTurret(entity);
         }
         void OnEntitySpawned(SamSite entity)
         {
-            ElectricSwitch s = GameManager.server.CreateEntity("assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab", new Vector3(0, -0.65f, .95f), Quaternion.identity) as ElectricSwitch;
+            ElectricSwitch s = GameManager.server.CreateEntity(SwitchPrefab, new Vector3(0, -0.65f, .95f), Quaternion.identity) as ElectricSwitch;
             s.Spawn();
             s.SetParent(entity);
             s.gameObject.AddComponent<SAMSwitch>().SamSite = entity;
@@ -131,21 +132,11 @@ namespace Oxide.Plugins
         {
             foreach (var entity in BaseNetworkable.serverEntities)
             {
-                if (entity.PrefabName == "assets/prefabs/npc/autoturret/autoturret_deployed.prefab")
-                {
-                    ElectricSwitch s = GameManager.server.CreateEntity("assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab", new Vector3(0, -0.65f, .3f), Quaternion.identity) as ElectricSwitch;
-                    s.Spawn();
-                    s.SetParent((BaseEntity)entity);
-                    s.gameObject.AddComponent<TurretSwitch>().Turret = entity.GetComponent<AutoTurret>();
-                    s.SetFlag(IOEntity.Flag_HasPower, true);
-                    s.InitializeHealth(float.MaxValue, float.MaxValue);
-                    GameObject.Destroy(s.GetComponent<GroundWatch>());
-                    GameObject.Destroy(s.GetComponent<DestroyOnGroundMissing>());
-                    switches.Add(s);
-                }
+                AddSwitchToTurret(entity as AutoTurret);
+
                 if (entity is SamSite)
                 {
-                    ElectricSwitch s = GameManager.server.CreateEntity("assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab", new Vector3(0, -0.65f, .95f), Quaternion.identity) as ElectricSwitch;
+                    ElectricSwitch s = GameManager.server.CreateEntity(SwitchPrefab, new Vector3(0, -0.65f, .95f), Quaternion.identity) as ElectricSwitch;
                     s.Spawn();
                     s.SetParent((BaseEntity)entity);
                     s.gameObject.AddComponent<SAMSwitch>().SamSite = entity.GetComponent<SamSite>();
@@ -156,6 +147,118 @@ namespace Oxide.Plugins
                 }
             }
         }
+
+        public void AddSwitchToTurret(AutoTurret entity)
+        {
+            AddSwitchToTurret(entity, null);
+        }
+
+        public void AddSwitchToTurret(AutoTurret entity, Vector3? preferredWorldPosition)
+        {
+            if (entity == null || entity.IsDestroyed)
+                return;
+
+            var existingSwitch = FindTurretSwitch(entity);
+            if (existingSwitch != null)
+            {
+                PositionTurretSwitch(entity, existingSwitch, preferredWorldPosition);
+                if (!switches.Contains(existingSwitch))
+                    switches.Add(existingSwitch);
+                return;
+            }
+
+            ElectricSwitch s = GameManager.server.CreateEntity(SwitchPrefab, entity.transform.position, entity.transform.rotation) as ElectricSwitch;
+            s.Spawn();
+            s.SetParent(entity);
+            s.gameObject.AddComponent<TurretSwitch>().Turret = entity;
+            PositionTurretSwitch(entity, s, preferredWorldPosition);
+            s.SetFlag(IOEntity.Flag_HasPower, true);
+            s.InitializeHealth(float.MaxValue, float.MaxValue);
+            GameObject.Destroy(s.GetComponent<GroundWatch>());
+            GameObject.Destroy(s.GetComponent<DestroyOnGroundMissing>());
+            switches.Add(s);
+        }
+
+        public void API_RepositionTurretSwitch(BaseEntity entity, Vector3 preferredWorldPosition)
+        {
+            var turret = entity as AutoTurret;
+            if (turret == null)
+                turret = entity?.GetComponent<AutoTurret>();
+
+            AddSwitchToTurret(turret, preferredWorldPosition);
+        }
+
+        private ElectricSwitch FindTurretSwitch(AutoTurret entity)
+        {
+            if (entity.children == null)
+                return null;
+
+            foreach (var child in entity.children)
+            {
+                if (child != null && child.HasComponent<TurretSwitch>())
+                    return child as ElectricSwitch;
+            }
+
+            return null;
+        }
+
+        private void PositionTurretSwitch(AutoTurret entity, ElectricSwitch switchEntity, Vector3? preferredWorldPosition)
+        {
+            if (entity == null || switchEntity == null)
+                return;
+
+            var localPosition = GetTurretSwitchOffset(entity, preferredWorldPosition);
+            switchEntity.transform.localPosition = localPosition;
+
+            if (entity is NPCAutoTurret)
+                switchEntity.transform.localRotation = GetOutwardSwitchRotation(localPosition);
+            else
+                switchEntity.transform.localRotation = Quaternion.identity;
+
+            switchEntity.SendNetworkUpdate();
+        }
+
+        private Vector3 GetTurretSwitchOffset(AutoTurret entity, Vector3? preferredWorldPosition)
+        {
+            if (!(entity is NPCAutoTurret))
+                return VanillaTurretSwitchOffset;
+
+            if (!preferredWorldPosition.HasValue)
+                return NpcSentryLegSwitchOffsets[0];
+
+            var localDirection = entity.transform.InverseTransformDirection(preferredWorldPosition.Value - entity.transform.position);
+            localDirection.y = 0f;
+            if (localDirection.sqrMagnitude < 0.01f)
+                return NpcSentryLegSwitchOffsets[0];
+
+            localDirection.Normalize();
+            var bestOffset = NpcSentryLegSwitchOffsets[0];
+            var bestScore = float.MinValue;
+            foreach (var offset in NpcSentryLegSwitchOffsets)
+            {
+                var offsetDirection = new Vector3(offset.x, 0f, offset.z);
+                if (offsetDirection.sqrMagnitude < 0.01f)
+                    continue;
+
+                offsetDirection.Normalize();
+                var score = Vector3.Dot(localDirection, offsetDirection);
+                if (score <= bestScore)
+                    continue;
+
+                bestScore = score;
+                bestOffset = offset;
+            }
+
+            return bestOffset;
+        }
+
+        private Quaternion GetOutwardSwitchRotation(Vector3 localPosition)
+        {
+            var outward = new Vector3(localPosition.x, 0f, localPosition.z);
+            return outward.sqrMagnitude < 0.01f
+                ? Quaternion.identity
+                : Quaternion.LookRotation(outward.normalized, Vector3.up);
+        }
         #endregion
     }
     #region Other Classes
@@ -165,14 +268,14 @@ namespace Oxide.Plugins
 
         public bool CanToggleTurret(BasePlayer player)
         {
+            if (Turret == null)
+                return false;
+
             if (TurretSwitches.config.RequiresPermission && !player.IPlayer.HasPermission(TurretSwitches.TurretPermission))
                 return false;
 
             if (TurretSwitches.config.NeedsBuildingPrivilegeToUseSwitch && Turret.GetBuildingPrivilege() != null)
                 return Turret.GetBuildingPrivilege().authorizedPlayers.ToList().Exists(x => x == player.userID);
-
-            if (Turret == null)
-                return false;
 
             if (Turret.GetBuildingPrivilege() == null)
                 return true;
@@ -184,7 +287,16 @@ namespace Oxide.Plugins
             if (Turret == null)
                 return;
             Turret.SetFlag(IOEntity.Flag_HasPower, toggle);
+            Turret.SetFlag(BaseEntity.Flags.Reserved8, toggle);
+            if (toggle)
+                Turret.InitiateStartup();
+            else
+            {
+                Turret.InitiateShutdown();
+                Turret.target = null;
+            }
             Turret.SetIsOnline(toggle);
+            Turret.SendNetworkUpdate();
         }
     }
     public class SAMSwitch : MonoBehaviour

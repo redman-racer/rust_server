@@ -8,16 +8,17 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.3")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.6")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
         private const string AdminPermission = "raidlands.sentryturrets.admin";
+        private const string RemoverToolRefundKey = "raidlands.sentryturret";
         private const string VanillaAutoTurretPrefab = "assets/prefabs/npc/autoturret/autoturret_deployed.prefab";
         private const string VanillaAutoTurretShortPrefab = "autoturret_deployed";
 
         [PluginReference]
-        private Plugin Clans, Friends;
+        private Plugin Clans, Friends, RemoverTool, TurretSwitches;
 
         private Configuration config;
         private readonly HashSet<ulong> handledTurretIds = new HashSet<ulong>();
@@ -59,7 +60,25 @@ namespace Oxide.Plugins
             public float[] AttackAllReapplyDelaysSeconds = { 0.05f, 0.25f, 1f, 3f };
 
             [JsonProperty("Remove TurretSwitches Child Entities From Spawned NPC Sentries")]
-            public bool RemoveTurretSwitchChildEntities = true;
+            public bool RemoveTurretSwitchChildEntities = false;
+
+            [JsonProperty("Enable TurretSwitches Compatibility")]
+            public bool EnableTurretSwitchesCompatibility = true;
+
+            [JsonProperty("Default New Sentries Online")]
+            public bool DefaultNewSentriesOnline = false;
+
+            [JsonProperty("Enable Hammer Pickup")]
+            public bool EnableHammerPickup = true;
+
+            [JsonProperty("Enable RemoverTool Integration")]
+            public bool EnableRemoverToolIntegration = true;
+
+            [JsonProperty("Return Item On Hammer Pickup")]
+            public bool ReturnItemOnHammerPickup = true;
+
+            [JsonProperty("Return Item When RemoverTool Refunds")]
+            public bool ReturnItemWhenRemoverToolRefunds = true;
 
             [JsonProperty("Replacement Delay Seconds")]
             public float ReplacementDelaySeconds = 0.1f;
@@ -143,6 +162,11 @@ namespace Oxide.Plugins
                 config.ClearAuthorizedPlayersOnSpawnedNpcSentries = false;
             }
 
+            if (config.EnableTurretSwitchesCompatibility)
+            {
+                config.RemoveTurretSwitchChildEntities = false;
+            }
+
             if (config.ReplacementDelaySeconds < 0f)
             {
                 config.ReplacementDelaySeconds = 0.1f;
@@ -184,6 +208,7 @@ namespace Oxide.Plugins
                 var authIds = BuildAuthorizationSet(entity as AutoTurret, entity.OwnerID);
                 ApplySentryRuntimeState(entity, authIds);
                 ScheduleSentryRuntimeStateReapply(entity, authIds);
+                ConfigurePickup(entity);
             }
         }
 
@@ -302,6 +327,67 @@ namespace Oxide.Plugins
             HandleItemDeployed(deployer, entity);
         }
 
+        private object OnRemovableEntityInfo(BaseEntity entity, BasePlayer player)
+        {
+            if (!config.EnableRemoverToolIntegration || !IsManagedNpcSentry(entity))
+            {
+                return null;
+            }
+
+            var info = new Dictionary<string, object>
+            {
+                ["DisplayName"] = config.SentryItem.DisplayName,
+                ["ImageId"] = config.SentryItem.Shortname,
+                ["Price"] = new Dictionary<string, object>()
+            };
+
+            if (config.ReturnItemWhenRemoverToolRefunds)
+            {
+                info["Refund"] = CreateRemoverToolItemMap(1);
+            }
+
+            return info;
+        }
+
+        private object CanPickupEntity(BasePlayer player, BaseEntity entity)
+        {
+            if (!config.EnableHammerPickup || !IsManagedNpcSentry(entity))
+            {
+                return null;
+            }
+
+            TryPickupSentry(player, entity, true);
+            return false;
+        }
+
+        private object OnHammerHit(BasePlayer player, HitInfo info)
+        {
+            if (!config.EnableHammerPickup || player == null || info?.HitEntity == null)
+            {
+                return null;
+            }
+
+            var entity = info.HitEntity as BaseEntity;
+            if (!IsManagedNpcSentry(entity) || !IsHammer(player.GetActiveItem()) || IsRemoverToolActive(player))
+            {
+                return null;
+            }
+
+            TryPickupSentry(player, entity, true);
+            return false;
+        }
+
+        private object OnRemovableEntityGiveRefund(BaseEntity targetEntity, BasePlayer player, string itemName, int amount, long skinId)
+        {
+            if (!string.Equals(itemName, RemoverToolRefundKey, StringComparison.OrdinalIgnoreCase) || !IsManagedNpcSentry(targetEntity) || player == null)
+            {
+                return null;
+            }
+
+            GiveSentryTurretsDetailed(player, Math.Max(1, amount));
+            return null;
+        }
+
         private void HandleItemDeployed(Deployer deployer, BaseEntity entity)
         {
             if (!config.Enabled)
@@ -331,10 +417,12 @@ namespace Oxide.Plugins
                 return;
             }
 
-            timer.Once(config.ReplacementDelaySeconds, () => ReplaceTurret(player.userID, entity));
+            var placerPosition = player.transform.position;
+            var ownerId = player.userID;
+            timer.Once(config.ReplacementDelaySeconds, () => ReplaceTurret(ownerId, placerPosition, entity));
         }
 
-        private void ReplaceTurret(ulong ownerId, BaseEntity original)
+        private void ReplaceTurret(ulong ownerId, Vector3 placerPosition, BaseEntity original)
         {
             if (original == null || original.IsDestroyed || !IsVanillaAutoTurret(original))
             {
@@ -364,6 +452,10 @@ namespace Oxide.Plugins
 
             ApplySentryRuntimeState(replacement, authIds);
             ScheduleSentryRuntimeStateReapply(replacement, authIds);
+            ConfigurePickup(replacement);
+            SetTurretPowerState(replacement as AutoTurret, config.DefaultNewSentriesOnline);
+            RepositionTurretSwitch(replacement, placerPosition);
+            timer.Once(0.1f, () => RepositionTurretSwitch(replacement, placerPosition));
 
             if (config.RemoveTurretSwitchChildEntities)
             {
@@ -644,6 +736,184 @@ namespace Oxide.Plugins
                     child.Kill();
                 }
             }
+        }
+
+        private void ConfigurePickup(BaseEntity entity)
+        {
+            if (!config.EnableHammerPickup)
+            {
+                return;
+            }
+
+            var combatEntity = entity as BaseCombatEntity;
+            if (combatEntity == null)
+            {
+                return;
+            }
+
+            var itemDefinition = ItemManager.FindItemDefinition(config.SentryItem.Shortname);
+            if (itemDefinition == null)
+            {
+                return;
+            }
+
+            combatEntity.pickup.enabled = true;
+            combatEntity.pickup.itemTarget = itemDefinition;
+            combatEntity.SendNetworkUpdate();
+        }
+
+        private bool TryPickupSentry(BasePlayer player, BaseEntity entity, bool sendMessages)
+        {
+            if (player == null || !IsManagedNpcSentry(entity))
+            {
+                return false;
+            }
+
+            if (!CanManageSentry(player, entity))
+            {
+                if (sendMessages)
+                {
+                    player.ChatMessage($"{config.ChatPrefix} You are not authorized to pick up this Outpost Sentry Turret.");
+                }
+
+                return false;
+            }
+
+            if (config.ReturnItemOnHammerPickup)
+            {
+                var item = CreateSentryItem();
+                if (item != null)
+                {
+                    if (!player.inventory.GiveItem(item))
+                    {
+                        item.Drop(player.GetDropPosition(), player.GetDropVelocity());
+                    }
+                }
+            }
+
+            entity.Kill(BaseNetworkable.DestroyMode.None);
+            if (sendMessages)
+            {
+                player.ChatMessage($"{config.ChatPrefix} Outpost Sentry Turret picked up.");
+            }
+
+            return true;
+        }
+
+        private bool CanManageSentry(BasePlayer player, BaseEntity entity)
+        {
+            if (player == null || entity == null)
+            {
+                return false;
+            }
+
+            if (player.IsAdmin || permission.UserHasPermission(player.UserIDString, AdminPermission))
+            {
+                return true;
+            }
+
+            if (entity.OwnerID == player.userID)
+            {
+                return true;
+            }
+
+            var turret = entity as AutoTurret;
+            return turret != null && turret.authorizedPlayers.Contains(player.userID);
+        }
+
+        private bool IsHammer(Item item)
+        {
+            return string.Equals(item?.info?.shortname, "hammer", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsRemoverToolActive(BasePlayer player)
+        {
+            if (player == null || RemoverTool == null)
+            {
+                return false;
+            }
+
+            var removeType = RemoverTool.Call("GetPlayerRemoveType", player) as string;
+            if (!string.IsNullOrWhiteSpace(removeType))
+            {
+                return true;
+            }
+
+            foreach (var component in player.GetComponents<Component>())
+            {
+                if (component != null && string.Equals(component.GetType().Name, "ToolRemover", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private Dictionary<string, object> CreateRemoverToolItemMap(int amount)
+        {
+            return new Dictionary<string, object>
+            {
+                [RemoverToolRefundKey] = new Dictionary<string, object>
+                {
+                    ["Amount"] = amount,
+                    ["SkinId"] = ToRemoverToolSkinId(config.SentryItem.Skin),
+                    ["ImageId"] = config.SentryItem.Shortname,
+                    ["DisplayName"] = config.SentryItem.DisplayName
+                }
+            };
+        }
+
+        private long ToRemoverToolSkinId(ulong skinId)
+        {
+            return skinId > long.MaxValue ? -1 : (long)skinId;
+        }
+
+        private void SetTurretPowerState(AutoTurret turret, bool online)
+        {
+            if (turret == null || turret.IsDestroyed)
+            {
+                return;
+            }
+
+            try
+            {
+                turret.SetFlag(IOEntity.Flag_HasPower, online);
+                turret.SetFlag(BaseEntity.Flags.Reserved8, online);
+
+                if ((turret.inputs?.Length ?? 0) > 0)
+                {
+                    turret.UpdateFromInput(online ? 11 : 0, 0);
+                }
+
+                if (online)
+                {
+                    turret.InitiateStartup();
+                    turret.SetIsOnline(true);
+                }
+                else
+                {
+                    turret.InitiateShutdown();
+                    turret.SetIsOnline(false);
+                    turret.target = null;
+                }
+
+                turret.SendNetworkUpdate();
+            }
+            catch (Exception exception)
+            {
+                PrintWarning($"Could not set Outpost Sentry Turret power state: {exception.Message}");
+            }
+        }
+
+        private void RepositionTurretSwitch(BaseEntity entity, Vector3 preferredWorldPosition)
+        {
+            if (!config.EnableTurretSwitchesCompatibility || TurretSwitches == null || entity == null || entity.IsDestroyed)
+            {
+                return;
+            }
+
+            TurretSwitches.Call("API_RepositionTurretSwitch", entity, preferredWorldPosition);
         }
 
         private void ScheduleSentryRuntimeStateReapply(BaseEntity entity, HashSet<ulong> authIds)
