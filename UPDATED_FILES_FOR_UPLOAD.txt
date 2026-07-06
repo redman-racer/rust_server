@@ -1,92 +1,36 @@
-RaidlandsRoamBots v0.3.34 killfeed + quiet console + clan wars - 2026-07-05
+Raidlands bots debug UI and LiveAdmin command catalog - 2026-07-06
 
 What changed:
-- Checked-in RoamBots config is now a staged live-release profile: disabled on reload, target=50, min=0, max=200.
-- Added an in-game admin CUI opened with `/raidbots admin`.
-- Added `raidbots.ui` as the panel action dispatcher behind the CUI buttons.
-- Admin panel tabs now cover overview, population, spawn, AI, utility, rewards, advisor, debug, and danger controls.
-- The panel can enable/disable, apply the live 50/200 preset, spawn manual test batches, tune target/min/max, change spawn mode, clear anchor, toggle tactical features, tune key ranges/cooldowns/caps, manage rewards/RP, switch advisor modes, control debug UI, reload config/data, and run emergency cleanup actions.
-- Code defaults now match the staged high-cap live config for target/max population, near-player spawn tuning, random fallback, nav sample distance, retry timing, and solo/duo/trio weights.
-- Near-player spawning now targets any active non-safe-zone player; the tester-only `ababmxking` anchor is cleared.
-- Random land fallback remains disabled so bad/no player-adjacent spawns do not silently become arbitrary map spawns.
-- Team weights are back to a normal live mix: solo=55, duo=35, trio=10.
-- Debug spawn logs, tactical logs, nameplates, and side panel are off by default.
-- Debug console logs are now separated from debug UI and remain off by default; repeated spawn/kit warnings are throttled.
-- Different-clan roam bots can now target, damage, and kill each other; same-clan bot damage remains blocked.
-- Decision advisor is off/fallback-only by default so release play uses deterministic local tactics and makes no outbound advisor calls unless explicitly configured later.
-- Foliage LOS defaults now use a narrower 0.65m cast, require 2 foliage blockers, and allow 24m clear-through distance to reduce firing through brush while avoiding one-branch false negatives.
-- Kill chat for tracked roam bot deaths now includes weapon/method/distance, such as `PlayerName killed [NR] LaunchLoot with Assault Rifle from 42m (gunfire).`.
-- Bot kills against real players now broadcast to global chat with the same DeathNotes-styled format.
-- Different-clan bot-vs-bot kills also broadcast through the same killfeed.
-- DeathNotes is suppressed for any death involving a tracked roam bot to avoid duplicate generic scientist/NPC death messages.
-- Real players now receive ServerRewards RP for roam bot kills.
-- The live config currently awards 5 RP per roam bot kill and sends the killer a short RP confirmation message.
-- New config section: `Bot Kill Integration`.
+- RaidlandsRoamBots v0.3.38 suppresses and destroys the right-side debug panel when common menu/admin CUI commands fire, including Kits editor commands such as `kits.creator`, so the one-second debug refresh does not re-add the side panel above another plugin's menu.
+- Explicit close commands such as `kits.close` now actively shorten an existing menu suppression window, so the debug side panel can return shortly after the other menu closes.
+- Normal menu commands now use a shorter fallback suppression window if no close command is seen.
+- Opening the `/raidbots admin` CUI clears and suppresses the right-side debug panel until the admin CUI is closed.
+- LiveAdmin v0.4.5 adds a Commands nav tab with separate Slash Commands and Console Commands pages, filter support, paging, plugin/source columns, and a short cache over the local plugin source scan.
 
 Rust server plugin files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
+- oxide/plugins/LiveAdmin.cs
 
-Rust server config files to upload:
-- oxide/config/RaidlandsRoamBots.json
-
-Documentation / handoff files:
+Docs/reference files to upload or keep with the repo handoff:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 - UPDATED_FILES_FOR_UPLOAD.txt
-- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_POPULATION_AI_2026-07-04.md
 
 Reload after upload:
 - oxide.reload RaidlandsRoamBots
-- In game: /raidbots admin
-- raidbots.diag
-- raidbots.enable 3
-- raidbots.list
-- If the three-bot smoke looks healthy: raidbots.target 25, then raidbots.target 50
+- oxide.reload LiveAdmin
 
-Local verification:
-- JSON parse passed for oxide/config/RaidlandsRoamBots.json.
-- Roslyn compile check against RustDedicated_Data/Managed passed for RaidlandsRoamBots v0.3.34.
-- Remaining compiler warnings are expected unused future-phase fields and Oxide plugin references populated at runtime.
+Optional permissions if non-owner staff should see the new LiveAdmin command catalog:
+- oxide.grant group admin liveadmin.commands.view
+- oxide.grant group moderator liveadmin.commands.view
 
 Live smoke checks:
-- Confirm the plugin loads as RaidlandsRoamBots v0.3.34.
-- Confirm `/raidbots admin` opens the admin panel for an admin or a player with `raidlandsroambots.admin`.
-- Confirm the panel shows enabled=False, target=50, max=200, mode=near_players, anchor=all, and advisor=none/fallback_only.
-- Confirm `raidbots.diag` shows enabled=False before the manual enable step, target=50, anchor=all, and advisor=none/fallback_only.
-- Confirm oxide/config/RaidlandsRoamBots.json has "Target Population": 50, "Minimum Allowed Population": 0, "Maximum Allowed Population": 200, "Near Player Anchor Name Or SteamID": "", and "Use Random Land Fallback": false.
-- Confirm oxide/config/RaidlandsRoamBots.json has "Foliage Vision Check Radius": 0.65, "Maximum Clear Vision Through Foliage": 24.0, and "Foliage Hits To Block Vision": 2.
-- Confirm raidbots.advisor status reports enabled=False, provider=none, mode=fallback_only, apiKey=not_used.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Allow Bot Clan Wars": true.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Bot Kill Integration" with "Broadcast Player-Like Kill Messages": true, "Suppress DeathNotes For Roam Bot Kills": true, "Kill Message" containing "{weapon}", "{method}", and "{distance}", "Award ServerRewards RP": true, and "RP Reward Per Bot Kill": 5.
-- Confirm oxide/config/RaidlandsRoamBots.json includes "Debug Console Logs": false and "Console Warning Cooldown Seconds": 30.0.
-- Kill a roam bot with a real player account.
-- Expected: global chat shows `PlayerName killed [TAG] BotName with Weapon from 42m (gunfire).` using the DeathNotes-style format.
-- Expected: chat does not also show a generic scientist/NPC kill line for the same bot death.
-- Expected: the killer receives the RP confirmation message and their ServerRewards balance increases by 5.
-- Let a roam bot kill a real player.
-- Expected: global chat shows `[TAG] BotName killed PlayerName with Weapon from 42m (gunfire).`
-- Spawn multiple bots from at least two clans close enough to fight.
-- Expected: bots from different clans can damage/kill each other, same-clan damage is blocked, and a bot-vs-bot death appears in global chat with weapon/method/distance.
-- With Debug UI enabled and Debug Console Logs false, nameplates/side panel should work without repeated perception/tactical lines flooding the console.
-- Confirm oxide/config/RaidlandsRoamBots.json still includes "Stuck Memory Seconds": 75.0, "Stuck Memory Radius": 9.0, "Maximum Stuck Memory Points": 14, "Squad Destination Reservation Radius": 7.5, "Grant Bot Medical Items": true, "Use Physics Surface Spawn Checks": true, and "Maximum Physical Surface Mismatch": 1.25.
-- Confirm raidbots.list includes badspots=0 on a fresh healthy bot.
-- Confirm raidbots.list includes formation=<reason> and heal=<reason> on active bots.
-- Confirm debug overhead names and the closest-bot side panel color bot names by skill: casual green, average yellow, dangerous red.
-- Spawn near hilly/mountain terrain that previously produced the under-surface bubble. Expected: bad lower-layer navmesh positions are skipped or invalid bots despawn quickly instead of remaining as protected shooters.
-- With Debug Spawn Details enabled, spawn logs should include physicalSurface=... and belowPhysical=False for accepted bots.
-- Force a bot to fail movement against a cliff, large rock, wall, or base edge. Expected: badspots increments after no-progress/path failure.
-- After a bad spot is remembered, keep pressure on the bot. Expected: recovery, retreat, cover, investigate, flank, regroup, push, and roam candidates avoid that same destination until the memory expires.
-- Wait longer than Stuck Memory Seconds. Expected: badspots decays and the area can be reconsidered later.
-- During a trio fight, watch for formation=...offset... or side-panel Formation: ...offset... when squadmates would otherwise choose the same shared search/flank/regroup point.
-- Damage a bot below the low-health threshold after it reaches effective cover. Expected: Heal shows real:syringe.medical lock ... while medical items remain, or fallback:<reason> if no usable item is available.
-- Continue the existing combat checks: foliage LOS, wall hold, squad roles, base hold-out behavior, low-health cover, auto-reload, grenade/smoke utility, and normal 100-120 HP damage balance.
+- Run `raidbots.debug on`, spawn or keep at least one tracked bot, then open the Kits editor. Expected: the right-side debug panel should disappear when Kits opens or when a Kits editor control fires, and it should not jump back above the Kit Editor on the next debug refresh.
+- Close the Kits editor with its X button. Expected: the right-side debug panel can return after the short close suppression window if debug side panel mode remains enabled.
+- If the Kits UI is dismissed without firing `kits.close`, wait for the fallback suppression window. Expected: the right-side debug panel can return automatically instead of staying hidden indefinitely.
+- Open `/raidbots admin`. Expected: the RoamBots debug side panel clears while the admin CUI is open, then can return after the admin CUI closes if debug side panel mode remains enabled.
+- Open `/admin`, select Commands, then switch between Slash Commands and Console Commands. Expected: both pages list commands from the installed plugin source files and the filter narrows by command, plugin, or source.
 
-Relevant reloads:
-- oxide.reload RaidlandsRoamBots
-- Optional after behavior verification: oxide.reload WebsiteVipBridge to push the next scheduled stats snapshot sooner.
-
-Deferred / future-phase issues to leave noted:
-- Cover/peek quality tuning still needs live iteration beyond the baseline.
-- Grenade/smoke arc, damage, and smoke-screen tuning still need live validation.
-- Full native med-item animation/effect parity is not implemented; v0.3.29 consumes real medical inventory but still applies a controlled heal budget.
-- Full leader/follower pathing is still future work; v0.3.29 implements first-pass destination reservation and formation offsets.
-- Base objective validation/base assault, advisor-selected action execution, and live advisor endpoint tuning are still future work.
+Local verification:
+- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.38 against `RustDedicated_Data/Managed`; remaining warnings are expected plugin-reference/future-field warnings.
+- Roslyn compile check passed for `oxide/plugins/LiveAdmin.cs` v0.4.5 against `RustDedicated_Data/Managed`; remaining warning is the existing `Title(string)` helper hiding the inherited plugin `Title` member.
+- `git diff --check` passed for the edited handoff files, with only the repo's normal LF-to-CRLF working-copy warnings.

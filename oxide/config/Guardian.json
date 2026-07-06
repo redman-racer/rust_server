@@ -1,3 +1,4 @@
+
 {
   "Admin": {
     "Broadcast": true,
@@ -6,9 +7,9 @@
   "AntiCheat": {
     "Aim": {
       "Ban": false,
-      "Cooldown": 300,
+      "Cooldown": 120,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.52,
       "Trigger": {
         "Animal": false,
         "Bradley": false,
@@ -21,54 +22,54 @@
       "Ban": false,
       "Cooldown": 10,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.58,
       "Warn": true
     },
     "Gravity": {
       "Ban": false,
-      "Cooldown": 10,
+      "Cooldown": 20,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.55,
       "Warn": true
     },
     "MeleeRate": {
       "Ban": false,
-      "Cooldown": 300,
+      "Cooldown": 120,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.55,
       "Warn": true
     },
     "Recoil": {
       "Ban": false,
       "Cooldown": 10,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.52,
       "Warn": true
     },
     "Server": {
       "Ban": false,
-      "Cooldown": 300,
+      "Cooldown": 120,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.55,
       "Warn": true
     },
     "Stash": {
       "Ban": false,
-      "Cooldown": 3600,
+      "Cooldown": 1800,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.55,
       "Warn": true
     },
     "Trajectory": {
       "Ban": false,
-      "Cooldown": 90,
+      "Cooldown": 45,
       "Enabled": true,
-      "Sensitivity": 0.5,
+      "Sensitivity": 0.54,
       "Warn": true
     },
     "WallHack": {
       "Ban": false,
-      "Cooldown": 300,
+      "Cooldown": 180,
       "Enabled": true,
       "Sensitivity": 0.5,
       "Warn": true
@@ -77,24 +78,24 @@
   "AntiFlood": {
     "Chat": {
       "Ban": false,
-      "Cooldown": 30,
+      "Cooldown": 15,
       "Enabled": true,
-      "Sensitivity": 0.5,
-      "Warn": false
+      "Sensitivity": 0.65,
+      "Warn": true
     },
     "Command": {
       "Ban": false,
-      "Cooldown": 30,
+      "Cooldown": 15,
       "Enabled": true,
-      "Sensitivity": 0.5,
-      "Warn": false
+      "Sensitivity": 0.7,
+      "Warn": true
     },
     "ItemDrop": {
       "Ban": false,
-      "Cooldown": 300,
+      "Cooldown": 120,
       "Enabled": true,
-      "Sensitivity": 0.5,
-      "Warn": false
+      "Sensitivity": 0.65,
+      "Warn": true
     }
   },
   "Ban": {
@@ -111,28 +112,28 @@
     "Inherit": true
   },
   "Discord": {
-    "Enabled": false,
-    "WebHook": "",
+    "Enabled": true,
+    "WebHook": "PASTE_MAIN_GUARDIAN_WEBHOOK_HERE",
     "Filters": {
       "AntiCheat": {
         "Enabled": true,
-        "WebHook": ""
+        "WebHook": "PASTE_ANTICHEAT_WEBHOOK_HERE"
       },
       "AntiFlood": {
         "Enabled": true,
-        "WebHook": ""
+        "WebHook": "PASTE_MODERATION_WEBHOOK_HERE"
       },
       "IP": {
         "Enabled": true,
-        "WebHook": ""
+        "WebHook": "PASTE_JOIN_SECURITY_WEBHOOK_HERE"
       },
       "Steam": {
         "Enabled": true,
-        "WebHook": ""
+        "WebHook": "PASTE_JOIN_SECURITY_WEBHOOK_HERE"
       },
       "VPN": {
         "Enabled": true,
-        "WebHook": ""
+        "WebHook": "PASTE_JOIN_SECURITY_WEBHOOK_HERE"
       }
     }
   },
@@ -162,15 +163,15 @@
   "Log": {
     "AntiCheat": {
       "Aim": false,
-      "Gravity": false,
-      "MeleeRate": false,
-      "Recoil": false,
-      "Server": false,
-      "Stash": false,
-      "Trajectory": false
+      "Gravity": true,
+      "MeleeRate": true,
+      "Recoil": true,
+      "Server": true,
+      "Stash": true,
+      "Trajectory": true
     },
     "AntiFlood": {
-      "ItemDrop": false
+      "ItemDrop": true
     },
     "IP": {
       "Filter": true
@@ -189,33 +190,33 @@
   },
   "Steam": {
     "API": {
-      "ApiKey": "",
+      "ApiKey": "23C4AF259F71E055D843487F0E7AFC90",
       "Enabled": false
     },
     "Ban": {
       "Active": false,
       "Community": false,
-      "Days": 0,
+      "Days": 30,
       "Economy": false,
-      "Game": 0,
-      "VAC": 0
+      "Game": 1,
+      "VAC": 1
     },
     "Game": {
       "Count": 0,
-      "Hours": 0
+      "Hours": 75
     },
     "Profile": {
-      "Invalid": false,
-      "Limited": false,
+      "Invalid": true,
+      "Limited": true,
       "Private": false
     },
     "Share": {
-      "Family": false
+      "Family": true
     },
     "Violation": {
       "Ban": false,
       "Enabled": true,
-      "Warn": false
+      "Warn": true
     }
   },
   "User": {
@@ -238,10 +239,10 @@
     "Patch": 9
   },
   "Violation": {
-    "Ban": true,
-    "Cooldown": 7200,
-    "Sensitivity": 0.5,
-    "Warn": false
+    "Ban": false,
+    "Cooldown": 3600,
+    "Sensitivity": 0.55,
+    "Warn": true
   },
   "VPN": {
     "API": {
@@ -258,21 +259,21 @@
         "Enabled": false
       },
       "IpQualityScore": {
-        "ApiKey": "",
-        "Enabled": false
+        "ApiKey": "PASTE_IPQUALITYSCORE_KEY_HERE",
+        "Enabled": true
       }
     },
     "Cache": {
       "Hours": 72
     },
     "Check": {
-      "Enabled": false,
+      "Enabled": true,
       "Strict": false
     },
     "Violation": {
       "Ban": false,
       "Enabled": true,
-      "Warn": false
+      "Warn": true
     }
   }
 }

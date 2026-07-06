@@ -31,7 +31,7 @@
     "IOEntity Container - Drop a item container from container": true
   },
   "Remove Damaged Entities": {
-    "Enabled": false,
+    "Enabled": true,
     "Exclude Quarries": true,
     "Exclude Building Blocks": true,
     "Percentage (Can be removed when (health / max health * 100) is not less than it)": 90.0
@@ -47,7 +47,7 @@
       "Priority": 0,
       "Distance": 3.0,
       "Cooldown": 10.0,
-      "Max Time": 15,
+      "Max Time": 120,
       "Remove Interval (Min = 0.2)": 0.8,
       "Max Removable Objects (0 = Unlimited)": 50,
       "Pay": true,
@@ -59,40 +59,40 @@
     "Normal": {
       "Display Name": "Normal",
       "Distance": 3.0,
-      "Default Time": 10,
-      "Max Time": 15,
+      "Default Time": 300,
+      "Max Time": 300,
       "Gibs": false,
       "Reset the time after removing an entity": false
     },
     "Structure": {
       "Display Name": "Structure",
       "Distance": 100.0,
-      "Default Time": 10,
-      "Max Time": 15,
+      "Default Time": 300,
+      "Max Time": 300,
       "Gibs": false,
       "Reset the time after removing an entity": true
     },
     "All": {
       "Display Name": "All",
       "Distance": 50.0,
-      "Default Time": 10,
-      "Max Time": 15,
+      "Default Time": 300,
+      "Max Time": 300,
       "Gibs": false,
       "Reset the time after removing an entity": true
     },
     "Admin": {
       "Display Name": "Admin",
       "Distance": 20.0,
-      "Default Time": 19,
-      "Max Time": 15,
+      "Default Time": 180,
+      "Max Time": 30,
       "Gibs": false,
       "Reset the time after removing an entity": true
     },
     "External": {
       "Display Name": "External",
       "Distance": 20.0,
-      "Default Time": 10,
-      "Max Time": 15,
+      "Default Time": 300,
+      "Max Time": 300,
       "Gibs": false,
       "Reset the time after removing an entity": true
     }

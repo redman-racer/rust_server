@@ -1,0 +1,32 @@
+{
+  "Title": "LiveAdmin",
+  "AccentColor": "0.12 0.58 0.55 1",
+  "WarningColor": "0.96 0.62 0.18 1",
+  "DangerColor": "0.82 0.20 0.18 1",
+  "SuccessColor": "0.24 0.68 0.36 1",
+  "PlayersPerPage": 10,
+  "LogsPerPage": 12,
+  "ManagedPlugins": [
+    "Kits",
+    "BetterChat",
+    "ZoneManager"
+  ],
+  "ProtectedGroups": [
+    "admin",
+    "owner"
+  ],
+  "QuickCommands": [
+    {
+      "Label": "Save Server",
+      "Command": "server.save",
+      "Permission": "liveadmin.server.actions",
+      "Confirm": false
+    },
+    {
+      "Label": "Reload Kits",
+      "Command": "oxide.reload Kits",
+      "Permission": "liveadmin.plugins.manage",
+      "Confirm": true
+    }
+  ]
+}

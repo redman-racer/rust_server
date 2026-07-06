@@ -1,20 +1,21 @@
+
 {
-  "DefaultFoundationLimit": 20,
-  "DefaultTriangleFoundationLimit": 0,
+  "DefaultFoundationLimit": 500,
+  "DefaultTriangleFoundationLimit": 500,
   "MinFoundationsBeforeMsgShowsUp": -1,
   "permissionItems": [
     {
-      "FoundationLimit": 40,
+      "FoundationLimit": 500,
       "PermissionName": "foundationlimit.vip",
       "TriangleFoundationLimit": 0
     },
     {
-      "FoundationLimit": 60,
+      "FoundationLimit": 500,
       "PermissionName": "foundationlimit.vip2",
       "TriangleFoundationLimit": 0
     },
     {
-      "FoundationLimit": 80,
+      "FoundationLimit": 500,
       "PermissionName": "foundationlimit.vip3",
       "TriangleFoundationLimit": 0
     }

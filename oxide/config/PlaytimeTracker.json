@@ -9,7 +9,7 @@
     "Playtime rewards": {
       "Issue rewards for playtime": true,
       "Reward interval (seconds)": 300,
-      "Reward amount": 5
+      "Reward amount": 100
     },
     "Referral rewards": {
       "Issue rewards for player referrals": true,

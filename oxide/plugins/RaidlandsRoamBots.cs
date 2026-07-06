@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.34")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.38")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -49,8 +49,49 @@ namespace Oxide.Plugins
         private const string ScoreboardBotKd = "Bot K/D";
         private const string ScoreboardBotClanKd = "Bot Clan K/D";
         private const string DebugBotPanelUi = "RaidlandsRoamBots.DebugBotPanel";
+        private const string DebugBotPanelTextUi = "RaidlandsRoamBots.DebugBotPanel.Text";
+        private const float DebugSidePanelMenuSuppressSeconds = 20f;
+        private const float DebugSidePanelMenuCloseSuppressSeconds = 2f;
         private const string AdminPanelUi = "RaidlandsRoamBots.AdminPanel";
         private const int AdminPanelMaximumPopulation = 500;
+        private static readonly string[] DebugSidePanelMenuCommandPrefixes =
+        {
+            "kits.",
+            "liveadmin.",
+            "sr.",
+            "shop.",
+            "store.",
+            "rewards.",
+            "backpack.",
+            "trade.",
+            "skin.",
+            "skinbox.",
+            "remove.",
+            "bskin.",
+            "clan.",
+            "clans."
+        };
+        private static readonly string[] DebugSidePanelMenuChatCommands =
+        {
+            "kit",
+            "kits",
+            "shop",
+            "store",
+            "s",
+            "rewards",
+            "sr",
+            "backpack",
+            "backpackgui",
+            "trade",
+            "skin",
+            "skinbox",
+            "remove",
+            "bskin",
+            "clan",
+            "clans",
+            "admin",
+            "liveadmin"
+        };
         private static readonly string[] AdminPanelTabs =
         {
             "overview",
@@ -78,6 +119,9 @@ namespace Oxide.Plugins
         private readonly System.Random random = new System.Random();
         private readonly Dictionary<BaseCombatEntity, BotRuntime> activeBots = new Dictionary<BaseCombatEntity, BotRuntime>();
         private readonly HashSet<BaseCombatEntity> despawningBots = new HashSet<BaseCombatEntity>();
+        private readonly HashSet<ulong> debugBotPanelViewers = new HashSet<ulong>();
+        private readonly HashSet<ulong> adminPanelViewers = new HashSet<ulong>();
+        private readonly Dictionary<ulong, float> debugSidePanelSuppressedUntil = new Dictionary<ulong, float>();
         private readonly List<BaseEntity> botPlacedEntities = new List<BaseEntity>();
         private readonly List<BotUtilityEntity> botUtilityEntities = new List<BotUtilityEntity>();
         private readonly List<UtilityDangerZone> utilityDangerZones = new List<UtilityDangerZone>();
@@ -601,6 +645,24 @@ namespace Oxide.Plugins
             [JsonProperty("Retreat Wall Cover Distance")]
             public float RetreatWallCoverDistance = 10f;
 
+            [JsonProperty("Protection Damage Trigger Percent")]
+            public float ProtectionDamageTriggerPercent = 15f;
+
+            [JsonProperty("Protection Damage Window Seconds")]
+            public float ProtectionDamageWindowSeconds = 10f;
+
+            [JsonProperty("Protection Commitment Seconds")]
+            public float ProtectionCommitmentSeconds = 12f;
+
+            [JsonProperty("Protection Distance Casual")]
+            public float ProtectionDistanceCasual = 8f;
+
+            [JsonProperty("Protection Distance Average")]
+            public float ProtectionDistanceAverage = 5f;
+
+            [JsonProperty("Protection Distance Dangerous")]
+            public float ProtectionDistanceDangerous = 3f;
+
             [JsonProperty("Long Range Defensive Minimum Distance")]
             public float LongRangeDefensiveMinDistance = 40f;
 
@@ -682,11 +744,23 @@ namespace Oxide.Plugins
             [JsonProperty("Passive Combat Heal Target Fraction")]
             public float PassiveCombatHealTargetFraction = 1f;
 
+            [JsonProperty("Non Syringe Heal Cooldown Seconds")]
+            public float NonSyringeHealCooldownSeconds = 3.5f;
+
+            [JsonProperty("Non Syringe Heal Amount")]
+            public float NonSyringeHealAmount = 8f;
+
+            [JsonProperty("Allow Shooting While Non Syringe Healing")]
+            public bool AllowShootingWhileNonSyringeHealing = true;
+
             [JsonProperty("Syringe Fire Lock Seconds")]
             public float SyringeFireLockSeconds = 2.2f;
 
             [JsonProperty("Syringe Cooldown Seconds")]
             public float SyringeCooldownSeconds = 8f;
+
+            [JsonProperty("Syringe Heal Target Fraction")]
+            public float SyringeHealTargetFraction = 0.85f;
 
             [JsonProperty("Grant Bot Medical Items")]
             public bool GrantBotMedicalItems = true;
@@ -697,6 +771,14 @@ namespace Oxide.Plugins
             [JsonProperty("Bot Medical Item Amount")]
             public int BotMedicalItemAmount = 2;
 
+            [JsonProperty("Bot Medical Loadout")]
+            public Dictionary<string, int> BotMedicalLoadout = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["syringe.medical"] = 2,
+                ["largemedkit"] = 2,
+                ["black.raspberries"] = 4
+            };
+
             [JsonProperty("Use Real Medical Items For Cover Heal")]
             public bool UseRealMedicalItemsForCoverHeal = true;
 
@@ -704,7 +786,37 @@ namespace Oxide.Plugins
             public float RealMedicalItemHealAmount = 15f;
 
             [JsonProperty("Real Medical Item Shortnames")]
-            public List<string> RealMedicalItemShortnames = new List<string> { "syringe.medical", "largemedkit", "bandage" };
+            public List<string> RealMedicalItemShortnames = new List<string> { "syringe.medical", "largemedkit", "bandage", "black.raspberries" };
+
+            [JsonProperty("Barricade Anchor Casual Long Range Threshold")]
+            public float BarricadeAnchorLongRangeThresholdCasual = 40f;
+
+            [JsonProperty("Barricade Anchor Average Long Range Threshold")]
+            public float BarricadeAnchorLongRangeThresholdAverage = 55f;
+
+            [JsonProperty("Barricade Anchor Dangerous Long Range Threshold")]
+            public float BarricadeAnchorLongRangeThresholdDangerous = 70f;
+
+            [JsonProperty("Barricade Anchor Required Hitmarkers Casual")]
+            public int BarricadeAnchorRequiredHitmarkersCasual = 2;
+
+            [JsonProperty("Barricade Anchor Required Hitmarkers Average")]
+            public int BarricadeAnchorRequiredHitmarkersAverage = 3;
+
+            [JsonProperty("Barricade Anchor Required Hitmarkers Dangerous")]
+            public int BarricadeAnchorRequiredHitmarkersDangerous = 5;
+
+            [JsonProperty("Barricade Anchor No Action Push Seconds Casual")]
+            public float BarricadeAnchorNoActionPushSecondsCasual = 10f;
+
+            [JsonProperty("Barricade Anchor No Action Push Seconds Average")]
+            public float BarricadeAnchorNoActionPushSecondsAverage = 15f;
+
+            [JsonProperty("Barricade Anchor No Action Push Seconds Dangerous")]
+            public float BarricadeAnchorNoActionPushSecondsDangerous = 22f;
+
+            [JsonProperty("Prevent Moving In Front Of Anchored Barricade")]
+            public bool PreventMovingInFrontOfAnchoredBarricade = true;
 
             [JsonProperty("Auto Reload Bot Weapons")]
             public bool AutoReloadBotWeapons = true;
@@ -973,16 +1085,31 @@ namespace Oxide.Plugins
             public float NextGrenadeAt;
             public float NextBarricadeAt;
             public float LastBarricadePlacedAt;
+            public float ProtectionDamageWindowStartedAt;
+            public float ProtectionDamageAccumulatedFraction;
+            public float ProtectionDamageAwareUntil;
             public float DamageBarricadeAwareUntil;
             public float LastDamageBarricadeAwarenessCheckAt;
             public float LowHealthCoverAwareUntil;
             public float NextLowHealthAwarenessCheckAt;
             public float LastLowHealthHealAt;
             public float LastPassiveHealAt;
+            public float NextNonSyringeHealAt;
+            public float PendingNonSyringeHealRemaining;
             public float MedicalFireLockedUntil;
             public float NextSyringeHealAt;
             public float PendingMedicalHealRemaining;
             public string LastMedicalUseReason = "none";
+            public string LastProtectionReason = "none";
+            public bool BarricadeAnchorActive;
+            public float BarricadeAnchorStartedAt;
+            public float BarricadeAnchorThreatDistance;
+            public float BarricadeAnchorNoActionPushAt;
+            public int BarricadeAnchorHitmarkers;
+            public int BarricadeAnchorRequiredHitmarkers;
+            public ulong BarricadeAnchorTargetUserId;
+            public float BarricadeAnchorTargetDeadAt;
+            public string LastBarricadeAnchorReason = "none";
             public float HoldOutsideBaseUntil;
             public float LastShotAt;
             public float LastDamageTakenAt;
@@ -1126,6 +1253,15 @@ namespace Oxide.Plugins
             public Vector3 PeekLeftPoint;
             public Vector3 PeekRightPoint;
             public float Score;
+        }
+
+        private class ProtectionPlan
+        {
+            public Vector3 CoverPoint;
+            public Vector3 TuckPoint;
+            public Vector3 PeekPoint;
+            public string Source = "";
+            public float Distance;
         }
 
         private class DecisionContext
@@ -1338,6 +1474,10 @@ namespace Oxide.Plugins
             public bool IsStuck;
             public int StuckMemoryPoints;
             public bool TargetIsInsideBaseRestrictedArea;
+            public float ProtectionDamageFraction;
+            public string ProtectionState = "";
+            public string BarricadeAnchorState = "";
+            public bool MedicalFireLocked;
             public List<DecisionEvent> RecentEvents = new List<DecisionEvent>();
             public List<TacticalActionCandidate> CandidateActions = new List<TacticalActionCandidate>();
         }
@@ -1390,6 +1530,9 @@ namespace Oxide.Plugins
             public string fallback_reason;
             public string final_action;
             public float final_score;
+            public string protection_state;
+            public string barricade_anchor_state;
+            public string medical_state;
             public List<TacticalActionCandidate> candidates;
             public float created_at;
         }
@@ -1457,6 +1600,7 @@ namespace Oxide.Plugins
             StopRuntime();
             DestroyDebugBotPanels();
             DestroyAdminPanels();
+            debugSidePanelSuppressedUntil.Clear();
             pendingAdvisorDecisions.Clear();
             if (config?.Persistence?.KillBotsOnPluginUnload == true)
             {
@@ -1822,6 +1966,12 @@ namespace Oxide.Plugins
             config.AI.BarricadeHoldSeconds = Math.Max(2f, config.AI.BarricadeHoldSeconds);
             config.AI.BarricadeFightCommitmentSeconds = Mathf.Clamp(config.AI.BarricadeFightCommitmentSeconds, 2f, 30f);
             config.AI.RetreatWallCoverDistance = Mathf.Clamp(config.AI.RetreatWallCoverDistance, 2f, 40f);
+            config.AI.ProtectionDamageTriggerPercent = Mathf.Clamp(config.AI.ProtectionDamageTriggerPercent <= 0f ? defaults.AI.ProtectionDamageTriggerPercent : config.AI.ProtectionDamageTriggerPercent, 1f, 95f);
+            config.AI.ProtectionDamageWindowSeconds = Mathf.Clamp(config.AI.ProtectionDamageWindowSeconds <= 0f ? defaults.AI.ProtectionDamageWindowSeconds : config.AI.ProtectionDamageWindowSeconds, 1f, 30f);
+            config.AI.ProtectionCommitmentSeconds = Mathf.Clamp(config.AI.ProtectionCommitmentSeconds <= 0f ? defaults.AI.ProtectionCommitmentSeconds : config.AI.ProtectionCommitmentSeconds, 2f, 30f);
+            config.AI.ProtectionDistanceCasual = Mathf.Clamp(config.AI.ProtectionDistanceCasual <= 0f ? defaults.AI.ProtectionDistanceCasual : config.AI.ProtectionDistanceCasual, 1f, 15f);
+            config.AI.ProtectionDistanceAverage = Mathf.Clamp(config.AI.ProtectionDistanceAverage <= 0f ? defaults.AI.ProtectionDistanceAverage : config.AI.ProtectionDistanceAverage, 1f, config.AI.ProtectionDistanceCasual);
+            config.AI.ProtectionDistanceDangerous = Mathf.Clamp(config.AI.ProtectionDistanceDangerous <= 0f ? defaults.AI.ProtectionDistanceDangerous : config.AI.ProtectionDistanceDangerous, 1f, config.AI.ProtectionDistanceAverage);
             config.AI.LongRangeDefensiveMinDistance = Mathf.Clamp(config.AI.LongRangeDefensiveMinDistance <= 0f ? defaults.AI.LongRangeDefensiveMinDistance : config.AI.LongRangeDefensiveMinDistance, 20f, 120f);
             config.AI.LongRangeDefensiveMaxDistance = Mathf.Clamp(config.AI.LongRangeDefensiveMaxDistance <= 0f ? defaults.AI.LongRangeDefensiveMaxDistance : config.AI.LongRangeDefensiveMaxDistance, config.AI.LongRangeDefensiveMinDistance, 180f);
             config.AI.LongRangeLosingFightMemorySeconds = Mathf.Clamp(config.AI.LongRangeLosingFightMemorySeconds <= 0f ? defaults.AI.LongRangeLosingFightMemorySeconds : config.AI.LongRangeLosingFightMemorySeconds, 2f, 30f);
@@ -1850,10 +2000,22 @@ namespace Oxide.Plugins
             config.AI.LowHealthCoverHealTargetFraction = Mathf.Clamp(config.AI.LowHealthCoverHealTargetFraction, Math.Max(config.AI.LowHealthCoverThreshold, 0.85f), 1f);
             config.AI.PassiveCombatHealPerSecond = Mathf.Clamp(config.AI.PassiveCombatHealPerSecond, 0f, 20f);
             config.AI.PassiveCombatHealTargetFraction = Mathf.Clamp(config.AI.PassiveCombatHealTargetFraction, config.AI.LowHealthCoverThreshold, 1f);
+            config.AI.NonSyringeHealCooldownSeconds = Mathf.Clamp(config.AI.NonSyringeHealCooldownSeconds <= 0f ? defaults.AI.NonSyringeHealCooldownSeconds : config.AI.NonSyringeHealCooldownSeconds, 0.5f, 20f);
+            config.AI.NonSyringeHealAmount = Mathf.Clamp(config.AI.NonSyringeHealAmount <= 0f ? defaults.AI.NonSyringeHealAmount : config.AI.NonSyringeHealAmount, 1f, 40f);
             config.AI.SyringeFireLockSeconds = Mathf.Clamp(config.AI.SyringeFireLockSeconds, 0.5f, 6f);
             config.AI.SyringeCooldownSeconds = Mathf.Clamp(config.AI.SyringeCooldownSeconds, 1f, 30f);
+            config.AI.SyringeHealTargetFraction = Mathf.Clamp(config.AI.SyringeHealTargetFraction <= 0f ? defaults.AI.SyringeHealTargetFraction : config.AI.SyringeHealTargetFraction, config.AI.LowHealthCoverThreshold, 1f);
             config.AI.BotMedicalItemShortname = string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname) ? defaults.AI.BotMedicalItemShortname : config.AI.BotMedicalItemShortname.Trim();
             config.AI.BotMedicalItemAmount = Clamp(config.AI.BotMedicalItemAmount, 0, 12);
+            if (config.AI.BotMedicalLoadout == null || config.AI.BotMedicalLoadout.Count == 0)
+            {
+                config.AI.BotMedicalLoadout = defaults.AI.BotMedicalLoadout;
+            }
+
+            config.AI.BotMedicalLoadout = config.AI.BotMedicalLoadout
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && entry.Value > 0)
+                .GroupBy(entry => entry.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => Clamp(group.Sum(entry => entry.Value), 0, 20), StringComparer.OrdinalIgnoreCase);
             config.AI.RealMedicalItemHealAmount = Mathf.Clamp(config.AI.RealMedicalItemHealAmount <= 0f ? defaults.AI.RealMedicalItemHealAmount : config.AI.RealMedicalItemHealAmount, 1f, 50f);
             if (config.AI.RealMedicalItemShortnames == null || config.AI.RealMedicalItemShortnames.Count == 0)
             {
@@ -1865,6 +2027,15 @@ namespace Oxide.Plugins
                 .Select(shortname => shortname.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            config.AI.BarricadeAnchorLongRangeThresholdCasual = Mathf.Clamp(config.AI.BarricadeAnchorLongRangeThresholdCasual <= 0f ? defaults.AI.BarricadeAnchorLongRangeThresholdCasual : config.AI.BarricadeAnchorLongRangeThresholdCasual, 20f, 140f);
+            config.AI.BarricadeAnchorLongRangeThresholdAverage = Mathf.Clamp(config.AI.BarricadeAnchorLongRangeThresholdAverage <= 0f ? defaults.AI.BarricadeAnchorLongRangeThresholdAverage : config.AI.BarricadeAnchorLongRangeThresholdAverage, config.AI.BarricadeAnchorLongRangeThresholdCasual, 160f);
+            config.AI.BarricadeAnchorLongRangeThresholdDangerous = Mathf.Clamp(config.AI.BarricadeAnchorLongRangeThresholdDangerous <= 0f ? defaults.AI.BarricadeAnchorLongRangeThresholdDangerous : config.AI.BarricadeAnchorLongRangeThresholdDangerous, config.AI.BarricadeAnchorLongRangeThresholdAverage, 180f);
+            config.AI.BarricadeAnchorRequiredHitmarkersCasual = Clamp(config.AI.BarricadeAnchorRequiredHitmarkersCasual <= 0 ? defaults.AI.BarricadeAnchorRequiredHitmarkersCasual : config.AI.BarricadeAnchorRequiredHitmarkersCasual, 1, 10);
+            config.AI.BarricadeAnchorRequiredHitmarkersAverage = Clamp(config.AI.BarricadeAnchorRequiredHitmarkersAverage <= 0 ? defaults.AI.BarricadeAnchorRequiredHitmarkersAverage : config.AI.BarricadeAnchorRequiredHitmarkersAverage, config.AI.BarricadeAnchorRequiredHitmarkersCasual, 10);
+            config.AI.BarricadeAnchorRequiredHitmarkersDangerous = Clamp(config.AI.BarricadeAnchorRequiredHitmarkersDangerous <= 0 ? defaults.AI.BarricadeAnchorRequiredHitmarkersDangerous : config.AI.BarricadeAnchorRequiredHitmarkersDangerous, config.AI.BarricadeAnchorRequiredHitmarkersAverage, 12);
+            config.AI.BarricadeAnchorNoActionPushSecondsCasual = Mathf.Clamp(config.AI.BarricadeAnchorNoActionPushSecondsCasual <= 0f ? defaults.AI.BarricadeAnchorNoActionPushSecondsCasual : config.AI.BarricadeAnchorNoActionPushSecondsCasual, 2f, 45f);
+            config.AI.BarricadeAnchorNoActionPushSecondsAverage = Mathf.Clamp(config.AI.BarricadeAnchorNoActionPushSecondsAverage <= 0f ? defaults.AI.BarricadeAnchorNoActionPushSecondsAverage : config.AI.BarricadeAnchorNoActionPushSecondsAverage, config.AI.BarricadeAnchorNoActionPushSecondsCasual, 60f);
+            config.AI.BarricadeAnchorNoActionPushSecondsDangerous = Mathf.Clamp(config.AI.BarricadeAnchorNoActionPushSecondsDangerous <= 0f ? defaults.AI.BarricadeAnchorNoActionPushSecondsDangerous : config.AI.BarricadeAnchorNoActionPushSecondsDangerous, config.AI.BarricadeAnchorNoActionPushSecondsAverage, 75f);
             config.AI.PeekOffsetDistance = Mathf.Clamp(config.AI.PeekOffsetDistance, 1f, 8f);
             config.AI.PeekExposureMinSeconds = Math.Max(0.1f, config.AI.PeekExposureMinSeconds);
             config.AI.PeekExposureMaxSeconds = Math.Max(config.AI.PeekExposureMinSeconds, config.AI.PeekExposureMaxSeconds);
@@ -2466,19 +2637,41 @@ namespace Oxide.Plugins
         {
             if (bot == null
                 || config?.AI?.GrantBotMedicalItems != true
-                || config.AI.BotMedicalItemAmount <= 0
-                || string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+                || bot.inventory == null)
             {
                 return;
             }
 
-            var item = ItemManager.CreateByName(config.AI.BotMedicalItemShortname, config.AI.BotMedicalItemAmount);
+            var granted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in config.AI.BotMedicalLoadout ?? new Dictionary<string, int>())
+            {
+                GiveBotMedicalItem(bot, entry.Key, entry.Value, granted);
+            }
+
+            if (config.AI.BotMedicalItemAmount > 0 && !string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+            {
+                GiveBotMedicalItem(bot, config.AI.BotMedicalItemShortname, config.AI.BotMedicalItemAmount, granted);
+            }
+        }
+
+        private void GiveBotMedicalItem(BasePlayer bot, string shortname, int amount, HashSet<string> granted)
+        {
+            shortname = (shortname ?? "").Trim();
+            amount = Math.Max(0, amount);
+
+            if (bot == null || amount <= 0 || string.IsNullOrWhiteSpace(shortname) || granted?.Add(shortname) == false)
+            {
+                return;
+            }
+
+            var item = ItemManager.CreateByName(shortname, amount);
 
             if (item == null)
             {
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    DebugWarning("medical-create-failed", $"Could not create roam bot medical item '{config.AI.BotMedicalItemShortname}'.");
+                    DebugWarning("medical-create-failed", $"Could not create roam bot medical item '{shortname}'.");
                 }
 
                 return;
@@ -2599,7 +2792,7 @@ namespace Oxide.Plugins
 
                 if (attackerBot != null)
                 {
-                    RememberDamageSource(victim, victimRuntime, attackerBot, now);
+                    RememberDamageSource(victim, victimRuntime, attackerBot, now, info);
                 }
 
                 if (victimPlayer != null)
@@ -2627,7 +2820,7 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null && IsRealPlayer(attacker))
             {
-                RememberDamageSource(victim, victimRuntime, attacker, now);
+                RememberDamageSource(victim, victimRuntime, attacker, now, info);
                 return null;
             }
 
@@ -2639,14 +2832,20 @@ namespace Oxide.Plugins
             return null;
         }
 
-        private void RememberDamageSource(BaseCombatEntity victim, BotRuntime victimRuntime, BasePlayer attacker, float now)
+        private void RememberDamageSource(BaseCombatEntity victim, BotRuntime victimRuntime, BasePlayer attacker, float now, HitInfo info = null)
         {
             if (victim == null || victimRuntime == null || attacker == null)
             {
                 return;
             }
 
+            RememberProtectionDamage(victim, victimRuntime, info, now);
             victimRuntime.LastDamageTakenAt = now;
+            if (IsBarricadeAnchorActive(victimRuntime, now))
+            {
+                victimRuntime.BarricadeAnchorNoActionPushAt = now + BarricadeAnchorNoActionPushSeconds(victimRuntime);
+            }
+
             victimRuntime.LastDamageBarricadeAwarenessCheckAt = 0f;
             victimRuntime.NextLowHealthAwarenessCheckAt = 0f;
             victimRuntime.Memory.TargetUserId = CombatTargetId(attacker);
@@ -2675,6 +2874,59 @@ namespace Oxide.Plugins
             }
         }
 
+        private void RememberProtectionDamage(BaseCombatEntity victim, BotRuntime runtime, HitInfo info, float now)
+        {
+            if (victim == null || runtime == null || info == null)
+            {
+                return;
+            }
+
+            var damageFraction = DamageFractionOfBotHealth(victim, runtime, info);
+
+            if (damageFraction <= 0f)
+            {
+                return;
+            }
+
+            if (runtime.ProtectionDamageWindowStartedAt <= 0f
+                || now - runtime.ProtectionDamageWindowStartedAt > config.AI.ProtectionDamageWindowSeconds)
+            {
+                runtime.ProtectionDamageWindowStartedAt = now;
+                runtime.ProtectionDamageAccumulatedFraction = 0f;
+            }
+
+            runtime.ProtectionDamageAccumulatedFraction += damageFraction;
+            var triggerFraction = config.AI.ProtectionDamageTriggerPercent / 100f;
+
+            if (runtime.ProtectionDamageAccumulatedFraction < triggerFraction)
+            {
+                runtime.LastProtectionReason = $"damage {runtime.ProtectionDamageAccumulatedFraction * 100f:0}%/{config.AI.ProtectionDamageTriggerPercent:0}%";
+                return;
+            }
+
+            runtime.ProtectionDamageAwareUntil = now + config.AI.ProtectionCommitmentSeconds;
+            runtime.DamageBarricadeAwareUntil = Math.Max(runtime.DamageBarricadeAwareUntil, now + config.AI.DamageWallReactionWindowSeconds);
+            runtime.LastProtectionReason = $"trigger {runtime.ProtectionDamageAccumulatedFraction * 100f:0}%/{config.AI.ProtectionDamageTriggerPercent:0}%";
+        }
+
+        private float DamageFractionOfBotHealth(BaseCombatEntity victim, BotRuntime runtime, HitInfo info)
+        {
+            if (info?.damageTypes == null)
+            {
+                return 0f;
+            }
+
+            try
+            {
+                var damage = info.damageTypes.Total();
+                return Mathf.Clamp01(damage / BotMaxHealth(victim, runtime));
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
         private void RememberDamageDealt(BaseCombatEntity attackerEntity, BotRuntime attackerRuntime, BasePlayer victim, float now)
         {
             if (attackerEntity == null || attackerRuntime == null || victim == null)
@@ -2684,6 +2936,7 @@ namespace Oxide.Plugins
 
             RefreshCombatProfile(attackerEntity, attackerRuntime);
             attackerRuntime.LastDamageDealtAt = now;
+            RememberBarricadeAnchorHitmarker(attackerRuntime, CombatTargetId(victim), now);
             attackerRuntime.Memory.Target = victim;
             attackerRuntime.Memory.TargetUserId = CombatTargetId(victim);
             attackerRuntime.Memory.LastSeenPosition = victim.transform.position;
@@ -2764,6 +3017,11 @@ namespace Oxide.Plugins
             if (victimRuntime != null)
             {
                 TrackRecentBotDeath(victim, victimRuntime);
+                if (victimPlayer != null)
+                {
+                    MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), Time.realtimeSinceStartup);
+                }
+
                 activeBots.Remove(victim);
 
                 if (!despawningBots.Remove(victim))
@@ -2809,6 +3067,11 @@ namespace Oxide.Plugins
                 QueueSaveData();
                 UpdateScoreboards();
             }
+
+            if (victimPlayer != null)
+            {
+                MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), Time.realtimeSinceStartup);
+            }
         }
 
         private object OnDeathNotice(Dictionary<string, object> deathData, string message)
@@ -2837,6 +3100,20 @@ namespace Oxide.Plugins
 
             activeBots.Remove(bot);
             despawningBots.Remove(bot);
+        }
+
+        private object OnServerCommand(ConsoleSystem.Arg arg)
+        {
+            var player = arg?.Player();
+            var command = arg?.cmd?.FullName ?? arg?.cmd?.Name;
+            SuppressDebugSidePanelForMenuCommand(player, command);
+            return null;
+        }
+
+        private object OnPlayerCommand(BasePlayer player, string command, string[] args)
+        {
+            SuppressDebugSidePanelForMenuCommand(player, command);
+            return null;
         }
 
         [ChatCommand("raidbots")]
@@ -5198,16 +5475,15 @@ namespace Oxide.Plugins
                 return;
             }
 
-            DestroyDebugBotPanel(viewer);
-
-            var container = new CuiElementContainer();
-            var panel = container.Add(new CuiPanel
+            if (ShouldSuppressDebugBotSidePanel(viewer))
             {
-                CursorEnabled = false,
-                Image = { Color = "0.03 0.04 0.05 0.76" },
-                RectTransform = { AnchorMin = "0.755 0.52", AnchorMax = "0.995 0.92" }
-            }, "Hud", DebugBotPanelUi);
+                DestroyDebugBotPanel(viewer);
+                return;
+            }
 
+            EnsureDebugBotSidePanel(viewer);
+            CuiHelper.DestroyUi(viewer, DebugBotPanelTextUi);
+            var container = new CuiElementContainer();
             container.Add(new CuiLabel
             {
                 Text =
@@ -5218,15 +5494,123 @@ namespace Oxide.Plugins
                     Color = "0.92 0.96 1 1"
                 },
                 RectTransform = { AnchorMin = "0.04 0.04", AnchorMax = "0.96 0.96" }
-            }, panel);
+            }, DebugBotPanelUi, DebugBotPanelTextUi);
 
             CuiHelper.AddUi(viewer, container);
+        }
+
+        private bool ShouldSuppressDebugBotSidePanel(BasePlayer viewer)
+        {
+            if (viewer == null || adminPanelViewers.Contains(viewer.userID))
+            {
+                return true;
+            }
+
+            if (debugSidePanelSuppressedUntil.TryGetValue(viewer.userID, out var suppressedUntil))
+            {
+                if (Time.realtimeSinceStartup <= suppressedUntil)
+                {
+                    return true;
+                }
+
+                debugSidePanelSuppressedUntil.Remove(viewer.userID);
+            }
+
+            return false;
+        }
+
+        private void SuppressDebugSidePanelForMenuCommand(BasePlayer player, string command)
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            var normalized = NormalizeDebugSidePanelMenuCommand(command);
+            if (!IsDebugSidePanelMenuCommand(normalized))
+            {
+                return;
+            }
+
+            var isCloseCommand = IsDebugSidePanelMenuCloseCommand(normalized);
+            var seconds = isCloseCommand
+                ? DebugSidePanelMenuCloseSuppressSeconds
+                : DebugSidePanelMenuSuppressSeconds;
+            var suppressedUntil = Time.realtimeSinceStartup + seconds;
+
+            if (isCloseCommand || !debugSidePanelSuppressedUntil.TryGetValue(player.userID, out var currentUntil) || currentUntil < suppressedUntil)
+            {
+                debugSidePanelSuppressedUntil[player.userID] = suppressedUntil;
+            }
+
+            DestroyDebugBotPanel(player);
+        }
+
+        private string NormalizeDebugSidePanelMenuCommand(string command)
+        {
+            var normalized = (command ?? "").Trim().TrimStart('/').ToLowerInvariant();
+            return normalized.StartsWith("global.", StringComparison.Ordinal)
+                ? normalized.Substring("global.".Length)
+                : normalized;
+        }
+
+        private bool IsDebugSidePanelMenuCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command) || command.StartsWith("raidbots", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            foreach (var prefix in DebugSidePanelMenuCommandPrefixes)
+            {
+                if (command.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            foreach (var chatCommand in DebugSidePanelMenuChatCommands)
+            {
+                if (command.Equals(chatCommand, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsDebugSidePanelMenuCloseCommand(string command)
+        {
+            return command.Equals("close", StringComparison.Ordinal)
+                || command.EndsWith(".close", StringComparison.Ordinal);
+        }
+
+        private void EnsureDebugBotSidePanel(BasePlayer viewer)
+        {
+            if (viewer == null || debugBotPanelViewers.Contains(viewer.userID))
+            {
+                return;
+            }
+
+            var container = new CuiElementContainer();
+            container.Add(new CuiPanel
+            {
+                CursorEnabled = false,
+                Image = { Color = "0.03 0.04 0.05 0.76" },
+                RectTransform = { AnchorMin = "0.755 0.52", AnchorMax = "0.995 0.92" }
+            }, "Hud", DebugBotPanelUi);
+
+            CuiHelper.AddUi(viewer, container);
+            debugBotPanelViewers.Add(viewer.userID);
         }
 
         private void DestroyDebugBotPanel(BasePlayer player)
         {
             if (player != null)
             {
+                debugBotPanelViewers.Remove(player.userID);
+                CuiHelper.DestroyUi(player, DebugBotPanelTextUi);
                 CuiHelper.DestroyUi(player, DebugBotPanelUi);
             }
         }
@@ -5260,6 +5644,8 @@ namespace Oxide.Plugins
             RefreshEligibleKits();
             CleanupInactiveBots();
             DestroyAdminPanel(player);
+            adminPanelViewers.Add(player.userID);
+            DestroyDebugBotPanel(player);
 
             var container = new CuiElementContainer();
             var panel = container.Add(new CuiPanel
@@ -5534,6 +5920,7 @@ namespace Oxide.Plugins
         {
             if (player != null)
             {
+                adminPanelViewers.Remove(player.userID);
                 CuiHelper.DestroyUi(player, AdminPanelUi);
             }
         }
@@ -5672,6 +6059,11 @@ namespace Oxide.Plugins
         {
             DestroyDebugBotPanel(player);
             DestroyAdminPanel(player);
+            if (player != null)
+            {
+                adminPanelViewers.Remove(player.userID);
+                debugSidePanelSuppressedUntil.Remove(player.userID);
+            }
         }
 
         private string BuildDebugSidePanelText(BaseCombatEntity bot, BotRuntime runtime, float distance, float now)
@@ -5692,6 +6084,8 @@ namespace Oxide.Plugins
             var fallback = string.IsNullOrWhiteSpace(runtime.Decisions.LastFallbackReason) ? "none" : runtime.Decisions.LastFallbackReason;
             var coverStatus = CoverStatus(bot, runtime);
             var medicalStatus = MedicalStatus(bot, runtime, now);
+            var protectionStatus = string.IsNullOrWhiteSpace(runtime.LastProtectionReason) ? "none" : runtime.LastProtectionReason;
+            var anchorStatus = BarricadeAnchorStatus(runtime, now);
             var skillColor = SkillNameplateColorHex(runtime);
             CleanupBotPlacedEntityRefs();
 
@@ -5707,6 +6101,7 @@ namespace Oxide.Plugins
                 + $"\nK/D: {stats.kills}/{stats.deaths} ({kd})  Team: {runtime.TeamId}  Role: {runtime.SquadRole}"
                 + $"\nBase: {(runtime.IsInBaseRestrictedArea ? "inside" : "clear")}  Barricades: {botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}"
                 + $"\nCover: {coverStatus}  Wall: {(string.IsNullOrWhiteSpace(runtime.LastBarricadeReason) ? "none" : runtime.LastBarricadeReason)}"
+                + $"\nProtect: {protectionStatus}  Anchor: {anchorStatus}"
                 + $"\nUtility: {(string.IsNullOrWhiteSpace(runtime.LastUtilityReason) ? "none" : runtime.LastUtilityReason)}"
                 + $"\nHeal: {medicalStatus}"
                 + $"\nFire: {(string.IsNullOrWhiteSpace(runtime.LastFireBlockReason) ? "none" : runtime.LastFireBlockReason)}"
@@ -6339,6 +6734,11 @@ namespace Oxide.Plugins
                 runtime.Memory.TargetUserId = source.userID;
                 runtime.Memory.LastHeardPosition = sourcePosition;
                 runtime.Memory.LastHeardAt = now;
+                if (IsBarricadeAnchorActive(runtime, now))
+                {
+                    runtime.BarricadeAnchorNoActionPushAt = now + BarricadeAnchorNoActionPushSeconds(runtime);
+                }
+
                 runtime.Memory.TargetConfidence = Math.Max(runtime.Memory.TargetConfidence, confidence);
                 runtime.NextDecisionAt = Math.Min(runtime.NextDecisionAt, now);
 
@@ -6560,7 +6960,11 @@ namespace Oxide.Plugins
                 NearbyKnownEnemies = NearbyKnownEnemies(runtime, now),
                 IsStuck = IsBotStuck(bot, runtime, now),
                 StuckMemoryPoints = ActiveStuckMemoryCount(runtime, now),
-                TargetIsInsideBaseRestrictedArea = target != null && IsBaseRestrictedPosition(target.transform.position)
+                TargetIsInsideBaseRestrictedArea = target != null && IsBaseRestrictedPosition(target.transform.position),
+                ProtectionDamageFraction = runtime.ProtectionDamageAccumulatedFraction,
+                ProtectionState = runtime.LastProtectionReason ?? "none",
+                BarricadeAnchorState = BarricadeAnchorStatus(runtime, now),
+                MedicalFireLocked = IsMedicalFireLocked(runtime, now)
             };
 
             return request;
@@ -6623,6 +7027,10 @@ namespace Oxide.Plugins
                 ["is_stuck"] = request.IsStuck,
                 ["stuck_memory_points"] = request.StuckMemoryPoints,
                 ["target_is_inside_base_restricted_area"] = request.TargetIsInsideBaseRestrictedArea,
+                ["protection_damage_fraction"] = request.ProtectionDamageFraction,
+                ["protection_state"] = request.ProtectionState ?? "",
+                ["barricade_anchor_state"] = request.BarricadeAnchorState ?? "",
+                ["medical_fire_locked"] = request.MedicalFireLocked,
                 ["recent_events"] = events,
                 ["candidate_actions"] = candidates
             };
@@ -6911,6 +7319,7 @@ namespace Oxide.Plugins
             var hasRecentContact = HasRecentContact(runtime, now);
             var knownThreatPosition = KnownThreatPosition(runtime);
             var damageWallAware = HasDamageWallAwareness(runtime, now);
+            var protectionDamageAware = HasProtectionDamageTrigger(runtime, now);
             var knownThreatDistance = knownThreatPosition == Vector3.zero ? 0f : Vector3.Distance(bot.transform.position, knownThreatPosition);
             var longRangeDefensiveAware = ShouldPreferLongRangeDefensiveHeal(runtime, healthFraction, knownThreatDistance, hasFreshSeen || hasFreshHeard || hasRecentContact, now);
             var lowHealthAware = longRangeDefensiveAware || ShouldNoticeLowHealth(runtime, healthFraction, now);
@@ -6927,12 +7336,15 @@ namespace Oxide.Plugins
             {
                 runtime.NextCoverSearchAt = 0f;
                 runtime.BarricadeCommittedUntil = 0f;
+                ClearBarricadeAnchor(runtime, "cover_compromised");
             }
 
             var wallCommitActive = runtime.BarricadeCommittedUntil > now
                 && runtime.CurrentBarricadePoint != Vector3.zero
                 && nearCoverNow
                 && !coverCompromised;
+            var barricadeAnchorActive = IsBarricadeAnchorActive(runtime, now);
+            var barricadeAnchorCanLeave = CanLeaveBarricadeAnchor(runtime, now);
 
             var targetInBase = target != null && IsBaseRestrictedPosition(target.transform.position);
             var threatPathCrossesBase = knownThreatPosition != Vector3.zero
@@ -6977,7 +7389,22 @@ namespace Oxide.Plugins
                 }
             }
 
+            if (protectionDamageAware
+                && config.AI.AllowCover
+                && !atCoverNow
+                && knownThreatPosition != Vector3.zero
+                && TryFindNearbyProtectionPlan(bot, runtime, knownThreatPosition, target, ProtectionDistance(runtime), now, out var protectionPlan))
+            {
+                ApplyProtectionPlan(runtime, protectionPlan, now);
+                var protection = Candidate(TacticalActionId.RetreatToCover, 158f + SkillDiscipline(runtime) * 10f, "low", $"damage protection trigger; use {protectionPlan.Source} within {protectionPlan.Distance:0.0}m", protectionPlan.TuckPoint, runtime.Memory.TargetUserId, now);
+                protection.RiskFlags.Add("protection_damage");
+                protection.RiskFlags.Add(protectionPlan.Source);
+                candidates.Add(protection);
+            }
+
             AddUtilityCandidates(candidates, bot, runtime, target, knownThreatPosition, healthFraction, lowHealthAware, atCoverNow, hasFreshSeen, hasFreshHeard, hasRecentContact, targetInBase, now, board);
+
+            var hasNearbyProtectionCandidate = candidates.Any(candidate => candidate.RiskFlags.Contains("protection_damage"));
 
             if (config.AI.AllowBarricades && !atCoverNow && knownThreatPosition != Vector3.zero && now < runtime.NextBarricadeAt)
             {
@@ -6988,6 +7415,7 @@ namespace Oxide.Plugins
                 && !atCoverNow
                 && now >= runtime.NextBarricadeAt
                 && knownThreatPosition != Vector3.zero
+                && !hasNearbyProtectionCandidate
                 && ShouldPlaceBarricade(bot, runtime, knownThreatPosition, healthFraction, runtime.Memory.TargetExposureFraction, now, out var reactionBarricadePoint))
             {
                 var score = damageWallAware
@@ -7008,12 +7436,13 @@ namespace Oxide.Plugins
                     var canShootFromCover = target != null
                         && CanShootVisibleTarget(bot, runtime, targetDistance, runtime.Memory.TargetExposureFraction, now);
                     var shouldReturnFireFromCover = canShootFromCover && ShouldReturnFireFromCoverWhileHealing(runtime, targetDistance, now);
+                    var syringeRecoveryActive = IsMedicalFireLocked(runtime, now) || healthFraction < SyringeHealTargetFraction();
 
-                    if (tuckDestination != Vector3.zero && !shouldReturnFireFromCover)
+                    if (syringeRecoveryActive && tuckDestination != Vector3.zero && !shouldReturnFireFromCover)
                     {
-                        var tuck = Candidate(TacticalActionId.Tuck, 142f + SkillDiscipline(runtime) * 10f, "low", "hold cover until close to full health", tuckDestination, runtime.Memory.TargetUserId, now);
+                        var tuck = Candidate(TacticalActionId.Tuck, 142f + SkillDiscipline(runtime) * 10f, "low", "hold cover until syringe recovery finishes", tuckDestination, runtime.Memory.TargetUserId, now);
                         tuck.RiskFlags.Add("low_health_heal");
-                        tuck.RiskFlags.Add("full_health_discipline");
+                        tuck.RiskFlags.Add("syringe_recovery");
                         candidates.Add(tuck);
                     }
                 }
@@ -7027,7 +7456,13 @@ namespace Oxide.Plugins
                             || runtime.State == TacticalState.FightFromCover
                             || runtime.CurrentBarricadePoint != Vector3.zero);
 
-                    if (hasCurrentCoverDestination)
+                    if (TryFindNearbyProtectionPlan(bot, runtime, knownThreatPosition, target, ProtectionDistance(runtime), now, out var lowHealthProtection))
+                    {
+                        ApplyProtectionPlan(runtime, lowHealthProtection, now);
+                        retreatDestination = lowHealthProtection.TuckPoint;
+                        foundCoverDestination = true;
+                    }
+                    else if (hasCurrentCoverDestination)
                     {
                         retreatDestination = runtime.CurrentTuckPoint;
                         foundCoverDestination = true;
@@ -7119,7 +7554,7 @@ namespace Oxide.Plugins
                 var rangeScore = WeaponRangeScore(runtime, distance);
                 var exposure = runtime.Memory.TargetExposureFraction;
                 var atCover = atCoverNow;
-                var healingTowardFull = lowHealthAware && healthFraction < config.AI.LowHealthCoverHealTargetFraction;
+                var emergencyHealing = lowHealthAware && (healthFraction < SyringeHealTargetFraction() || IsMedicalFireLocked(runtime, now));
                 var returnFireWhileExposed = lowHealthAware && !atCover && ShouldReturnFireWhileExposed(runtime, healthFraction, distance, exposure, now);
                 var canShootVisibleTarget = CanShootVisibleTarget(bot, runtime, distance, exposure, now);
 
@@ -7171,6 +7606,7 @@ namespace Oxide.Plugins
                     && !atCover
                     && now >= runtime.NextBarricadeAt
                     && candidates.All(candidate => candidate.ActionId != TacticalActionId.PlaceBarricade)
+                    && !hasNearbyProtectionCandidate
                     && ShouldPlaceBarricade(bot, runtime, target.transform.position, healthFraction, exposure, now, out var barricadePoint))
                 {
                     var barricade = Candidate(TacticalActionId.PlaceBarricade, damageWallAware ? 136f : 90f + (1f - healthFraction) * 18f + exposure * 8f, "medium", "damaged or exposed in open ground; place real barricade cover", barricadePoint, targetId, now);
@@ -7207,7 +7643,9 @@ namespace Oxide.Plugins
                     }
                 }
 
-                if (distance > runtime.Combat.PreferredDistance && !healingTowardFull)
+                if (distance > runtime.Combat.PreferredDistance
+                    && !emergencyHealing
+                    && (!barricadeAnchorActive || barricadeAnchorCanLeave))
                 {
                     var pushScore = 56f + runtime.Skill.Aggression * 22f;
 
@@ -7226,6 +7664,11 @@ namespace Oxide.Plugins
                         pushScore -= 70f;
                     }
 
+                    if (barricadeAnchorActive && barricadeAnchorCanLeave)
+                    {
+                        pushScore += 10f;
+                    }
+
                     candidates.Add(Candidate(TacticalActionId.PushTarget, pushScore, "medium", $"target is outside {runtime.Combat.WeaponClass} preferred range", MoveTowardPosition(bot.transform.position, target.transform.position, runtime.Combat.PushDistance, runtime), targetId, now));
                 }
 
@@ -7234,7 +7677,8 @@ namespace Oxide.Plugins
                     && board.TeamSize > 1
                     && now >= runtime.NextFlankAt
                     && !(wallCommitActive && distance <= runtime.Combat.MaxRange)
-                    && !healingTowardFull
+                    && !emergencyHealing
+                    && (!barricadeAnchorActive || barricadeAnchorCanLeave)
                     && distance > Math.Max(12f, runtime.Combat.RetreatDistance + 4f)
                     && (runtime.SquadRole == "flanker" || runtime.SquadRole == "pusher"))
                 {
@@ -7330,6 +7774,7 @@ namespace Oxide.Plugins
 
             candidates.Add(Candidate(TacticalActionId.RoamToPoint, 15f, "low", "no higher-priority tactical stimulus", runtime.CurrentDestination, 0, now));
             ApplySquadDestinationReservations(bot, runtime, candidates, now);
+            ApplyBarricadeAnchorCandidateFilter(bot, runtime, candidates, now);
             var filtered = candidates
                 .Where(candidate => !IsMovementDestinationAction(candidate.ActionId) || !ShouldAvoidDestination(runtime, candidate.Destination, now))
                 .OrderByDescending(candidate => candidate.HeuristicScore)
@@ -7352,6 +7797,7 @@ namespace Oxide.Plugins
                 && runtime != null
                 && runtime.Memory.HasLineOfSight
                 && !IsMedicalFireLocked(runtime, now)
+                && (config.AI.AllowShootingWhileNonSyringeHealing || !IsNonSyringeHealing(runtime, now))
                 && HasAmmoToShoot(bot)
                 && distance <= runtime.Combat.MaxRange
                 && exposure >= config.AI.MinimumExposedTargetFractionToShoot;
@@ -8089,6 +8535,9 @@ namespace Oxide.Plugins
                     fallback_reason = decision.FallbackReason,
                     final_action = decision.Selected?.Id ?? "none",
                     final_score = decision.Selected?.HeuristicScore ?? 0f,
+                    protection_state = runtime.LastProtectionReason ?? "none",
+                    barricade_anchor_state = BarricadeAnchorStatus(runtime, now),
+                    medical_state = MedicalStatus(bot, runtime, now),
                     candidates = candidates,
                     created_at = now
                 });
@@ -8166,6 +8615,9 @@ namespace Oxide.Plugins
                     fallback_reason = accepted ? $"{config.DecisionAdvisor.Mode}_advisor_validated_heuristic_executed" : $"advisor_rejected:{status}",
                     final_action = fallback?.Id ?? "none",
                     final_score = fallback?.HeuristicScore ?? 0f,
+                    protection_state = runtime?.LastProtectionReason ?? "none",
+                    barricade_anchor_state = runtime == null ? "none" : BarricadeAnchorStatus(runtime, now),
+                    medical_state = runtime == null ? "none" : MedicalStatus(null, runtime, now),
                     candidates = candidates,
                     created_at = now
                 });
@@ -8393,6 +8845,11 @@ namespace Oxide.Plugins
                     runtime.CurrentCover = action.Destination;
                     runtime.CurrentDestination = action.Destination;
                     runtime.NextCoverSearchAt = now + config.AI.CoverRepositionCooldownSeconds;
+                    if (action.RiskFlags.Contains("protection_damage"))
+                    {
+                        ResetProtectionDamageTrigger(runtime, "moved_to_protection", now);
+                    }
+
                     MoveBotTo(bot, runtime, action.Destination, BaseNavigator.NavigationSpeed.Fast);
                     FaceEntity(bot, runtime.Memory.Target);
                     MaintainFireOrStop(bot, runtime, now);
@@ -8422,6 +8879,11 @@ namespace Oxide.Plugins
                     break;
 
                 case TacticalActionId.PushTarget:
+                    if (IsBarricadeAnchorActive(runtime, now) && CanLeaveBarricadeAnchor(runtime, now))
+                    {
+                        ClearBarricadeAnchor(runtime, "push_unlocked");
+                    }
+
                     SetState(runtime, TacticalState.Push, now);
                     runtime.CurrentDestination = action.Destination;
                     MoveBotTo(bot, runtime, action.Destination, BaseNavigator.NavigationSpeed.Fast);
@@ -8449,6 +8911,11 @@ namespace Oxide.Plugins
                     SetState(runtime, TacticalState.Retreat, now);
                     runtime.CurrentDestination = action.Destination;
                     runtime.NextCoverSearchAt = now + config.AI.CoverRepositionCooldownSeconds;
+                    if (action.RiskFlags.Contains("protection_damage"))
+                    {
+                        ResetProtectionDamageTrigger(runtime, "moved_to_protection", now);
+                    }
+
                     MoveBotTo(bot, runtime, action.Destination, BaseNavigator.NavigationSpeed.Fast);
                     FacePosition(bot, KnownThreatPosition(runtime));
                     MaintainFireOrStop(bot, runtime, now);
@@ -8504,6 +8971,9 @@ namespace Oxide.Plugins
                         runtime.NextPeekAt = runtime.CurrentTuckUntil;
                         runtime.HoldOutsideBaseUntil = now + config.AI.BarricadeHoldSeconds;
                         runtime.BarricadeCommittedUntil = now + config.AI.BarricadeFightCommitmentSeconds;
+                        ResetProtectionDamageTrigger(runtime, "placed_barricade", now);
+                        var anchorThreatDistance = barricadeThreatPosition == Vector3.zero ? 0f : Vector3.Distance(bot.transform.position, barricadeThreatPosition);
+                        StartBarricadeAnchorIfNeeded(runtime, anchorThreatDistance, runtime.Memory.TargetUserId, now);
                         MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
                         FacePosition(bot, barricadeThreatPosition);
                         MaintainFireOrStop(bot, runtime, now);
@@ -8698,12 +9168,15 @@ namespace Oxide.Plugins
                 var advisorConfidence = json.Value<float?>("advisor_confidence") ?? 0f;
                 var advisorLatency = json.Value<int?>("advisor_latency_ms") ?? 0;
                 var fallback = (string) json["fallback_reason"] ?? "none";
+                var protection = (string) json["protection_state"] ?? "none";
+                var anchor = (string) json["barricade_anchor_state"] ?? "none";
+                var medical = (string) json["medical_state"] ?? "none";
                 var candidates = (json["candidates"] as JArray)?.Count ?? 0;
                 var advisor = string.IsNullOrWhiteSpace(advisorAction)
                     ? $"advisor={advisorStatus}"
                     : $"advisor={advisorStatus}/{advisorAction} conf={advisorConfidence:0.00} latency={advisorLatency}ms";
 
-                return $"{botId}: state={state}, action={finalAction}, score={finalScore:0.0}, candidates={candidates}, {advisor}, fallback={fallback}";
+                return $"{botId}: state={state}, action={finalAction}, score={finalScore:0.0}, candidates={candidates}, protect={protection}, anchor={anchor}, heal={medical}, {advisor}, fallback={fallback}";
             }
             catch
             {
@@ -9415,18 +9888,21 @@ namespace Oxide.Plugins
             var maxHealth = BotMaxHealth(bot, runtime);
             var healthFraction = Mathf.Clamp01(bot.Health() / maxHealth);
 
-            if (runtime.LowHealthCoverAwareUntil > now && healthFraction < config.AI.LowHealthCoverHealTargetFraction)
+            if (runtime.LowHealthCoverAwareUntil > now && healthFraction < SyringeHealTargetFraction())
             {
                 var nextSyringe = runtime.NextSyringeHealAt > now
                     ? $" next_syringe {Math.Max(0f, runtime.NextSyringeHealAt - now).ToString("0", CultureInfo.InvariantCulture)}s"
                     : "";
                 var source = string.IsNullOrWhiteSpace(runtime.LastMedicalUseReason) ? "none" : runtime.LastMedicalUseReason;
-                return $"cover_heal {source}{nextSyringe}";
+                return $"syringe_cover {source}{nextSyringe}";
             }
 
             if (config.AI.PassiveCombatHealPerSecond > 0f && healthFraction < config.AI.PassiveCombatHealTargetFraction)
             {
-                return "passive";
+                var source = string.IsNullOrWhiteSpace(runtime.LastMedicalUseReason) ? "none" : runtime.LastMedicalUseReason;
+                return healthFraction >= config.AI.LowHealthCoverThreshold
+                    ? $"non_syringe {source}"
+                    : "waiting_syringe_cover";
             }
 
             return "none";
@@ -9845,9 +10321,23 @@ namespace Oxide.Plugins
             return Mathf.Lerp(config.AI.LongRangeDefensiveMaxDistance, config.AI.LongRangeDefensiveMinDistance, SkillDiscipline(runtime));
         }
 
+        private float ProtectionDistance(BotRuntime runtime)
+        {
+            return SkillWeightedValue(
+                runtime,
+                config.AI.ProtectionDistanceCasual,
+                config.AI.ProtectionDistanceAverage,
+                config.AI.ProtectionDistanceDangerous);
+        }
+
         private float NearbyDefensiveCoverDistance(BotRuntime runtime)
         {
-            return Mathf.Lerp(config.AI.NearbyDefensiveCoverMinDistance, config.AI.NearbyDefensiveCoverMaxDistance, SkillDiscipline(runtime));
+            return ProtectionDistance(runtime);
+        }
+
+        private float SyringeHealTargetFraction()
+        {
+            return Mathf.Clamp(config.AI.SyringeHealTargetFraction, config.AI.LowHealthCoverThreshold, 1f);
         }
 
         private float LongRangeDefensiveHealthFraction(BotRuntime runtime)
@@ -9875,11 +10365,297 @@ namespace Oxide.Plugins
                 || tier.Equals("dangerous", StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool HasProtectionDamageTrigger(BotRuntime runtime, float now)
+        {
+            return runtime != null && runtime.ProtectionDamageAwareUntil > now;
+        }
+
+        private void ResetProtectionDamageTrigger(BotRuntime runtime, string reason, float now)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            runtime.ProtectionDamageAccumulatedFraction = 0f;
+            runtime.ProtectionDamageWindowStartedAt = now;
+            runtime.ProtectionDamageAwareUntil = 0f;
+            runtime.LastProtectionReason = string.IsNullOrWhiteSpace(reason) ? "reset" : reason;
+        }
+
+        private float BarricadeAnchorLongRangeThreshold(BotRuntime runtime)
+        {
+            return SkillWeightedValue(
+                runtime,
+                config.AI.BarricadeAnchorLongRangeThresholdCasual,
+                config.AI.BarricadeAnchorLongRangeThresholdAverage,
+                config.AI.BarricadeAnchorLongRangeThresholdDangerous);
+        }
+
+        private int BarricadeAnchorRequiredHitmarkers(BotRuntime runtime)
+        {
+            return Clamp((int)SkillWeightedValue(
+                runtime,
+                config.AI.BarricadeAnchorRequiredHitmarkersCasual,
+                config.AI.BarricadeAnchorRequiredHitmarkersAverage,
+                config.AI.BarricadeAnchorRequiredHitmarkersDangerous), 1, 12);
+        }
+
+        private float BarricadeAnchorNoActionPushSeconds(BotRuntime runtime)
+        {
+            return SkillWeightedValue(
+                runtime,
+                config.AI.BarricadeAnchorNoActionPushSecondsCasual,
+                config.AI.BarricadeAnchorNoActionPushSecondsAverage,
+                config.AI.BarricadeAnchorNoActionPushSecondsDangerous);
+        }
+
+        private float LastThreatActionAt(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return 0f;
+            }
+
+            return Math.Max(runtime.LastDamageTakenAt, runtime.Memory.LastHeardAt);
+        }
+
+        private void StartBarricadeAnchorIfNeeded(BotRuntime runtime, float threatDistance, ulong targetUserId, float now)
+        {
+            if (runtime == null || runtime.CurrentBarricadePoint == Vector3.zero)
+            {
+                return;
+            }
+
+            var threshold = BarricadeAnchorLongRangeThreshold(runtime);
+
+            if (threatDistance < threshold)
+            {
+                ClearBarricadeAnchor(runtime, $"range {threatDistance:0}m<{threshold:0}m");
+                return;
+            }
+
+            runtime.BarricadeAnchorActive = true;
+            runtime.BarricadeAnchorStartedAt = now;
+            runtime.BarricadeAnchorThreatDistance = threatDistance;
+            runtime.BarricadeAnchorHitmarkers = 0;
+            runtime.BarricadeAnchorRequiredHitmarkers = BarricadeAnchorRequiredHitmarkers(runtime);
+            runtime.BarricadeAnchorTargetUserId = targetUserId;
+            runtime.BarricadeAnchorTargetDeadAt = 0f;
+            runtime.BarricadeAnchorNoActionPushAt = Math.Max(now, LastThreatActionAt(runtime)) + BarricadeAnchorNoActionPushSeconds(runtime);
+            runtime.LastBarricadeAnchorReason = $"anchored {threatDistance:0}m need_hits={runtime.BarricadeAnchorRequiredHitmarkers}";
+        }
+
+        private void ClearBarricadeAnchor(BotRuntime runtime, string reason)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            runtime.BarricadeAnchorActive = false;
+            runtime.BarricadeAnchorTargetUserId = 0;
+            runtime.BarricadeAnchorHitmarkers = 0;
+            runtime.BarricadeAnchorRequiredHitmarkers = 0;
+            runtime.BarricadeAnchorNoActionPushAt = 0f;
+            runtime.BarricadeAnchorTargetDeadAt = 0f;
+            runtime.LastBarricadeAnchorReason = string.IsNullOrWhiteSpace(reason) ? "clear" : reason;
+        }
+
+        private bool IsBarricadeAnchorActive(BotRuntime runtime, float now)
+        {
+            return runtime != null
+                && runtime.BarricadeAnchorActive
+                && runtime.CurrentBarricadePoint != Vector3.zero
+                && runtime.CurrentTuckPoint != Vector3.zero;
+        }
+
+        private bool CanLeaveBarricadeAnchor(BotRuntime runtime, float now)
+        {
+            if (!IsBarricadeAnchorActive(runtime, now))
+            {
+                return true;
+            }
+
+            if (runtime.BarricadeAnchorTargetDeadAt > 0f)
+            {
+                runtime.LastBarricadeAnchorReason = "push target_dead";
+                return true;
+            }
+
+            if (runtime.BarricadeAnchorHitmarkers >= Math.Max(1, runtime.BarricadeAnchorRequiredHitmarkers))
+            {
+                runtime.LastBarricadeAnchorReason = $"push hits={runtime.BarricadeAnchorHitmarkers}/{runtime.BarricadeAnchorRequiredHitmarkers}";
+                return true;
+            }
+
+            if (runtime.BarricadeAnchorNoActionPushAt > 0f && now >= runtime.BarricadeAnchorNoActionPushAt)
+            {
+                runtime.LastBarricadeAnchorReason = "push no_action";
+                return true;
+            }
+
+            runtime.LastBarricadeAnchorReason = $"hold hits={runtime.BarricadeAnchorHitmarkers}/{Math.Max(1, runtime.BarricadeAnchorRequiredHitmarkers)} no_action={Math.Max(0f, runtime.BarricadeAnchorNoActionPushAt - now):0}s";
+            return false;
+        }
+
+        private void RememberBarricadeAnchorHitmarker(BotRuntime runtime, ulong targetUserId, float now)
+        {
+            if (!IsBarricadeAnchorActive(runtime, now) || targetUserId == 0)
+            {
+                return;
+            }
+
+            if (runtime.BarricadeAnchorTargetUserId != 0 && runtime.BarricadeAnchorTargetUserId != targetUserId)
+            {
+                return;
+            }
+
+            runtime.BarricadeAnchorHitmarkers++;
+            runtime.LastBarricadeAnchorReason = $"hit {runtime.BarricadeAnchorHitmarkers}/{Math.Max(1, runtime.BarricadeAnchorRequiredHitmarkers)}";
+        }
+
+        private void MarkBarricadeAnchorTargetDeath(ulong targetUserId, float now)
+        {
+            if (targetUserId == 0)
+            {
+                return;
+            }
+
+            foreach (var runtime in activeBots.Values)
+            {
+                if (runtime == null
+                    || !runtime.BarricadeAnchorActive
+                    || runtime.BarricadeAnchorTargetUserId != targetUserId)
+                {
+                    continue;
+                }
+
+                runtime.BarricadeAnchorTargetDeadAt = now;
+                runtime.LastBarricadeAnchorReason = "target_dead";
+            }
+        }
+
+        private string BarricadeAnchorStatus(BotRuntime runtime, float now)
+        {
+            if (runtime == null || !runtime.BarricadeAnchorActive)
+            {
+                return string.IsNullOrWhiteSpace(runtime?.LastBarricadeAnchorReason) ? "none" : runtime.LastBarricadeAnchorReason;
+            }
+
+            var noAction = runtime.BarricadeAnchorNoActionPushAt > now
+                ? $"{Math.Max(0f, runtime.BarricadeAnchorNoActionPushAt - now):0}s"
+                : "ready";
+            return $"{(CanLeaveBarricadeAnchor(runtime, now) ? "ready" : "hold")} {runtime.BarricadeAnchorHitmarkers}/{Math.Max(1, runtime.BarricadeAnchorRequiredHitmarkers)} no_action={noAction}";
+        }
+
+        private void ApplyBarricadeAnchorCandidateFilter(BaseCombatEntity bot, BotRuntime runtime, List<TacticalActionCandidate> candidates, float now)
+        {
+            if (bot == null
+                || runtime == null
+                || candidates == null
+                || !config.AI.PreventMovingInFrontOfAnchoredBarricade
+                || !IsBarricadeAnchorActive(runtime, now)
+                || CanLeaveBarricadeAnchor(runtime, now))
+            {
+                return;
+            }
+
+            var holdPoint = runtime.CurrentTuckPoint == Vector3.zero ? runtime.CurrentCover : runtime.CurrentTuckPoint;
+
+            if (holdPoint != Vector3.zero)
+            {
+                var hold = Candidate(TacticalActionId.Tuck, 154f + SkillDiscipline(runtime) * 12f, "low", "long-range barricade anchor; stay behind wall until confidence unlocks push", holdPoint, runtime.Memory.TargetUserId, now);
+                hold.RiskFlags.Add("barricade_anchor");
+                candidates.Add(hold);
+            }
+
+            candidates.RemoveAll(candidate => !IsBarricadeAnchorAllowedCandidate(runtime, candidate, now));
+        }
+
+        private bool IsBarricadeAnchorAllowedCandidate(BotRuntime runtime, TacticalActionCandidate candidate, float now)
+        {
+            if (runtime == null || candidate == null)
+            {
+                return false;
+            }
+
+            switch (candidate.ActionId)
+            {
+                case TacticalActionId.AcquireVisibleTarget:
+                case TacticalActionId.PeekLeft:
+                case TacticalActionId.PeekRight:
+                case TacticalActionId.Tuck:
+                    candidate.RiskFlags.Add("barricade_anchor");
+                    return true;
+
+                case TacticalActionId.MoveToCover:
+                case TacticalActionId.RetreatToCover:
+                    if (IsBehindAnchoredBarricade(runtime, candidate.Destination))
+                    {
+                        candidate.RiskFlags.Add("barricade_anchor");
+                        return true;
+                    }
+
+                    runtime.LastBarricadeAnchorReason = "blocked_front_move";
+                    return false;
+
+                case TacticalActionId.PlaceBarricade:
+                    return true;
+
+                default:
+                    runtime.LastBarricadeAnchorReason = "holding_wall";
+                    return false;
+            }
+        }
+
+        private bool IsBehindAnchoredBarricade(BotRuntime runtime, Vector3 destination)
+        {
+            if (runtime == null || destination == Vector3.zero || runtime.CurrentBarricadePoint == Vector3.zero)
+            {
+                return false;
+            }
+
+            var threat = KnownThreatPosition(runtime);
+
+            if (threat == Vector3.zero)
+            {
+                return Distance2D(destination, runtime.CurrentBarricadePoint) <= 8.5f;
+            }
+
+            var awayFromThreat = runtime.CurrentBarricadePoint - threat;
+            awayFromThreat.y = 0f;
+
+            if (awayFromThreat.sqrMagnitude <= 0.01f)
+            {
+                return Distance2D(destination, runtime.CurrentBarricadePoint) <= 8.5f;
+            }
+
+            var toDestination = destination - runtime.CurrentBarricadePoint;
+            toDestination.y = 0f;
+
+            if (toDestination.sqrMagnitude <= 0.01f)
+            {
+                return true;
+            }
+
+            awayFromThreat.Normalize();
+            toDestination.Normalize();
+            return Vector3.Dot(awayFromThreat, toDestination) >= -0.15f
+                && Distance2D(destination, runtime.CurrentBarricadePoint) <= 8.5f;
+        }
+
         private bool HasDamageWallAwareness(BotRuntime runtime, float now)
         {
             if (runtime == null)
             {
                 return false;
+            }
+
+            if (HasProtectionDamageTrigger(runtime, now))
+            {
+                ExtendDamageBarricadeAwarenessThroughCooldown(runtime, now);
+                return true;
             }
 
             if (runtime.DamageBarricadeAwareUntil > now)
@@ -9954,7 +10730,7 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            var healTarget = Math.Max(config.AI.LowHealthCoverThreshold, config.AI.LowHealthCoverHealTargetFraction);
+            var healTarget = SyringeHealTargetFraction();
 
             if (runtime.LowHealthCoverAwareUntil > now && healthFraction < healTarget)
             {
@@ -10013,7 +10789,7 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            var healTarget = Math.Max(config.AI.LowHealthCoverThreshold, config.AI.LowHealthCoverHealTargetFraction);
+            var healTarget = SyringeHealTargetFraction();
 
             if (runtime.LowHealthCoverAwareUntil > now && healthFraction < healTarget)
             {
@@ -10066,13 +10842,13 @@ namespace Oxide.Plugins
                 return;
             }
 
-            ApplyPassiveCombatHeal(bot, runtime, now);
             ApplySyringeCoverHeal(bot, runtime, now);
+            ApplyPassiveCombatHeal(bot, runtime, now);
         }
 
         private void ApplyPassiveCombatHeal(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
-            if (config.AI.PassiveCombatHealPerSecond <= 0f)
+            if (config.AI.PassiveCombatHealPerSecond <= 0f || IsMedicalFireLocked(runtime, now))
             {
                 runtime.LastPassiveHealAt = 0f;
                 return;
@@ -10081,11 +10857,28 @@ namespace Oxide.Plugins
             var maxHealth = BotMaxHealth(bot, runtime);
             var targetHealth = maxHealth * config.AI.PassiveCombatHealTargetFraction;
             var currentHealth = bot.Health();
+            var healthFraction = Mathf.Clamp01(currentHealth / maxHealth);
 
-            if (currentHealth >= targetHealth)
+            if (healthFraction < config.AI.LowHealthCoverThreshold || currentHealth >= targetHealth)
             {
                 runtime.LastPassiveHealAt = 0f;
+                runtime.PendingNonSyringeHealRemaining = 0f;
                 return;
+            }
+
+            if (runtime.PendingNonSyringeHealRemaining <= 0f && now >= runtime.NextNonSyringeHealAt)
+            {
+                if (TryConsumeBotMedicalItem(bot, false, out var medicalItemShortname, out var medicalHealAmount, out var medicalReason))
+                {
+                    runtime.PendingNonSyringeHealRemaining = medicalHealAmount;
+                    runtime.LastMedicalUseReason = $"non_syringe:{medicalItemShortname}";
+                }
+                else
+                {
+                    runtime.LastMedicalUseReason = $"non_syringe:fallback:{medicalReason}";
+                }
+
+                runtime.NextNonSyringeHealAt = now + config.AI.NonSyringeHealCooldownSeconds;
             }
 
             if (runtime.LastPassiveHealAt <= 0f || runtime.LastPassiveHealAt > now)
@@ -10099,14 +10892,23 @@ namespace Oxide.Plugins
 
             if (elapsed > 0f)
             {
-                bot.SetHealth(Math.Min(targetHealth, currentHealth + config.AI.PassiveCombatHealPerSecond * elapsed));
+                var healAmount = config.AI.PassiveCombatHealPerSecond * elapsed;
+
+                if (runtime.PendingNonSyringeHealRemaining > 0f)
+                {
+                    var realMedicalRate = Math.Max(config.AI.PassiveCombatHealPerSecond, config.AI.NonSyringeHealAmount / Math.Max(0.1f, config.AI.NonSyringeHealCooldownSeconds));
+                    healAmount = Math.Min(runtime.PendingNonSyringeHealRemaining, realMedicalRate * elapsed);
+                    runtime.PendingNonSyringeHealRemaining = Math.Max(0f, runtime.PendingNonSyringeHealRemaining - healAmount);
+                }
+
+                bot.SetHealth(Math.Min(targetHealth, currentHealth + healAmount));
             }
         }
 
         private void ApplySyringeCoverHeal(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
             var maxHealth = BotMaxHealth(bot, runtime);
-            var targetHealth = maxHealth * Math.Max(config.AI.LowHealthCoverThreshold, config.AI.LowHealthCoverHealTargetFraction);
+            var targetHealth = maxHealth * SyringeHealTargetFraction();
             var currentHealth = bot.Health();
 
             if (config.AI.LowHealthCoverHealPerSecond <= 0f || runtime.LowHealthCoverAwareUntil <= now)
@@ -10127,6 +10929,7 @@ namespace Oxide.Plugins
                 runtime.LastLowHealthHealAt = 0f;
                 runtime.MedicalFireLockedUntil = Math.Min(runtime.MedicalFireLockedUntil, now);
                 runtime.PendingMedicalHealRemaining = 0f;
+                runtime.PendingNonSyringeHealRemaining = 0f;
                 SetState(runtime, TacticalState.FightFromCover, now);
                 MaintainFireOrStop(bot, runtime, now);
                 return;
@@ -10157,14 +10960,15 @@ namespace Oxide.Plugins
                 runtime.NextSyringeHealAt = runtime.MedicalFireLockedUntil + config.AI.SyringeCooldownSeconds;
                 runtime.LastLowHealthHealAt = now;
                 runtime.PendingMedicalHealRemaining = 0f;
-                if (TryConsumeBotMedicalItem(bot, out var medicalItemShortname, out var medicalHealAmount, out var medicalReason))
+                runtime.PendingNonSyringeHealRemaining = 0f;
+                if (TryConsumeBotMedicalItem(bot, true, out var medicalItemShortname, out var medicalHealAmount, out var medicalReason))
                 {
                     runtime.PendingMedicalHealRemaining = medicalHealAmount;
-                    runtime.LastMedicalUseReason = $"real:{medicalItemShortname}";
+                    runtime.LastMedicalUseReason = $"syringe:{medicalItemShortname}";
                 }
                 else
                 {
-                    runtime.LastMedicalUseReason = $"fallback:{medicalReason}";
+                    runtime.LastMedicalUseReason = $"syringe:fallback:{medicalReason}";
                 }
 
                 StopBotAttack(bot, runtime);
@@ -10193,7 +10997,8 @@ namespace Oxide.Plugins
                 healAmount = Math.Min(runtime.PendingMedicalHealRemaining, realMedicalRate * elapsed);
                 runtime.PendingMedicalHealRemaining = Math.Max(0f, runtime.PendingMedicalHealRemaining - healAmount);
             }
-            else if ((runtime.LastMedicalUseReason ?? "").StartsWith("real:", StringComparison.OrdinalIgnoreCase))
+            else if ((runtime.LastMedicalUseReason ?? "").StartsWith("syringe:", StringComparison.OrdinalIgnoreCase)
+                && !(runtime.LastMedicalUseReason ?? "").StartsWith("syringe:fallback", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -10201,7 +11006,7 @@ namespace Oxide.Plugins
             bot.SetHealth(Math.Min(targetHealth, currentHealth + healAmount));
         }
 
-        private bool TryConsumeBotMedicalItem(BaseCombatEntity bot, out string itemShortname, out float healAmount, out string reason)
+        private bool TryConsumeBotMedicalItem(BaseCombatEntity bot, bool requireSyringe, out string itemShortname, out float healAmount, out string reason)
         {
             itemShortname = "";
             healAmount = 0f;
@@ -10222,6 +11027,19 @@ namespace Oxide.Plugins
 
             var allowed = new HashSet<string>(config.AI.RealMedicalItemShortnames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
 
+            foreach (var entry in config.AI.BotMedicalLoadout ?? new Dictionary<string, int>())
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    allowed.Add(entry.Key.Trim());
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+            {
+                allowed.Add(config.AI.BotMedicalItemShortname.Trim());
+            }
+
             if (allowed.Count == 0)
             {
                 reason = "no_medical_shortnames";
@@ -10239,13 +11057,13 @@ namespace Oxide.Plugins
                 {
                     var shortname = item?.info?.shortname ?? "";
 
-                    if (item == null || item.amount <= 0 || !allowed.Contains(shortname))
+                    if (item == null || item.amount <= 0 || !allowed.Contains(shortname) || IsSyringeMedicalItem(shortname) != requireSyringe)
                     {
                         continue;
                     }
 
                     itemShortname = shortname;
-                    healAmount = config.AI.RealMedicalItemHealAmount;
+                    healAmount = requireSyringe ? config.AI.RealMedicalItemHealAmount : config.AI.NonSyringeHealAmount;
                     item.UseItem(1);
                     reason = "used";
                     return true;
@@ -10254,6 +11072,12 @@ namespace Oxide.Plugins
 
             reason = "no_item";
             return false;
+        }
+
+        private bool IsSyringeMedicalItem(string shortname)
+        {
+            shortname = (shortname ?? "").Trim();
+            return shortname.IndexOf("syringe", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private Vector3 KnownThreatPosition(BotRuntime runtime)
@@ -10389,7 +11213,7 @@ namespace Oxide.Plugins
             }
 
             var damageAware = HasDamageWallAwareness(runtime, now);
-            var lowHealthAware = runtime.LowHealthCoverAwareUntil > now && healthFraction < Math.Max(config.AI.LowHealthCoverThreshold, config.AI.LowHealthCoverHealTargetFraction);
+            var lowHealthAware = runtime.LowHealthCoverAwareUntil > now && healthFraction < SyringeHealTargetFraction();
             var pressured = damageAware || lowHealthAware || exposure >= 0.65f;
 
             if (!pressured)
@@ -10644,6 +11468,194 @@ namespace Oxide.Plugins
             return false;
         }
 
+        private bool TryFindNearbyProtectionPlan(BaseCombatEntity bot, BotRuntime runtime, Vector3 threatPosition, BasePlayer target, float maxDistance, float now, out ProtectionPlan plan)
+        {
+            plan = null;
+
+            if (bot == null || runtime == null || threatPosition == Vector3.zero || maxDistance <= 0f)
+            {
+                return false;
+            }
+
+            var candidates = new List<ProtectionPlan>();
+
+            if (TryFindNearestExistingBarricadeProtection(bot, runtime, threatPosition, target, maxDistance, now, out var barricadePlan))
+            {
+                candidates.Add(barricadePlan);
+            }
+
+            if (TryFindNearbyCoverProtection(bot, runtime, threatPosition, target, maxDistance, now, out var coverPlan))
+            {
+                candidates.Add(coverPlan);
+            }
+
+            plan = candidates
+                .Where(candidate => candidate != null && candidate.TuckPoint != Vector3.zero)
+                .OrderBy(candidate => candidate.Distance)
+                .FirstOrDefault();
+
+            return plan != null;
+        }
+
+        private bool TryFindNearestExistingBarricadeProtection(BaseCombatEntity bot, BotRuntime runtime, Vector3 threatPosition, BasePlayer target, float maxDistance, float now, out ProtectionPlan plan)
+        {
+            plan = null;
+            CleanupBotPlacedEntityRefs();
+
+            foreach (var barricade in botPlacedEntities)
+            {
+                if (barricade == null || barricade.IsDestroyed)
+                {
+                    continue;
+                }
+
+                var barricadePosition = barricade.transform.position;
+
+                if (!TryFindBarricadeHoldPoint(bot.transform.position, barricadePosition, threatPosition, out var holdPoint))
+                {
+                    continue;
+                }
+
+                var distance = Distance2D(bot.transform.position, holdPoint);
+
+                if (distance > maxDistance)
+                {
+                    continue;
+                }
+
+                var peek = BarricadePeekPoint(bot, holdPoint, barricadePosition, threatPosition, target, runtime, now);
+
+                if (plan != null && distance >= plan.Distance)
+                {
+                    continue;
+                }
+
+                plan = new ProtectionPlan
+                {
+                    CoverPoint = holdPoint,
+                    TuckPoint = holdPoint,
+                    PeekPoint = peek,
+                    Source = "existing_barricade",
+                    Distance = distance
+                };
+            }
+
+            return plan != null;
+        }
+
+        private bool TryFindNearbyCoverProtection(BaseCombatEntity bot, BotRuntime runtime, Vector3 threatPosition, BasePlayer target, float maxDistance, float now, out ProtectionPlan plan)
+        {
+            plan = null;
+
+            if (bot == null || runtime == null || maxDistance <= 0f)
+            {
+                return false;
+            }
+
+            var origin = bot.transform.position;
+            var away = origin - threatPosition;
+            away.y = 0f;
+
+            if (away.sqrMagnitude <= 0.01f)
+            {
+                away = -bot.transform.forward;
+                away.y = 0f;
+            }
+
+            if (away.sqrMagnitude <= 0.01f)
+            {
+                away = Vector3.forward;
+            }
+
+            away.Normalize();
+            var threatEye = target == null ? threatPosition + Vector3.up * 1.6f : EyePosition(target);
+            var attempts = Math.Max(8, config.AI.CoverPointAttempts);
+            var minRadius = Mathf.Clamp(maxDistance * 0.45f, 1.25f, maxDistance);
+            var bestScore = float.MinValue;
+
+            for (var index = 0; index < attempts; index++)
+            {
+                var shell = index / 8;
+                var slot = index % 8;
+                var shellT = attempts <= 8 ? 0f : Mathf.Clamp01(shell / Mathf.Max(1f, (attempts / 8f) - 1f));
+                var radius = Mathf.Lerp(minRadius, maxDistance, shellT);
+                var angleOffset = ((slot - 3.5f) * 22.5f) + shell * 11.25f;
+                var direction = Quaternion.Euler(0f, angleOffset, 0f) * away;
+                var candidate = origin + direction.normalized * radius;
+
+                if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(4f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+                {
+                    continue;
+                }
+
+                var distanceFromBot = Distance2D(origin, sampled);
+
+                if (distanceFromBot > maxDistance + 0.35f)
+                {
+                    continue;
+                }
+
+                if (IsCoverClaimedBySquad(runtime, sampled))
+                {
+                    continue;
+                }
+
+                var coverEye = sampled + Vector3.up * 1.25f;
+
+                if (!IsWorldLineBlocked(threatEye, coverEye, target, bot))
+                {
+                    continue;
+                }
+
+                var left = Vector3.zero;
+                var right = Vector3.zero;
+                var score = 100f - distanceFromBot * 8f;
+
+                if (TryBuildPeekPoint(bot, sampled, threatPosition, target, 1f, runtime, now, out var leftPeek))
+                {
+                    left = leftPeek;
+                    score += 8f;
+                }
+
+                if (TryBuildPeekPoint(bot, sampled, threatPosition, target, -1f, runtime, now, out var rightPeek))
+                {
+                    right = rightPeek;
+                    score += 8f;
+                }
+
+                if (score <= bestScore)
+                {
+                    continue;
+                }
+
+                bestScore = score;
+                plan = new ProtectionPlan
+                {
+                    CoverPoint = sampled,
+                    TuckPoint = sampled,
+                    PeekPoint = left != Vector3.zero ? left : right,
+                    Source = "natural_cover",
+                    Distance = distanceFromBot
+                };
+            }
+
+            return plan != null;
+        }
+
+        private void ApplyProtectionPlan(BotRuntime runtime, ProtectionPlan plan, float now)
+        {
+            if (runtime == null || plan == null)
+            {
+                return;
+            }
+
+            runtime.CurrentCover = plan.CoverPoint;
+            runtime.CurrentTuckPoint = plan.TuckPoint == Vector3.zero ? plan.CoverPoint : plan.TuckPoint;
+            runtime.CurrentPeekPoint = plan.PeekPoint;
+            runtime.NextCoverSearchAt = now + config.AI.CoverRepositionCooldownSeconds;
+            runtime.LastProtectionReason = $"{plan.Source} {plan.Distance:0.0}m";
+        }
+
         private Vector3 BarricadePeekPoint(BaseCombatEntity bot, Vector3 holdPoint, Vector3 barricadePosition, Vector3 threatPosition, BasePlayer target, BotRuntime runtime = null, float now = 0f)
         {
             if (holdPoint == Vector3.zero || threatPosition == Vector3.zero)
@@ -10678,7 +11690,7 @@ namespace Oxide.Plugins
 
             toThreat.Normalize();
             var side = Vector3.Cross(Vector3.up, toThreat).normalized * firstSide;
-            var fallback = barricadePosition + side * config.AI.PeekOffsetDistance + toThreat * 1.1f;
+            var fallback = holdPoint + side * config.AI.PeekOffsetDistance + toThreat * 0.65f;
 
             return TrySampleTacticalPositionAvoidingStuck(runtime, fallback, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled)
                 ? sampled
@@ -11226,6 +12238,11 @@ namespace Oxide.Plugins
                 return BlockFire(runtime, "syringe_lock");
             }
 
+            if (!config.AI.AllowShootingWhileNonSyringeHealing && IsNonSyringeHealing(runtime, now))
+            {
+                return BlockFire(runtime, "non_syringe_lock");
+            }
+
             if (!HasAmmoToShoot(bot))
             {
                 return BlockFire(runtime, "no_ammo");
@@ -11467,6 +12484,11 @@ namespace Oxide.Plugins
             return runtime != null && runtime.MedicalFireLockedUntil > now;
         }
 
+        private bool IsNonSyringeHealing(BotRuntime runtime, float now)
+        {
+            return runtime != null && runtime.PendingNonSyringeHealRemaining > 0f;
+        }
+
         private int NearbyAllies(BaseCombatEntity bot, BotRuntime runtime)
         {
             return activeBots.Count(entry => entry.Key != bot && IsLiveBot(entry.Key) && SameBotClan(runtime, entry.Value) && Vector3.Distance(bot.transform.position, entry.Key.transform.position) <= 45f);
@@ -11589,7 +12611,8 @@ namespace Oxide.Plugins
 
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
-            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, utility={runtime.LastUtilityReason}, heal={runtime.LastMedicalUseReason}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, Time.realtimeSinceStartup)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            var now = Time.realtimeSinceStartup;
+            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
         }
 
         private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)

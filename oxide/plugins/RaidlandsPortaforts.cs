@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsPortaforts", "Raidlands", "1.2.4")]
+    [Info("RaidlandsPortaforts", "Raidlands", "1.2.5")]
     [Description("Provides Raidlands Portafort token items backed by CopyPaste placement.")]
     public class RaidlandsPortaforts : RustPlugin
     {
@@ -50,7 +50,7 @@ namespace Oxide.Plugins
                 "inventories", "true",
                 "autoheight", "false",
                 "height", "0",
-                "blockcollision", "3"
+                "blockcollision", "0"
             };
 
             [JsonProperty("Use Ground Anchored Placement")]

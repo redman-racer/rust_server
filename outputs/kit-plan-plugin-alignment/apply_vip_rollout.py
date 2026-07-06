@@ -313,7 +313,7 @@ def normalize_manifest_item(row, item_defs, existing_defaults):
     if key == "custom.weapon.m16a2":
         return container, [build_item("m16a2", amount, item_defs, existing_defaults)]
     if key == "custom.sentry":
-        return container, [build_item("autoturret", amount, item_defs, existing_defaults)]
+        return container, [build_item("autoturret", amount, item_defs, existing_defaults, "Outpost Sentry Turret")]
     if key == "wall.external.high.wood":
         return container, [build_item("wall.external.high", amount, item_defs, existing_defaults)]
     if key == "wrappedgift / Portafort Token":

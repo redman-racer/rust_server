@@ -576,16 +576,27 @@ namespace Oxide.Plugins
 
         private void OnPlayerLootEnd(PlayerLoot loot)
         {
-            var player = loot.gameObject.GetComponent<BasePlayer>();
-            if (player != loot.entitySource)
-                return;
+            var player = loot.baseEntity ?? loot.gameObject.GetComponent<BasePlayer>();
 
 #if DEBUG
-            Puts("OnLootEntityEnd: Closing container");
+            Puts("OnPlayerLootEnd: Closing container");
 #endif
 
+            CloseSkinContainer(player);
+        }
+
+        private void OnLootEntityEnd(BasePlayer player, BaseCombatEntity entity)
+        {
+            CloseSkinContainer(player);
+        }
+
+        private void CloseSkinContainer(BasePlayer player)
+        {
+            if (player == null)
+                return;
+
             ContainerController container;
-            if (!_controllers.TryGetValue(player.userID, out container))
+            if (!_controllers.TryGetValue(player.userID, out container) || !container.IsOpened)
                 return;
 
             container.Close();
@@ -947,6 +958,12 @@ namespace Oxide.Plugins
 
             private void DestroyUI()
             {
+                CuiHelper.DestroyUi(Owner, "Skins.Right.Text");
+                CuiHelper.DestroyUi(Owner, "Skins.Right");
+                CuiHelper.DestroyUi(Owner, "Skins.Center.Text");
+                CuiHelper.DestroyUi(Owner, "Skins.Center");
+                CuiHelper.DestroyUi(Owner, "Skins.Left.Text");
+                CuiHelper.DestroyUi(Owner, "Skins.Left");
                 CuiHelper.DestroyUi(Owner, "Skins.Background");
             }
 
@@ -986,12 +1003,12 @@ namespace Oxide.Plugins
                 if (!CanUse())
                     return;
 
-                IsOpened = true;
-                UpdateContent(0);
-
                 var loot = Owner.inventory.loot;
 
                 loot.Clear();
+                IsOpened = true;
+                UpdateContent(0);
+
                 loot.PositionChecks = false;
                 loot.entitySource = Owner;
                 loot.itemSource = null;

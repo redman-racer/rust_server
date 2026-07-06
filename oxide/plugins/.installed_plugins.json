@@ -608,5 +608,15 @@
         "plugin_author": "misticos",
         "file_name": "SmartChatBot.cs",
         "installed_at": "2026-07-01T16:47:33+00:00"
+    },
+    {
+        "plugin_id": "auto-code",
+        "provider": "umod",
+        "version_id": "auto-code",
+        "plugin_name": "Auto Code",
+        "plugin_icon": "https://assets.umod.org/images/icons/plugin/6031b57752b6c.png",
+        "plugin_author": "BlueBeka",
+        "file_name": "AutoCode.cs",
+        "installed_at": "2026-07-04T21:16:14+00:00"
     }
 ]

@@ -5,7 +5,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsConsumables", "Raidlands", "1.0.7")]
+    [Info("RaidlandsConsumables", "Raidlands", "1.0.8")]
     [Description("Provides Raidlands Super Serum consumables with persistent tea and pie style buffs until death.")]
     public class RaidlandsConsumables : RustPlugin
     {
@@ -498,8 +498,27 @@ namespace Oxide.Plugins
             if (firstApply && config.MetabolismRefresh.InstantHealOnConsume > 0f)
             {
                 player.Heal(config.MetabolismRefresh.InstantHealOnConsume);
+                TopOffSerumHealth(player);
+                timer.Once(0.1f, () => TopOffSerumHealth(player));
             }
 
+            player.SendNetworkUpdateImmediate();
+        }
+
+        private void TopOffSerumHealth(BasePlayer player)
+        {
+            if (player == null || player.IsDead())
+            {
+                return;
+            }
+
+            var missingHealth = player.MaxHealth() - player.Health();
+            if (missingHealth <= 0.01f)
+            {
+                return;
+            }
+
+            player.Heal(missingHealth);
             player.SendNetworkUpdateImmediate();
         }
 

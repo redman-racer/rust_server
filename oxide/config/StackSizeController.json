@@ -2,7 +2,7 @@
   "RevertStackSizesToVanillaOnUnload": true,
   "AllowStackingItemsWithDurability": true,
   "HidePrefixWithPluginNameInMessages": false,
-  "GlobalStackMultiplier": 1000.0,
+  "GlobalStackMultiplier": 100000.0,
   "CategoryStackMultipliers": {
     "Weapon": 100000.0,
     "Construction": 100000.0,
@@ -19,9 +19,9 @@
     "Common": 100000.0,
     "Component": 100000.0,
     "Search": 100000.0,
-    "Favourite": 1000.0,
-    "Electrical": 1000.0,
-    "Fun": 1000.0
+    "Favourite": 100000.0,
+    "Electrical": 100000.0,
+    "Fun": 100000.0
   },
   "IndividualItemStackMultipliers": {},
   "IndividualItemStackSize": {

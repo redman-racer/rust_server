@@ -282,8 +282,6 @@ namespace Oxide.Plugins
                     {
                         var position = info.HitPositionWorld;
 
-                        var distance = Vector3.Distance(position, weapon.Position);
-
                         bool can_trigger = false, hit_location = true, pvp = false;
 
                         string target;
@@ -304,6 +302,38 @@ namespace Oxide.Plugins
                         case Entity.Type.Player:     can_trigger = pvp = true; break;
                         default:
                             hit_location = false; break;
+                        }
+
+                        // Distance fix:
+                        // The old Aim check used Vector3.Distance(info.HitPositionWorld, weapon.Position).
+                        // That can false flag if Guardian's cached weapon/projectile position is stale.
+                        // For PvP, use the real attacker-to-victim distance, which matches normal kill-feed distance better.
+                        var cached_distance = Vector3.Distance(position, weapon.Position);
+                        var pointstart_distance = Vector3.Distance(info.PointStart, position);
+                        var projectile_distance = info.ProjectileDistance;
+                        var victim_player = entity as BasePlayer;
+
+                        var distance = projectile_distance;
+
+                        if(pvp && victim_player != null)
+                        {
+                            distance = Vector3.Distance(player.transform.position, victim_player.transform.position);
+                        }
+                        else if(distance <= 0.0f || float.IsNaN(distance) || float.IsInfinity(distance) || distance > 1000.0f)
+                        {
+                            distance = pointstart_distance;
+                        }
+
+                        if(distance <= 0.0f || float.IsNaN(distance) || float.IsInfinity(distance) || distance > 1000.0f)
+                        {
+                            distance = cached_distance;
+                        }
+
+                        // Final PvP sanity guard. Never allow a stale projectile/cache distance to create
+                        // a 1000m+ Aim warning when the actual players are close together.
+                        if(pvp && victim_player != null && distance > 300.0f)
+                        {
+                            return;
                         }
 
                         if(can_trigger)
@@ -453,6 +483,9 @@ namespace Oxide.Plugins
                                 { "angle_variance", angle_variance.ToString("F6") },
                                 { "bodypart", bodypart },
                                 { "distance", distance.ToString("F1") },
+                                { "projectile_distance", projectile_distance.ToString("F1") },
+                                { "pointstart_distance", pointstart_distance.ToString("F1") },
+                                { "cached_distance", cached_distance.ToString("F1") },
                                 { "playerid", player.UserIDString },
                                 { "playername", Text.Sanitize(player.displayName) },
                                 { "pvp_variance", pvp_variance.ToString("F6") },
@@ -10208,26 +10241,8 @@ namespace Oxide.Plugins
 
             public static bool IsFriend(BasePlayer a, BasePlayer b) =>
                 IsFriend(a, b.userID);
-            public static bool IsFriend(BasePlayer player, ulong userid)
-            {
-                var friends = _instance?.Friends;
-
-                if((player == null) || (friends == null) || !friends.IsLoaded)
-                {
-                    return false;
-                }
-
-                var result = friends.Call("IsFriend", player.UserIDString, userid.ToString());
-
-                if(result is bool is_friend)
-                {
-                    return is_friend;
-                }
-
-                result = friends.Call("HasFriend", userid.ToString(), player.UserIDString);
-
-                return (result is bool has_friend) && has_friend;
-            }
+            public static bool IsFriend(BasePlayer player, ulong userid) =>
+                (_instance?.Friends?.Call<bool>("IsFriend", player.userID, userid) ?? false);
 
             public static bool IsInactive(BasePlayer player) =>
                 player.IsDead() || player.IsSleeping() || !player.IsConnected;

@@ -1,277 +1,300 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using Cronos;
+using JetBrains.Annotations;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Plugins;
 using UnityEngine;
-using Random = UnityEngine.Random;
+using Random = Oxide.Core.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("AutoWipe", "Converted", "2.0.0")]
-    [Description("Automates server wiping based on cron expressions.")]
-    public class AutoWipe : RustPlugin
+    [Info("Auto Lock", "birthdates", "2.4.7")]
+    [Description("Automatically adds a codelock to a lockable entity with a set pin")]
+    public class AutoLock : RustPlugin
     {
-        public static AutoWipe Singleton;
+        #region Variables
 
-        private AutoWipeConfig ConfigInstance;
-        private AutoWipeData DataInstance;
+        private const string PermissionUse = "autolock.use";
+        private const string PermissionItemBypass = "autolock.item.bypass";
 
-        private readonly char[] splitter = new[] { '|' };
-        private readonly float wipeCooldown = 60 * 60;
-        private readonly float wipeTick = 30;
-        private Timer wipeTimer;
+        [UsedImplicitly] [PluginReference("NoEscape")]
+        private Plugin _noEscape;
 
-        public bool InCooldown() => (DateTime.UtcNow - new DateTime(DataInstance.LastWipeTime)).TotalSeconds <= wipeCooldown;
+        #endregion
 
-        #region Oxide Hooks
+        #region Hooks
 
+        [UsedImplicitly]
         private void Init()
         {
-            Singleton = this;
-            LoadConfigVariables();
-            LoadDataVariables();
+            LoadConfig();
+            permission.RegisterPermission(PermissionUse, this);
+            permission.RegisterPermission(PermissionItemBypass, this);
+            _data = Interface.Oxide.DataFileSystem.ReadObject<Data>(Name);
+
+            cmd.AddChatCommand("autolock", this, ChatCommand);
+            cmd.AddChatCommand("al", this, ChatCommand);
         }
 
-        private void OnServerInitialized()
+        [UsedImplicitly]
+        private void OnEntityBuilt(HeldEntity plan, GameObject go)
         {
-            if (InCooldown())
+            var player = plan.GetOwnerPlayer();
+            if (player == null) return;
+            if (!permission.UserHasPermission(player.UserIDString, PermissionUse)) return;
+            var entity = go.ToBaseEntity() as DecayEntity;
+            if (entity == null || _config.Disabled.Contains(entity.PrefabName)) return;
+            var container = entity as StorageContainer;
+            if (entity.IsLocked() || container != null && container.inventorySlots < 12 ||
+                !container && !(entity is AnimatedBuildingBlock)) return;
+            var playerData = CreateDataIfAbsent(player.UserIDString);
+            if (_noEscape != null)
             {
-                PrintWarning("Initialized world config [WIPE_COOLDOWN]");
-                DataInstance.Wipe?.InitWorld(ConfigInstance.Maps, DataInstance.LastWipeTime);
-                return;
-            }
-
-            if (DataInstance.NextWipe == null)
-            {
-                DataInstance.NextWipe = GetUpcomingAvailableWipeImpl();
-            }
-
-            var currentWipe = DataInstance.Wipe;
-            var wipe = DataInstance.NextWipe ?? currentWipe;
-            var justWiped = wipe != null && !wipe.Equals(currentWipe);
-
-            if (justWiped)
-            {
-                var config = ConfigInstance.GetWipeConfig(wipe);
-                DataInstance.LastWipeTime = DateTime.UtcNow.Ticks;
-                DataInstance.NextWipe = null;
-                ConVar.Server.autoUploadMap = false;
-
-                if (wipe.Temp)
+                if (_config.NoEscapeSettings.BlockRaid && _noEscape.Call<bool>("IsRaidBlocked", player.UserIDString))
                 {
-                    ConfigInstance.AvailableWipes.Remove(wipe);
-                    PrintWarning("Removed map from list");
+                    if (!playerData.Hidden)
+                        player.ChatMessage(lang.GetMessage("RaidBlocked", this, player.UserIDString));
+                    return;
                 }
 
-                DataInstance.Wipe ??= new Wipe();
-                wipe.CopyTo(DataInstance.Wipe);
-                PrintWarning("New wipe detected!");
-                DataInstance.Wipe?.InitWorld(ConfigInstance.Maps, DataInstance.LastWipeTime);
-
-                if (config.PostWipeCommands != null)
+                if (_config.NoEscapeSettings.BlockCombat &&
+                    _noEscape.Call<bool>("IsCombatBlocked", player.UserIDString))
                 {
-                    for (int i = 0; i < config.PostWipeCommands.Length; i++)
-                    {
-                        var command = config.PostWipeCommands[i];
-                        if (string.IsNullOrEmpty(command))
-                            continue;
-                        ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), command);
-                    }
+                    if (!playerData.Hidden)
+                        player.ChatMessage(lang.GetMessage("CombatBlocked", this, player.UserIDString));
+                    return;
                 }
-
-                if (config.PostWipeDeletes != null)
-                {
-                    for (int i = 0; i < config.PostWipeDeletes.Length; i++)
-                    {
-                        var delete = config.PostWipeDeletes[i];
-                        if (string.IsNullOrEmpty(delete))
-                            continue;
-
-                        if (delete.Contains("*"))
-                        {
-                            var directoryPath = Path.GetDirectoryName(delete);
-                            var searchPattern = Path.GetFileName(delete);
-
-                            if (string.IsNullOrEmpty(directoryPath))
-                            {
-                                directoryPath = ".";
-                            }
-
-                            if (Directory.Exists(directoryPath))
-                            {
-                                try
-                                {
-                                    var matchingFiles = Directory.GetFiles(directoryPath, searchPattern);
-                                    for (int o = 0; o < matchingFiles.Length; o++)
-                                    {
-                                        var file = matchingFiles[o];
-                                        File.Delete(file);
-                                        PrintWarning($"Deleting scheduled file '{file}'");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    PrintError($"Error deleting files matching pattern '{delete}': {ex.Message}");
-                                }
-                            }
-                            continue;
-                        }
-
-                        if (File.Exists(delete))
-                        {
-                            File.Delete(delete);
-                            PrintWarning($"Deleting scheduled file '{delete}'");
-                            continue;
-                        }
-
-                        if (Directory.Exists(delete))
-                        {
-                            Directory.Delete(delete, true);
-                            PrintWarning($"Deleting scheduled directory '{delete}'");
-                        }
-                    }
-                }
-
-                SaveDataVariables();
             }
-            else
+
+
+            if (!playerData.Enabled || !HasCodeLock(player)) return;
+            var code = GameManager.server.CreateEntity("assets/prefabs/locks/keypad/lock.code.prefab") as CodeLock;
+            if (code != null)
             {
-                PrintWarning("Initialized world config");
-                DataInstance.Wipe?.InitWorld(ConfigInstance.Maps, DataInstance.LastWipeTime);
+                code.gameObject.Identity();
+                code.SetParent(entity, entity.GetSlotAnchorName(BaseEntity.Slot.Lock));
+                code.Spawn();
+                code.code = playerData.Code;
+                code.hasCode = true;
+                entity.SetSlot(BaseEntity.Slot.Lock, code);
+                Effect.server.Run("assets/prefabs/locks/keypad/effects/lock-code-deploy.prefab",
+                    code.transform.position);
+                if (!code.whitelistPlayers.Contains(player.userID))
+                {
+                    code.whitelistPlayers.Add(player.userID);
+                }
+                code.SetFlag(BaseEntity.Flags.Locked, true);
             }
 
-            // Start the tick timer
-            if (wipeTimer != null) wipeTimer.Destroy();
-            wipeTimer = timer.Every(wipeTick, WipeTickImpl);
+            TakeCodeLock(player);
+            if (!playerData.Hidden)
+                player.ChatMessage(string.Format(lang.GetMessage("CodeAdded", this, player.UserIDString),
+                    player.net.connection.info.GetBool("global.streamermode") ? "****" : playerData.Code));
+        }
+
+        private static string GetRandomCode()
+        {
+            return Random.Range(1000, 9999).ToString();
+        }
+
+        [UsedImplicitly]
+        private void OnServerShutdown()
+        {
+            Unload();
         }
 
         private void Unload()
         {
-            if (wipeTimer != null)
-            {
-                wipeTimer.Destroy();
-                wipeTimer = null;
-            }
-            SaveDataVariables();
+            SaveData();
         }
 
-        private void OnServerInformationUpdated()
+        private PlayerData CreateDataIfAbsent(string id)
         {
-            RefreshHostName();
-        }
-
-        #endregion
-
-        #region Chat Commands
-
-        [ChatCommand("wipe")]
-        private void WipeChat(BasePlayer player, string cmd, string[] args)
-        {
-            // Optional check if you want dynamic commands using ConfigInstance.WipeChatCommand:
-            if (!string.IsNullOrEmpty(ConfigInstance.WipeChatCommand) && !cmd.Equals(ConfigInstance.WipeChatCommand, StringComparison.OrdinalIgnoreCase))
+            PlayerData playerData;
+            if (_data.Codes.TryGetValue(id, out playerData)) return playerData;
+            _data.Codes.Add(id, playerData = new PlayerData
             {
-                return;
-            }
-
-            var nextWipe = GetUpcomingWipeImpl();
-            if (nextWipe.wipe == null)
-            {
-                player.ChatMessage("No available wipe found");
-                return;
-            }
-
-            var result = (nextWipe.next.GetValueOrDefault() - DateTime.UtcNow).TotalSeconds;
-            player.ChatMessage($"Next wipe happens in <color=orange>{FormatTime(result).ToLower()}</color>");
+                Code = GetRandomCode(),
+                Enabled = true
+            });
+            return playerData;
         }
 
         #endregion
 
-        #region Core Core Logic
+        #region Command
 
-        private void RefreshHostName()
+        private void ChatCommand(BasePlayer player, string label, string[] args)
         {
-            if (DataInstance == null) return;
-
-            var lastWipeDate = new DateTime(DataInstance.LastWipeTime);
-
-            if (!string.IsNullOrEmpty(ConVar.Server.hostname) && HasReplacements(ConVar.Server.hostname))
+            if (!permission.UserHasPermission(player.UserIDString, PermissionUse))
             {
-                ConVar.Server.hostname = ProcessString(ConVar.Server.hostname, lastWipeDate);
-                PrintWarning("Updated server hostname replacements");
-            }
-            if (!string.IsNullOrEmpty(ConVar.Server.description) && HasReplacements(ConVar.Server.description))
-            {
-                ConVar.Server.description = ProcessString(ConVar.Server.description, lastWipeDate);
-                PrintWarning("Updated server description replacements");
+                player.ChatMessage(lang.GetMessage("NoPermission", this, player.UserIDString));
+                return;
             }
 
-            return;
-
-            static string ProcessString(string source, DateTime time)
+            if (args.Length < 1)
             {
-                return source
-                    .Replace("[WIPE_DAY]", $"{time.Day}")
-                    .Replace("[WIPE_MONTH]", $"{time.Month}")
-                    .Replace("[WIPE_YEAR]", $"{time.Year}")
-                    .Replace("[WIPE_HOUR]", $"{time.Hour}")
-                    .Replace("[WIPE_MINUTE]", $"{time.Minute}");
+                player.ChatMessage(string.Format(lang.GetMessage("InvalidArgs", this, player.UserIDString), label));
+                return;
             }
 
-            static bool HasReplacements(string source)
+            CreateDataIfAbsent(player.UserIDString);
+            switch (args[0].ToLower())
             {
-                return source.Contains("[WIPE_DAY]") ||
-                       source.Contains("[WIPE_MONTH]") ||
-                       source.Contains("[WIPE_YEAR]") ||
-                       source.Contains("[WIPE_HOUR]") ||
-                       source.Contains("[WIPE_MINUTE]");
+                case "code":
+                    SetCode(player, args.Length > 1 ? args[1] : null);
+                    break;
+                case "toggle":
+                    player.ChatMessage(lang.GetMessage(Toggle(player) ? "Enabled" : "Disabled", this,
+                        player.UserIDString));
+                    break;
+                case "hide":
+                    player.ChatMessage(lang.GetMessage(ToggleHide(player) ? "HideEnabled" : "HideDisabled", this,
+                        player.UserIDString));
+                    break;
+                default:
+                    player.ChatMessage(string.Format(lang.GetMessage("InvalidArgs", this, player.UserIDString), label));
+                    break;
             }
         }
 
-        private void WipeTickImpl()
+        private static bool HasCodeLock(BasePlayer player)
         {
-            if (InCooldown()) return;
+            return player.IPlayer.HasPermission(PermissionItemBypass) || player.inventory.FindItemByItemID(1159991980) != null;
+        }
 
-            DataInstance.NextWipe = GetUpcomingAvailableWipeImpl();
+        private static void TakeCodeLock(BasePlayer player)
+        {
+            if (!player.IPlayer.HasPermission(PermissionItemBypass))
+                player.inventory.Take(null, 1159991980, 1);
+        }
 
-            if (DataInstance.NextWipe == null) return;
-
-            if (DataInstance.NextWipe.Commands != null)
+        private void SetCode(BasePlayer player, string code)
+        {
+            if (string.IsNullOrEmpty(code) || code.Length != 4 || !code.All(char.IsDigit))
             {
-                for (int i = 0; i < DataInstance.NextWipe.Commands.Length; i++)
+                player.ChatMessage(lang.GetMessage("InvalidCode", this, player.UserIDString));
+                return;
+            }
+
+            var pData = _data.Codes[player.UserIDString];
+            pData.Code = code;
+            if (!pData.Hidden)
+                player.ChatMessage(string.Format(lang.GetMessage("CodeUpdated", this, player.UserIDString),
+                    player.net.connection.info.GetBool("global.streamermode") ? "****" : code));
+        }
+
+        private bool Toggle(BasePlayer player)
+        {
+            var data = _data.Codes[player.UserIDString];
+            var newToggle = !data.Enabled;
+            data.Enabled = newToggle;
+            return newToggle;
+        }
+
+        private bool ToggleHide(BasePlayer player)
+        {
+            var data = _data.Codes[player.UserIDString];
+            data.Hidden = !data.Hidden;
+            return data.Hidden;
+        }
+
+        #endregion
+
+        #region Configuration & Language
+
+        private ConfigFile _config;
+        private Data _data;
+
+        private class PlayerData
+        {
+            public string Code;
+            public bool Enabled;
+            public bool Hidden;
+        }
+
+        private class Data
+        {
+            public readonly Dictionary<string, PlayerData> Codes = new Dictionary<string, PlayerData>();
+        }
+
+        protected override void LoadDefaultMessages()
+        {
+            lang.RegisterMessages(new Dictionary<string, string>
+            {
+                {"CodeAdded", "Codelock placed with code {0}."},
+                {"Disabled", "You have disabled auto locks."},
+                {"Enabled", "You have enabled auto locks."},
+                {"HideEnabled", "You have hidden auto lock notifications."},
+                {"HideDisabled", "You have shown auto lock notifications."},
+                {"CodeUpdated", "Your new code is {0}."},
+                {"InvalidCode", "Please enter a valid 4-digit code, e.g. /autolock code 1234"},
+                {"NoPermission", "You don't have permission."},
+                {"InvalidArgs", "/{0} code <1234>|toggle|hide"},
+                {"RaidBlocked", "The codelock wasn't automatically locked due to you being raid blocked!"},
+                {"CombatBlocked", "The codelock wasn't automatically locked due to you being combat blocked!"}
+            }, this);
+        }
+
+        public class ConfigFile
+        {
+            [JsonProperty("Disabled Items (Prefabs)")]
+            public List<string> Disabled;
+
+            [JsonProperty("No Escape")] public NoEscapeSettings NoEscapeSettings;
+
+            public static ConfigFile DefaultConfig()
+            {
+                return new ConfigFile
                 {
-                    var command = DataInstance.NextWipe.Commands[i];
-                    if (string.IsNullOrEmpty(command))
-                        continue;
-                    ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), command);
-                }
+                    Disabled = new List<string>
+                    {
+                        "assets/prefabs/deployable/large wood storage/box.wooden.large.prefab"
+                    },
+                    NoEscapeSettings = new NoEscapeSettings
+                    {
+                        BlockCombat = true,
+                        BlockRaid = true
+                    }
+                };
             }
-
-            wipeTimer?.Destroy();
-            SaveDataVariables();
         }
 
-        private Wipe GetUpcomingAvailableWipeImpl()
+        public class NoEscapeSettings
         {
-            for (int i = 0; i < ConfigInstance.AvailableWipes.Count; i++)
-            {
-                var wipe = ConfigInstance.AvailableWipes[i];
-                if (wipe.ShouldWipe())
-                {
-                    return wipe;
-                }
-            }
-            return null;
+            [JsonProperty("Block Auto Lock whilst in Combat?")]
+            public bool BlockCombat;
+
+            [JsonProperty("Block Auto Lock whilst Raid Blocked?")]
+            public bool BlockRaid;
         }
 
-        private (Wipe wipe, DateTime? next) GetUpcomingWipeImpl()
+        private void SaveData()
         {
-            var now = DateTime.UtcNow;
-            var nextRun = ConfigInstance.AvailableWipes.Select(job => (job, CronExpression.Parse(job.Cron).GetNextOccurrence(now, TimeZoneInfo.Utc)))
-                .Where(x => x.Item2.HasValue)
-                .OrderBy(x => x.Item2)
-                .FirstOrDefault();
+            Interface.Oxide.DataFileSystem.WriteObject(Name, _data);
+        }
 
+        protected override void LoadConfig()
+        {
+            base.LoadConfig();
+            _config = Config.ReadObject<ConfigFile>();
+            if (_config == null) LoadDefaultConfig();
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            _config = ConfigFile.DefaultConfig();
+            PrintWarning("Default configuration has been loaded.");
+        }
+
+        protected override void SaveConfig()
+        {
+            Config.WriteObject(_config);
+        }
+
+        #endregion
+    }
+}
+//Generated with birthdates' Plugin Maker
