@@ -1,12 +1,12 @@
 {
   "Enabled": false,
-  "Target Population": 3,
-  "Minimum Allowed Population": 1,
-  "Maximum Allowed Population": 3,
+  "Target Population": 50,
+  "Minimum Allowed Population": 0,
+  "Maximum Allowed Population": 200,
   "Team Size Weights": {
-    "solo": 0,
+    "solo": 55,
     "duo": 35,
-    "trio": 65
+    "trio": 10
   },
   "Bot Clans": [
     {
@@ -114,10 +114,10 @@
     "Runtime Invalid Position Despawn Seconds": 2.0,
     "Group Spawn Radius": 12.0,
     "Use Generated Positions Near Players": true,
-    "Near Player Minimum Distance": 45.0,
-    "Near Player Maximum Distance": 180.0,
-    "Near Player Attempts Per Bot": 160,
-    "Near Player Anchor Name Or SteamID": "ababmxking",
+    "Near Player Minimum Distance": 80.0,
+    "Near Player Maximum Distance": 260.0,
+    "Near Player Attempts Per Bot": 120,
+    "Near Player Anchor Name Or SteamID": "",
     "Avoid Safe Zone Spawns": true,
     "Ignore Players In Safe Zones": true,
     "Safe Zone Spawn Buffer Distance": 75.0
@@ -137,9 +137,9 @@
     "Minimum Exposed Target Fraction": 0.25,
     "Minimum Exposed Target Fraction To Shoot": 0.25,
     "Foliage Blocks Vision": true,
-    "Foliage Vision Check Radius": 0.9,
-    "Maximum Clear Vision Through Foliage": 14.0,
-    "Foliage Hits To Block Vision": 1,
+    "Foliage Vision Check Radius": 0.65,
+    "Maximum Clear Vision Through Foliage": 24.0,
+    "Foliage Hits To Block Vision": 2,
     "Foliage Terrain Sampling": true,
     "Foliage Terrain Sample Step": 6.0,
     "Foliage Terrain Samples To Block Vision": 4,
@@ -167,6 +167,7 @@
     "Allow Barricades": true,
     "Allow Jiggle Peeking": true,
     "Allow Jump Peek Approximation": false,
+    "Allow Bot Clan Wars": true,
     "Cover Search Radius": 28.0,
     "Cover Point Attempts": 28,
     "Cover Minimum Distance From Threat": 16.0,
@@ -262,7 +263,7 @@
     "Base Hold Seconds": 12.0
   },
   "Decision Advisor": {
-    "Enabled": true,
+    "Enabled": false,
     "Provider": "none",
     "Mode": "fallback_only",
     "Shadow Mode": true,
@@ -271,6 +272,8 @@
     "Endpoint Url": "",
     "Api Key": "",
     "Model": "",
+    "Use Structured Response Schema": true,
+    "Max Advisor Response Bytes": 8192,
     "Timeout Milliseconds": 750,
     "Decision Ttl Milliseconds": 3000,
     "Minimum Confidence": 0.55,
@@ -285,6 +288,16 @@
     "Max Recent Events In Request": 24,
     "Max Candidate Actions": 8
   },
+  "Bot Kill Integration": {
+    "Broadcast Player-Like Kill Messages": true,
+    "Suppress DeathNotes For Roam Bot Kills": true,
+    "Chat Format": "<color=#838383>[<color=#80D000>DeathNotes</color>] {message}</color>",
+    "Kill Message": "<color=#C4FF00>{killer}</color> killed <color=#C4FF00>{victim}</color> with <color=#C4FF00>{weapon}</color> from <color=#C4FF00>{distance}</color> ({method}).",
+    "Award ServerRewards RP": true,
+    "RP Reward Per Bot Kill": 5,
+    "Tell Killer About RP Reward": true,
+    "RP Reward Message": "<color=#ce422b>[Raidlands]</color> You earned <color=#B6F34A>{rp} RP</color> for killing <color=#C4FF00>{victim}</color>."
+  },
   "Persistence": {
     "Kill Bots On Plugin Unload": false,
     "Kill Bots On Disable": false,
@@ -293,21 +306,24 @@
     "Emergency Kill Command Enabled": true
   },
   "Debug": {
-    "Debug Spawn Details": true,
-    "Debug Tactical Decisions": true,
-    "Debug Perception": true,
-    "Debug Bot Nameplates": true,
-    "Debug Bot Side Panel": true,
-    "Debug UI Includes Anchor Player": true,
+    "Debug Spawn Details": false,
+    "Debug Tactical Decisions": false,
+    "Debug Perception": false,
+    "Debug Bot Nameplates": false,
+    "Debug Bot Side Panel": false,
+    "Debug UI Includes Anchor Player": false,
     "Debug Nameplate Refresh Seconds": 1.0,
     "Debug Nameplate Draw Duration Seconds": 1.25,
     "Debug Nameplate Height": 3.25,
     "Debug Nameplate Font Size": 9,
     "Debug Nameplate Max Distance": 350.0,
     "Debug Cover Scores": false,
-    "Debug Decision Advisor": false
+    "Debug Decision Advisor": false,
+    "Debug Console Logs": false,
+    "Debug Console Log Cooldown Seconds": 5.0,
+    "Console Warning Cooldown Seconds": 30.0
   },
-  "Spawn Failure Retry Seconds": 30.0,
+  "Spawn Failure Retry Seconds": 90.0,
   "Bot Profiles": [
     "LaunchLoot",
     "BlueCarded",

@@ -1,6 +1,90 @@
-Raidlands roam bots stuck-memory resilience update - 2026-07-05
+Raidlands roam bots killfeed, quiet-console, and clan-war addendum - 2026-07-05
+
+Latest addendum:
+- RaidlandsRoamBots is now v0.3.34.
+- Kill chat now includes weapon/method/distance using the configured template tokens `{weapon}`, `{method}`, and `{distance}`.
+- Bot kills against real players now broadcast to chat, not only real-player kills against bots.
+- Different-clan bot-vs-bot kills are allowed and broadcast through the same killfeed; same-clan bot damage remains blocked.
+- DeathNotes suppression now applies to any death involving a tracked roam bot to avoid duplicate generic NPC/scientist messages.
+- Debug UI and debug console output are separated. Nameplates/side panel can be enabled without console flooding; detailed console debug requires `Debug -> Debug Console Logs`.
+- Repeated spawn/kit warnings are throttled by `Debug -> Console Warning Cooldown Seconds`.
+- Local Roslyn compile check against `RustDedicated_Data/Managed` passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.34. Remaining warnings are expected plugin-reference/future-field warnings.
+- Confirm the live console loads RaidlandsRoamBots v0.3.34 after upload/reload.
+
+Previous admin panel and high-cap live defaults update - 2026-07-05
 
 Current update:
+- RaidlandsRoamBots is now v0.3.33.
+- The checked-in config is now staged for live release: disabled on reload, target=50, min=0, max=200.
+- Added the in-game `/raidbots admin` CUI, backed by `raidbots.ui`, with tabs for overview, population, spawn, AI, utility, rewards, advisor, debug, and danger controls.
+- The panel can manage enable/disable, population caps, manual spawn batches, spawn mode/fallback/anchor, tactical toggles, utility caps/cooldowns, bot reward/RP behavior, advisor modes, debug surfaces, config reloads, and emergency cleanup.
+- Code defaults now match the staged high-cap live config for target/max population, near-player spawn tuning, random fallback, nav sample distance, retry timing, and solo/duo/trio weights.
+- The tester-only near-player anchor is cleared, so live spawning uses any active non-safe-zone player as the anchor source.
+- Random land fallback remains disabled so failed/no player-adjacent spawning does not silently become arbitrary map spawning.
+- Team weights are back to a normal live mix: solo=55, duo=35, trio=10.
+- Debug spawn details, tactical/perception logs, overhead nameplates, and side panel are off by default.
+- Decision advisor is off/fallback-only by default for release play. Deterministic local tactics run without any external advisor or API key unless the owner explicitly opts in later.
+- Foliage LOS release defaults now use a narrower `0.65m` cast, require `2` foliage blockers, and allow `24m` clear-through distance. This supersedes the older `0.9m` / `1 blocker` test tuning.
+- Added player-like roam bot kill chat: when a real player kills a tracked roam bot, chat now says `{killer} killed [TAG] BotName` instead of letting the bot read like a generic scientist.
+- Added DeathNotes suppression for tracked roam bot deaths so the server does not double-post both the new player-like bot kill line and the old NPC/scientist death line.
+- Added ServerRewards RP payout for real-player roam bot kills. The live config currently awards `5 RP` per bot kill and sends the killer a short RP confirmation message.
+- Added `Bot Kill Integration` config knobs for chat format, kill message text, DeathNotes suppression, ServerRewards RP enablement, RP amount, and the killer-only RP reward notice.
+- Added non-blocking HTTP decision advisor adapters for `openai_compatible` and `website_proxy` providers using Oxide `webrequest.Enqueue`.
+- Added compact advisor request payloads containing bot state, tactical context, and precomputed legal candidate actions.
+- Added OpenAI-compatible chat-completions request bodies with configurable structured schema output, plus direct website-proxy request bodies for a future Raidlands-side advisor endpoint.
+- Added response parsing and validation for direct proxy decisions and OpenAI-compatible `choices[0].message.content` JSON.
+- Advisor responses are rejected on invalid JSON, empty/oversized responses, unknown action ids, low confidence, excessive TTL, late candidate expiry, invalid/dead/sleeping/disconnected targets, or movement destinations inside base-restricted areas.
+- Remote advisor responses are trace/validation only in this pass. The deterministic heuristic action still executes in `fallback_only`, `shadow`, and `canary` modes.
+- Added pending-request caps, timeout pruning, advisor result stats, richer JSONL trace fields, and `raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot]`.
+- RoamBots can resolve an OpenAI advisor key from ignored `oxide/config/Secrets.local.json` using `${OPENAI_ROAM_BOT_API_KEY}` if advisor plumbing is intentionally configured later.
+- The checked-in advisor config now uses `Enabled=false`, `Provider=none`, and `Mode=fallback_only`.
+- Added config knobs:
+  - `Bot Kill Integration -> Broadcast Player-Like Kill Messages`
+  - `Bot Kill Integration -> Suppress DeathNotes For Roam Bot Kills`
+  - `Bot Kill Integration -> Chat Format`
+  - `Bot Kill Integration -> Kill Message`
+  - `Bot Kill Integration -> Award ServerRewards RP`
+  - `Bot Kill Integration -> RP Reward Per Bot Kill`
+  - `Bot Kill Integration -> Tell Killer About RP Reward`
+  - `Bot Kill Integration -> RP Reward Message`
+  - `Decision Advisor -> Use Structured Response Schema`
+  - `Decision Advisor -> Max Advisor Response Bytes`
+- Local Roslyn compile check against `RustDedicated_Data/Managed` passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.33. Remaining warnings are expected plugin-reference/future-field warnings.
+
+Live Oxide files to upload for this update:
+- oxide/plugins/RaidlandsRoamBots.cs
+- oxide/config/RaidlandsRoamBots.json
+
+Local handoff/docs files updated:
+- oxide/config/Secrets.example.json
+- Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
+- UPDATED_FILES_FOR_UPLOAD.txt
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_POPULATION_AI_2026-07-04.md
+
+Optional live ignored secret file for later advisor testing:
+- oxide/config/Secrets.local.json
+- Only add `OPENAI_ROAM_BOT_API_KEY` if intentionally testing advisor shadow mode. Do not put the real key in tracked configs, upload manifests, docs, chat, or Git.
+
+Recommended live RCON order for this update:
+- Upload `oxide/plugins/RaidlandsRoamBots.cs`
+- Upload `oxide/config/RaidlandsRoamBots.json`
+- `oxide.reload RaidlandsRoamBots`
+- Confirm the live console loads RaidlandsRoamBots v0.3.33.
+- In game, run `/raidbots admin`.
+- Expected: the admin panel opens and shows disabled, target=50, max=200, mode=near_players, anchor=all.
+- `raidbots.diag`
+- Expected before enable: `enabled=False`, `target=50`, `anchor=all`, and `advisor=none/fallback_only`.
+- `raidbots.enable 3`
+- `raidbots.list`
+- If the first three bots look healthy, ramp with `raidbots.target 25`, then `raidbots.target 50`.
+- Kill a roam bot with a real player account.
+- Expected: chat shows a DeathNotes-styled line like `PlayerName killed [NR] LaunchLoot.` and does not also print the generic scientist/NPC death line.
+- Expected: the killer receives `You earned 5 RP for killing [TAG] BotName.` and their ServerRewards balance increases by 5.
+- `raidbots.advisor status`
+- Expected release default: provider is `none`, mode is `fallback_only`, enabled is `False`, apiKey is `not_used`, pending is `0/2`, and no plaintext key is printed.
+- Optional later advisor smoke: configure provider/endpoint/model/API key, run `raidbots.reload`, then `raidbots.advisor shadow`, fight until a hard decision trigger fires, and inspect `raidbots.decisions last 5` / `raidbots.advisor stats`.
+
+Previous v0.3.26 stuck-memory resilience update:
 - RaidlandsRoamBots is now v0.3.26.
 - Bots now remember recently failed movement destinations instead of repeatedly selecting the same blocked or no-progress point.
 - Failed blocked destinations, base-blocked paths, failed navigator commands, and repeated stuck/no-progress destinations are added to a per-bot bad-spot memory.

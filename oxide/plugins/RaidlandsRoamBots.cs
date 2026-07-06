@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.29")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.34")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -25,9 +25,17 @@ namespace Oxide.Plugins
         private const string DecisionTraceDataFile = "RaidlandsRoamBots/decision_traces.jsonl";
         private const string StatsDataFile = "RaidlandsRoamBots/stats";
         private const string KitsDataFile = "Kits/kits_data";
+        private const string SecretsConfigName = "Secrets.local";
+        private const string OpenAiRoamBotApiKeySecret = "OPENAI_ROAM_BOT_API_KEY";
         private const string WoodenBarricadeCoverPrefab = "assets/prefabs/deployable/barricades/barricade.cover.wood_double.prefab";
         private const string F1GrenadePrefab = "assets/prefabs/weapons/f1 grenade/grenade.f1.deployed.prefab";
         private const string SmokeGrenadePrefab = "assets/prefabs/tools/smoke grenade/grenade.smoke.deployed.prefab";
+        private const string AdvisorProviderNone = "none";
+        private const string AdvisorProviderOpenAiCompatible = "openai_compatible";
+        private const string AdvisorProviderWebsiteProxy = "website_proxy";
+        private const string AdvisorModeFallbackOnly = "fallback_only";
+        private const string AdvisorModeShadow = "shadow";
+        private const string AdvisorModeCanary = "canary";
         private const float RetreatFallbackReturnFireAfterSeconds = 2.5f;
         private const float RetreatFallbackTimeoutSeconds = 8f;
         private const float MinimumAmmoFractionToShoot = 0.01f;
@@ -41,12 +49,29 @@ namespace Oxide.Plugins
         private const string ScoreboardBotKd = "Bot K/D";
         private const string ScoreboardBotClanKd = "Bot Clan K/D";
         private const string DebugBotPanelUi = "RaidlandsRoamBots.DebugBotPanel";
+        private const string AdminPanelUi = "RaidlandsRoamBots.AdminPanel";
+        private const int AdminPanelMaximumPopulation = 500;
+        private static readonly string[] AdminPanelTabs =
+        {
+            "overview",
+            "population",
+            "spawn",
+            "ai",
+            "utility",
+            "rewards",
+            "advisor",
+            "debug",
+            "danger"
+        };
 
         [PluginReference]
         private Plugin Kits;
 
         [PluginReference]
         private Plugin Scoreboards;
+
+        [PluginReference]
+        private Plugin ServerRewards;
 
         private Configuration config;
         private StoredData data;
@@ -59,8 +84,15 @@ namespace Oxide.Plugins
         private readonly Dictionary<string, KitEligibility> eligibleKits = new Dictionary<string, KitEligibility>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, SquadBlackboard> squadBlackboards = new Dictionary<int, SquadBlackboard>();
         private readonly Dictionary<string, float> recentSoundBroadcasts = new Dictionary<string, float>(StringComparer.Ordinal);
+        private readonly Dictionary<string, float> consoleLogLastAt = new Dictionary<string, float>(StringComparer.Ordinal);
         private readonly List<DecisionTrace> pendingDecisionTraces = new List<DecisionTrace>();
+        private readonly Dictionary<string, PendingAdvisorDecision> pendingAdvisorDecisions = new Dictionary<string, PendingAdvisorDecision>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<ulong, RecentBotDeath> recentBotDeaths = new Dictionary<ulong, RecentBotDeath>();
+        private AdvisorStats advisorStats = new AdvisorStats();
+        private Dictionary<string, string> secrets;
+        private string secretsConfigSource;
         private IDecisionAdvisor decisionAdvisor;
+        private bool serverRewardsUnavailableWarned;
         private Timer maintainTimer;
         private Timer perceptionTimer;
         private Timer brainTimer;
@@ -77,19 +109,19 @@ namespace Oxide.Plugins
             public bool Enabled = false;
 
             [JsonProperty("Target Population")]
-            public int TargetPopulation = 15;
+            public int TargetPopulation = 50;
 
             [JsonProperty("Minimum Allowed Population")]
             public int MinAllowedPopulation = 0;
 
             [JsonProperty("Maximum Allowed Population")]
-            public int MaxAllowedPopulation = 30;
+            public int MaxAllowedPopulation = 200;
 
             [JsonProperty("Team Size Weights")]
             public Dictionary<string, int> TeamSizeWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
             {
-                ["solo"] = 60,
-                ["duo"] = 30,
+                ["solo"] = 55,
+                ["duo"] = 35,
                 ["trio"] = 10
             };
 
@@ -140,12 +172,15 @@ namespace Oxide.Plugins
             [JsonProperty("Decision Advisor")]
             public DecisionAdvisorConfig DecisionAdvisor = new DecisionAdvisorConfig();
 
+            [JsonProperty("Bot Kill Integration")]
+            public BotKillIntegrationConfig BotKillIntegration = new BotKillIntegrationConfig();
+
             public PersistenceConfig Persistence = new PersistenceConfig();
 
             public DebugConfig Debug = new DebugConfig();
 
             [JsonProperty("Spawn Failure Retry Seconds")]
-            public float SpawnFailureRetrySeconds = 120f;
+            public float SpawnFailureRetrySeconds = 90f;
 
             [JsonProperty("Bot Profiles")]
             public List<string> BotProfiles = new List<string>
@@ -229,13 +264,13 @@ namespace Oxide.Plugins
             public string SpawnMode = SpawnModeNearPlayers;
 
             [JsonProperty("Use Random Land Fallback")]
-            public bool UseRandomLandFallback = true;
+            public bool UseRandomLandFallback = false;
 
             [JsonProperty("Max Position Attempts")]
             public int MaxPositionAttempts = 80;
 
             [JsonProperty("Navmesh Sample Distance")]
-            public float NavmeshSampleDistance = 12f;
+            public float NavmeshSampleDistance = 18f;
 
             [JsonProperty("Minimum Above Water")]
             public float MinimumAboveWater = 1.5f;
@@ -271,10 +306,10 @@ namespace Oxide.Plugins
             public float NearPlayerMinDistance = 80f;
 
             [JsonProperty("Near Player Maximum Distance")]
-            public float NearPlayerMaxDistance = 300f;
+            public float NearPlayerMaxDistance = 260f;
 
             [JsonProperty("Near Player Attempts Per Bot")]
-            public int NearPlayerAttempts = 64;
+            public int NearPlayerAttempts = 120;
 
             [JsonProperty("Near Player Anchor Name Or SteamID")]
             public string NearPlayerAnchorNameOrSteamId = "";
@@ -339,13 +374,13 @@ namespace Oxide.Plugins
             public bool FoliageBlocksVision = true;
 
             [JsonProperty("Foliage Vision Check Radius")]
-            public float FoliageVisionCheckRadius = 0.9f;
+            public float FoliageVisionCheckRadius = 0.65f;
 
             [JsonProperty("Maximum Clear Vision Through Foliage")]
-            public float MaximumClearVisionThroughFoliage = 14f;
+            public float MaximumClearVisionThroughFoliage = 24f;
 
             [JsonProperty("Foliage Hits To Block Vision")]
-            public int FoliageHitsToBlockVision = 1;
+            public int FoliageHitsToBlockVision = 2;
 
             [JsonProperty("Foliage Terrain Sampling")]
             public bool FoliageTerrainSampling = true;
@@ -412,6 +447,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Allow Jump Peek Approximation")]
             public bool AllowJumpPeekApproximation = false;
+
+            [JsonProperty("Allow Bot Clan Wars")]
+            public bool AllowBotClanWars = true;
 
             [JsonProperty("Cover Search Radius")]
             public float CoverSearchRadius = 28f;
@@ -683,9 +721,9 @@ namespace Oxide.Plugins
 
         private class DecisionAdvisorConfig
         {
-            public bool Enabled = true;
-            public string Provider = "none";
-            public string Mode = "fallback_only";
+            public bool Enabled = false;
+            public string Provider = AdvisorProviderNone;
+            public string Mode = AdvisorModeFallbackOnly;
 
             [JsonProperty("Shadow Mode")]
             public bool ShadowMode = true;
@@ -703,6 +741,12 @@ namespace Oxide.Plugins
             public string ApiKey = "";
 
             public string Model = "";
+
+            [JsonProperty("Use Structured Response Schema")]
+            public bool UseStructuredResponseSchema = true;
+
+            [JsonProperty("Max Advisor Response Bytes")]
+            public int MaxAdvisorResponseBytes = 8192;
 
             [JsonProperty("Timeout Milliseconds")]
             public int TimeoutMilliseconds = 750;
@@ -744,6 +788,33 @@ namespace Oxide.Plugins
             public int MaxCandidateActions = 8;
         }
 
+        private class BotKillIntegrationConfig
+        {
+            [JsonProperty("Broadcast Player-Like Kill Messages")]
+            public bool BroadcastPlayerLikeKillMessages = true;
+
+            [JsonProperty("Suppress DeathNotes For Roam Bot Kills")]
+            public bool SuppressDeathNotesForRoamBotKills = true;
+
+            [JsonProperty("Chat Format")]
+            public string ChatFormat = "<color=#838383>[<color=#80D000>DeathNotes</color>] {message}</color>";
+
+            [JsonProperty("Kill Message")]
+            public string KillMessage = "<color=#C4FF00>{killer}</color> killed <color=#C4FF00>{victim}</color> with <color=#C4FF00>{weapon}</color> from <color=#C4FF00>{distance}</color> ({method}).";
+
+            [JsonProperty("Award ServerRewards RP")]
+            public bool AwardServerRewardsRp = true;
+
+            [JsonProperty("RP Reward Per Bot Kill")]
+            public int ServerRewardsRpPerBotKill = 5;
+
+            [JsonProperty("Tell Killer About RP Reward")]
+            public bool TellKillerAboutRpReward = true;
+
+            [JsonProperty("RP Reward Message")]
+            public string RpRewardMessage = "<color=#ce422b>[Raidlands]</color> You earned <color=#B6F34A>{rp} RP</color> for killing <color=#C4FF00>{victim}</color>.";
+        }
+
         private class PersistenceConfig
         {
             [JsonProperty("Kill Bots On Plugin Unload")]
@@ -780,7 +851,7 @@ namespace Oxide.Plugins
             public bool DebugBotSidePanel = false;
 
             [JsonProperty("Debug UI Includes Anchor Player")]
-            public bool DebugUiIncludesAnchorPlayer = true;
+            public bool DebugUiIncludesAnchorPlayer = false;
 
             [JsonProperty("Debug Nameplate Refresh Seconds")]
             public float DebugNameplateRefreshSeconds = 1f;
@@ -802,6 +873,15 @@ namespace Oxide.Plugins
 
             [JsonProperty("Debug Decision Advisor")]
             public bool DebugDecisionAdvisor = false;
+
+            [JsonProperty("Debug Console Logs")]
+            public bool DebugConsoleLogs = false;
+
+            [JsonProperty("Debug Console Log Cooldown Seconds")]
+            public float DebugConsoleLogCooldownSeconds = 5f;
+
+            [JsonProperty("Console Warning Cooldown Seconds")]
+            public float ConsoleWarningCooldownSeconds = 30f;
         }
 
         private class StoredData
@@ -1052,6 +1132,9 @@ namespace Oxide.Plugins
         {
             public float LastAdvisorRequestAt;
             public string LastAdvisorStatus = "";
+            public string LastAdvisorActionId = "";
+            public float LastAdvisorConfidence;
+            public string LastAdvisorRationale = "";
             public TacticalActionId LastActionId = TacticalActionId.None;
             public float LastDecisionAt;
             public string LastFallbackReason = "";
@@ -1126,6 +1209,54 @@ namespace Oxide.Plugins
             }
         }
 
+        private class HttpDecisionAdvisor : IDecisionAdvisor
+        {
+            private readonly RaidlandsRoamBots owner;
+            private readonly string provider;
+
+            public HttpDecisionAdvisor(RaidlandsRoamBots owner, string provider)
+            {
+                this.owner = owner;
+                this.provider = provider;
+            }
+
+            public string Name => provider;
+            public bool IsConfigured => owner.IsDecisionAdvisorHttpConfigured(provider);
+
+            public bool TrySubmit(DecisionRequest request, Action<DecisionAdvisorResult> callback)
+            {
+                if (!IsConfigured)
+                {
+                    callback?.Invoke(DecisionAdvisorResult.Failure("advisor_not_configured"));
+                    return false;
+                }
+
+                owner.PruneExpiredAdvisorRequests(Time.realtimeSinceStartup);
+                var maxConcurrent = Math.Max(0, owner.config?.DecisionAdvisor?.MaxConcurrentRequests ?? 0);
+
+                if (maxConcurrent <= 0 || owner.PendingAdvisorRequestCount() >= maxConcurrent)
+                {
+                    callback?.Invoke(DecisionAdvisorResult.Failure("advisor_capacity"));
+                    return false;
+                }
+
+                var url = owner.AdvisorEndpointUrl(provider);
+                var body = provider == AdvisorProviderOpenAiCompatible
+                    ? owner.BuildOpenAiCompatibleAdvisorBody(request)
+                    : owner.BuildWebsiteProxyAdvisorBody(request);
+                var headers = owner.BuildAdvisorHeaders(provider);
+                var submittedAt = Time.realtimeSinceStartup;
+                var timeout = (float)Math.Max(100, owner.config.DecisionAdvisor.TimeoutMilliseconds);
+
+                owner.SendAdvisorPost(url, body, (code, response) =>
+                {
+                    callback?.Invoke(owner.ParseAdvisorHttpResponse(provider, request, code, response, submittedAt));
+                }, headers, timeout);
+
+                return true;
+            }
+        }
+
         private class DecisionAdvisorResult
         {
             public bool Success;
@@ -1135,6 +1266,8 @@ namespace Oxide.Plugins
             public int TtlMilliseconds;
             public string Rationale = "";
             public string FallbackActionId = "";
+            public int HttpStatusCode;
+            public int LatencyMilliseconds;
 
             public static DecisionAdvisorResult Failure(string status)
             {
@@ -1144,6 +1277,42 @@ namespace Oxide.Plugins
                     Status = status ?? "advisor_failure"
                 };
             }
+        }
+
+        private class PendingAdvisorDecision
+        {
+            public string RequestId = "";
+            public string BotKey = "";
+            public string FallbackActionId = "";
+            public float SubmittedAt;
+            public float ExpiresAt;
+        }
+
+        private class RecentBotDeath
+        {
+            public BotRuntime Runtime;
+            public float ExpiresAt;
+        }
+
+        private class AdvisorStats
+        {
+            public int TotalRequests;
+            public int SubmittedRequests;
+            public int SynchronousFailures;
+            public int SuccessResponses;
+            public int RejectedResponses;
+            public int HttpFailures;
+            public int InvalidJsonResponses;
+            public int InvalidActionResponses;
+            public int LowConfidenceResponses;
+            public int LateResponses;
+            public int TimeoutResponses;
+            public string LastStatus = "none";
+            public string LastBotKey = "";
+            public string LastActionId = "";
+            public float LastConfidence;
+            public int LastLatencyMilliseconds;
+            public string LastRationale = "";
         }
 
         private class DecisionRequest
@@ -1214,6 +1383,10 @@ namespace Oxide.Plugins
             public string state;
             public bool advisor_requested;
             public string advisor_status;
+            public string advisor_action;
+            public float advisor_confidence;
+            public int advisor_latency_ms;
+            public string advisor_rationale;
             public string fallback_reason;
             public string final_action;
             public float final_score;
@@ -1236,6 +1409,7 @@ namespace Oxide.Plugins
         protected override void LoadConfig()
         {
             base.LoadConfig();
+            ResetSecretsCache();
 
             try
             {
@@ -1265,7 +1439,7 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             RefreshEligibleKits();
-            decisionAdvisor = new NullDecisionAdvisor();
+            RefreshDecisionAdvisor();
             CreateScoreboards();
             UpdateScoreboards();
 
@@ -1282,6 +1456,8 @@ namespace Oxide.Plugins
         {
             StopRuntime();
             DestroyDebugBotPanels();
+            DestroyAdminPanels();
+            pendingAdvisorDecisions.Clear();
             if (config?.Persistence?.KillBotsOnPluginUnload == true)
             {
                 KillAllBots(!config.Persistence.LeaveCorpses);
@@ -1304,6 +1480,11 @@ namespace Oxide.Plugins
             if (plugin?.Name == "Kits")
             {
                 timer.Once(2f, RefreshEligibleKits);
+            }
+
+            if (plugin?.Name == "ServerRewards")
+            {
+                serverRewardsUnavailableWarned = false;
             }
         }
 
@@ -1704,8 +1885,12 @@ namespace Oxide.Plugins
                 config.DecisionAdvisor = defaults.DecisionAdvisor;
             }
 
-            config.DecisionAdvisor.Provider = string.IsNullOrWhiteSpace(config.DecisionAdvisor.Provider) ? "none" : config.DecisionAdvisor.Provider.Trim().ToLowerInvariant();
-            config.DecisionAdvisor.Mode = string.IsNullOrWhiteSpace(config.DecisionAdvisor.Mode) ? "fallback_only" : config.DecisionAdvisor.Mode.Trim().ToLowerInvariant();
+            config.DecisionAdvisor.Provider = NormalizeAdvisorProvider(config.DecisionAdvisor.Provider);
+            config.DecisionAdvisor.Mode = NormalizeAdvisorMode(config.DecisionAdvisor.Mode);
+            config.DecisionAdvisor.EndpointUrl = string.IsNullOrWhiteSpace(config.DecisionAdvisor.EndpointUrl) && config.DecisionAdvisor.Provider == AdvisorProviderOpenAiCompatible ? defaults.DecisionAdvisor.EndpointUrl : (config.DecisionAdvisor.EndpointUrl ?? "").Trim();
+            config.DecisionAdvisor.ApiKey = string.IsNullOrWhiteSpace(config.DecisionAdvisor.ApiKey) && config.DecisionAdvisor.Provider == AdvisorProviderOpenAiCompatible ? defaults.DecisionAdvisor.ApiKey : (config.DecisionAdvisor.ApiKey ?? "").Trim();
+            config.DecisionAdvisor.Model = string.IsNullOrWhiteSpace(config.DecisionAdvisor.Model) && config.DecisionAdvisor.Provider == AdvisorProviderOpenAiCompatible ? defaults.DecisionAdvisor.Model : (config.DecisionAdvisor.Model ?? "").Trim();
+            config.DecisionAdvisor.MaxAdvisorResponseBytes = Clamp(config.DecisionAdvisor.MaxAdvisorResponseBytes <= 0 ? defaults.DecisionAdvisor.MaxAdvisorResponseBytes : config.DecisionAdvisor.MaxAdvisorResponseBytes, 512, 65536);
             config.DecisionAdvisor.TimeoutMilliseconds = Clamp(config.DecisionAdvisor.TimeoutMilliseconds, 100, 5000);
             config.DecisionAdvisor.DecisionTtlMilliseconds = Clamp(config.DecisionAdvisor.DecisionTtlMilliseconds, 100, 10000);
             config.DecisionAdvisor.MinimumConfidence = Mathf.Clamp01(config.DecisionAdvisor.MinimumConfidence);
@@ -1713,6 +1898,16 @@ namespace Oxide.Plugins
             config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot = Math.Max(0f, config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot);
             config.DecisionAdvisor.MaxRecentEventsInRequest = Math.Max(0, config.DecisionAdvisor.MaxRecentEventsInRequest);
             config.DecisionAdvisor.MaxCandidateActions = Clamp(config.DecisionAdvisor.MaxCandidateActions, 1, 16);
+
+            if (config.BotKillIntegration == null)
+            {
+                config.BotKillIntegration = defaults.BotKillIntegration;
+            }
+
+            config.BotKillIntegration.ChatFormat = string.IsNullOrWhiteSpace(config.BotKillIntegration.ChatFormat) ? defaults.BotKillIntegration.ChatFormat : config.BotKillIntegration.ChatFormat.Trim();
+            config.BotKillIntegration.KillMessage = string.IsNullOrWhiteSpace(config.BotKillIntegration.KillMessage) ? defaults.BotKillIntegration.KillMessage : config.BotKillIntegration.KillMessage.Trim();
+            config.BotKillIntegration.ServerRewardsRpPerBotKill = Clamp(config.BotKillIntegration.ServerRewardsRpPerBotKill, 0, 100000);
+            config.BotKillIntegration.RpRewardMessage = string.IsNullOrWhiteSpace(config.BotKillIntegration.RpRewardMessage) ? defaults.BotKillIntegration.RpRewardMessage : config.BotKillIntegration.RpRewardMessage.Trim();
 
             if (config.Persistence == null)
             {
@@ -1729,6 +1924,132 @@ namespace Oxide.Plugins
             config.Debug.DebugNameplateHeight = Mathf.Clamp(config.Debug.DebugNameplateHeight, 2.5f, 6f);
             config.Debug.DebugNameplateFontSize = Clamp(config.Debug.DebugNameplateFontSize, 6, 14);
             config.Debug.DebugNameplateMaxDistance = Mathf.Clamp(config.Debug.DebugNameplateMaxDistance, 25f, 1000f);
+            config.Debug.DebugConsoleLogCooldownSeconds = Mathf.Clamp(config.Debug.DebugConsoleLogCooldownSeconds, 1f, 60f);
+            config.Debug.ConsoleWarningCooldownSeconds = Mathf.Clamp(config.Debug.ConsoleWarningCooldownSeconds, 5f, 300f);
+        }
+
+        private string NormalizeAdvisorProvider(string provider)
+        {
+            var normalized = string.IsNullOrWhiteSpace(provider) ? AdvisorProviderNone : provider.Trim().ToLowerInvariant();
+
+            if (normalized == AdvisorProviderOpenAiCompatible || normalized == AdvisorProviderWebsiteProxy)
+            {
+                return normalized;
+            }
+
+            return AdvisorProviderNone;
+        }
+
+        private string NormalizeAdvisorMode(string mode)
+        {
+            var normalized = string.IsNullOrWhiteSpace(mode) ? AdvisorModeFallbackOnly : mode.Trim().ToLowerInvariant();
+
+            if (normalized == AdvisorModeShadow || normalized == AdvisorModeCanary)
+            {
+                return normalized;
+            }
+
+            return AdvisorModeFallbackOnly;
+        }
+
+        private void RefreshDecisionAdvisor()
+        {
+            var provider = NormalizeAdvisorProvider(config?.DecisionAdvisor?.Provider);
+            decisionAdvisor = provider == AdvisorProviderOpenAiCompatible || provider == AdvisorProviderWebsiteProxy
+                ? (IDecisionAdvisor)new HttpDecisionAdvisor(this, provider)
+                : new NullDecisionAdvisor();
+        }
+
+        private void ResetSecretsCache()
+        {
+            secrets = null;
+            secretsConfigSource = "";
+        }
+
+        private string ResolveSecretValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+
+            var trimmed = value.Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return trimmed;
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return "";
+            }
+
+            string secret;
+
+            if (LoadSecrets().TryGetValue(key, out secret))
+            {
+                return (secret ?? "").Trim();
+            }
+
+            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            return "";
+        }
+
+        private string DescribeSecretSource(string value)
+        {
+            var trimmed = (value ?? "").Trim();
+
+            if (!trimmed.StartsWith("${", StringComparison.Ordinal) || !trimmed.EndsWith("}", StringComparison.Ordinal))
+            {
+                return "oxide/config/RaidlandsRoamBots.json";
+            }
+
+            var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
+            var source = string.IsNullOrWhiteSpace(secretsConfigSource) ? $"oxide/config/{SecretsConfigName}.json" : secretsConfigSource;
+
+            return $"{key} in {source}";
+        }
+
+        private bool HasResolvedAdvisorApiKey()
+        {
+            return !string.IsNullOrWhiteSpace(ResolveAdvisorApiKey());
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (secrets != null)
+            {
+                return secrets;
+            }
+
+            secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+            secretsConfigSource = $"oxide/config/{SecretsConfigName}.json";
+
+            if (!File.Exists(path))
+            {
+                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
+                return secrets;
+            }
+
+            try
+            {
+                var loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+
+                if (loadedSecrets != null)
+                {
+                    secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json: {ex.Message}");
+            }
+
+            return secrets;
         }
 
         private void LoadData()
@@ -1813,7 +2134,7 @@ namespace Oxide.Plugins
             if (spawned <= 0)
             {
                 spawnRetryBlockedUntil = Time.realtimeSinceStartup + config.SpawnFailureRetrySeconds;
-                PrintWarning($"Roam bot spawning is paused for {config.SpawnFailureRetrySeconds:0} seconds because no configured prefab could be placed on navmesh.");
+                ThrottledWarning("spawn-paused", $"Roam bot spawning is paused for {config.SpawnFailureRetrySeconds:0} seconds because no configured prefab could be placed on navmesh.");
             }
         }
 
@@ -1868,7 +2189,7 @@ namespace Oxide.Plugins
 
             if (eligibleKits.Count == 0)
             {
-                PrintWarning("No eligible default-access weapon kits found for roam bots.");
+                ThrottledWarning("no-eligible-kits", "No eligible default-access weapon kits found for roam bots.");
                 return 0;
             }
 
@@ -1888,7 +2209,7 @@ namespace Oxide.Plugins
                     {
                         if (spawnAttempt == 0)
                         {
-                            PrintWarning("Could not find a valid land/navmesh spawn position for roam bots.");
+                            ThrottledWarning("spawn-no-position", "Could not find a valid land/navmesh spawn position for roam bots.");
                         }
 
                         break;
@@ -1945,7 +2266,7 @@ namespace Oxide.Plugins
             {
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    Puts($"Trying legacy body prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), brain={TacticalBrainName}.");
+                    DebugLog($"spawn-try:{prefab}", $"Trying legacy body prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), brain={TacticalBrainName}.");
                 }
 
                 var entity = GameManager.server.CreateEntity(prefab, position, Quaternion.Euler(0f, UnityEngine.Random.Range(0f, 360f), 0f), true);
@@ -1954,7 +2275,7 @@ namespace Oxide.Plugins
                 {
                     if (config.Debug.DebugSpawnDetails)
                     {
-                        Puts($"Prefab {prefab} could not be created at {FormatVector(position)}.");
+                        DebugLog($"spawn-create-null:{prefab}", $"Prefab {prefab} could not be created at {FormatVector(position)}.");
                     }
 
                     continue;
@@ -1966,7 +2287,7 @@ namespace Oxide.Plugins
                 {
                     if (config.Debug.DebugSpawnDetails)
                     {
-                        Puts($"Prefab {prefab} created {entity.GetType().Name}, not BaseCombatEntity; rejecting spawn attempt.");
+                        DebugLog($"spawn-wrong-type:{prefab}", $"Prefab {prefab} created {entity.GetType().Name}, not BaseCombatEntity; rejecting spawn attempt.");
                     }
 
                     SafeKillSpawnAttempt(entity);
@@ -1977,14 +2298,14 @@ namespace Oxide.Plugins
 
                 if (!TryPlaceBotOnOwnNavmesh(bot, ref position))
                 {
-                    PrintWarning($"Prefab {prefab} spawned but its navigator could not be placed on navmesh; trying the next candidate.");
+                    ThrottledWarning($"spawn-navmesh:{prefab}", $"Prefab {prefab} spawned but its navigator could not be placed on navmesh; trying the next candidate.");
                     SafeKillSpawnAttempt(bot);
                     continue;
                 }
 
                 if (IsBlockedLandPosition(position))
                 {
-                    PrintWarning($"Prefab {prefab} spawned at {FormatVector(position)}, but that position is blocked by terrain, water, or safe-zone rules; trying the next candidate.");
+                    ThrottledWarning($"spawn-blocked:{prefab}", $"Prefab {prefab} spawned at {FormatVector(position)}, but that position is blocked by terrain, water, or safe-zone rules; trying the next candidate.");
                     SafeKillSpawnAttempt(bot);
                     continue;
                 }
@@ -1997,13 +2318,13 @@ namespace Oxide.Plugins
 
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    Puts($"Accepted roam bot {runtime.DisplayName} from prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), {BotRuntimeDiagnostics(bot, runtime)}.");
+                    DebugLog($"spawn-accepted:{prefab}", $"Accepted roam bot {runtime.DisplayName} from prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), {BotRuntimeDiagnostics(bot, runtime)}.");
                 }
 
                 return bot;
             }
 
-            PrintWarning("None of the configured NPC prefabs could be created.");
+            ThrottledWarning("spawn-prefabs-failed", "None of the configured NPC prefabs could be created.");
             return null;
         }
 
@@ -2137,7 +2458,7 @@ namespace Oxide.Plugins
 
             if (result is string message && !string.IsNullOrWhiteSpace(message))
             {
-                PrintWarning($"Kits plugin could not give {kitName} to {bot.displayName}: {message}");
+                ThrottledWarning($"kit-give:{kitName}", $"Kits plugin could not give {kitName} to {bot.displayName}: {message}");
             }
         }
 
@@ -2157,7 +2478,7 @@ namespace Oxide.Plugins
             {
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    PrintWarning($"Could not create roam bot medical item '{config.AI.BotMedicalItemShortname}'.");
+                    DebugWarning("medical-create-failed", $"Could not create roam bot medical item '{config.AI.BotMedicalItemShortname}'.");
                 }
 
                 return;
@@ -2218,7 +2539,7 @@ namespace Oxide.Plugins
 
             if (!string.IsNullOrWhiteSpace(reason))
             {
-                Puts($"Despawned roam bot after {reason}.");
+                ThrottledInfo($"despawn:{reason}", $"Despawned roam bot after {reason}.");
             }
         }
 
@@ -2265,10 +2586,28 @@ namespace Oxide.Plugins
 
             var victimRuntime = RuntimeFor(victim);
             var attackerRuntime = RuntimeFor(attackerEntity);
+            var now = Time.realtimeSinceStartup;
 
             if (victimRuntime != null && attackerRuntime != null)
             {
-                return true;
+                if (!IsEnemyBot(victimRuntime, attackerRuntime))
+                {
+                    return true;
+                }
+
+                var attackerBot = attackerEntity as BasePlayer;
+
+                if (attackerBot != null)
+                {
+                    RememberDamageSource(victim, victimRuntime, attackerBot, now);
+                }
+
+                if (victimPlayer != null)
+                {
+                    RememberDamageDealt(attackerEntity, attackerRuntime, victimPlayer, now);
+                }
+
+                return null;
             }
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer) && ShouldIgnoreSafeZonePlayer(victimPlayer))
@@ -2281,8 +2620,6 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            var now = Time.realtimeSinceStartup;
-
             if (IsRealPlayer(attacker) && IsExplosionDamage(info))
             {
                 BroadcastPlayerSound(attacker, SoundPositionFromHit(info, attacker), config.AI.ExplosionHearingRange, "explosion", 1f, 0.75f);
@@ -2290,48 +2627,68 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null && IsRealPlayer(attacker))
             {
-                victimRuntime.LastDamageTakenAt = now;
-                victimRuntime.LastDamageBarricadeAwarenessCheckAt = 0f;
-                victimRuntime.NextLowHealthAwarenessCheckAt = 0f;
-                victimRuntime.Memory.TargetUserId = attacker.userID;
-                victimRuntime.Memory.LastDamageSourcePlayer = attacker;
-                victimRuntime.Memory.LastDamageSourcePosition = attacker.transform.position;
-                victimRuntime.Memory.LastDamagedAt = now;
-
-                if (HasLineOfSight(victim, attacker))
-                {
-                    victimRuntime.Memory.Target = attacker;
-                    victimRuntime.Memory.HasLineOfSight = true;
-                    victimRuntime.Memory.LastLineOfSightAt = now;
-                    victimRuntime.Memory.LastSeenPosition = attacker.transform.position;
-                    victimRuntime.Memory.LastSeenAt = now;
-                    victimRuntime.Memory.TargetConfidence = Math.Max(victimRuntime.Memory.TargetConfidence, 0.7f);
-                }
-                else
-                {
-                    victimRuntime.Memory.TargetConfidence = Math.Max(victimRuntime.Memory.TargetConfidence, 0.55f);
-                }
-
-                if (config.AI.AllowHearing)
-                {
-                    victimRuntime.Memory.LastHeardPosition = attacker.transform.position;
-                    victimRuntime.Memory.LastHeardAt = now;
-                }
+                RememberDamageSource(victim, victimRuntime, attacker, now);
                 return null;
             }
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer))
             {
-                RefreshCombatProfile(attackerEntity, attackerRuntime);
-                attackerRuntime.LastDamageDealtAt = now;
-                attackerRuntime.Memory.Target = victimPlayer;
-                attackerRuntime.Memory.TargetUserId = victimPlayer.userID;
-                attackerRuntime.Memory.LastSeenPosition = victimPlayer.transform.position;
-                attackerRuntime.Memory.LastSeenAt = now;
-                attackerRuntime.Memory.TargetConfidence = Math.Max(attackerRuntime.Memory.TargetConfidence, 0.85f);
+                RememberDamageDealt(attackerEntity, attackerRuntime, victimPlayer, now);
             }
 
             return null;
+        }
+
+        private void RememberDamageSource(BaseCombatEntity victim, BotRuntime victimRuntime, BasePlayer attacker, float now)
+        {
+            if (victim == null || victimRuntime == null || attacker == null)
+            {
+                return;
+            }
+
+            victimRuntime.LastDamageTakenAt = now;
+            victimRuntime.LastDamageBarricadeAwarenessCheckAt = 0f;
+            victimRuntime.NextLowHealthAwarenessCheckAt = 0f;
+            victimRuntime.Memory.TargetUserId = CombatTargetId(attacker);
+            victimRuntime.Memory.LastDamageSourcePlayer = attacker;
+            victimRuntime.Memory.LastDamageSourcePosition = attacker.transform.position;
+            victimRuntime.Memory.LastDamagedAt = now;
+
+            if (HasLineOfSight(victim, attacker))
+            {
+                victimRuntime.Memory.Target = attacker;
+                victimRuntime.Memory.HasLineOfSight = true;
+                victimRuntime.Memory.LastLineOfSightAt = now;
+                victimRuntime.Memory.LastSeenPosition = attacker.transform.position;
+                victimRuntime.Memory.LastSeenAt = now;
+                victimRuntime.Memory.TargetConfidence = Math.Max(victimRuntime.Memory.TargetConfidence, 0.7f);
+            }
+            else
+            {
+                victimRuntime.Memory.TargetConfidence = Math.Max(victimRuntime.Memory.TargetConfidence, 0.55f);
+            }
+
+            if (config.AI.AllowHearing)
+            {
+                victimRuntime.Memory.LastHeardPosition = attacker.transform.position;
+                victimRuntime.Memory.LastHeardAt = now;
+            }
+        }
+
+        private void RememberDamageDealt(BaseCombatEntity attackerEntity, BotRuntime attackerRuntime, BasePlayer victim, float now)
+        {
+            if (attackerEntity == null || attackerRuntime == null || victim == null)
+            {
+                return;
+            }
+
+            RefreshCombatProfile(attackerEntity, attackerRuntime);
+            attackerRuntime.LastDamageDealtAt = now;
+            attackerRuntime.Memory.Target = victim;
+            attackerRuntime.Memory.TargetUserId = CombatTargetId(victim);
+            attackerRuntime.Memory.LastSeenPosition = victim.transform.position;
+            attackerRuntime.Memory.LastSeenAt = now;
+            attackerRuntime.Memory.TargetConfidence = Math.Max(attackerRuntime.Memory.TargetConfidence, 0.85f);
         }
 
         private void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectileShoot)
@@ -2400,12 +2757,13 @@ namespace Oxide.Plugins
             }
 
             var victimRuntime = RuntimeFor(victim);
-            var attacker = info?.Initiator as BasePlayer;
-            var attackerEntity = info?.Initiator as BaseCombatEntity;
+            var attacker = ResolveKillerPlayer(victim, info);
+            var attackerEntity = ResolveKillerEntity(victim, info, attacker);
             var attackerRuntime = RuntimeFor(attackerEntity);
 
             if (victimRuntime != null)
             {
+                TrackRecentBotDeath(victim, victimRuntime);
                 activeBots.Remove(victim);
 
                 if (!despawningBots.Remove(victim))
@@ -2418,6 +2776,14 @@ namespace Oxide.Plugins
                     {
                         var playerStats = EnsurePlayerStats(attacker);
                         playerStats.npc_kills++;
+                        HandlePlayerKilledBot(attacker, victim, victimRuntime, info);
+                    }
+                    else if (attackerRuntime != null && IsEnemyBot(attackerRuntime, victimRuntime))
+                    {
+                        var killerStats = EnsureBotStats(attackerRuntime);
+                        killerStats.kills++;
+                        EnsureClanStats(attackerRuntime).kills++;
+                        HandleBotKilledBot(attackerEntity, attackerRuntime, victim, victimRuntime, info);
                     }
 
                     QueueSaveData();
@@ -2439,9 +2805,25 @@ namespace Oxide.Plugins
                 var botStats = EnsureBotStats(attackerRuntime);
                 botStats.kills++;
                 EnsureClanStats(attackerRuntime).kills++;
+                HandleBotKilledPlayer(attackerEntity, attackerRuntime, victimPlayer, info);
                 QueueSaveData();
                 UpdateScoreboards();
             }
+        }
+
+        private object OnDeathNotice(Dictionary<string, object> deathData, string message)
+        {
+            if (config?.BotKillIntegration?.SuppressDeathNotesForRoamBotKills != true)
+            {
+                return null;
+            }
+
+            var hasTrackedVictim = TryGetDeathNoticeEntity(deathData, "VictimEntity", out var victim)
+                && BotRuntimeForDeathNotice(victim) != null;
+            var hasTrackedKiller = TryGetDeathNoticeEntity(deathData, "KillerEntity", out var killer)
+                && BotRuntimeForDeathNotice(killer) != null;
+
+            return hasTrackedVictim || hasTrackedKiller ? (object)false : null;
         }
 
         private void OnEntityKill(BaseNetworkable entity)
@@ -2455,6 +2837,367 @@ namespace Oxide.Plugins
 
             activeBots.Remove(bot);
             despawningBots.Remove(bot);
+        }
+
+        [ChatCommand("raidbots")]
+        private void ChatRaidBots(BasePlayer player, string command, string[] args)
+        {
+            if (!CanAdmin(player))
+            {
+                player?.ChatMessage("You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var mode = args != null && args.Length > 0 ? (args[0] ?? "").Trim().ToLowerInvariant() : "admin";
+
+            if (string.IsNullOrWhiteSpace(mode) || mode == "admin" || mode == "panel" || mode == "settings")
+            {
+                var tab = args != null && args.Length > 1 ? args[1] : "overview";
+                OpenAdminPanel(player, tab);
+                return;
+            }
+
+            if (mode == "close")
+            {
+                DestroyAdminPanel(player);
+                return;
+            }
+
+            player.ChatMessage("Use /raidbots admin to open the Raidlands roam bot admin panel.");
+        }
+
+        [ConsoleCommand("raidbots.ui")]
+        private void CmdAdminUi(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var player = arg?.Connection?.player as BasePlayer;
+
+            if (player == null)
+            {
+                Reply(arg, "Use /raidbots admin in game to open the Raidlands roam bot admin panel.");
+                return;
+            }
+
+            var action = ArgString(arg, 0).ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(action) || action == "open" || action == "admin")
+            {
+                OpenAdminPanel(player, AdminTabFromTail(arg, "overview"));
+                return;
+            }
+
+            if (action == "close")
+            {
+                DestroyAdminPanel(player);
+                return;
+            }
+
+            var tab = AdminTabFromTail(arg, "overview");
+
+            if (action == "tab")
+            {
+                DrawAdminPanel(player, NormalizeAdminTab(ArgString(arg, 1)));
+                return;
+            }
+
+            if (action == "refresh")
+            {
+                DrawAdminPanel(player, tab);
+                return;
+            }
+
+            if (ApplyAdminUiAction(arg, action, ref tab))
+            {
+                DrawAdminPanel(player, tab);
+            }
+        }
+
+        private bool ApplyAdminUiAction(ConsoleSystem.Arg arg, string action, ref string tab)
+        {
+            if (action == "reload")
+            {
+                LoadConfig();
+                LoadData();
+                RefreshEligibleKits();
+                RefreshDecisionAdvisor();
+
+                if (config.Enabled)
+                {
+                    StartRuntime();
+                }
+                else
+                {
+                    StopRuntime();
+                }
+
+                CreateScoreboards();
+                UpdateScoreboards();
+                Reply(arg, "Raidlands roam bot config and data reloaded.");
+                return true;
+            }
+
+            if (action == "enable")
+            {
+                config.Enabled = true;
+                SaveConfig();
+                StartRuntime();
+                Reply(arg, $"Raidlands roam bots enabled with target population {TargetPopulation()}.");
+                return true;
+            }
+
+            if (action == "disable")
+            {
+                config.Enabled = false;
+                SaveConfig();
+                StopRuntime();
+
+                if (config.Persistence.KillBotsOnDisable)
+                {
+                    KillAllBots(!config.Persistence.LeaveCorpses);
+                    Reply(arg, "Raidlands roam bots disabled and active bots removed by persistence config.");
+                }
+                else
+                {
+                    Reply(arg, "Raidlands roam bots disabled. Existing bots are left alone by persistence config.");
+                }
+
+                return true;
+            }
+
+            if (action == "spawn")
+            {
+                var count = 1;
+
+                if (TryReadIntArg(arg, 1, out var requested))
+                {
+                    count = Clamp(requested, 1, Math.Max(1, config.MaxAllowedPopulation));
+                }
+
+                if (!config.Enabled)
+                {
+                    Reply(arg, "Raidlands roam bots are disabled; enable them before spawning bots.");
+                    return true;
+                }
+
+                CleanupInactiveBots();
+                var available = Math.Max(0, TargetPopulation() - activeBots.Count);
+
+                if (available <= 0)
+                {
+                    Reply(arg, $"Raidlands roam bots are already at target population {TargetPopulation()}.");
+                    return true;
+                }
+
+                var spawned = SpawnBots(Math.Min(count, available), true);
+                Reply(arg, $"Spawned {spawned} roam bot{(spawned == 1 ? "" : "s")}.");
+                return true;
+            }
+
+            if (action == "killall")
+            {
+                var count = activeBots.Count;
+                KillAllBots(false);
+                Reply(arg, $"Despawned {count} roam bot{(count == 1 ? "" : "s")}.");
+                return true;
+            }
+
+            if (action == "nuke")
+            {
+                if (!config.Persistence.EmergencyKillCommandEnabled)
+                {
+                    Reply(arg, "Raidlands roam bot emergency kill command is disabled in config.");
+                    return true;
+                }
+
+                var mode = ArgString(arg, 1).ToLowerInvariant();
+
+                if (string.IsNullOrWhiteSpace(mode) || mode == "active")
+                {
+                    var count = activeBots.Count;
+                    KillAllBots(false);
+                    Reply(arg, $"Emergency removed {count} tracked roam bot{(count == 1 ? "" : "s")}.");
+                    return true;
+                }
+
+                if (mode == "debug")
+                {
+                    DestroyDebugBotPanels();
+                    Reply(arg, "Cleared Raidlands roam bot debug panels.");
+                    return true;
+                }
+
+                if (mode == "all")
+                {
+                    var count = activeBots.Count;
+                    KillAllBots(false);
+                    DestroyDebugBotPanels();
+                    Reply(arg, $"Emergency removed {count} tracked roam bot{(count == 1 ? "" : "s")} and cleared debug panels.");
+                    return true;
+                }
+            }
+
+            if (action == "mode")
+            {
+                var requested = ArgString(arg, 1);
+
+                if (!TryNormalizeSpawnMode(requested, out var mode))
+                {
+                    Reply(arg, $"Unknown spawn mode '{requested}'.");
+                    return true;
+                }
+
+                config.Spawn.SpawnMode = mode;
+                SaveAdminConfigChange(true, false, false, false);
+                Reply(arg, $"Raidlands roam bot spawn mode set to {mode}.");
+                return true;
+            }
+
+            if (action == "anchor-clear")
+            {
+                config.Spawn.NearPlayerAnchorNameOrSteamId = "";
+                SaveAdminConfigChange(true, false, false, false);
+                Reply(arg, "Raidlands roam bot near-player anchor cleared; all valid players are anchors.");
+                return true;
+            }
+
+            if (action == "advisor")
+            {
+                SetAdminAdvisorMode(ArgString(arg, 1), arg);
+                return true;
+            }
+
+            if (action == "debug-all")
+            {
+                if (!TryParseAdminBool(ArgString(arg, 1), out var enabled))
+                {
+                    enabled = !config.Debug.DebugSpawnDetails
+                        || !config.Debug.DebugPerception
+                        || !config.Debug.DebugTacticalDecisions
+                        || !config.Debug.DebugBotNameplates
+                        || !config.Debug.DebugBotSidePanel;
+                }
+
+                config.Debug.DebugSpawnDetails = enabled;
+                config.Debug.DebugPerception = enabled;
+                config.Debug.DebugTacticalDecisions = enabled;
+                config.Debug.DebugBotNameplates = enabled;
+                config.Debug.DebugBotSidePanel = enabled;
+                SaveAdminConfigChange(false, false, false, true);
+                Reply(arg, $"Raidlands roam bot debug surfaces set to {enabled}.");
+                return true;
+            }
+
+            if (action == "toggle")
+            {
+                var key = ArgString(arg, 1);
+
+                if (!ToggleAdminBooleanSetting(key, out var restartRuntime, out var refreshAdvisor, out var refreshNameplates))
+                {
+                    Reply(arg, $"Unknown Raidlands roam bot toggle '{key}'.");
+                    return true;
+                }
+
+                SaveAdminConfigChange(true, restartRuntime, refreshAdvisor, refreshNameplates);
+                Reply(arg, $"Raidlands roam bot setting '{key}' toggled.");
+                return true;
+            }
+
+            if (action == "seti" || action == "addi")
+            {
+                var key = ArgString(arg, 1);
+
+                if (!TryReadIntArg(arg, 2, out var value))
+                {
+                    Reply(arg, $"Missing integer value for '{key}'.");
+                    return true;
+                }
+
+                if (!(action == "seti" ? SetAdminIntegerSetting(key, value) : AdjustAdminIntegerSetting(key, value)))
+                {
+                    Reply(arg, $"Unknown integer Raidlands roam bot setting '{key}'.");
+                    return true;
+                }
+
+                SaveAdminConfigChange(true, AdminIntegerSettingNeedsRuntimeRestart(key), false, AdminIntegerSettingNeedsNameplateRestart(key));
+                Reply(arg, $"Raidlands roam bot setting '{key}' updated.");
+                return true;
+            }
+
+            if (action == "setf" || action == "addf")
+            {
+                var key = ArgString(arg, 1);
+
+                if (!TryReadFloatArg(arg, 2, out var value))
+                {
+                    Reply(arg, $"Missing numeric value for '{key}'.");
+                    return true;
+                }
+
+                if (!(action == "setf" ? SetAdminFloatSetting(key, value) : AdjustAdminFloatSetting(key, value)))
+                {
+                    Reply(arg, $"Unknown numeric Raidlands roam bot setting '{key}'.");
+                    return true;
+                }
+
+                SaveAdminConfigChange(true, AdminFloatSettingNeedsRuntimeRestart(key), false, AdminFloatSettingNeedsNameplateRestart(key));
+                Reply(arg, $"Raidlands roam bot setting '{key}' updated.");
+                return true;
+            }
+
+            if (action == "preset-live")
+            {
+                config.TargetPopulation = 50;
+                config.MinAllowedPopulation = 0;
+                config.MaxAllowedPopulation = 200;
+                config.TeamSizeWeights["solo"] = 55;
+                config.TeamSizeWeights["duo"] = 35;
+                config.TeamSizeWeights["trio"] = 10;
+                config.Spawn.SpawnMode = SpawnModeNearPlayers;
+                config.Spawn.NearPlayerAnchorNameOrSteamId = "";
+                config.Spawn.UseRandomLandFallback = false;
+                config.Spawn.RequireLandSpawns = true;
+                config.Spawn.AvoidSafeZoneSpawns = true;
+                config.Spawn.IgnorePlayersInSafeZones = true;
+                SaveAdminConfigChange(true, false, false, false);
+                Reply(arg, "Applied live population preset: target=50, max=200, near players, all-player anchors.");
+                return true;
+            }
+
+            Reply(arg, $"Unknown Raidlands roam bot admin action '{action}'.");
+            return true;
+        }
+
+        private void SaveAdminConfigChange(bool maintainPopulation, bool restartRuntime, bool refreshAdvisor, bool refreshNameplates)
+        {
+            NormalizeConfig();
+            SaveConfig();
+            spawnRetryBlockedUntil = 0f;
+
+            if (refreshAdvisor)
+            {
+                RefreshDecisionAdvisor();
+            }
+
+            if (restartRuntime && config.Enabled)
+            {
+                StartRuntime();
+                return;
+            }
+
+            if (refreshNameplates)
+            {
+                StartNameplateTimerIfEnabled();
+            }
+
+            if (maintainPopulation && config.Enabled)
+            {
+                MaintainPopulation();
+            }
         }
 
         [ConsoleCommand("raidbots.status")]
@@ -2527,6 +3270,7 @@ namespace Oxide.Plugins
             LoadConfig();
             LoadData();
             RefreshEligibleKits();
+            RefreshDecisionAdvisor();
 
             if (config.Enabled)
             {
@@ -2883,6 +3627,95 @@ namespace Oxide.Plugins
             }
 
             Reply(arg, "Usage: raidbots.decisions [last [count]|bot <name/key> [count]|export]");
+        }
+
+        [ConsoleCommand("raidbots.advisor")]
+        private void CmdAdvisor(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var mode = ArgString(arg, 0).ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(mode) || mode == "status")
+            {
+                Reply(arg, AdvisorStatusLine());
+                Reply(arg, "Usage: raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot name/key]");
+                return;
+            }
+
+            if (mode == "off")
+            {
+                config.DecisionAdvisor.Enabled = false;
+                config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                config.DecisionAdvisor.ShadowMode = true;
+                SaveConfig();
+                RefreshDecisionAdvisor();
+                Reply(arg, "Raidlands roam bot advisor disabled. Deterministic heuristic fallback remains active.");
+                return;
+            }
+
+            if (mode == "fallback")
+            {
+                config.DecisionAdvisor.Enabled = true;
+                config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                config.DecisionAdvisor.ShadowMode = true;
+                SaveConfig();
+                RefreshDecisionAdvisor();
+                Reply(arg, "Raidlands roam bot advisor set to fallback_only with provider none.");
+                return;
+            }
+
+            if (mode == "shadow")
+            {
+                config.DecisionAdvisor.Enabled = true;
+                config.DecisionAdvisor.Mode = AdvisorModeShadow;
+                config.DecisionAdvisor.ShadowMode = true;
+                SaveConfig();
+                RefreshDecisionAdvisor();
+                Reply(arg, $"Raidlands roam bot advisor set to shadow mode. Provider remains {config.DecisionAdvisor.Provider}; heuristic actions still execute.");
+                return;
+            }
+
+            if (mode == "canary")
+            {
+                config.DecisionAdvisor.Enabled = true;
+                config.DecisionAdvisor.Mode = AdvisorModeCanary;
+                config.DecisionAdvisor.ShadowMode = false;
+                SaveConfig();
+                RefreshDecisionAdvisor();
+                Reply(arg, "Raidlands roam bot advisor set to canary mode for validation/tracing. Remote actions are still not executed in this adapter pass.");
+                return;
+            }
+
+            if (mode == "stats")
+            {
+                Reply(arg, AdvisorStatsLine());
+                return;
+            }
+
+            if (mode == "last")
+            {
+                var query = ArgString(arg, 1);
+                FlushDecisionTraces();
+                var lines = ReadDecisionTraceLines(1, string.IsNullOrWhiteSpace(query) ? "" : BotKey(query));
+
+                if (lines.Count == 0)
+                {
+                    Reply(arg, string.IsNullOrWhiteSpace(query) ? "No advisor decision traces have been written yet." : $"No advisor decision traces found for bot '{query}'.");
+                    return;
+                }
+
+                Reply(arg, FormatDecisionTraceLine(lines.Last()));
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot name/key]");
         }
 
         [ConsoleCommand("raidbots.land")]
@@ -3982,7 +4815,7 @@ namespace Oxide.Plugins
 
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    PrintWarning($"Roam bot {runtime.DisplayName} entered an invalid terrain/nav position at {FormatVector(bot.transform.position)} ({PositionDiagnostics(bot.transform.position)}); combat paused.");
+                    DebugWarning($"invalid-position:{runtime.BotKey}", $"Roam bot {runtime.DisplayName} entered an invalid terrain/nav position at {FormatVector(bot.transform.position)} ({PositionDiagnostics(bot.transform.position)}); combat paused.");
                 }
             }
 
@@ -4406,9 +5239,439 @@ namespace Oxide.Plugins
             }
         }
 
+        private void OpenAdminPanel(BasePlayer player, string tab = "overview")
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            DrawAdminPanel(player, tab);
+        }
+
+        private void DrawAdminPanel(BasePlayer player, string tab)
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            tab = NormalizeAdminTab(tab);
+            RefreshEligibleKits();
+            CleanupInactiveBots();
+            DestroyAdminPanel(player);
+
+            var container = new CuiElementContainer();
+            var panel = container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                Image = { Color = "0.02 0.025 0.03 0.95" },
+                RectTransform = { AnchorMin = "0.145 0.095", AnchorMax = "0.855 0.91" }
+            }, "Overlay", AdminPanelUi);
+
+            AddAdminLabel(container, panel, "<b>Raidlands Roam Bots</b>", 0.025f, 0.935f, 0.50f, 0.985f, 18, TextAnchor.MiddleLeft, "0.95 0.98 1 1");
+            AddAdminLabel(container, panel, AdminHeaderStatus(), 0.50f, 0.935f, 0.88f, 0.985f, 11, TextAnchor.MiddleRight, "0.72 0.78 0.84 1");
+            AddAdminButton(container, panel, "X", "raidbots.ui close", 0.91f, 0.94f, 0.98f, 0.985f, "0.45 0.12 0.12 0.95", 13);
+
+            var tabX = 0.025f;
+            var tabWidth = 0.102f;
+
+            foreach (var adminTab in AdminPanelTabs)
+            {
+                var selected = adminTab == tab;
+                AddAdminButton(
+                    container,
+                    panel,
+                    AdminTabLabel(adminTab),
+                    $"raidbots.ui tab {adminTab}",
+                    tabX,
+                    0.875f,
+                    tabX + tabWidth,
+                    0.925f,
+                    selected ? "0.14 0.34 0.52 0.98" : "0.11 0.13 0.16 0.94",
+                    10);
+                tabX += tabWidth + 0.006f;
+            }
+
+            switch (tab)
+            {
+                case "population":
+                    BuildAdminPopulationTab(container, panel);
+                    break;
+                case "spawn":
+                    BuildAdminSpawnTab(container, panel);
+                    break;
+                case "ai":
+                    BuildAdminAiTab(container, panel);
+                    break;
+                case "utility":
+                    BuildAdminUtilityTab(container, panel);
+                    break;
+                case "rewards":
+                    BuildAdminRewardsTab(container, panel);
+                    break;
+                case "advisor":
+                    BuildAdminAdvisorTab(container, panel);
+                    break;
+                case "debug":
+                    BuildAdminDebugTab(container, panel);
+                    break;
+                case "danger":
+                    BuildAdminDangerTab(container, panel);
+                    break;
+                default:
+                    BuildAdminOverviewTab(container, panel);
+                    break;
+            }
+
+            CuiHelper.AddUi(player, container);
+        }
+
+        private void BuildAdminOverviewTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Live Status", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminMetric(container, panel, "Enabled", AdminOnOff(config.Enabled), 0.05f, 0.76f);
+            AddAdminMetric(container, panel, "Active", $"{activeBots.Count}/{TargetPopulation()}", 0.29f, 0.76f);
+            AddAdminMetric(container, panel, "Max", config.MaxAllowedPopulation.ToString(CultureInfo.InvariantCulture), 0.53f, 0.76f);
+            AddAdminMetric(container, panel, "Mode", config.Spawn.SpawnMode, 0.77f, 0.76f);
+            AddAdminMetric(container, panel, "Anchor", SpawnAnchorLabel(), 0.05f, 0.69f);
+            AddAdminMetric(container, panel, "Kits", eligibleKits.Count.ToString(CultureInfo.InvariantCulture), 0.29f, 0.69f);
+            AddAdminMetric(container, panel, "Advisor", $"{config.DecisionAdvisor.Provider}/{config.DecisionAdvisor.Mode}", 0.53f, 0.69f);
+            AddAdminMetric(container, panel, "Debug", AdminOnOff(config.Debug.DebugBotNameplates || config.Debug.DebugBotSidePanel), 0.77f, 0.69f);
+
+            AddAdminButton(container, panel, "Enable", "raidbots.ui enable overview", 0.05f, 0.60f, 0.20f, 0.655f, "0.14 0.42 0.22 0.96");
+            AddAdminButton(container, panel, "Disable", "raidbots.ui disable overview", 0.215f, 0.60f, 0.37f, 0.655f, "0.42 0.18 0.12 0.96");
+            AddAdminButton(container, panel, "Live 50/200", "raidbots.ui preset-live overview", 0.385f, 0.60f, 0.56f, 0.655f, "0.16 0.31 0.48 0.96");
+            AddAdminButton(container, panel, "Spawn 1", "raidbots.ui spawn 1 overview", 0.575f, 0.60f, 0.73f, 0.655f, "0.16 0.29 0.19 0.96");
+            AddAdminButton(container, panel, "Spawn 10", "raidbots.ui spawn 10 overview", 0.745f, 0.60f, 0.90f, 0.655f, "0.16 0.29 0.19 0.96");
+
+            AddAdminIntControl(container, panel, "Target", "target", TargetPopulation(), 5, 25, 0.05f, 0.50f, 0.47f, "overview");
+            AddAdminIntControl(container, panel, "Max", "max_population", config.MaxAllowedPopulation, 25, 50, 0.53f, 0.50f, 0.95f, "overview");
+            AddAdminToggle(container, panel, "Land only", "require_land", config.Spawn.RequireLandSpawns, 0.05f, 0.41f, 0.29f, "overview");
+            AddAdminToggle(container, panel, "Random fallback", "random_fallback", config.Spawn.UseRandomLandFallback, 0.32f, 0.41f, 0.56f, "overview");
+            AddAdminToggle(container, panel, "Nameplates", "nameplates", config.Debug.DebugBotNameplates, 0.59f, 0.41f, 0.83f, "overview");
+
+            AddAdminButton(container, panel, "Diag", "raidbots.diag", 0.05f, 0.29f, 0.20f, 0.345f, "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "List", "raidbots.list", 0.215f, 0.29f, 0.37f, 0.345f, "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Decisions", "raidbots.decisions last 10", 0.385f, 0.29f, 0.56f, 0.345f, "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Refresh", "raidbots.ui refresh overview", 0.575f, 0.29f, 0.73f, 0.345f, "0.18 0.21 0.26 0.96");
+        }
+
+        private void BuildAdminPopulationTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Population And Kit Mix", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminIntControl(container, panel, "Target", "target", TargetPopulation(), 5, 25, 0.05f, 0.75f, 0.47f, "population");
+            AddAdminIntControl(container, panel, "Minimum", "min_population", config.MinAllowedPopulation, 1, 10, 0.53f, 0.75f, 0.95f, "population");
+            AddAdminIntControl(container, panel, "Maximum", "max_population", config.MaxAllowedPopulation, 25, 50, 0.05f, 0.665f, 0.47f, "population");
+            AddAdminIntControl(container, panel, "High tier", "high_tier_weight", config.HighTierKitWeight, 1, 10, 0.53f, 0.665f, 0.95f, "population");
+            AddAdminIntControl(container, panel, "Solo weight", "solo_weight", TeamWeight("solo"), 5, 25, 0.05f, 0.58f, 0.47f, "population");
+            AddAdminIntControl(container, panel, "Duo weight", "duo_weight", TeamWeight("duo"), 5, 25, 0.53f, 0.58f, 0.95f, "population");
+            AddAdminIntControl(container, panel, "Trio weight", "trio_weight", TeamWeight("trio"), 5, 25, 0.05f, 0.495f, 0.47f, "population");
+            AddAdminFloatControl(container, panel, "Maintain sec", "maintain_interval", config.MaintainIntervalSeconds, 5f, 15f, 0.53f, 0.495f, 0.95f, "population");
+            AddAdminFloatControl(container, panel, "Respawn sec", "respawn_delay", config.RespawnDelaySeconds, 5f, 15f, 0.05f, 0.41f, 0.47f, "population");
+            AddAdminFloatControl(container, panel, "Retry sec", "spawn_retry", config.SpawnFailureRetrySeconds, 15f, 60f, 0.53f, 0.41f, 0.95f, "population");
+            AddAdminButton(container, panel, "Apply Live 50/200", "raidbots.ui preset-live population", 0.05f, 0.29f, 0.29f, 0.345f, "0.16 0.31 0.48 0.96");
+            AddAdminButton(container, panel, "Enable", "raidbots.ui enable population", 0.32f, 0.29f, 0.47f, 0.345f, "0.14 0.42 0.22 0.96");
+            AddAdminButton(container, panel, "Disable", "raidbots.ui disable population", 0.50f, 0.29f, 0.65f, 0.345f, "0.42 0.18 0.12 0.96");
+        }
+
+        private void BuildAdminSpawnTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Spawn Routing", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminButton(container, panel, "Near Players", "raidbots.ui mode near_players spawn", 0.05f, 0.76f, 0.22f, 0.815f, config.Spawn.SpawnMode == SpawnModeNearPlayers ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Random Land", "raidbots.ui mode random spawn", 0.235f, 0.76f, 0.40f, 0.815f, config.Spawn.SpawnMode == SpawnModeRandom ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Clear Anchor", "raidbots.ui anchor-clear spawn", 0.415f, 0.76f, 0.58f, 0.815f, "0.18 0.21 0.26 0.96");
+            AddAdminLabel(container, panel, $"Anchor: {AdminEscape(SpawnAnchorLabel())}", 0.61f, 0.76f, 0.95f, 0.815f, 11, TextAnchor.MiddleLeft, "0.76 0.82 0.88 1");
+
+            AddAdminToggle(container, panel, "Random fallback", "random_fallback", config.Spawn.UseRandomLandFallback, 0.05f, 0.67f, 0.29f, "spawn");
+            AddAdminToggle(container, panel, "Generated near", "generated_near", config.Spawn.UseGeneratedPositionsNearPlayers, 0.32f, 0.67f, 0.56f, "spawn");
+            AddAdminToggle(container, panel, "Land only", "require_land", config.Spawn.RequireLandSpawns, 0.59f, 0.67f, 0.83f, "spawn");
+            AddAdminToggle(container, panel, "Physics surface", "physics_surface", config.Spawn.UsePhysicsSurfaceSpawnChecks, 0.05f, 0.59f, 0.29f, "spawn");
+            AddAdminToggle(container, panel, "Avoid safe zones", "avoid_safe_zones", config.Spawn.AvoidSafeZoneSpawns, 0.32f, 0.59f, 0.56f, "spawn");
+            AddAdminToggle(container, panel, "Ignore safe players", "ignore_safe_zone_players", config.Spawn.IgnorePlayersInSafeZones, 0.59f, 0.59f, 0.83f, "spawn");
+
+            AddAdminIntControl(container, panel, "Position tries", "max_position_attempts", config.Spawn.MaxPositionAttempts, 10, 50, 0.05f, 0.48f, 0.47f, "spawn");
+            AddAdminIntControl(container, panel, "Near tries", "near_attempts", config.Spawn.NearPlayerAttempts, 10, 50, 0.53f, 0.48f, 0.95f, "spawn");
+            AddAdminFloatControl(container, panel, "Near min", "near_min", config.Spawn.NearPlayerMinDistance, 10f, 50f, 0.05f, 0.395f, 0.47f, "spawn");
+            AddAdminFloatControl(container, panel, "Near max", "near_max", config.Spawn.NearPlayerMaxDistance, 10f, 50f, 0.53f, 0.395f, 0.95f, "spawn");
+            AddAdminFloatControl(container, panel, "Nav sample", "nav_sample", config.Spawn.NavmeshSampleDistance, 2f, 10f, 0.05f, 0.31f, 0.47f, "spawn");
+            AddAdminFloatControl(container, panel, "Group radius", "group_radius", config.Spawn.GroupSpawnRadius, 1f, 5f, 0.53f, 0.31f, 0.95f, "spawn");
+            AddAdminFloatControl(container, panel, "Safe buffer", "safe_buffer", config.Spawn.SafeZoneSpawnBufferDistance, 10f, 25f, 0.05f, 0.225f, 0.47f, "spawn");
+        }
+
+        private void BuildAdminAiTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Tactical Brain", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminToggle(container, panel, "LOS to shoot", "los_shoot", config.AI.RequireLineOfSightToShoot, 0.05f, 0.76f, 0.27f, "ai");
+            AddAdminToggle(container, panel, "Hearing", "allow_hearing", config.AI.AllowHearing, 0.29f, 0.76f, 0.51f, "ai");
+            AddAdminToggle(container, panel, "Cover", "allow_cover", config.AI.AllowCover, 0.53f, 0.76f, 0.75f, "ai");
+            AddAdminToggle(container, panel, "Flanking", "allow_flanking", config.AI.AllowFlanking, 0.77f, 0.76f, 0.95f, "ai");
+            AddAdminToggle(container, panel, "Grenades", "allow_grenades", config.AI.AllowGrenades, 0.05f, 0.685f, 0.27f, "ai");
+            AddAdminToggle(container, panel, "Smoke", "allow_smoke", config.AI.AllowSmoke, 0.29f, 0.685f, 0.51f, "ai");
+            AddAdminToggle(container, panel, "Barricades", "allow_barricades", config.AI.AllowBarricades, 0.53f, 0.685f, 0.75f, "ai");
+            AddAdminToggle(container, panel, "Base avoid", "base_avoidance", config.AI.DoNotEnterBases, 0.77f, 0.685f, 0.95f, "ai");
+            AddAdminToggle(container, panel, "Jiggle", "jiggle", config.AI.AllowJigglePeeking, 0.05f, 0.61f, 0.27f, "ai");
+            AddAdminToggle(container, panel, "Jump peek", "jump_peek", config.AI.AllowJumpPeekApproximation, 0.29f, 0.61f, 0.51f, "ai");
+            AddAdminToggle(container, panel, "Foliage", "foliage", config.AI.FoliageBlocksVision, 0.53f, 0.61f, 0.75f, "ai");
+            AddAdminToggle(container, panel, "Foliage terrain", "foliage_terrain", config.AI.FoliageTerrainSampling, 0.77f, 0.61f, 0.95f, "ai");
+
+            AddAdminFloatControl(container, panel, "Vision", "vision_range", config.AI.VisionRange, 10f, 50f, 0.05f, 0.50f, 0.47f, "ai");
+            AddAdminFloatControl(container, panel, "FOV", "vision_fov", config.AI.VisionFovDegrees, 10f, 30f, 0.53f, 0.50f, 0.95f, "ai");
+            AddAdminFloatControl(container, panel, "Expose seen", "exposed_min", config.AI.MinimumExposedTargetFraction, 0.05f, 0.1f, 0.05f, 0.415f, 0.47f, "ai");
+            AddAdminFloatControl(container, panel, "Expose shoot", "exposed_shoot", config.AI.MinimumExposedTargetFractionToShoot, 0.05f, 0.1f, 0.53f, 0.415f, 0.95f, "ai");
+            AddAdminFloatControl(container, panel, "Memory", "target_memory", config.AI.TargetMemorySeconds, 5f, 15f, 0.05f, 0.33f, 0.47f, "ai");
+            AddAdminFloatControl(container, panel, "Search", "search_last_seen", config.AI.SearchLastSeenSeconds, 5f, 15f, 0.53f, 0.33f, 0.95f, "ai");
+            AddAdminFloatControl(container, panel, "Gun hear", "hearing_gun", config.AI.UnsuppressedGunshotHearingRange, 10f, 50f, 0.05f, 0.245f, 0.47f, "ai");
+            AddAdminFloatControl(container, panel, "Supp hear", "hearing_suppressed", config.AI.SuppressedGunshotHearingRange, 5f, 25f, 0.53f, 0.245f, 0.95f, "ai");
+            AddAdminFloatControl(container, panel, "Cover radius", "cover_radius", config.AI.CoverSearchRadius, 2f, 10f, 0.05f, 0.16f, 0.47f, "ai");
+            AddAdminFloatControl(container, panel, "Flank dist", "flank_distance", config.AI.SquadFlankDistance, 2f, 10f, 0.53f, 0.16f, 0.95f, "ai");
+            AddAdminToggle(container, panel, "Clan wars", "bot_clan_wars", config.AI.AllowBotClanWars, 0.05f, 0.075f, 0.27f, "ai");
+        }
+
+        private void BuildAdminUtilityTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Utility, Healing, And Restrictions", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminToggle(container, panel, "Grant meds", "grant_meds", config.AI.GrantBotMedicalItems, 0.05f, 0.76f, 0.27f, "utility");
+            AddAdminToggle(container, panel, "Real med heal", "real_meds", config.AI.UseRealMedicalItemsForCoverHeal, 0.29f, 0.76f, 0.51f, "utility");
+            AddAdminToggle(container, panel, "Auto reload", "auto_reload", config.AI.AutoReloadBotWeapons, 0.53f, 0.76f, 0.75f, "utility");
+            AddAdminToggle(container, panel, "Base avoid", "base_avoidance", config.AI.DoNotEnterBases, 0.77f, 0.76f, 0.95f, "utility");
+            AddAdminIntControl(container, panel, "Utility cap", "max_utility", config.AI.MaxActiveBotUtilityProjectiles, 1, 5, 0.05f, 0.65f, 0.47f, "utility");
+            AddAdminIntControl(container, panel, "Barricade cap", "max_barricades", config.AI.MaxActiveBotBarricades, 1, 5, 0.53f, 0.65f, 0.95f, "utility");
+            AddAdminIntControl(container, panel, "Med amount", "bot_med_amount", config.AI.BotMedicalItemAmount, 1, 3, 0.05f, 0.565f, 0.47f, "utility");
+            AddAdminIntControl(container, panel, "Stuck paths", "hard_stuck_paths", config.AI.HardStuckFailedPathsToDespawn, 5, 20, 0.53f, 0.565f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Grenade CD", "grenade_cooldown", config.AI.GrenadeCooldownSeconds, 5f, 15f, 0.05f, 0.48f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Team nade CD", "team_grenade_cooldown", config.AI.TeamGrenadeCooldownSeconds, 2f, 10f, 0.53f, 0.48f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Grenade max", "grenade_max", config.AI.GrenadeMaxThrowDistance, 2f, 10f, 0.05f, 0.395f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Smoke max", "smoke_max", config.AI.SmokeMaxThrowDistance, 2f, 10f, 0.53f, 0.395f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Barricade CD", "barricade_cooldown", config.AI.BarricadeCooldownSeconds, 2f, 10f, 0.05f, 0.31f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Cover heal", "cover_heal", config.AI.LowHealthCoverHealPerSecond, 1f, 5f, 0.53f, 0.31f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Base radius", "base_radius", config.AI.BaseAvoidanceRadius, 1f, 5f, 0.05f, 0.225f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Base hold", "base_hold", config.AI.BaseHoldSeconds, 2f, 10f, 0.53f, 0.225f, 0.95f, "utility");
+        }
+
+        private void BuildAdminRewardsTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Rewards And Kill Messages", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminToggle(container, panel, "Kill chat", "kill_chat", config.BotKillIntegration.BroadcastPlayerLikeKillMessages, 0.05f, 0.76f, 0.27f, "rewards");
+            AddAdminToggle(container, panel, "Suppress DeathNotes", "deathnotes", config.BotKillIntegration.SuppressDeathNotesForRoamBotKills, 0.29f, 0.76f, 0.55f, "rewards");
+            AddAdminToggle(container, panel, "Award RP", "award_rp", config.BotKillIntegration.AwardServerRewardsRp, 0.57f, 0.76f, 0.77f, "rewards");
+            AddAdminToggle(container, panel, "Tell RP", "tell_rp", config.BotKillIntegration.TellKillerAboutRpReward, 0.79f, 0.76f, 0.95f, "rewards");
+            AddAdminIntControl(container, panel, "RP reward", "rp_reward", config.BotKillIntegration.ServerRewardsRpPerBotKill, 1, 10, 0.05f, 0.65f, 0.47f, "rewards");
+            AddAdminLabel(container, panel, $"Chat format: {AdminEscape(AdminShorten(config.BotKillIntegration.ChatFormat, 110))}", 0.05f, 0.52f, 0.95f, 0.58f, 10, TextAnchor.MiddleLeft, "0.74 0.80 0.86 1");
+            AddAdminLabel(container, panel, $"Kill message: {AdminEscape(AdminShorten(config.BotKillIntegration.KillMessage, 110))}", 0.05f, 0.45f, 0.95f, 0.51f, 10, TextAnchor.MiddleLeft, "0.74 0.80 0.86 1");
+            AddAdminLabel(container, panel, $"RP message: {AdminEscape(AdminShorten(config.BotKillIntegration.RpRewardMessage, 110))}", 0.05f, 0.38f, 0.95f, 0.44f, 10, TextAnchor.MiddleLeft, "0.74 0.80 0.86 1");
+        }
+
+        private void BuildAdminAdvisorTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Decision Advisor", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminButton(container, panel, "Off", "raidbots.ui advisor off advisor", 0.05f, 0.76f, 0.18f, 0.815f, config.DecisionAdvisor.Enabled ? "0.18 0.21 0.26 0.96" : "0.42 0.18 0.12 0.96");
+            AddAdminButton(container, panel, "Fallback", "raidbots.ui advisor fallback advisor", 0.195f, 0.76f, 0.34f, 0.815f, config.DecisionAdvisor.Mode == AdvisorModeFallbackOnly ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Shadow", "raidbots.ui advisor shadow advisor", 0.355f, 0.76f, 0.50f, 0.815f, config.DecisionAdvisor.Mode == AdvisorModeShadow ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Canary", "raidbots.ui advisor canary advisor", 0.515f, 0.76f, 0.66f, 0.815f, config.DecisionAdvisor.Mode == AdvisorModeCanary ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Stats", "raidbots.advisor stats", 0.675f, 0.76f, 0.82f, 0.815f, "0.18 0.21 0.26 0.96");
+
+            AddAdminLabel(container, panel, AdminEscape(AdminShorten(AdvisorStatusLine(), 150)), 0.05f, 0.675f, 0.95f, 0.73f, 10, TextAnchor.MiddleLeft, "0.76 0.82 0.88 1");
+            AddAdminToggle(container, panel, "Enabled", "advisor_enabled", config.DecisionAdvisor.Enabled, 0.05f, 0.595f, 0.27f, "advisor");
+            AddAdminToggle(container, panel, "Shadow", "advisor_shadow", config.DecisionAdvisor.ShadowMode, 0.29f, 0.595f, 0.51f, "advisor");
+            AddAdminToggle(container, panel, "Fallback fail", "advisor_fallback", config.DecisionAdvisor.FallbackOnAnyFailure, 0.53f, 0.595f, 0.75f, "advisor");
+            AddAdminToggle(container, panel, "Trace", "advisor_trace", config.DecisionAdvisor.LogDecisionTraces, 0.77f, 0.595f, 0.95f, "advisor");
+            AddAdminToggle(container, panel, "Schema", "advisor_schema", config.DecisionAdvisor.UseStructuredResponseSchema, 0.05f, 0.52f, 0.27f, "advisor");
+            AddAdminToggle(container, panel, "Ask stuck", "advisor_ask_stuck", config.DecisionAdvisor.AskWhenBotIsStuck, 0.29f, 0.52f, 0.51f, "advisor");
+            AddAdminToggle(container, panel, "Ask close", "advisor_ask_close", config.DecisionAdvisor.AskWhenActionScoresAreClose, 0.53f, 0.52f, 0.75f, "advisor");
+            AddAdminToggle(container, panel, "Ask squad", "advisor_ask_squad", config.DecisionAdvisor.AskWhenSquadStateChangesSharply, 0.77f, 0.52f, 0.95f, "advisor");
+            AddAdminFloatControl(container, panel, "Confidence", "advisor_confidence", config.DecisionAdvisor.MinimumConfidence, 0.05f, 0.1f, 0.05f, 0.40f, 0.47f, "advisor");
+            AddAdminFloatControl(container, panel, "Per bot sec", "advisor_min_seconds", config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot, 1f, 5f, 0.53f, 0.40f, 0.95f, "advisor");
+            AddAdminIntControl(container, panel, "Timeout ms", "advisor_timeout", config.DecisionAdvisor.TimeoutMilliseconds, 100, 500, 0.05f, 0.315f, 0.47f, "advisor");
+            AddAdminIntControl(container, panel, "Concurrent", "advisor_concurrent", config.DecisionAdvisor.MaxConcurrentRequests, 1, 2, 0.53f, 0.315f, 0.95f, "advisor");
+            AddAdminIntControl(container, panel, "Events", "advisor_events", config.DecisionAdvisor.MaxRecentEventsInRequest, 2, 8, 0.05f, 0.23f, 0.47f, "advisor");
+            AddAdminIntControl(container, panel, "Candidates", "advisor_candidates", config.DecisionAdvisor.MaxCandidateActions, 1, 4, 0.53f, 0.23f, 0.95f, "advisor");
+        }
+
+        private void BuildAdminDebugTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Debug Surfaces", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminButton(container, panel, "Debug All On", "raidbots.ui debug-all on debug", 0.05f, 0.76f, 0.22f, 0.815f, "0.14 0.34 0.52 0.96");
+            AddAdminButton(container, panel, "Debug All Off", "raidbots.ui debug-all off debug", 0.235f, 0.76f, 0.405f, 0.815f, "0.42 0.18 0.12 0.96");
+            AddAdminButton(container, panel, "Diag", "raidbots.diag", 0.42f, 0.76f, 0.56f, 0.815f, "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "List", "raidbots.list", 0.575f, 0.76f, 0.715f, 0.815f, "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Decisions", "raidbots.decisions last 10", 0.73f, 0.76f, 0.90f, 0.815f, "0.18 0.21 0.26 0.96");
+            AddAdminToggle(container, panel, "Spawn", "debug_spawn", config.Debug.DebugSpawnDetails, 0.05f, 0.67f, 0.27f, "debug");
+            AddAdminToggle(container, panel, "Perception", "debug_perception", config.Debug.DebugPerception, 0.29f, 0.67f, 0.51f, "debug");
+            AddAdminToggle(container, panel, "Tactical", "debug_tactical", config.Debug.DebugTacticalDecisions, 0.53f, 0.67f, 0.75f, "debug");
+            AddAdminToggle(container, panel, "Advisor", "debug_advisor", config.Debug.DebugDecisionAdvisor, 0.77f, 0.67f, 0.95f, "debug");
+            AddAdminToggle(container, panel, "Nameplates", "nameplates", config.Debug.DebugBotNameplates, 0.05f, 0.595f, 0.27f, "debug");
+            AddAdminToggle(container, panel, "Side panel", "side_panel", config.Debug.DebugBotSidePanel, 0.29f, 0.595f, 0.51f, "debug");
+            AddAdminToggle(container, panel, "Anchor viewer", "anchor_viewer", config.Debug.DebugUiIncludesAnchorPlayer, 0.53f, 0.595f, 0.75f, "debug");
+            AddAdminToggle(container, panel, "Cover scores", "cover_scores", config.Debug.DebugCoverScores, 0.77f, 0.595f, 0.95f, "debug");
+            AddAdminFloatControl(container, panel, "Refresh", "nameplate_refresh", config.Debug.DebugNameplateRefreshSeconds, 0.25f, 1f, 0.05f, 0.48f, 0.47f, "debug");
+            AddAdminFloatControl(container, panel, "Duration", "nameplate_duration", config.Debug.DebugNameplateDrawDurationSeconds, 0.25f, 1f, 0.53f, 0.48f, 0.95f, "debug");
+            AddAdminFloatControl(container, panel, "Height", "nameplate_height", config.Debug.DebugNameplateHeight, 0.25f, 1f, 0.05f, 0.395f, 0.47f, "debug");
+            AddAdminIntControl(container, panel, "Font", "nameplate_font", config.Debug.DebugNameplateFontSize, 1, 2, 0.53f, 0.395f, 0.95f, "debug");
+            AddAdminFloatControl(container, panel, "Distance", "nameplate_distance", config.Debug.DebugNameplateMaxDistance, 25f, 100f, 0.05f, 0.31f, 0.47f, "debug");
+            AddAdminToggle(container, panel, "Console logs", "console_logs", config.Debug.DebugConsoleLogs, 0.53f, 0.31f, 0.78f, "debug");
+        }
+
+        private void BuildAdminDangerTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Danger Zone", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminLabel(container, panel, "These actions can remove active bots or reload runtime state. Use them deliberately.", 0.05f, 0.76f, 0.95f, 0.815f, 11, TextAnchor.MiddleLeft, "0.95 0.78 0.58 1");
+            AddAdminToggle(container, panel, "Emergency enabled", "nuke_enabled", config.Persistence.EmergencyKillCommandEnabled, 0.05f, 0.665f, 0.32f, "danger");
+            AddAdminToggle(container, panel, "Kill on disable", "kill_disable", config.Persistence.KillBotsOnDisable, 0.35f, 0.665f, 0.62f, "danger");
+            AddAdminToggle(container, panel, "Kill on unload", "kill_unload", config.Persistence.KillBotsOnPluginUnload, 0.65f, 0.665f, 0.92f, "danger");
+            AddAdminToggle(container, panel, "Leave corpses", "leave_corpses", config.Persistence.LeaveCorpses, 0.05f, 0.59f, 0.32f, "danger");
+            AddAdminToggle(container, panel, "Leave bot entities", "leave_entities", config.Persistence.LeaveBotPlacedEntities, 0.35f, 0.59f, 0.62f, "danger");
+            AddAdminButton(container, panel, "Disable Runtime", "raidbots.ui disable danger", 0.05f, 0.47f, 0.25f, 0.535f, "0.42 0.18 0.12 0.96", 12);
+            AddAdminButton(container, panel, "Kill Active", "raidbots.ui killall danger", 0.275f, 0.47f, 0.475f, 0.535f, "0.52 0.16 0.10 0.96", 12);
+            AddAdminButton(container, panel, "Nuke Active", "raidbots.ui nuke active danger", 0.50f, 0.47f, 0.70f, 0.535f, "0.60 0.10 0.08 0.96", 12);
+            AddAdminButton(container, panel, "Nuke All", "raidbots.ui nuke all danger", 0.725f, 0.47f, 0.925f, 0.535f, "0.68 0.08 0.06 0.96", 12);
+            AddAdminButton(container, panel, "Clear Debug UI", "raidbots.ui nuke debug danger", 0.05f, 0.36f, 0.25f, 0.425f, "0.18 0.21 0.26 0.96", 12);
+            AddAdminButton(container, panel, "Reload Config/Data", "raidbots.ui reload danger", 0.275f, 0.36f, 0.505f, 0.425f, "0.18 0.21 0.26 0.96", 12);
+            AddAdminButton(container, panel, "Refresh Panel", "raidbots.ui refresh danger", 0.53f, 0.36f, 0.73f, 0.425f, "0.18 0.21 0.26 0.96", 12);
+        }
+
+        private void DestroyAdminPanel(BasePlayer player)
+        {
+            if (player != null)
+            {
+                CuiHelper.DestroyUi(player, AdminPanelUi);
+            }
+        }
+
+        private void DestroyAdminPanels()
+        {
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                DestroyAdminPanel(player);
+            }
+        }
+
+        private string AdminHeaderStatus()
+        {
+            return $"enabled={config.Enabled} active={activeBots.Count}/{TargetPopulation()} max={config.MaxAllowedPopulation} anchor={AdminShorten(SpawnAnchorLabel(), 18)}";
+        }
+
+        private string AdminTabLabel(string tab)
+        {
+            switch (tab)
+            {
+                case "population":
+                    return "Pop";
+                case "utility":
+                    return "Util";
+                default:
+                    return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(tab);
+            }
+        }
+
+        private void AddAdminSection(CuiElementContainer container, string parent, string text, float x1, float y1, float x2, float y2)
+        {
+            AddAdminLabel(container, parent, $"<b>{text}</b>", x1, y1, x2, y2, 13, TextAnchor.MiddleLeft, "0.88 0.94 1 1");
+        }
+
+        private void AddAdminMetric(CuiElementContainer container, string parent, string label, string value, float x, float y)
+        {
+            AddAdminLabel(container, parent, label, x, y + 0.035f, x + 0.20f, y + 0.07f, 9, TextAnchor.MiddleLeft, "0.53 0.60 0.67 1");
+            AddAdminLabel(container, parent, AdminEscape(AdminShorten(value, 24)), x, y, x + 0.20f, y + 0.04f, 12, TextAnchor.MiddleLeft, "0.94 0.97 1 1");
+        }
+
+        private void AddAdminToggle(CuiElementContainer container, string parent, string label, string key, bool enabled, float x1, float y, float x2, string tab)
+        {
+            AddAdminButton(container, parent, $"{label}: {AdminOnOff(enabled)}", $"raidbots.ui toggle {key} {tab}", x1, y, x2, y + 0.055f, enabled ? "0.14 0.34 0.21 0.96" : "0.25 0.26 0.29 0.96", 10);
+        }
+
+        private void AddAdminIntControl(CuiElementContainer container, string parent, string label, string key, int value, int step, int bigStep, float x1, float y, float x2, string tab)
+        {
+            var width = x2 - x1;
+            AddAdminLabel(container, parent, label, x1, y + 0.035f, x1 + width * 0.40f, y + 0.068f, 9, TextAnchor.MiddleLeft, "0.58 0.65 0.72 1");
+            AddAdminLabel(container, parent, value.ToString(CultureInfo.InvariantCulture), x1, y, x1 + width * 0.30f, y + 0.045f, 12, TextAnchor.MiddleLeft, "0.94 0.97 1 1");
+            AddAdminButton(container, parent, $"-{bigStep}", $"raidbots.ui addi {key} {-bigStep} {tab}", x1 + width * 0.32f, y, x1 + width * 0.48f, y + 0.047f, "0.24 0.27 0.31 0.96", 9);
+            AddAdminButton(container, parent, $"-{step}", $"raidbots.ui addi {key} {-step} {tab}", x1 + width * 0.50f, y, x1 + width * 0.64f, y + 0.047f, "0.24 0.27 0.31 0.96", 9);
+            AddAdminButton(container, parent, $"+{step}", $"raidbots.ui addi {key} {step} {tab}", x1 + width * 0.66f, y, x1 + width * 0.80f, y + 0.047f, "0.18 0.30 0.22 0.96", 9);
+            AddAdminButton(container, parent, $"+{bigStep}", $"raidbots.ui addi {key} {bigStep} {tab}", x1 + width * 0.82f, y, x2, y + 0.047f, "0.18 0.30 0.22 0.96", 9);
+        }
+
+        private void AddAdminFloatControl(CuiElementContainer container, string parent, string label, string key, float value, float step, float bigStep, float x1, float y, float x2, string tab)
+        {
+            var width = x2 - x1;
+            var stepText = AdminFloat(step);
+            var bigText = AdminFloat(bigStep);
+            AddAdminLabel(container, parent, label, x1, y + 0.035f, x1 + width * 0.40f, y + 0.068f, 9, TextAnchor.MiddleLeft, "0.58 0.65 0.72 1");
+            AddAdminLabel(container, parent, AdminFloat(value), x1, y, x1 + width * 0.30f, y + 0.045f, 12, TextAnchor.MiddleLeft, "0.94 0.97 1 1");
+            AddAdminButton(container, parent, $"-{bigText}", $"raidbots.ui addf {key} -{bigText} {tab}", x1 + width * 0.32f, y, x1 + width * 0.48f, y + 0.047f, "0.24 0.27 0.31 0.96", 9);
+            AddAdminButton(container, parent, $"-{stepText}", $"raidbots.ui addf {key} -{stepText} {tab}", x1 + width * 0.50f, y, x1 + width * 0.64f, y + 0.047f, "0.24 0.27 0.31 0.96", 9);
+            AddAdminButton(container, parent, $"+{stepText}", $"raidbots.ui addf {key} {stepText} {tab}", x1 + width * 0.66f, y, x1 + width * 0.80f, y + 0.047f, "0.18 0.30 0.22 0.96", 9);
+            AddAdminButton(container, parent, $"+{bigText}", $"raidbots.ui addf {key} {bigText} {tab}", x1 + width * 0.82f, y, x2, y + 0.047f, "0.18 0.30 0.22 0.96", 9);
+        }
+
+        private void AddAdminButton(CuiElementContainer container, string parent, string text, string command, float x1, float y1, float x2, float y2, string color, int fontSize = 11)
+        {
+            container.Add(new CuiButton
+            {
+                Button = { Command = command, Color = color },
+                RectTransform = { AnchorMin = AdminAnchor(x1, y1), AnchorMax = AdminAnchor(x2, y2) },
+                Text =
+                {
+                    Text = text,
+                    FontSize = fontSize,
+                    Align = TextAnchor.MiddleCenter,
+                    Color = "0.95 0.97 1 1"
+                }
+            }, parent);
+        }
+
+        private void AddAdminLabel(CuiElementContainer container, string parent, string text, float x1, float y1, float x2, float y2, int fontSize, TextAnchor align, string color)
+        {
+            container.Add(new CuiLabel
+            {
+                Text =
+                {
+                    Text = text,
+                    FontSize = fontSize,
+                    Align = align,
+                    Color = color
+                },
+                RectTransform = { AnchorMin = AdminAnchor(x1, y1), AnchorMax = AdminAnchor(x2, y2) }
+            }, parent);
+        }
+
+        private string AdminAnchor(float x, float y)
+        {
+            return $"{x.ToString("0.###", CultureInfo.InvariantCulture)} {y.ToString("0.###", CultureInfo.InvariantCulture)}";
+        }
+
+        private string AdminFloat(float value)
+        {
+            return value.ToString("0.##", CultureInfo.InvariantCulture);
+        }
+
+        private string AdminOnOff(bool enabled)
+        {
+            return enabled ? "ON" : "OFF";
+        }
+
+        private string AdminShorten(string value, int maxLength)
+        {
+            value = value ?? "";
+            return value.Length <= maxLength ? value : value.Substring(0, Math.Max(0, maxLength - 3)) + "...";
+        }
+
+        private string AdminEscape(string value)
+        {
+            return (value ?? "").Replace("<", "").Replace(">", "");
+        }
+
+        private int TeamWeight(string key)
+        {
+            return config.TeamSizeWeights != null && config.TeamSizeWeights.ContainsKey(key)
+                ? config.TeamSizeWeights[key]
+                : 0;
+        }
+
         private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
             DestroyDebugBotPanel(player);
+            DestroyAdminPanel(player);
         }
 
         private string BuildDebugSidePanelText(BaseCombatEntity bot, BotRuntime runtime, float distance, float now)
@@ -4563,9 +5826,10 @@ namespace Oxide.Plugins
 
             if (visible != null)
             {
-                var switched = runtime.Memory.TargetUserId != visible.userID;
+                var visibleTargetId = CombatTargetId(visible);
+                var switched = runtime.Memory.TargetUserId != visibleTargetId;
                 runtime.Memory.Target = visible;
-                runtime.Memory.TargetUserId = visible.userID;
+                runtime.Memory.TargetUserId = visibleTargetId;
                 runtime.Memory.HasLineOfSight = true;
                 runtime.Memory.LastLineOfSightAt = now;
                 runtime.Memory.TargetExposureFraction = visibility.ExposedFraction;
@@ -4585,7 +5849,7 @@ namespace Oxide.Plugins
 
                 if (config.Debug.DebugPerception)
                 {
-                    Puts($"{runtime.DisplayName} sees {PlayerName(visible)} exposure={visibility.ExposedFraction:0.00} probes={visibility.VisibleProbePoints}/{visibility.TotalProbePoints} at {FormatVector(visible.transform.position)}.");
+                    DebugLog($"perception-see:{runtime.BotKey}", $"{runtime.DisplayName} sees {PlayerName(visible)} exposure={visibility.ExposedFraction:0.00} probes={visibility.VisibleProbePoints}/{visibility.TotalProbePoints} at {FormatVector(visible.transform.position)}.");
                 }
 
                 if (runtime.IsShooting && !ShouldFireAtTarget(bot, runtime, visible, now, true))
@@ -4643,16 +5907,17 @@ namespace Oxide.Plugins
             var bestFailedVisibility = (VisionResult)null;
             var bestFailedScore = float.MinValue;
 
-            foreach (var player in BasePlayer.activePlayerList)
+            foreach (var player in CombatTargetCandidates(bot, runtime))
             {
-                if (!IsCandidateTarget(bot, player))
+                if (!IsCandidateTarget(bot, runtime, player))
                 {
                     continue;
                 }
 
-                var isKnownThreat = runtime.Memory.TargetUserId == player.userID
+                var playerTargetId = CombatTargetId(player);
+                var isKnownThreat = runtime.Memory.TargetUserId == playerTargetId
                     || runtime.Memory.LastDamageSourcePlayer == player
-                    || (runtime.Memory.LastDamageSourcePlayer != null && runtime.Memory.LastDamageSourcePlayer.userID == player.userID);
+                    || (runtime.Memory.LastDamageSourcePlayer != null && CombatTargetId(runtime.Memory.LastDamageSourcePlayer) == playerTargetId);
 
                 if (!isKnownThreat && !IsInVisionCone(bot, player))
                 {
@@ -4695,9 +5960,48 @@ namespace Oxide.Plugins
             return best;
         }
 
-        private bool IsCandidateTarget(BaseCombatEntity bot, BasePlayer player)
+        private IEnumerable<BasePlayer> CombatTargetCandidates(BaseCombatEntity bot, BotRuntime runtime)
         {
-            if (!IsRealPlayer(player) || !player.IsConnected || player.IsDead() || player.IsSleeping() || ShouldIgnoreSafeZonePlayer(player))
+            var seen = new HashSet<BasePlayer>();
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (player != null && seen.Add(player))
+                {
+                    yield return player;
+                }
+            }
+
+            foreach (var entry in activeBots)
+            {
+                var candidate = entry.Key as BasePlayer;
+
+                if (candidate == null || candidate == bot || entry.Value == null || !IsEnemyBot(runtime, entry.Value) || !seen.Add(candidate))
+                {
+                    continue;
+                }
+
+                yield return candidate;
+            }
+        }
+
+        private bool IsCandidateTarget(BaseCombatEntity bot, BotRuntime runtime, BasePlayer player)
+        {
+            if (bot == null || player == null || player == bot || player.IsDead() || player.IsSleeping())
+            {
+                return false;
+            }
+
+            var targetRuntime = RuntimeFor(player);
+
+            if (targetRuntime != null)
+            {
+                if (!IsLiveBot(player) || !IsEnemyBot(runtime, targetRuntime))
+                {
+                    return false;
+                }
+            }
+            else if (!IsRealPlayer(player) || !player.IsConnected || ShouldIgnoreSafeZonePlayer(player))
             {
                 return false;
             }
@@ -5058,7 +6362,7 @@ namespace Oxide.Plugins
                 if (config.Debug.DebugPerception && now - runtime.LastSoundDebugAt >= 1.5f)
                 {
                     runtime.LastSoundDebugAt = now;
-                    Puts($"{runtime.DisplayName} heard {soundType} from {PlayerName(source)} at {distance.ToString("0", CultureInfo.InvariantCulture)}m; investigating {FormatVector(sourcePosition)}.");
+                    DebugLog($"perception-hear:{runtime.BotKey}:{soundType}", $"{runtime.DisplayName} heard {soundType} from {PlayerName(source)} at {distance.ToString("0", CultureInfo.InvariantCulture)}m; investigating {FormatVector(sourcePosition)}.");
                 }
             }
         }
@@ -5260,6 +6564,338 @@ namespace Oxide.Plugins
             };
 
             return request;
+        }
+
+        private JObject BuildAdvisorPayload(DecisionRequest request)
+        {
+            var candidates = new JArray();
+
+            foreach (var candidate in request.CandidateActions ?? new List<TacticalActionCandidate>())
+            {
+                candidates.Add(new JObject
+                {
+                    ["id"] = candidate.Id ?? ActionIdString(candidate.ActionId),
+                    ["heuristic_score"] = candidate.HeuristicScore,
+                    ["risk"] = candidate.Risk ?? "",
+                    ["reason"] = candidate.ReasonFromCode ?? "",
+                    ["destination"] = VectorPayload(candidate.Destination),
+                    ["target_user_id"] = candidate.TargetUserId.ToString(),
+                    ["expires_at"] = candidate.ExpiresAt,
+                    ["preconditions"] = new JArray(candidate.Preconditions ?? new List<string>()),
+                    ["risk_flags"] = new JArray(candidate.RiskFlags ?? new List<string>())
+                });
+            }
+
+            var events = new JArray();
+
+            foreach (var decisionEvent in (request.RecentEvents ?? new List<DecisionEvent>()).Take(Math.Max(0, config.DecisionAdvisor.MaxRecentEventsInRequest)))
+            {
+                events.Add(new JObject
+                {
+                    ["time"] = decisionEvent.Time,
+                    ["type"] = decisionEvent.Type ?? "",
+                    ["detail"] = decisionEvent.Detail ?? "",
+                    ["position"] = VectorPayload(decisionEvent.Position)
+                });
+            }
+
+            return new JObject
+            {
+                ["schema_version"] = 1,
+                ["request_id"] = request.RequestId ?? "",
+                ["bot_id"] = request.BotId ?? "",
+                ["team_id"] = request.TeamId,
+                ["clan_key"] = request.ClanKey ?? "",
+                ["clan_tag"] = request.ClanTag ?? "",
+                ["state"] = request.State ?? "",
+                ["skill_tier"] = request.SkillTier ?? "",
+                ["health_fraction"] = request.HealthFraction,
+                ["weapon_shortname"] = request.WeaponShortname ?? "",
+                ["ammo_fraction"] = request.AmmoFraction,
+                ["has_line_of_sight"] = request.HasLineOfSight,
+                ["target_exposure_fraction"] = request.TargetExposureFraction,
+                ["target_confidence"] = request.TargetConfidence,
+                ["distance_to_target"] = request.DistanceToTarget,
+                ["seconds_since_last_seen"] = request.SecondsSinceLastSeen,
+                ["seconds_since_last_heard"] = request.SecondsSinceLastHeard,
+                ["nearby_allies"] = request.NearbyAllies,
+                ["nearby_known_enemies"] = request.NearbyKnownEnemies,
+                ["is_stuck"] = request.IsStuck,
+                ["stuck_memory_points"] = request.StuckMemoryPoints,
+                ["target_is_inside_base_restricted_area"] = request.TargetIsInsideBaseRestrictedArea,
+                ["recent_events"] = events,
+                ["candidate_actions"] = candidates
+            };
+        }
+
+        private JObject VectorPayload(Vector3 vector)
+        {
+            return new JObject
+            {
+                ["x"] = Math.Round(vector.x, 2),
+                ["y"] = Math.Round(vector.y, 2),
+                ["z"] = Math.Round(vector.z, 2)
+            };
+        }
+
+        private JObject AdvisorResponseSchema()
+        {
+            return new JObject
+            {
+                ["type"] = "object",
+                ["additionalProperties"] = false,
+                ["properties"] = new JObject
+                {
+                    ["action_id"] = new JObject
+                    {
+                        ["type"] = "string",
+                        ["description"] = "One id from candidate_actions."
+                    },
+                    ["confidence"] = new JObject
+                    {
+                        ["type"] = "number",
+                        ["minimum"] = 0,
+                        ["maximum"] = 1
+                    },
+                    ["ttl_ms"] = new JObject
+                    {
+                        ["type"] = "integer",
+                        ["minimum"] = 100,
+                        ["maximum"] = config.DecisionAdvisor.DecisionTtlMilliseconds
+                    },
+                    ["rationale"] = new JObject
+                    {
+                        ["type"] = "string",
+                        ["description"] = "Short visible debugging reason. No hidden reasoning."
+                    },
+                    ["fallback_action_id"] = new JObject
+                    {
+                        ["type"] = "string"
+                    },
+                    ["risk_flags"] = new JObject
+                    {
+                        ["type"] = "array",
+                        ["items"] = new JObject { ["type"] = "string" }
+                    }
+                },
+                ["required"] = new JArray("action_id", "confidence", "ttl_ms", "rationale", "fallback_action_id", "risk_flags")
+            };
+        }
+
+        private string BuildOpenAiCompatibleAdvisorBody(DecisionRequest request)
+        {
+            var payload = BuildAdvisorPayload(request).ToString(Formatting.None);
+            var body = new JObject
+            {
+                ["model"] = string.IsNullOrWhiteSpace(config.DecisionAdvisor.Model) ? "local-tactical-advisor" : config.DecisionAdvisor.Model,
+                ["temperature"] = 0.1f,
+                ["max_tokens"] = 300,
+                ["messages"] = new JArray
+                {
+                    new JObject
+                    {
+                        ["role"] = "system",
+                        ["content"] = "You are a Raidlands roam bot tactical advisor. Choose exactly one action_id from candidate_actions. Return only compact JSON matching the requested schema. Do not invent actions, destinations, timers, item use, or targets."
+                    },
+                    new JObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = payload
+                    }
+                }
+            };
+
+            body["response_format"] = config.DecisionAdvisor.UseStructuredResponseSchema
+                ? new JObject
+                {
+                    ["type"] = "json_schema",
+                    ["json_schema"] = new JObject
+                    {
+                        ["name"] = "raidlands_roambot_decision",
+                        ["strict"] = true,
+                        ["schema"] = AdvisorResponseSchema()
+                    }
+                }
+                : new JObject { ["type"] = "json_object" };
+
+            return body.ToString(Formatting.None);
+        }
+
+        private string BuildWebsiteProxyAdvisorBody(DecisionRequest request)
+        {
+            return new JObject
+            {
+                ["schema_version"] = 1,
+                ["plugin"] = Name,
+                ["advisor_mode"] = config.DecisionAdvisor.Mode,
+                ["request"] = BuildAdvisorPayload(request),
+                ["response_schema"] = AdvisorResponseSchema()
+            }.ToString(Formatting.None);
+        }
+
+        private bool IsDecisionAdvisorHttpConfigured(string provider)
+        {
+            if (config?.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled)
+            {
+                return false;
+            }
+
+            if (provider != AdvisorProviderOpenAiCompatible && provider != AdvisorProviderWebsiteProxy)
+            {
+                return false;
+            }
+
+            if (provider == AdvisorProviderOpenAiCompatible && string.IsNullOrWhiteSpace(ResolveAdvisorApiKey()))
+            {
+                return false;
+            }
+
+            return !string.IsNullOrWhiteSpace(config.DecisionAdvisor.EndpointUrl);
+        }
+
+        private string AdvisorEndpointUrl(string provider)
+        {
+            var endpoint = (config?.DecisionAdvisor?.EndpointUrl ?? "").Trim();
+
+            if (provider == AdvisorProviderOpenAiCompatible)
+            {
+                var trimmed = endpoint.TrimEnd('/');
+
+                if (trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                {
+                    return trimmed + "/chat/completions";
+                }
+            }
+
+            return endpoint;
+        }
+
+        private Dictionary<string, string> BuildAdvisorHeaders(string provider)
+        {
+            var headers = new Dictionary<string, string>
+            {
+                ["Content-Type"] = "application/json"
+            };
+
+            var apiKey = ResolveAdvisorApiKey();
+
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                headers["Authorization"] = $"Bearer {apiKey}";
+            }
+
+            return headers;
+        }
+
+        private string ResolveAdvisorApiKey()
+        {
+            return ResolveSecretValue(config?.DecisionAdvisor?.ApiKey);
+        }
+
+        private void SendAdvisorPost(string url, string body, Action<int, string> callback, Dictionary<string, string> headers, float timeoutMilliseconds)
+        {
+            webrequest.Enqueue(url, body, (code, response) => callback(code, response ?? ""), this, Oxide.Core.Libraries.RequestMethod.POST, headers, timeoutMilliseconds);
+        }
+
+        private DecisionAdvisorResult ParseAdvisorHttpResponse(string provider, DecisionRequest request, int code, string response, float submittedAt)
+        {
+            var latency = (int)Math.Max(0f, (Time.realtimeSinceStartup - submittedAt) * 1000f);
+
+            if (code < 200 || code >= 300)
+            {
+                var failure = DecisionAdvisorResult.Failure(code == 0 ? "advisor_timeout_or_network" : $"advisor_http_{code}");
+                failure.HttpStatusCode = code;
+                failure.LatencyMilliseconds = latency;
+                return failure;
+            }
+
+            if (string.IsNullOrWhiteSpace(response))
+            {
+                var failure = DecisionAdvisorResult.Failure("advisor_empty_response");
+                failure.HttpStatusCode = code;
+                failure.LatencyMilliseconds = latency;
+                return failure;
+            }
+
+            if (response.Length > config.DecisionAdvisor.MaxAdvisorResponseBytes)
+            {
+                var failure = DecisionAdvisorResult.Failure("advisor_response_too_large");
+                failure.HttpStatusCode = code;
+                failure.LatencyMilliseconds = latency;
+                return failure;
+            }
+
+            try
+            {
+                var root = JObject.Parse(response);
+                var decisionJson = provider == AdvisorProviderOpenAiCompatible
+                    ? ExtractOpenAiCompatibleDecisionJson(root)
+                    : ExtractWebsiteProxyDecisionJson(root);
+                var result = ParseAdvisorDecisionJson(decisionJson);
+                result.HttpStatusCode = code;
+                result.LatencyMilliseconds = latency;
+                return result;
+            }
+            catch
+            {
+                var failure = DecisionAdvisorResult.Failure("advisor_invalid_json");
+                failure.HttpStatusCode = code;
+                failure.LatencyMilliseconds = latency;
+                return failure;
+            }
+        }
+
+        private JObject ExtractOpenAiCompatibleDecisionJson(JObject root)
+        {
+            if (root["action_id"] != null)
+            {
+                return root;
+            }
+
+            var contentToken = root.SelectToken("choices[0].message.content");
+
+            if (contentToken is JObject contentObject)
+            {
+                return contentObject;
+            }
+
+            var content = contentToken?.ToString();
+
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                throw new JsonException("OpenAI-compatible response did not include choices[0].message.content.");
+            }
+
+            return JObject.Parse(content);
+        }
+
+        private JObject ExtractWebsiteProxyDecisionJson(JObject root)
+        {
+            if (root["action_id"] != null)
+            {
+                return root;
+            }
+
+            if (root["decision"] is JObject decision)
+            {
+                return decision;
+            }
+
+            throw new JsonException("Website proxy response did not include a decision object.");
+        }
+
+        private DecisionAdvisorResult ParseAdvisorDecisionJson(JObject decisionJson)
+        {
+            return new DecisionAdvisorResult
+            {
+                Success = true,
+                Status = "advisor_ok",
+                ActionId = ((string)decisionJson["action_id"] ?? "").Trim(),
+                Confidence = decisionJson.Value<float?>("confidence") ?? 0f,
+                TtlMilliseconds = decisionJson.Value<int?>("ttl_ms") ?? config.DecisionAdvisor.DecisionTtlMilliseconds,
+                Rationale = ((string)decisionJson["rationale"] ?? "").Trim(),
+                FallbackActionId = ((string)decisionJson["fallback_action_id"] ?? "").Trim()
+            };
         }
 
         private List<TacticalActionCandidate> BuildCandidateActions(BaseCombatEntity bot, BotRuntime runtime, float now)
@@ -5478,6 +7114,7 @@ namespace Oxide.Plugins
             }
             else if (runtime.Memory.HasLineOfSight && target != null)
             {
+                var targetId = CombatTargetId(target);
                 var distance = Vector3.Distance(bot.transform.position, target.transform.position);
                 var rangeScore = WeaponRangeScore(runtime, distance);
                 var exposure = runtime.Memory.TargetExposureFraction;
@@ -5520,7 +7157,7 @@ namespace Oxide.Plugins
                         shootReason = "low health with no immediate cover/wall answer; return fire instead of endless retreat";
                     }
 
-                    var shoot = Candidate(TacticalActionId.AcquireVisibleTarget, shootScore, shootRisk, shootReason, target.transform.position, target.userID, now);
+                    var shoot = Candidate(TacticalActionId.AcquireVisibleTarget, shootScore, shootRisk, shootReason, target.transform.position, targetId, now);
 
                     if (returnFireWhileExposed)
                     {
@@ -5536,7 +7173,7 @@ namespace Oxide.Plugins
                     && candidates.All(candidate => candidate.ActionId != TacticalActionId.PlaceBarricade)
                     && ShouldPlaceBarricade(bot, runtime, target.transform.position, healthFraction, exposure, now, out var barricadePoint))
                 {
-                    var barricade = Candidate(TacticalActionId.PlaceBarricade, damageWallAware ? 136f : 90f + (1f - healthFraction) * 18f + exposure * 8f, "medium", "damaged or exposed in open ground; place real barricade cover", barricadePoint, target.userID, now);
+                    var barricade = Candidate(TacticalActionId.PlaceBarricade, damageWallAware ? 136f : 90f + (1f - healthFraction) * 18f + exposure * 8f, "medium", "damaged or exposed in open ground; place real barricade cover", barricadePoint, targetId, now);
                     barricade.RiskFlags.Add("real_entity");
                     barricade.RiskFlags.Add(damageWallAware ? "damage_wall" : "pressure_wall");
                     candidates.Add(barricade);
@@ -5548,12 +7185,12 @@ namespace Oxide.Plugins
                     {
                         if (runtime.IsShooting && now >= runtime.CurrentPeekUntil)
                         {
-                            candidates.Add(Candidate(TacticalActionId.Tuck, 84f, "low", "peek window expired; tuck back into cover", runtime.CurrentTuckPoint == Vector3.zero ? runtime.CurrentCover : runtime.CurrentTuckPoint, target.userID, now));
+                            candidates.Add(Candidate(TacticalActionId.Tuck, 84f, "low", "peek window expired; tuck back into cover", runtime.CurrentTuckPoint == Vector3.zero ? runtime.CurrentCover : runtime.CurrentTuckPoint, targetId, now));
                         }
                         else if (!runtime.IsShooting && now >= runtime.NextPeekAt && runtime.CurrentPeekPoint != Vector3.zero)
                         {
                             var peekAction = UnityEngine.Random.value < 0.5f ? TacticalActionId.PeekLeft : TacticalActionId.PeekRight;
-                            candidates.Add(Candidate(peekAction, 66f + runtime.Skill.Aggression * 12f, "medium", "peek from current cover to re-check target", runtime.CurrentPeekPoint, target.userID, now));
+                            candidates.Add(Candidate(peekAction, 66f + runtime.Skill.Aggression * 12f, "medium", "peek from current cover to re-check target", runtime.CurrentPeekPoint, targetId, now));
                         }
                     }
                     else if (now >= runtime.NextCoverSearchAt && TryFindCoverPlan(bot, runtime, target.transform.position, target, out var coverPlan))
@@ -5566,7 +7203,7 @@ namespace Oxide.Plugins
                             coverScore += 8f;
                         }
 
-                        candidates.Add(Candidate(TacticalActionId.MoveToCover, coverScore, "low", "visible target while bot is exposed", coverPlan.CoverPoint, target.userID, now));
+                        candidates.Add(Candidate(TacticalActionId.MoveToCover, coverScore, "low", "visible target while bot is exposed", coverPlan.CoverPoint, targetId, now));
                     }
                 }
 
@@ -5589,7 +7226,7 @@ namespace Oxide.Plugins
                         pushScore -= 70f;
                     }
 
-                    candidates.Add(Candidate(TacticalActionId.PushTarget, pushScore, "medium", $"target is outside {runtime.Combat.WeaponClass} preferred range", MoveTowardPosition(bot.transform.position, target.transform.position, runtime.Combat.PushDistance, runtime), target.userID, now));
+                    candidates.Add(Candidate(TacticalActionId.PushTarget, pushScore, "medium", $"target is outside {runtime.Combat.WeaponClass} preferred range", MoveTowardPosition(bot.transform.position, target.transform.position, runtime.Combat.PushDistance, runtime), targetId, now));
                 }
 
                 if (config.AI.AllowFlanking
@@ -5611,7 +7248,7 @@ namespace Oxide.Plugins
 
                     if (TryFindFlankPosition(bot.transform.position, target.transform.position, side, runtime, now, out var flankPoint))
                     {
-                        candidates.Add(Candidate(side > 0f ? TacticalActionId.FlankLeft : TacticalActionId.FlankRight, score, "medium", $"squad {runtime.SquadRole} flank toward shared fight", flankPoint, target.userID, now));
+                        candidates.Add(Candidate(side > 0f ? TacticalActionId.FlankLeft : TacticalActionId.FlankRight, score, "medium", $"squad {runtime.SquadRole} flank toward shared fight", flankPoint, targetId, now));
                     }
                 }
             }
@@ -6056,7 +7693,7 @@ namespace Oxide.Plugins
                 var bot = entry.Key;
                 var other = entry.Value;
 
-                if (bot == null || bot == thrower || other == null || other.TeamId != runtime.TeamId || !IsLiveBot(bot))
+                if (bot == null || bot == thrower || other == null || !SameBotClan(runtime, other) || !IsLiveBot(bot))
                 {
                     continue;
                 }
@@ -6313,7 +7950,7 @@ namespace Oxide.Plugins
 
             if (config.Debug.DebugTacticalDecisions)
             {
-                Puts($"{runtime.DisplayName} threw {(smoke ? "smoke" : "grenade")} toward {FormatVector(impactPosition)}.");
+                DebugLog($"utility-throw:{runtime.BotKey}", $"{runtime.DisplayName} threw {(smoke ? "smoke" : "grenade")} toward {FormatVector(impactPosition)}.");
             }
 
             return true;
@@ -6387,7 +8024,10 @@ namespace Oxide.Plugins
 
         private TacticalDecision DecideOrFallback(BaseCombatEntity bot, BotRuntime runtime, DecisionRequest request, List<TacticalActionCandidate> candidates, float now)
         {
-            var decision = new TacticalDecision();
+            var decision = new TacticalDecision
+            {
+                Selected = SelectFallbackCandidate(candidates)
+            };
             DecisionAdvisorResult advisorResult = null;
 
             if (ShouldAskAdvisor(runtime, candidates, now))
@@ -6395,12 +8035,38 @@ namespace Oxide.Plugins
                 decision.AdvisorRequested = true;
                 runtime.Decisions.LastAdvisorRequestAt = now;
                 decisionAdvisor = decisionAdvisor ?? new NullDecisionAdvisor();
-                decisionAdvisor.TrySubmit(request, result => advisorResult = result);
-                decision.AdvisorStatus = advisorResult?.Status ?? "advisor_no_response";
+
+                var callbackReturned = false;
+                var submitted = decisionAdvisor.TrySubmit(request, result =>
+                {
+                    if (!callbackReturned)
+                    {
+                        advisorResult = result;
+                        return;
+                    }
+
+                    HandleAsyncAdvisorResult(request, candidates, decision.Selected, result);
+                });
+                callbackReturned = true;
+
+                advisorStats.TotalRequests++;
+
+                if (submitted)
+                {
+                    advisorStats.SubmittedRequests++;
+                    RegisterPendingAdvisorRequest(request, runtime, decision.Selected, now);
+                    decision.AdvisorStatus = "advisor_pending";
+                }
+                else
+                {
+                    decision.AdvisorStatus = advisorResult?.Status ?? "advisor_no_response";
+                    advisorStats.SynchronousFailures++;
+                    advisorStats.LastStatus = decision.AdvisorStatus;
+                }
+
                 runtime.Decisions.LastAdvisorStatus = decision.AdvisorStatus;
             }
 
-            decision.Selected = SelectFallbackCandidate(candidates);
             decision.FallbackReason = decision.AdvisorRequested ? decision.AdvisorStatus : "heuristic_only";
             runtime.Decisions.LastFallbackReason = decision.FallbackReason;
 
@@ -6416,6 +8082,10 @@ namespace Oxide.Plugins
                     state = runtime.State.ToString(),
                     advisor_requested = decision.AdvisorRequested,
                     advisor_status = decision.AdvisorStatus,
+                    advisor_action = "",
+                    advisor_confidence = 0f,
+                    advisor_latency_ms = 0,
+                    advisor_rationale = "",
                     fallback_reason = decision.FallbackReason,
                     final_action = decision.Selected?.Id ?? "none",
                     final_score = decision.Selected?.HeuristicScore ?? 0f,
@@ -6425,6 +8095,217 @@ namespace Oxide.Plugins
             }
 
             return decision;
+        }
+
+        private void RegisterPendingAdvisorRequest(DecisionRequest request, BotRuntime runtime, TacticalActionCandidate fallback, float now)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.RequestId))
+            {
+                return;
+            }
+
+            pendingAdvisorDecisions[request.RequestId] = new PendingAdvisorDecision
+            {
+                RequestId = request.RequestId,
+                BotKey = runtime?.BotKey ?? request.BotId ?? "",
+                FallbackActionId = fallback?.Id ?? "none",
+                SubmittedAt = now,
+                ExpiresAt = now + Math.Max(1f, (config.DecisionAdvisor.TimeoutMilliseconds + config.DecisionAdvisor.DecisionTtlMilliseconds) / 1000f)
+            };
+        }
+
+        private void HandleAsyncAdvisorResult(DecisionRequest request, List<TacticalActionCandidate> candidates, TacticalActionCandidate fallback, DecisionAdvisorResult result)
+        {
+            var now = Time.realtimeSinceStartup;
+            PendingAdvisorDecision pending = null;
+
+            if (request != null && !string.IsNullOrWhiteSpace(request.RequestId))
+            {
+                pendingAdvisorDecisions.TryGetValue(request.RequestId, out pending);
+                pendingAdvisorDecisions.Remove(request.RequestId);
+            }
+
+            var botKey = pending?.BotKey ?? request?.BotId ?? "";
+            TacticalActionCandidate advisorCandidate;
+            var status = ValidateAdvisorResult(request, candidates, result, now, out advisorCandidate);
+            var accepted = status == "advisor_ok";
+
+            RecordAdvisorResultStats(status, result, accepted);
+
+            var runtime = ActiveRuntimeByKey(botKey);
+
+            if (runtime != null)
+            {
+                runtime.Decisions.LastAdvisorStatus = status;
+                runtime.Decisions.LastAdvisorActionId = advisorCandidate?.Id ?? "";
+                runtime.Decisions.LastAdvisorConfidence = result?.Confidence ?? 0f;
+                runtime.Decisions.LastAdvisorRationale = result?.Rationale ?? "";
+            }
+
+            if (config.Debug.DebugDecisionAdvisor)
+            {
+                DebugLog($"advisor-result:{request?.BotId ?? "unknown"}", $"Advisor result {request?.RequestId ?? "unknown"} status={status} action={advisorCandidate?.Id ?? result?.ActionId ?? "none"} confidence={(result?.Confidence ?? 0f):0.00} latency={result?.LatencyMilliseconds ?? 0}ms fallback={fallback?.Id ?? "none"}");
+            }
+
+            if (config.DecisionAdvisor.LogDecisionTraces)
+            {
+                QueueDecisionTrace(new DecisionTrace
+                {
+                    request_id = request?.RequestId ?? "",
+                    bot_id = botKey,
+                    team_id = request?.TeamId ?? 0,
+                    clan_key = request?.ClanKey ?? "",
+                    clan_tag = request?.ClanTag ?? "",
+                    state = request?.State ?? "",
+                    advisor_requested = true,
+                    advisor_status = status,
+                    advisor_action = advisorCandidate?.Id ?? result?.ActionId ?? "",
+                    advisor_confidence = result?.Confidence ?? 0f,
+                    advisor_latency_ms = result?.LatencyMilliseconds ?? 0,
+                    advisor_rationale = result?.Rationale ?? "",
+                    fallback_reason = accepted ? $"{config.DecisionAdvisor.Mode}_advisor_validated_heuristic_executed" : $"advisor_rejected:{status}",
+                    final_action = fallback?.Id ?? "none",
+                    final_score = fallback?.HeuristicScore ?? 0f,
+                    candidates = candidates,
+                    created_at = now
+                });
+            }
+        }
+
+        private string ValidateAdvisorResult(DecisionRequest request, List<TacticalActionCandidate> candidates, DecisionAdvisorResult result, float now, out TacticalActionCandidate selected)
+        {
+            selected = null;
+
+            if (result == null)
+            {
+                return "advisor_no_response";
+            }
+
+            if (!result.Success)
+            {
+                return string.IsNullOrWhiteSpace(result.Status) ? "advisor_failure" : result.Status;
+            }
+
+            if (string.IsNullOrWhiteSpace(result.ActionId))
+            {
+                return "advisor_missing_action";
+            }
+
+            selected = candidates?.FirstOrDefault(candidate => string.Equals(candidate.Id, result.ActionId.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (selected == null)
+            {
+                return "advisor_invalid_action";
+            }
+
+            if (result.Confidence < config.DecisionAdvisor.MinimumConfidence)
+            {
+                return "advisor_low_confidence";
+            }
+
+            if (result.TtlMilliseconds <= 0 || result.TtlMilliseconds > config.DecisionAdvisor.DecisionTtlMilliseconds)
+            {
+                return "advisor_ttl_rejected";
+            }
+
+            if (selected.ExpiresAt > 0f && now > selected.ExpiresAt)
+            {
+                return "advisor_late";
+            }
+
+            if (IsMovementDestinationAction(selected.ActionId) && selected.Destination != Vector3.zero && IsBaseRestrictedPosition(selected.Destination))
+            {
+                return "advisor_base_blocked";
+            }
+
+            if (selected.TargetUserId != 0)
+            {
+                var target = FindCombatTargetById(selected.TargetUserId);
+
+                if (target == null || target.IsDead() || target.IsSleeping() || RuntimeFor(target) == null && !target.IsConnected)
+                {
+                    return "advisor_target_invalid";
+                }
+            }
+
+            return "advisor_ok";
+        }
+
+        private void RecordAdvisorResultStats(string status, DecisionAdvisorResult result, bool accepted)
+        {
+            advisorStats.LastStatus = status;
+            advisorStats.LastActionId = result?.ActionId ?? "";
+            advisorStats.LastConfidence = result?.Confidence ?? 0f;
+            advisorStats.LastLatencyMilliseconds = result?.LatencyMilliseconds ?? 0;
+            advisorStats.LastRationale = result?.Rationale ?? "";
+
+            if (accepted)
+            {
+                advisorStats.SuccessResponses++;
+                return;
+            }
+
+            advisorStats.RejectedResponses++;
+
+            if (status == "advisor_invalid_json" || status == "advisor_empty_response")
+            {
+                advisorStats.InvalidJsonResponses++;
+            }
+            else if (status == "advisor_invalid_action" || status == "advisor_missing_action")
+            {
+                advisorStats.InvalidActionResponses++;
+            }
+            else if (status == "advisor_low_confidence")
+            {
+                advisorStats.LowConfidenceResponses++;
+            }
+            else if (status == "advisor_late" || status == "advisor_ttl_rejected")
+            {
+                advisorStats.LateResponses++;
+            }
+            else if (status == "advisor_timeout_or_network")
+            {
+                advisorStats.TimeoutResponses++;
+            }
+            else if (status.StartsWith("advisor_http_", StringComparison.OrdinalIgnoreCase))
+            {
+                advisorStats.HttpFailures++;
+            }
+        }
+
+        private BotRuntime ActiveRuntimeByKey(string botKey)
+        {
+            if (string.IsNullOrWhiteSpace(botKey))
+            {
+                return null;
+            }
+
+            return activeBots.Values.FirstOrDefault(runtime => string.Equals(runtime?.BotKey, botKey, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private int PendingAdvisorRequestCount()
+        {
+            PruneExpiredAdvisorRequests(Time.realtimeSinceStartup);
+            return pendingAdvisorDecisions.Count;
+        }
+
+        private void PruneExpiredAdvisorRequests(float now)
+        {
+            var expired = pendingAdvisorDecisions
+                .Where(entry => entry.Value == null || entry.Value.ExpiresAt <= now)
+                .Select(entry => entry.Key)
+                .ToList();
+
+            foreach (var key in expired)
+            {
+                pendingAdvisorDecisions.Remove(key);
+            }
+
+            if (expired.Count > 0)
+            {
+                advisorStats.TimeoutResponses += expired.Count;
+                advisorStats.LastStatus = "advisor_timeout";
+            }
         }
 
         private bool ShouldAskAdvisor(BotRuntime runtime, List<TacticalActionCandidate> candidates, float now)
@@ -6483,7 +8364,7 @@ namespace Oxide.Plugins
 
             if (config.Debug.DebugTacticalDecisions)
             {
-                Puts($"{runtime.DisplayName} {runtime.State} -> {selected.Id} score={selected.HeuristicScore:0.0} advisor={decision.AdvisorStatus} fallback={decision.FallbackReason}");
+                DebugLog($"decision:{runtime.BotKey}", $"{runtime.DisplayName} {runtime.State} -> {selected.Id} score={selected.HeuristicScore:0.0} advisor={decision.AdvisorStatus} fallback={decision.FallbackReason}");
             }
         }
 
@@ -6813,15 +8694,42 @@ namespace Oxide.Plugins
                 var finalAction = (string) json["final_action"] ?? "none";
                 var finalScore = json.Value<float?>("final_score") ?? 0f;
                 var advisorStatus = (string) json["advisor_status"] ?? "none";
+                var advisorAction = (string) json["advisor_action"] ?? "";
+                var advisorConfidence = json.Value<float?>("advisor_confidence") ?? 0f;
+                var advisorLatency = json.Value<int?>("advisor_latency_ms") ?? 0;
                 var fallback = (string) json["fallback_reason"] ?? "none";
                 var candidates = (json["candidates"] as JArray)?.Count ?? 0;
+                var advisor = string.IsNullOrWhiteSpace(advisorAction)
+                    ? $"advisor={advisorStatus}"
+                    : $"advisor={advisorStatus}/{advisorAction} conf={advisorConfidence:0.00} latency={advisorLatency}ms";
 
-                return $"{botId}: state={state}, action={finalAction}, score={finalScore:0.0}, candidates={candidates}, advisor={advisorStatus}, fallback={fallback}";
+                return $"{botId}: state={state}, action={finalAction}, score={finalScore:0.0}, candidates={candidates}, {advisor}, fallback={fallback}";
             }
             catch
             {
                 return line.Length <= 240 ? line : line.Substring(0, 240);
             }
+        }
+
+        private string AdvisorStatusLine()
+        {
+            PruneExpiredAdvisorRequests(Time.realtimeSinceStartup);
+            var advisor = decisionAdvisor ?? new NullDecisionAdvisor();
+            var decisionConfig = config.DecisionAdvisor;
+            var endpoint = string.IsNullOrWhiteSpace(decisionConfig.EndpointUrl) ? "missing" : "set";
+            var model = string.IsNullOrWhiteSpace(decisionConfig.Model) ? "missing" : "set";
+            var key = decisionConfig.Provider == AdvisorProviderNone
+                ? "not_used"
+                : (HasResolvedAdvisorApiKey() ? "set" : "missing");
+            var keySource = DescribeSecretSource(decisionConfig.ApiKey);
+
+            return $"Raidlands roam bot advisor: enabled={decisionConfig.Enabled}, provider={decisionConfig.Provider}, mode={decisionConfig.Mode}, shadow={decisionConfig.ShadowMode}, configured={advisor.IsConfigured}, endpoint={endpoint}, model={model}, apiKey={key}, apiKeySource={keySource}, pending={pendingAdvisorDecisions.Count}/{decisionConfig.MaxConcurrentRequests}, last={advisorStats.LastStatus}.";
+        }
+
+        private string AdvisorStatsLine()
+        {
+            PruneExpiredAdvisorRequests(Time.realtimeSinceStartup);
+            return $"Raidlands roam bot advisor stats: requests={advisorStats.TotalRequests}, submitted={advisorStats.SubmittedRequests}, pending={pendingAdvisorDecisions.Count}, sync_failures={advisorStats.SynchronousFailures}, ok={advisorStats.SuccessResponses}, rejected={advisorStats.RejectedResponses}, invalid_json={advisorStats.InvalidJsonResponses}, invalid_action={advisorStats.InvalidActionResponses}, low_confidence={advisorStats.LowConfidenceResponses}, late={advisorStats.LateResponses}, http={advisorStats.HttpFailures}, timeout={advisorStats.TimeoutResponses}, last={advisorStats.LastStatus}/{advisorStats.LastActionId} conf={advisorStats.LastConfidence:0.00} latency={advisorStats.LastLatencyMilliseconds}ms.";
         }
 
         private string ActionIdString(TacticalActionId actionId)
@@ -6871,7 +8779,7 @@ namespace Oxide.Plugins
 
             if (config.Debug.DebugSpawnDetails)
             {
-                Puts($"NPC body prepare ({phase}) for {runtime.DisplayName}: {BotRuntimeDiagnostics(bot, runtime)}.");
+                DebugLog($"body-prepare:{runtime.BotKey}:{phase}", $"NPC body prepare ({phase}) for {runtime.DisplayName}: {BotRuntimeDiagnostics(bot, runtime)}.");
             }
         }
 
@@ -6944,7 +8852,7 @@ namespace Oxide.Plugins
             {
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    PrintWarning($"Could not suppress scientist body targeting: {ex.GetType().Name}: {ex.Message}");
+                    DebugWarning("suppress-targeting", $"Could not suppress scientist body targeting: {ex.GetType().Name}: {ex.Message}");
                 }
             }
         }
@@ -7010,7 +8918,7 @@ namespace Oxide.Plugins
                 {
                     if (config.Debug.DebugSpawnDetails)
                     {
-                        PrintWarning($"NPCPlayer.SetDestination failed for {ShortPrefab(bot.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                        DebugWarning($"npc-destination:{runtime.BotKey}", $"NPCPlayer.SetDestination failed for {ShortPrefab(bot.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
                     }
                 }
             }
@@ -7090,7 +8998,7 @@ namespace Oxide.Plugins
             {
                 if (config.Debug.DebugSpawnDetails)
                 {
-                    PrintWarning($"BaseNavigator.SetDestination failed for {ShortPrefab(bot?.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                    DebugWarning($"navigator-destination:{ShortPrefab(bot?.PrefabName)}", $"BaseNavigator.SetDestination failed for {ShortPrefab(bot?.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
                 }
 
                 return false;
@@ -7158,7 +9066,7 @@ namespace Oxide.Plugins
                 {
                     if (config.Debug.DebugSpawnDetails)
                     {
-                        PrintWarning($"IAIAttack.StartAttacking failed for {ShortPrefab(bot.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                        DebugWarning($"attack-start:{runtime.BotKey}", $"IAIAttack.StartAttacking failed for {ShortPrefab(bot.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
                     }
                 }
             }
@@ -8627,7 +10535,7 @@ namespace Oxide.Plugins
 
             if (config.Debug.DebugTacticalDecisions)
             {
-                Puts($"{runtime.DisplayName} placed barricade at {FormatVector(position)} ({botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}).");
+                DebugLog($"barricade:{runtime.BotKey}", $"{runtime.DisplayName} placed barricade at {FormatVector(position)} ({botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}).");
             }
 
             return true;
@@ -8664,7 +10572,7 @@ namespace Oxide.Plugins
             {
                 if (config.Debug.DebugTacticalDecisions)
                 {
-                    PrintWarning($"Could not recycle oldest roam bot barricade: {ex.GetType().Name}: {ex.Message}");
+                    DebugWarning("barricade-recycle", $"Could not recycle oldest roam bot barricade: {ex.GetType().Name}: {ex.Message}");
                 }
 
                 CleanupBotPlacedEntityRefs();
@@ -8887,7 +10795,7 @@ namespace Oxide.Plugins
 
             if (config.Debug.DebugCoverScores)
             {
-                Puts($"{runtime.DisplayName} cover score={plan.Score:0.0} cover={FormatVector(plan.CoverPoint)} peek={FormatVector(plan.PeekLeftPoint != Vector3.zero ? plan.PeekLeftPoint : plan.PeekRightPoint)}");
+                DebugLog($"cover-score:{runtime.BotKey}", $"{runtime.DisplayName} cover score={plan.Score:0.0} cover={FormatVector(plan.CoverPoint)} peek={FormatVector(plan.PeekLeftPoint != Vector3.zero ? plan.PeekLeftPoint : plan.PeekRightPoint)}");
             }
 
             return true;
@@ -9561,7 +11469,7 @@ namespace Oxide.Plugins
 
         private int NearbyAllies(BaseCombatEntity bot, BotRuntime runtime)
         {
-            return activeBots.Count(entry => entry.Key != bot && IsLiveBot(entry.Key) && entry.Value?.TeamId == runtime.TeamId && Vector3.Distance(bot.transform.position, entry.Key.transform.position) <= 45f);
+            return activeBots.Count(entry => entry.Key != bot && IsLiveBot(entry.Key) && SameBotClan(runtime, entry.Value) && Vector3.Distance(bot.transform.position, entry.Key.transform.position) <= 45f);
         }
 
         private int NearbyKnownEnemies(BotRuntime runtime, float now)
@@ -9665,7 +11573,7 @@ namespace Oxide.Plugins
             {
                 if (config?.Debug?.DebugSpawnDetails == true)
                 {
-                    PrintWarning($"Reflection call {target.GetType().Name}.{methodName} failed: {ex.GetType().Name}: {ex.Message}");
+                    DebugWarning($"reflection:{target.GetType().Name}.{methodName}", $"Reflection call {target.GetType().Name}.{methodName} failed: {ex.GetType().Name}: {ex.Message}");
                 }
 
                 return null;
@@ -10049,6 +11957,326 @@ namespace Oxide.Plugins
             return Mathf.Sqrt(x * x + z * z);
         }
 
+        private BasePlayer ResolveKillerPlayer(BaseCombatEntity victim, HitInfo info)
+        {
+            return info?.InitiatorPlayer
+                ?? info?.Initiator as BasePlayer
+                ?? victim?.lastAttacker as BasePlayer;
+        }
+
+        private BaseCombatEntity ResolveKillerEntity(BaseCombatEntity victim, HitInfo info, BasePlayer killerPlayer)
+        {
+            return info?.Initiator as BaseCombatEntity
+                ?? victim?.lastAttacker as BaseCombatEntity
+                ?? killerPlayer;
+        }
+
+        private void HandlePlayerKilledBot(BasePlayer killer, BaseCombatEntity victimEntity, BotRuntime victimRuntime, HitInfo info)
+        {
+            if (killer == null || victimRuntime == null)
+            {
+                return;
+            }
+
+            BroadcastKillFeed(killer, null, victimEntity, victimRuntime, info);
+
+            if (TryAwardBotKillRp(killer, victimRuntime, out var amount)
+                && amount > 0
+                && config.BotKillIntegration.TellKillerAboutRpReward)
+            {
+                killer.ChatMessage(FormatKillFeedTemplate(config.BotKillIntegration.RpRewardMessage, killer, null, victimEntity, victimRuntime, info, amount));
+            }
+        }
+
+        private void HandleBotKilledPlayer(BaseCombatEntity killerEntity, BotRuntime killerRuntime, BasePlayer victim, HitInfo info)
+        {
+            if (killerEntity == null || killerRuntime == null || victim == null)
+            {
+                return;
+            }
+
+            BroadcastKillFeed(killerEntity, killerRuntime, victim, null, info);
+        }
+
+        private void HandleBotKilledBot(BaseCombatEntity killerEntity, BotRuntime killerRuntime, BaseCombatEntity victimEntity, BotRuntime victimRuntime, HitInfo info)
+        {
+            if (killerEntity == null || killerRuntime == null || victimEntity == null || victimRuntime == null)
+            {
+                return;
+            }
+
+            BroadcastKillFeed(killerEntity, killerRuntime, victimEntity, victimRuntime, info);
+        }
+
+        private void BroadcastKillFeed(BaseCombatEntity killerEntity, BotRuntime killerRuntime, BaseCombatEntity victimEntity, BotRuntime victimRuntime, HitInfo info)
+        {
+            if (config?.BotKillIntegration?.BroadcastPlayerLikeKillMessages != true)
+            {
+                return;
+            }
+
+            var message = FormatKillFeedTemplate(config.BotKillIntegration.KillMessage, killerEntity, killerRuntime, victimEntity, victimRuntime, info, 0);
+            var formatted = (config.BotKillIntegration.ChatFormat ?? "{message}").Replace("{message}", message);
+            PrintToChat(formatted);
+        }
+
+        private bool TryAwardBotKillRp(BasePlayer killer, BotRuntime victimRuntime, out int amount)
+        {
+            amount = Math.Max(0, config?.BotKillIntegration?.ServerRewardsRpPerBotKill ?? 0);
+
+            if (killer == null || victimRuntime == null || config?.BotKillIntegration?.AwardServerRewardsRp != true || amount <= 0)
+            {
+                return false;
+            }
+
+            if (ServerRewards == null)
+            {
+                if (!serverRewardsUnavailableWarned)
+                {
+                    PrintWarning("ServerRewards is not loaded; roam bot kill RP rewards are enabled but could not be awarded.");
+                    serverRewardsUnavailableWarned = true;
+                }
+
+                return false;
+            }
+
+            try
+            {
+                var result = ServerRewards.Call("AddPoints", killer.UserIDString, amount);
+
+                if (result is bool && !(bool)result)
+                {
+                    PrintWarning($"ServerRewards rejected {amount} RP for {killer.UserIDString} after killing {victimRuntime.DisplayName}.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"ServerRewards AddPoints failed for roam bot kill reward: {ex.Message}");
+                return false;
+            }
+        }
+
+        private string FormatKillFeedTemplate(string template, BaseCombatEntity killerEntity, BotRuntime killerRuntime, BaseCombatEntity victimEntity, BotRuntime victimRuntime, HitInfo info, int rpAmount)
+        {
+            var distanceMeters = KillDistanceMeters(killerEntity, victimEntity, info);
+            var botRuntime = victimRuntime ?? killerRuntime;
+
+            return (template ?? "")
+                .Replace("{killer}", KillFeedName(killerEntity, killerRuntime, "Unknown"))
+                .Replace("{victim}", KillFeedName(victimEntity, victimRuntime, "Unknown"))
+                .Replace("{bot}", BotChatName(botRuntime))
+                .Replace("{killer_clan}", KillClanTag(killerRuntime))
+                .Replace("{victim_clan}", KillClanTag(victimRuntime))
+                .Replace("{weapon}", KillWeaponName(info, killerEntity))
+                .Replace("{method}", KillMethodName(info))
+                .Replace("{distance}", KillDistanceLabel(distanceMeters))
+                .Replace("{distance_m}", distanceMeters < 0f ? "unknown" : distanceMeters.ToString("0", CultureInfo.InvariantCulture))
+                .Replace("{rp}", rpAmount.ToString(CultureInfo.InvariantCulture));
+        }
+
+        private string KillFeedName(BaseCombatEntity entity, BotRuntime runtime, string fallback)
+        {
+            if (runtime != null)
+            {
+                return BotChatName(runtime);
+            }
+
+            var player = entity as BasePlayer;
+
+            if (player != null)
+            {
+                return SafeChatName(PlayerName(player), player.UserIDString ?? fallback);
+            }
+
+            return SafeChatName(entity?.ShortPrefabName, fallback);
+        }
+
+        private string KillClanTag(BotRuntime runtime)
+        {
+            return SafeChatName(runtime?.ClanTag, "");
+        }
+
+        private string BotChatName(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return "Roam Bot";
+            }
+
+            var name = SafeChatName(runtime.DisplayName, "Roam Bot");
+            var tag = SafeChatName(runtime.ClanTag, "");
+
+            return string.IsNullOrWhiteSpace(tag) ? name : $"[{tag}] {name}";
+        }
+
+        private string SafeChatName(string value, string fallback)
+        {
+            var cleaned = CleanName(value);
+            return string.IsNullOrWhiteSpace(cleaned) ? fallback : cleaned;
+        }
+
+        private string KillDistanceLabel(float distanceMeters)
+        {
+            return distanceMeters < 0f
+                ? "unknown range"
+                : $"{distanceMeters.ToString("0", CultureInfo.InvariantCulture)}m";
+        }
+
+        private float KillDistanceMeters(BaseCombatEntity killerEntity, BaseCombatEntity victimEntity, HitInfo info)
+        {
+            var killerPosition = killerEntity == null ? Vector3.zero : killerEntity.transform.position;
+            var victimPosition = victimEntity == null ? Vector3.zero : victimEntity.transform.position;
+
+            if (victimPosition == Vector3.zero)
+            {
+                victimPosition = info?.HitPositionWorld ?? Vector3.zero;
+            }
+
+            if (killerPosition == Vector3.zero || victimPosition == Vector3.zero)
+            {
+                return -1f;
+            }
+
+            return Vector3.Distance(killerPosition, victimPosition);
+        }
+
+        private string KillMethodName(HitInfo info)
+        {
+            try
+            {
+                var damageType = info?.damageTypes?.GetMajorityDamageType();
+                var raw = damageType?.ToString();
+
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    return info?.Weapon != null || info?.WeaponPrefab != null ? "weapon" : "damage";
+                }
+
+                if (raw.Equals("Bullet", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "gunfire";
+                }
+
+                if (raw.Equals("Explosion", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "explosion";
+                }
+
+                if (raw.Equals("Slash", StringComparison.OrdinalIgnoreCase)
+                    || raw.Equals("Stab", StringComparison.OrdinalIgnoreCase)
+                    || raw.Equals("Blunt", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "melee";
+                }
+
+                return raw.Replace("_", " ").ToLowerInvariant();
+            }
+            catch
+            {
+                return "damage";
+            }
+        }
+
+        private string KillWeaponName(HitInfo info, BaseCombatEntity killerEntity)
+        {
+            var killer = killerEntity as BasePlayer;
+            var item = info?.Weapon?.GetItem() ?? killer?.GetActiveItem();
+            var displayName = item?.info?.displayName?.english;
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+            {
+                return displayName;
+            }
+
+            var prefabName = info?.WeaponPrefab?.ShortPrefabName;
+
+            if (!string.IsNullOrWhiteSpace(prefabName))
+            {
+                return prefabName.Replace("_", " ").Replace(".", " ");
+            }
+
+            return KillMethodName(info);
+        }
+
+        private void TrackRecentBotDeath(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            var netId = NetId(bot);
+
+            if (netId == 0)
+            {
+                return;
+            }
+
+            recentBotDeaths[netId] = new RecentBotDeath
+            {
+                Runtime = runtime,
+                ExpiresAt = Time.realtimeSinceStartup + 5f
+            };
+        }
+
+        private BotRuntime BotRuntimeForDeathNotice(BaseCombatEntity bot)
+        {
+            PruneRecentBotDeaths();
+
+            var runtime = RuntimeFor(bot);
+
+            if (runtime != null)
+            {
+                return runtime;
+            }
+
+            var netId = NetId(bot);
+
+            if (netId != 0 && recentBotDeaths.TryGetValue(netId, out var recent) && recent?.ExpiresAt >= Time.realtimeSinceStartup)
+            {
+                return recent.Runtime;
+            }
+
+            return null;
+        }
+
+        private void PruneRecentBotDeaths()
+        {
+            var now = Time.realtimeSinceStartup;
+            var expired = recentBotDeaths
+                .Where(entry => entry.Value == null || entry.Value.ExpiresAt < now)
+                .Select(entry => entry.Key)
+                .ToList();
+
+            foreach (var key in expired)
+            {
+                recentBotDeaths.Remove(key);
+            }
+        }
+
+        private bool TryGetDeathNoticeEntity(Dictionary<string, object> deathData, string key, out BaseCombatEntity entity)
+        {
+            entity = null;
+
+            if (deathData == null || !deathData.TryGetValue(key, out var value))
+            {
+                return false;
+            }
+
+            entity = value as BaseCombatEntity;
+            return entity != null;
+        }
+
+        private ulong NetId(BaseNetworkable entity)
+        {
+            try
+            {
+                return entity?.net?.ID.Value ?? 0UL;
+            }
+            catch
+            {
+                return 0UL;
+            }
+        }
+
         private bool IsLiveBot(BaseCombatEntity bot)
         {
             return bot != null && !bot.IsDestroyed && !bot.IsDead();
@@ -10073,6 +12301,66 @@ namespace Oxide.Plugins
             }
 
             return IsSteamId64(player.UserIDString) && RuntimeFor(player) == null;
+        }
+
+        private ulong CombatTargetId(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return 0UL;
+            }
+
+            return player.userID != 0UL ? player.userID : NetId(player);
+        }
+
+        private bool SameBotClan(BotRuntime left, BotRuntime right)
+        {
+            if (left == null || right == null)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(left.ClanKey) && !string.IsNullOrWhiteSpace(right.ClanKey))
+            {
+                return string.Equals(left.ClanKey, right.ClanKey, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return left.TeamId == right.TeamId;
+        }
+
+        private bool IsEnemyBot(BotRuntime source, BotRuntime target)
+        {
+            return config?.AI?.AllowBotClanWars == true
+                && source != null
+                && target != null
+                && !SameBotClan(source, target);
+        }
+
+        private BasePlayer FindCombatTargetById(ulong targetId)
+        {
+            if (targetId == 0UL)
+            {
+                return null;
+            }
+
+            var player = BasePlayer.FindByID(targetId);
+
+            if (player != null)
+            {
+                return player;
+            }
+
+            foreach (var entry in activeBots)
+            {
+                var botPlayer = entry.Key as BasePlayer;
+
+                if (botPlayer != null && CombatTargetId(botPlayer) == targetId)
+                {
+                    return botPlayer;
+                }
+            }
+
+            return null;
         }
 
         private List<BasePlayer> SpawnAnchorPlayers()
@@ -10255,16 +12543,765 @@ namespace Oxide.Plugins
             return ScoreboardName($"[{tag}] {name}", clan.clan_key);
         }
 
-        private bool CanAdmin(ConsoleSystem.Arg arg)
+        private string NormalizeAdminKey(string key)
         {
-            var player = arg?.Connection?.player as BasePlayer;
+            return (key ?? "")
+                .Trim()
+                .ToLowerInvariant()
+                .Replace("-", "_")
+                .Replace(" ", "_");
+        }
 
+        private string NormalizeAdminTab(string tab)
+        {
+            var key = NormalizeAdminKey(tab);
+            return AdminPanelTabs.Contains(key) ? key : "overview";
+        }
+
+        private string AdminTabFromTail(ConsoleSystem.Arg arg, string fallback)
+        {
+            if (arg?.Args != null)
+            {
+                for (var index = arg.Args.Length - 1; index >= 0; index--)
+                {
+                    var tab = NormalizeAdminKey(arg.Args[index].ToString());
+
+                    if (AdminPanelTabs.Contains(tab))
+                    {
+                        return tab;
+                    }
+                }
+            }
+
+            return NormalizeAdminTab(fallback);
+        }
+
+        private bool TryParseAdminBool(string text, out bool value)
+        {
+            value = false;
+            var normalized = NormalizeAdminKey(text);
+
+            if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" || normalized == "enable" || normalized == "enabled")
+            {
+                value = true;
+                return true;
+            }
+
+            if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off" || normalized == "disable" || normalized == "disabled")
+            {
+                value = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool ToggleAdminBooleanSetting(string key, out bool restartRuntime, out bool refreshAdvisor, out bool refreshNameplates)
+        {
+            restartRuntime = false;
+            refreshAdvisor = false;
+            refreshNameplates = false;
+
+            switch (NormalizeAdminKey(key))
+            {
+                case "random_fallback":
+                    config.Spawn.UseRandomLandFallback = !config.Spawn.UseRandomLandFallback;
+                    return true;
+                case "generated_near":
+                    config.Spawn.UseGeneratedPositionsNearPlayers = !config.Spawn.UseGeneratedPositionsNearPlayers;
+                    return true;
+                case "require_land":
+                    config.Spawn.RequireLandSpawns = !config.Spawn.RequireLandSpawns;
+                    return true;
+                case "physics_surface":
+                    config.Spawn.UsePhysicsSurfaceSpawnChecks = !config.Spawn.UsePhysicsSurfaceSpawnChecks;
+                    return true;
+                case "avoid_safe_zones":
+                    config.Spawn.AvoidSafeZoneSpawns = !config.Spawn.AvoidSafeZoneSpawns;
+                    return true;
+                case "ignore_safe_zone_players":
+                    config.Spawn.IgnorePlayersInSafeZones = !config.Spawn.IgnorePlayersInSafeZones;
+                    return true;
+                case "los_shoot":
+                    config.AI.RequireLineOfSightToShoot = !config.AI.RequireLineOfSightToShoot;
+                    return true;
+                case "allow_hearing":
+                    config.AI.AllowHearing = !config.AI.AllowHearing;
+                    return true;
+                case "allow_cover":
+                    config.AI.AllowCover = !config.AI.AllowCover;
+                    return true;
+                case "allow_flanking":
+                    config.AI.AllowFlanking = !config.AI.AllowFlanking;
+                    return true;
+                case "allow_grenades":
+                    config.AI.AllowGrenades = !config.AI.AllowGrenades;
+                    return true;
+                case "allow_smoke":
+                    config.AI.AllowSmoke = !config.AI.AllowSmoke;
+                    return true;
+                case "allow_barricades":
+                    config.AI.AllowBarricades = !config.AI.AllowBarricades;
+                    return true;
+                case "jiggle":
+                    config.AI.AllowJigglePeeking = !config.AI.AllowJigglePeeking;
+                    return true;
+                case "jump_peek":
+                    config.AI.AllowJumpPeekApproximation = !config.AI.AllowJumpPeekApproximation;
+                    return true;
+                case "bot_clan_wars":
+                    config.AI.AllowBotClanWars = !config.AI.AllowBotClanWars;
+                    return true;
+                case "foliage":
+                    config.AI.FoliageBlocksVision = !config.AI.FoliageBlocksVision;
+                    return true;
+                case "foliage_terrain":
+                    config.AI.FoliageTerrainSampling = !config.AI.FoliageTerrainSampling;
+                    return true;
+                case "base_avoidance":
+                    config.AI.DoNotEnterBases = !config.AI.DoNotEnterBases;
+                    return true;
+                case "grant_meds":
+                    config.AI.GrantBotMedicalItems = !config.AI.GrantBotMedicalItems;
+                    return true;
+                case "real_meds":
+                    config.AI.UseRealMedicalItemsForCoverHeal = !config.AI.UseRealMedicalItemsForCoverHeal;
+                    return true;
+                case "auto_reload":
+                    config.AI.AutoReloadBotWeapons = !config.AI.AutoReloadBotWeapons;
+                    return true;
+                case "kill_chat":
+                    config.BotKillIntegration.BroadcastPlayerLikeKillMessages = !config.BotKillIntegration.BroadcastPlayerLikeKillMessages;
+                    return true;
+                case "deathnotes":
+                    config.BotKillIntegration.SuppressDeathNotesForRoamBotKills = !config.BotKillIntegration.SuppressDeathNotesForRoamBotKills;
+                    return true;
+                case "award_rp":
+                    config.BotKillIntegration.AwardServerRewardsRp = !config.BotKillIntegration.AwardServerRewardsRp;
+                    return true;
+                case "tell_rp":
+                    config.BotKillIntegration.TellKillerAboutRpReward = !config.BotKillIntegration.TellKillerAboutRpReward;
+                    return true;
+                case "kill_unload":
+                    config.Persistence.KillBotsOnPluginUnload = !config.Persistence.KillBotsOnPluginUnload;
+                    return true;
+                case "kill_disable":
+                    config.Persistence.KillBotsOnDisable = !config.Persistence.KillBotsOnDisable;
+                    return true;
+                case "leave_corpses":
+                    config.Persistence.LeaveCorpses = !config.Persistence.LeaveCorpses;
+                    return true;
+                case "leave_entities":
+                    config.Persistence.LeaveBotPlacedEntities = !config.Persistence.LeaveBotPlacedEntities;
+                    return true;
+                case "nuke_enabled":
+                    config.Persistence.EmergencyKillCommandEnabled = !config.Persistence.EmergencyKillCommandEnabled;
+                    return true;
+                case "debug_spawn":
+                    config.Debug.DebugSpawnDetails = !config.Debug.DebugSpawnDetails;
+                    return true;
+                case "debug_perception":
+                    config.Debug.DebugPerception = !config.Debug.DebugPerception;
+                    return true;
+                case "debug_tactical":
+                    config.Debug.DebugTacticalDecisions = !config.Debug.DebugTacticalDecisions;
+                    return true;
+                case "nameplates":
+                    config.Debug.DebugBotNameplates = !config.Debug.DebugBotNameplates;
+                    refreshNameplates = true;
+                    return true;
+                case "side_panel":
+                    config.Debug.DebugBotSidePanel = !config.Debug.DebugBotSidePanel;
+                    refreshNameplates = true;
+                    return true;
+                case "anchor_viewer":
+                    config.Debug.DebugUiIncludesAnchorPlayer = !config.Debug.DebugUiIncludesAnchorPlayer;
+                    refreshNameplates = true;
+                    return true;
+                case "cover_scores":
+                    config.Debug.DebugCoverScores = !config.Debug.DebugCoverScores;
+                    return true;
+                case "debug_advisor":
+                    config.Debug.DebugDecisionAdvisor = !config.Debug.DebugDecisionAdvisor;
+                    return true;
+                case "console_logs":
+                    config.Debug.DebugConsoleLogs = !config.Debug.DebugConsoleLogs;
+                    return true;
+                case "advisor_enabled":
+                    config.DecisionAdvisor.Enabled = !config.DecisionAdvisor.Enabled;
+                    refreshAdvisor = true;
+                    return true;
+                case "advisor_shadow":
+                    config.DecisionAdvisor.ShadowMode = !config.DecisionAdvisor.ShadowMode;
+                    refreshAdvisor = true;
+                    return true;
+                case "advisor_fallback":
+                    config.DecisionAdvisor.FallbackOnAnyFailure = !config.DecisionAdvisor.FallbackOnAnyFailure;
+                    refreshAdvisor = true;
+                    return true;
+                case "advisor_unconfigured_failure":
+                    config.DecisionAdvisor.TreatUnconfiguredAdvisorAsFailure = !config.DecisionAdvisor.TreatUnconfiguredAdvisorAsFailure;
+                    refreshAdvisor = true;
+                    return true;
+                case "advisor_schema":
+                    config.DecisionAdvisor.UseStructuredResponseSchema = !config.DecisionAdvisor.UseStructuredResponseSchema;
+                    refreshAdvisor = true;
+                    return true;
+                case "advisor_ask_stuck":
+                    config.DecisionAdvisor.AskWhenBotIsStuck = !config.DecisionAdvisor.AskWhenBotIsStuck;
+                    return true;
+                case "advisor_ask_close":
+                    config.DecisionAdvisor.AskWhenActionScoresAreClose = !config.DecisionAdvisor.AskWhenActionScoresAreClose;
+                    return true;
+                case "advisor_ask_high_impact":
+                    config.DecisionAdvisor.AskWhenPushRetreatOrFlankIsHighImpact = !config.DecisionAdvisor.AskWhenPushRetreatOrFlankIsHighImpact;
+                    return true;
+                case "advisor_ask_failed":
+                    config.DecisionAdvisor.AskWhenSameActionFailedRepeatedly = !config.DecisionAdvisor.AskWhenSameActionFailedRepeatedly;
+                    return true;
+                case "advisor_ask_squad":
+                    config.DecisionAdvisor.AskWhenSquadStateChangesSharply = !config.DecisionAdvisor.AskWhenSquadStateChangesSharply;
+                    return true;
+                case "advisor_trace":
+                    config.DecisionAdvisor.LogDecisionTraces = !config.DecisionAdvisor.LogDecisionTraces;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool SetAdminIntegerSetting(string key, int value)
+        {
+            switch (NormalizeAdminKey(key))
+            {
+                case "target":
+                    config.TargetPopulation = Clamp(value, config.MinAllowedPopulation, Math.Min(AdminPanelMaximumPopulation, Math.Max(config.MinAllowedPopulation, config.MaxAllowedPopulation)));
+                    return true;
+                case "min_population":
+                    config.MinAllowedPopulation = Clamp(value, 0, AdminPanelMaximumPopulation);
+                    config.MaxAllowedPopulation = Math.Max(config.MinAllowedPopulation, config.MaxAllowedPopulation);
+                    return true;
+                case "max_population":
+                    config.MaxAllowedPopulation = Clamp(value, Math.Max(0, config.MinAllowedPopulation), AdminPanelMaximumPopulation);
+                    return true;
+                case "solo_weight":
+                    config.TeamSizeWeights["solo"] = Clamp(value, 0, 100);
+                    return true;
+                case "duo_weight":
+                    config.TeamSizeWeights["duo"] = Clamp(value, 0, 100);
+                    return true;
+                case "trio_weight":
+                    config.TeamSizeWeights["trio"] = Clamp(value, 0, 100);
+                    return true;
+                case "high_tier_weight":
+                    config.HighTierKitWeight = Clamp(value, 0, 100);
+                    return true;
+                case "max_position_attempts":
+                    config.Spawn.MaxPositionAttempts = Clamp(value, 10, 1000);
+                    return true;
+                case "near_attempts":
+                    config.Spawn.NearPlayerAttempts = Clamp(value, 8, 1000);
+                    return true;
+                case "max_utility":
+                    config.AI.MaxActiveBotUtilityProjectiles = Clamp(value, 1, 30);
+                    return true;
+                case "max_barricades":
+                    config.AI.MaxActiveBotBarricades = Clamp(value, 0, 25);
+                    return true;
+                case "bot_med_amount":
+                    config.AI.BotMedicalItemAmount = Clamp(value, 0, 12);
+                    return true;
+                case "hard_stuck_paths":
+                    config.AI.HardStuckFailedPathsToDespawn = Clamp(value, 0, 200);
+                    return true;
+                case "max_stuck_points":
+                    config.AI.MaxStuckMemoryPoints = Clamp(value, 1, 50);
+                    return true;
+                case "rp_reward":
+                    config.BotKillIntegration.ServerRewardsRpPerBotKill = Clamp(value, 0, 100000);
+                    return true;
+                case "advisor_timeout":
+                    config.DecisionAdvisor.TimeoutMilliseconds = Clamp(value, 100, 5000);
+                    return true;
+                case "advisor_concurrent":
+                    config.DecisionAdvisor.MaxConcurrentRequests = Math.Max(0, value);
+                    return true;
+                case "advisor_events":
+                    config.DecisionAdvisor.MaxRecentEventsInRequest = Math.Max(0, value);
+                    return true;
+                case "advisor_candidates":
+                    config.DecisionAdvisor.MaxCandidateActions = Clamp(value, 1, 16);
+                    return true;
+                case "nameplate_font":
+                    config.Debug.DebugNameplateFontSize = Clamp(value, 6, 14);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool AdjustAdminIntegerSetting(string key, int delta)
+        {
+            if (!TryGetAdminIntegerSetting(key, out var current))
+            {
+                return false;
+            }
+
+            return SetAdminIntegerSetting(key, current + delta);
+        }
+
+        private bool TryGetAdminIntegerSetting(string key, out int value)
+        {
+            switch (NormalizeAdminKey(key))
+            {
+                case "target":
+                    value = config.TargetPopulation;
+                    return true;
+                case "min_population":
+                    value = config.MinAllowedPopulation;
+                    return true;
+                case "max_population":
+                    value = config.MaxAllowedPopulation;
+                    return true;
+                case "solo_weight":
+                    value = config.TeamSizeWeights.ContainsKey("solo") ? config.TeamSizeWeights["solo"] : 0;
+                    return true;
+                case "duo_weight":
+                    value = config.TeamSizeWeights.ContainsKey("duo") ? config.TeamSizeWeights["duo"] : 0;
+                    return true;
+                case "trio_weight":
+                    value = config.TeamSizeWeights.ContainsKey("trio") ? config.TeamSizeWeights["trio"] : 0;
+                    return true;
+                case "high_tier_weight":
+                    value = config.HighTierKitWeight;
+                    return true;
+                case "max_position_attempts":
+                    value = config.Spawn.MaxPositionAttempts;
+                    return true;
+                case "near_attempts":
+                    value = config.Spawn.NearPlayerAttempts;
+                    return true;
+                case "max_utility":
+                    value = config.AI.MaxActiveBotUtilityProjectiles;
+                    return true;
+                case "max_barricades":
+                    value = config.AI.MaxActiveBotBarricades;
+                    return true;
+                case "bot_med_amount":
+                    value = config.AI.BotMedicalItemAmount;
+                    return true;
+                case "hard_stuck_paths":
+                    value = config.AI.HardStuckFailedPathsToDespawn;
+                    return true;
+                case "max_stuck_points":
+                    value = config.AI.MaxStuckMemoryPoints;
+                    return true;
+                case "rp_reward":
+                    value = config.BotKillIntegration.ServerRewardsRpPerBotKill;
+                    return true;
+                case "advisor_timeout":
+                    value = config.DecisionAdvisor.TimeoutMilliseconds;
+                    return true;
+                case "advisor_concurrent":
+                    value = config.DecisionAdvisor.MaxConcurrentRequests;
+                    return true;
+                case "advisor_events":
+                    value = config.DecisionAdvisor.MaxRecentEventsInRequest;
+                    return true;
+                case "advisor_candidates":
+                    value = config.DecisionAdvisor.MaxCandidateActions;
+                    return true;
+                case "nameplate_font":
+                    value = config.Debug.DebugNameplateFontSize;
+                    return true;
+                default:
+                    value = 0;
+                    return false;
+            }
+        }
+
+        private bool AdminIntegerSettingNeedsRuntimeRestart(string key)
+        {
+            return false;
+        }
+
+        private bool AdminIntegerSettingNeedsNameplateRestart(string key)
+        {
+            return NormalizeAdminKey(key) == "nameplate_font";
+        }
+
+        private bool SetAdminFloatSetting(string key, float value)
+        {
+            switch (NormalizeAdminKey(key))
+            {
+                case "maintain_interval":
+                    config.MaintainIntervalSeconds = Math.Max(5f, value);
+                    return true;
+                case "perception_tick":
+                    config.AI.PerceptionTickSeconds = Mathf.Clamp(value, 0.1f, 2f);
+                    return true;
+                case "decision_tick":
+                    config.AI.DecisionTickSeconds = Mathf.Clamp(value, 0.15f, 3f);
+                    return true;
+                case "squad_tick":
+                    config.AI.SquadTickSeconds = Mathf.Clamp(value, 0.25f, 5f);
+                    return true;
+                case "spawn_retry":
+                    config.SpawnFailureRetrySeconds = Math.Max(15f, value);
+                    return true;
+                case "respawn_delay":
+                    config.RespawnDelaySeconds = Math.Max(5f, value);
+                    return true;
+                case "nav_sample":
+                    config.Spawn.NavmeshSampleDistance = Math.Max(2f, value);
+                    return true;
+                case "near_min":
+                    config.Spawn.NearPlayerMinDistance = Math.Max(25f, value);
+                    return true;
+                case "near_max":
+                    config.Spawn.NearPlayerMaxDistance = Math.Max(config.Spawn.NearPlayerMinDistance + 10f, value);
+                    return true;
+                case "group_radius":
+                    config.Spawn.GroupSpawnRadius = Math.Max(1f, value);
+                    return true;
+                case "safe_buffer":
+                    config.Spawn.SafeZoneSpawnBufferDistance = Math.Max(0f, value);
+                    return true;
+                case "vision_range":
+                    config.AI.VisionRange = Math.Max(20f, value);
+                    return true;
+                case "vision_fov":
+                    config.AI.VisionFovDegrees = Mathf.Clamp(value, 30f, 360f);
+                    return true;
+                case "close_awareness":
+                    config.AI.CloseAwarenessRadius = Math.Max(0f, value);
+                    return true;
+                case "exposed_min":
+                    config.AI.MinimumExposedTargetFraction = Mathf.Clamp(value, 0.1f, 1f);
+                    return true;
+                case "exposed_shoot":
+                    config.AI.MinimumExposedTargetFractionToShoot = Mathf.Clamp(value, config.AI.MinimumExposedTargetFraction, 1f);
+                    return true;
+                case "target_memory":
+                    config.AI.TargetMemorySeconds = Math.Max(1f, value);
+                    return true;
+                case "search_last_seen":
+                    config.AI.SearchLastSeenSeconds = Math.Max(config.AI.TargetMemorySeconds, value);
+                    return true;
+                case "hearing_gun":
+                    config.AI.UnsuppressedGunshotHearingRange = Mathf.Clamp(value, 0f, 500f);
+                    return true;
+                case "hearing_suppressed":
+                    config.AI.SuppressedGunshotHearingRange = Mathf.Clamp(value, 0f, config.AI.UnsuppressedGunshotHearingRange);
+                    return true;
+                case "hearing_explosion":
+                    config.AI.ExplosionHearingRange = Mathf.Clamp(value, 0f, 800f);
+                    return true;
+                case "hearing_melee":
+                    config.AI.MeleeOrToolHearingRange = Mathf.Clamp(value, 0f, 120f);
+                    return true;
+                case "hearing_sprint":
+                    config.AI.SprintHearingRange = Mathf.Clamp(value, 0f, 80f);
+                    return true;
+                case "foliage_radius":
+                    config.AI.FoliageVisionCheckRadius = Mathf.Clamp(value, 0.1f, 3f);
+                    return true;
+                case "foliage_clear":
+                    config.AI.MaximumClearVisionThroughFoliage = Mathf.Clamp(value, 1f, config.AI.VisionRange);
+                    return true;
+                case "cover_radius":
+                    config.AI.CoverSearchRadius = Math.Max(4f, value);
+                    return true;
+                case "cover_min_threat":
+                    config.AI.CoverMinimumDistanceFromThreat = Math.Max(2f, value);
+                    return true;
+                case "flank_distance":
+                    config.AI.SquadFlankDistance = Mathf.Clamp(value, 8f, 80f);
+                    return true;
+                case "regroup_distance":
+                    config.AI.SquadRegroupDistance = Mathf.Clamp(value, 20f, 140f);
+                    return true;
+                case "grenade_cooldown":
+                    config.AI.GrenadeCooldownSeconds = Math.Max(1f, value);
+                    return true;
+                case "team_grenade_cooldown":
+                    config.AI.TeamGrenadeCooldownSeconds = Math.Max(1f, value);
+                    return true;
+                case "grenade_min":
+                    config.AI.GrenadeMinThrowDistance = Mathf.Clamp(value, 4f, 35f);
+                    return true;
+                case "grenade_max":
+                    config.AI.GrenadeMaxThrowDistance = Mathf.Clamp(value, config.AI.GrenadeMinThrowDistance + 2f, 90f);
+                    return true;
+                case "smoke_min":
+                    config.AI.SmokeMinThrowDistance = Mathf.Clamp(value, 3f, 35f);
+                    return true;
+                case "smoke_max":
+                    config.AI.SmokeMaxThrowDistance = Mathf.Clamp(value, config.AI.SmokeMinThrowDistance + 2f, 90f);
+                    return true;
+                case "barricade_cooldown":
+                    config.AI.BarricadeCooldownSeconds = Mathf.Clamp(value, 5f, 45f);
+                    return true;
+                case "passive_heal":
+                    config.AI.PassiveCombatHealPerSecond = Mathf.Clamp(value, 0f, 20f);
+                    return true;
+                case "cover_heal":
+                    config.AI.LowHealthCoverHealPerSecond = Mathf.Clamp(value, 0f, 30f);
+                    return true;
+                case "base_radius":
+                    config.AI.BaseAvoidanceRadius = Math.Max(1f, value);
+                    return true;
+                case "base_hold":
+                    config.AI.BaseHoldSeconds = Math.Max(2f, value);
+                    return true;
+                case "advisor_confidence":
+                    config.DecisionAdvisor.MinimumConfidence = Mathf.Clamp01(value);
+                    return true;
+                case "advisor_min_seconds":
+                    config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot = Math.Max(0f, value);
+                    return true;
+                case "nameplate_refresh":
+                    config.Debug.DebugNameplateRefreshSeconds = Mathf.Clamp(value, 0.25f, 5f);
+                    return true;
+                case "nameplate_duration":
+                    config.Debug.DebugNameplateDrawDurationSeconds = Mathf.Clamp(value, config.Debug.DebugNameplateRefreshSeconds, 10f);
+                    return true;
+                case "nameplate_height":
+                    config.Debug.DebugNameplateHeight = Mathf.Clamp(value, 2.5f, 6f);
+                    return true;
+                case "nameplate_distance":
+                    config.Debug.DebugNameplateMaxDistance = Mathf.Clamp(value, 25f, 1000f);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool AdjustAdminFloatSetting(string key, float delta)
+        {
+            if (!TryGetAdminFloatSetting(key, out var current))
+            {
+                return false;
+            }
+
+            return SetAdminFloatSetting(key, current + delta);
+        }
+
+        private bool TryGetAdminFloatSetting(string key, out float value)
+        {
+            switch (NormalizeAdminKey(key))
+            {
+                case "maintain_interval":
+                    value = config.MaintainIntervalSeconds;
+                    return true;
+                case "perception_tick":
+                    value = config.AI.PerceptionTickSeconds;
+                    return true;
+                case "decision_tick":
+                    value = config.AI.DecisionTickSeconds;
+                    return true;
+                case "squad_tick":
+                    value = config.AI.SquadTickSeconds;
+                    return true;
+                case "spawn_retry":
+                    value = config.SpawnFailureRetrySeconds;
+                    return true;
+                case "respawn_delay":
+                    value = config.RespawnDelaySeconds;
+                    return true;
+                case "nav_sample":
+                    value = config.Spawn.NavmeshSampleDistance;
+                    return true;
+                case "near_min":
+                    value = config.Spawn.NearPlayerMinDistance;
+                    return true;
+                case "near_max":
+                    value = config.Spawn.NearPlayerMaxDistance;
+                    return true;
+                case "group_radius":
+                    value = config.Spawn.GroupSpawnRadius;
+                    return true;
+                case "safe_buffer":
+                    value = config.Spawn.SafeZoneSpawnBufferDistance;
+                    return true;
+                case "vision_range":
+                    value = config.AI.VisionRange;
+                    return true;
+                case "vision_fov":
+                    value = config.AI.VisionFovDegrees;
+                    return true;
+                case "close_awareness":
+                    value = config.AI.CloseAwarenessRadius;
+                    return true;
+                case "exposed_min":
+                    value = config.AI.MinimumExposedTargetFraction;
+                    return true;
+                case "exposed_shoot":
+                    value = config.AI.MinimumExposedTargetFractionToShoot;
+                    return true;
+                case "target_memory":
+                    value = config.AI.TargetMemorySeconds;
+                    return true;
+                case "search_last_seen":
+                    value = config.AI.SearchLastSeenSeconds;
+                    return true;
+                case "hearing_gun":
+                    value = config.AI.UnsuppressedGunshotHearingRange;
+                    return true;
+                case "hearing_suppressed":
+                    value = config.AI.SuppressedGunshotHearingRange;
+                    return true;
+                case "hearing_explosion":
+                    value = config.AI.ExplosionHearingRange;
+                    return true;
+                case "hearing_melee":
+                    value = config.AI.MeleeOrToolHearingRange;
+                    return true;
+                case "hearing_sprint":
+                    value = config.AI.SprintHearingRange;
+                    return true;
+                case "foliage_radius":
+                    value = config.AI.FoliageVisionCheckRadius;
+                    return true;
+                case "foliage_clear":
+                    value = config.AI.MaximumClearVisionThroughFoliage;
+                    return true;
+                case "cover_radius":
+                    value = config.AI.CoverSearchRadius;
+                    return true;
+                case "cover_min_threat":
+                    value = config.AI.CoverMinimumDistanceFromThreat;
+                    return true;
+                case "flank_distance":
+                    value = config.AI.SquadFlankDistance;
+                    return true;
+                case "regroup_distance":
+                    value = config.AI.SquadRegroupDistance;
+                    return true;
+                case "grenade_cooldown":
+                    value = config.AI.GrenadeCooldownSeconds;
+                    return true;
+                case "team_grenade_cooldown":
+                    value = config.AI.TeamGrenadeCooldownSeconds;
+                    return true;
+                case "grenade_min":
+                    value = config.AI.GrenadeMinThrowDistance;
+                    return true;
+                case "grenade_max":
+                    value = config.AI.GrenadeMaxThrowDistance;
+                    return true;
+                case "smoke_min":
+                    value = config.AI.SmokeMinThrowDistance;
+                    return true;
+                case "smoke_max":
+                    value = config.AI.SmokeMaxThrowDistance;
+                    return true;
+                case "barricade_cooldown":
+                    value = config.AI.BarricadeCooldownSeconds;
+                    return true;
+                case "passive_heal":
+                    value = config.AI.PassiveCombatHealPerSecond;
+                    return true;
+                case "cover_heal":
+                    value = config.AI.LowHealthCoverHealPerSecond;
+                    return true;
+                case "base_radius":
+                    value = config.AI.BaseAvoidanceRadius;
+                    return true;
+                case "base_hold":
+                    value = config.AI.BaseHoldSeconds;
+                    return true;
+                case "advisor_confidence":
+                    value = config.DecisionAdvisor.MinimumConfidence;
+                    return true;
+                case "advisor_min_seconds":
+                    value = config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot;
+                    return true;
+                case "nameplate_refresh":
+                    value = config.Debug.DebugNameplateRefreshSeconds;
+                    return true;
+                case "nameplate_duration":
+                    value = config.Debug.DebugNameplateDrawDurationSeconds;
+                    return true;
+                case "nameplate_height":
+                    value = config.Debug.DebugNameplateHeight;
+                    return true;
+                case "nameplate_distance":
+                    value = config.Debug.DebugNameplateMaxDistance;
+                    return true;
+                default:
+                    value = 0f;
+                    return false;
+            }
+        }
+
+        private bool AdminFloatSettingNeedsRuntimeRestart(string key)
+        {
+            var normalized = NormalizeAdminKey(key);
+            return normalized == "maintain_interval" || normalized == "perception_tick" || normalized == "decision_tick" || normalized == "squad_tick";
+        }
+
+        private bool AdminFloatSettingNeedsNameplateRestart(string key)
+        {
+            var normalized = NormalizeAdminKey(key);
+            return normalized == "nameplate_refresh" || normalized == "nameplate_duration" || normalized == "nameplate_height" || normalized == "nameplate_distance";
+        }
+
+        private void SetAdminAdvisorMode(string mode, ConsoleSystem.Arg arg)
+        {
+            switch (NormalizeAdminKey(mode))
+            {
+                case "off":
+                    config.DecisionAdvisor.Enabled = false;
+                    config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                    config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                    config.DecisionAdvisor.ShadowMode = true;
+                    SaveAdminConfigChange(false, false, true, false);
+                    Reply(arg, "Raidlands roam bot advisor disabled. Deterministic fallback remains active.");
+                    return;
+                case "fallback":
+                case "fallback_only":
+                    config.DecisionAdvisor.Enabled = true;
+                    config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                    config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                    config.DecisionAdvisor.ShadowMode = true;
+                    SaveAdminConfigChange(false, false, true, false);
+                    Reply(arg, "Raidlands roam bot advisor set to fallback_only with provider none.");
+                    return;
+                case "shadow":
+                    config.DecisionAdvisor.Enabled = true;
+                    config.DecisionAdvisor.Mode = AdvisorModeShadow;
+                    config.DecisionAdvisor.ShadowMode = true;
+                    SaveAdminConfigChange(false, false, true, false);
+                    Reply(arg, $"Raidlands roam bot advisor set to shadow mode. Provider remains {config.DecisionAdvisor.Provider}.");
+                    return;
+                case "canary":
+                    config.DecisionAdvisor.Enabled = true;
+                    config.DecisionAdvisor.Mode = AdvisorModeCanary;
+                    config.DecisionAdvisor.ShadowMode = false;
+                    SaveAdminConfigChange(false, false, true, false);
+                    Reply(arg, "Raidlands roam bot advisor set to canary mode.");
+                    return;
+                default:
+                    Reply(arg, "Usage: advisor off|fallback|shadow|canary");
+                    return;
+            }
+        }
+
+        private bool CanAdmin(BasePlayer player)
+        {
             if (player == null)
             {
                 return true;
             }
 
             return player.IsAdmin || permission.UserHasPermission(player.UserIDString, AdminPermission);
+        }
+
+        private bool CanAdmin(ConsoleSystem.Arg arg)
+        {
+            var player = arg?.Connection?.player as BasePlayer;
+            return CanAdmin(player);
         }
 
         private bool ValidateTestAnchor(ConsoleSystem.Arg arg, string requestedAnchor)
@@ -10391,6 +13428,18 @@ namespace Oxide.Plugins
             return int.TryParse(arg.Args[index].ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
         }
 
+        private bool TryReadFloatArg(ConsoleSystem.Arg arg, int index, out float value)
+        {
+            value = 0f;
+
+            if (arg?.Args == null || arg.Args.Length <= index)
+            {
+                return false;
+            }
+
+            return float.TryParse(arg.Args[index].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
         private bool TryReadBoolArg(ConsoleSystem.Arg arg, int index, out bool value)
         {
             value = false;
@@ -10443,6 +13492,79 @@ namespace Oxide.Plugins
 
             mode = SpawnModeNearPlayers;
             return false;
+        }
+
+        private bool ConsoleLogDue(string key, float cooldownSeconds)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return true;
+            }
+
+            if (cooldownSeconds <= 0f)
+            {
+                return true;
+            }
+
+            var now = Time.realtimeSinceStartup;
+
+            if (consoleLogLastAt.TryGetValue(key, out var lastAt) && now - lastAt < cooldownSeconds)
+            {
+                return false;
+            }
+
+            consoleLogLastAt[key] = now;
+            return true;
+        }
+
+        private void DebugLog(string key, string message, float cooldownSeconds = -1f)
+        {
+            if (config?.Debug?.DebugConsoleLogs != true)
+            {
+                return;
+            }
+
+            var cooldown = cooldownSeconds >= 0f ? cooldownSeconds : Math.Max(1f, config.Debug.DebugConsoleLogCooldownSeconds);
+
+            if (ConsoleLogDue($"debug:{key}", cooldown))
+            {
+                Puts(message);
+            }
+        }
+
+        private void DebugWarning(string key, string message, float cooldownSeconds = -1f)
+        {
+            if (config?.Debug?.DebugConsoleLogs != true)
+            {
+                return;
+            }
+
+            var cooldown = cooldownSeconds >= 0f ? cooldownSeconds : Math.Max(1f, config.Debug.DebugConsoleLogCooldownSeconds);
+
+            if (ConsoleLogDue($"debug-warn:{key}", cooldown))
+            {
+                PrintWarning(message);
+            }
+        }
+
+        private void ThrottledInfo(string key, string message, float cooldownSeconds = -1f)
+        {
+            var cooldown = cooldownSeconds >= 0f ? cooldownSeconds : Math.Max(5f, config?.Debug?.ConsoleWarningCooldownSeconds ?? 30f);
+
+            if (ConsoleLogDue($"info:{key}", cooldown))
+            {
+                Puts(message);
+            }
+        }
+
+        private void ThrottledWarning(string key, string message, float cooldownSeconds = -1f)
+        {
+            var cooldown = cooldownSeconds >= 0f ? cooldownSeconds : Math.Max(5f, config?.Debug?.ConsoleWarningCooldownSeconds ?? 30f);
+
+            if (ConsoleLogDue($"warn:{key}", cooldown))
+            {
+                PrintWarning(message);
+            }
         }
 
         private int Clamp(int value, int min, int max)
