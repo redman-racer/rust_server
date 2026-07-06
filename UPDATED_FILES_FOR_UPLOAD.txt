@@ -1,7 +1,10 @@
-Raidlands RoamBots sharper skill aim tuning - 2026-07-06
+Raidlands RoamBots advisor restore + sharper skill aim tuning - 2026-07-06
 
 What changed:
-- RaidlandsRoamBots v0.3.40 keeps bot hit damage at normal Rust weapon damage and makes misses real by applying a much tighter skill-scaled projectile aim cone.
+- RaidlandsRoamBots v0.3.41 restores the checked-in Decision Advisor block to OpenAI-compatible shadow mode with endpoint/model/key placeholder intact.
+- `${OPENAI_ROAM_BOT_API_KEY}` now resolves from the Rust server process environment first; `oxide/config/Secrets.local.json` is optional and no longer required for the advisor placeholder path.
+- Removed local ignored `oxide/config/Secrets.local.json` from this workspace.
+- RaidlandsRoamBots keeps bot hit damage at normal Rust weapon damage and makes misses real by applying a much tighter skill-scaled projectile aim cone.
 - Skill `AimErrorDegrees` now actively affects fired bot projectiles instead of only existing in config.
 - Bots still start a new aim warmup whenever they switch to a target, but the opening slop is much smaller and settles faster.
 - Default v0.3.40 warmup tuning:
@@ -13,6 +16,7 @@ What changed:
 Rust server plugin/config files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
 - oxide/config/RaidlandsRoamBots.json
+- oxide/config/Secrets.example.json
 
 Docs/reference files to upload or keep with the repo handoff:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
@@ -30,4 +34,4 @@ Live smoke checks:
 Local verification:
 - `oxide/config/RaidlandsRoamBots.json` parsed successfully.
 - `git diff --check` passed for the edited handoff files, with only the repo's normal LF-to-CRLF working-copy warnings.
-- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.40 against `RustDedicated_Data/Managed`; remaining warnings are expected plugin-reference/future-field warnings.
+- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.41 against `RustDedicated_Data/Managed`; remaining warnings are expected plugin-reference/future-field warnings.

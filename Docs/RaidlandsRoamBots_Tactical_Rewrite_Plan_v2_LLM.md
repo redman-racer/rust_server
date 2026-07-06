@@ -502,15 +502,15 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
   },
 
   "Decision Advisor": {
-    "Enabled": false,
-    "Provider": "none",
-    "Mode": "fallback_only",
+    "Enabled": true,
+    "Provider": "openai_compatible",
+    "Mode": "shadow",
     "Shadow Mode": true,
     "Treat Unconfigured Advisor As Failure": true,
     "Fallback On Any Failure": true,
-    "Endpoint Url": "",
-    "Api Key": "",
-    "Model": "",
+    "Endpoint Url": "https://api.openai.com/v1/chat/completions",
+    "Api Key": "${OPENAI_ROAM_BOT_API_KEY}",
+    "Model": "gpt-4.1-mini",
     "Timeout Milliseconds": 750,
     "Decision Ttl Milliseconds": 3000,
     "Minimum Confidence": 0.55,
@@ -3001,9 +3001,10 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Added `IDecisionAdvisor`, `NullDecisionAdvisor`, `DecisionRequest`, `TacticalActionCandidate`, `DecisionAdvisorResult`, `TacticalDecision`, and JSONL decision-trace writing.
   - `Provider = none` produces `advisor_not_configured` and falls back to heuristic decisions.
   - v0.3.30 adds non-blocking `openai_compatible` and `website_proxy` HTTP advisor adapters. Responses are parsed, validated against legal candidates, traced, and rejected on invalid JSON, unknown action ids, low confidence, excessive TTL, late arrival, invalid targets, or base-blocked destinations.
-  - v0.3.30 now resolves advisor API keys through the existing `oxide/config/Secrets.local.json` pattern. The checked-in RoamBots config uses `${OPENAI_ROAM_BOT_API_KEY}` and `Secrets.local.json` remains ignored by Git.
+  - v0.3.30 added `${OPENAI_ROAM_BOT_API_KEY}` advisor key indirection for ignored local secret storage.
   - v0.3.30 still executes deterministic heuristic actions only. Shadow/canary modes are validation and trace surfaces in this adapter pass; remote advisor actions are not applied to live movement/combat yet.
   - v0.3.32 makes fallback-only deterministic behavior the checked-in release default again, so live rollout does not depend on an external advisor or make outbound advisor calls unless the owner opts in.
+  - v0.3.41 restores the checked-in live advisor block to `openai_compatible` shadow mode, resolves `${OPENAI_ROAM_BOT_API_KEY}` from the process environment first, and keeps `oxide/config/Secrets.local.json` optional instead of required.
 
 - Phase 6 partial:
   - Added candidate-player filtering, FOV checks, plugin-controlled line-of-sight checks, target memory, reaction delay, and LOS-required shooting.
@@ -3288,8 +3289,8 @@ v0.3.30+ optional advisor adapter smoke:
 ```text
 1. oxide.reload RaidlandsRoamBots
 2. raidbots.advisor status
-3. Expected release default: enabled=False, provider=none, mode=fallback_only, apiKey=not_used, pending=0/2.
-4. If explicitly testing advisor plumbing, configure provider/endpoint/model/API key in the live config and ignored `oxide/config/Secrets.local.json`, then run `raidbots.reload` or `oxide.reload RaidlandsRoamBots`.
+3. Expected live advisor profile: enabled=True, provider=openai_compatible, mode=shadow, endpoint=set, model=set, pending=0/2.
+4. Put the API key in the Rust server process environment as `OPENAI_ROAM_BOT_API_KEY`, then run `raidbots.reload` or `oxide.reload RaidlandsRoamBots`.
 5. Run `raidbots.advisor shadow`.
 6. Fight or path-test until a hard decision trigger fires, then run `raidbots.decisions last 5`.
 7. Expected with a configured advisor: responses may validate or reject, but the selected heuristic action still executes normally in this adapter pass.

@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.40")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.41")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -132,6 +132,7 @@ namespace Oxide.Plugins
         private readonly List<DecisionTrace> pendingDecisionTraces = new List<DecisionTrace>();
         private readonly Dictionary<string, PendingAdvisorDecision> pendingAdvisorDecisions = new Dictionary<string, PendingAdvisorDecision>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<ulong, RecentBotDeath> recentBotDeaths = new Dictionary<ulong, RecentBotDeath>();
+        private readonly HashSet<string> missingSecretWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private AdvisorStats advisorStats = new AdvisorStats();
         private Dictionary<string, string> secrets;
         private string secretsConfigSource;
@@ -2142,6 +2143,7 @@ namespace Oxide.Plugins
         {
             secrets = null;
             secretsConfigSource = "";
+            missingSecretWarnings.Clear();
         }
 
         private string ResolveSecretValue(string value)
@@ -2165,6 +2167,13 @@ namespace Oxide.Plugins
                 return "";
             }
 
+            var environmentSecret = Environment.GetEnvironmentVariable(key);
+
+            if (!string.IsNullOrWhiteSpace(environmentSecret))
+            {
+                return environmentSecret.Trim();
+            }
+
             string secret;
 
             if (LoadSecrets().TryGetValue(key, out secret))
@@ -2172,7 +2181,11 @@ namespace Oxide.Plugins
                 return (secret ?? "").Trim();
             }
 
-            PrintWarning($"Secret variable {key} is not configured in oxide/config/{SecretsConfigName}.json.");
+            if (missingSecretWarnings.Add(key))
+            {
+                PrintWarning($"Secret variable {key} is not configured as an environment variable or in optional oxide/config/{SecretsConfigName}.json.");
+            }
+
             return "";
         }
 
@@ -2186,9 +2199,19 @@ namespace Oxide.Plugins
             }
 
             var key = trimmed.Substring(2, trimmed.Length - 3).Trim();
-            var source = string.IsNullOrWhiteSpace(secretsConfigSource) ? $"oxide/config/{SecretsConfigName}.json" : secretsConfigSource;
 
-            return $"{key} in {source}";
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
+            {
+                return $"environment variable {key}";
+            }
+
+            if (LoadSecrets().ContainsKey(key))
+            {
+                var source = string.IsNullOrWhiteSpace(secretsConfigSource) ? $"oxide/config/{SecretsConfigName}.json" : secretsConfigSource;
+                return $"{key} in {source}";
+            }
+
+            return $"environment variable {key} or optional oxide/config/{SecretsConfigName}.json";
         }
 
         private bool HasResolvedAdvisorApiKey()
@@ -2209,7 +2232,6 @@ namespace Oxide.Plugins
 
             if (!File.Exists(path))
             {
-                PrintWarning($"Optional secrets file not found: oxide/config/{SecretsConfigName}.json.");
                 return secrets;
             }
 
