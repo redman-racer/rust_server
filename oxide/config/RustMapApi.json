@@ -8,308 +8,308 @@
     "Harbor": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/ND4c70v.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/harbor.png",
       "Show": true
     },
     "Giant Excavator Pit": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/hmUKFwS.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/giant-excavator-pit.png",
       "Show": true
     },
     "Junkyard": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/V8D4ZGc.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/junkyard.png",
       "Show": true
     },
     "Launch Site": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/gjdynsc.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/launch-site.png",
       "Show": true
     },
     "Water Treatment Plant": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/5L2Gdag.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/water-treatment-plant.png",
       "Show": true
     },
     "Military Tunnel": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/6RwXvC2.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/military-tunnel.png",
       "Show": true
     },
     "Airfield": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/KhQXhIs.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/airfield.png",
       "Show": true
     },
     "Power Plant": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/ZxqiBc6.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/power-plant.png",
       "Show": true
     },
     "Train Yard": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/wVifXqr.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/train-yard.png",
       "Show": true
     },
     "Outpost": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/hb7JZ9i.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/outpost.png",
       "Show": true
     },
     "Bandit Camp": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/cIR4YOt.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/bandit-camp.png",
       "Show": true
     },
     "Sewer Branch": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/PbKZQdZ.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/sewer-branch.png",
       "Show": true
     },
     "HQM Quarry": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/bGFogbM.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/quarry.png",
       "Show": true
     },
     "Satellite Dish": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/XwSpCJY.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/satellite-dish.png",
       "Show": true
     },
     "The Dome": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/mPRgBF2.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/the-dome.png",
       "Show": true
     },
     "Sulfur Quarry": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/bGFogbM.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/quarry.png",
       "Show": true
     },
     "Stone Quarry": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/bGFogbM.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/quarry.png",
       "Show": true
     },
     "Power Sub Station": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/LQUknms.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/power-sub-station.png",
       "Show": false
     },
     "Water Well": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/TASWRD0.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/water-well.png",
       "Show": true
     },
     "Abandoned Cabins": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/xigwDcW.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/abandoned-cabins.png",
       "Show": true
     },
     "Wild Swamp": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/2tcTYKA.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/wild-swamp.png",
       "Show": true
     },
     "Abandoned Supermarket": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/ZyP2W9F.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/abandoned-supermarket.png",
       "Show": true
     },
     "Mining Outpost": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/C0acqvj.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/mining-outpost.png",
       "Show": true
     },
     "Oxum's Gas Station": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/oW1bDdF.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/oxums-gas-station.png",
       "Show": true
     },
     "Cave": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/ByKJj9C.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/cave.png",
       "Show": true
     },
     "Lighthouse": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/r5vbzhm.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/lighthouse.png",
       "Show": true
     },
     "Large Oil Rig": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/AAhZO7k.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/oil-rig.png",
       "Show": true
     },
     "Oil Rig": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/AAhZO7k.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/oil-rig.png",
       "Show": true
     },
     "Fishing Village": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/7UCs5BO.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/fishing-village.png",
       "Show": true
     },
     "Large Fishing Village": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/7UCs5BO.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/fishing-village.png",
       "Show": true
     },
     "Ranch": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/VQjSjzA.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/ranch.png",
       "Show": true
     },
     "Large Barn": {
       "Width": 60,
       "Height": 60,
-      "ImageUrl": "https://i.imgur.com/VQjSjzA.png",
+      "ImageUrl": "https://raidlands.net/assets/media/map-icons/rustmapapi/ranch.png",
       "Show": true
     },
     "Canyon B": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "jungle swamp": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Lake A": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Oasis A": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Oasis B": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Ferry Terminal": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Abandoned Military Base": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Arctic Research Base": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Missile Silo": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Train Tunnel": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Train Tunnel Link": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Jungle Ziggurat": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Jungle Ruin": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Jungle ruin": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Ice Lake": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Radtown": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Substation": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Underground Cave": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Underwater Lab": {
       "Width": 90,
       "Height": 90,
       "ImageUrl": "",
-      "Show": true
+      "Show": false
     },
     "Canyon A": {
       "Width": 90,
@@ -332,8 +332,8 @@
   },
   "Custom Icons": [
     {
-      "XPos": 0.0,
-      "ZPos": 0.0,
+      "XPos": 0,
+      "ZPos": 0,
       "Width": 200,
       "Height": 200,
       "ImageUrl": "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",

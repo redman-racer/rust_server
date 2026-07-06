@@ -14,7 +14,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.41")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.50")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -23,6 +23,9 @@ namespace Oxide.Plugins
         private const string SpawnModeRandom = "random";
         private const string TacticalBrainName = "playerlike_tactical_brain";
         private const string DecisionTraceDataFile = "RaidlandsRoamBots/decision_traces.jsonl";
+        private const string ObservationTraceDataFile = "RaidlandsRoamBots/player_observation_traces.jsonl";
+        private const string BehaviorModelDataFile = "RaidlandsRoamBots/behavior_models";
+        private const string TrainingRunDataFile = "RaidlandsRoamBots/training_runs.jsonl";
         private const string StatsDataFile = "RaidlandsRoamBots/stats";
         private const string KitsDataFile = "Kits/kits_data";
         private const string SecretsConfigName = "Secrets.local";
@@ -36,6 +39,14 @@ namespace Oxide.Plugins
         private const string AdvisorModeFallbackOnly = "fallback_only";
         private const string AdvisorModeShadow = "shadow";
         private const string AdvisorModeCanary = "canary";
+        private const string LearningApplyOff = "off";
+        private const string LearningApplyShadow = "shadow";
+        private const string LearningApplyGlobal = "global";
+        private const string LearningApplyProfiles = "profiles";
+        private const string LearningSourceAdminTesters = "admin_testers";
+        private const string ObservationContextNone = "none";
+        private const string ObservationContextNearestBotSample = "nearest_bot_sample";
+        private const string ObservationContextCombatTarget = "combat_target";
         private const float RetreatFallbackReturnFireAfterSeconds = 2.5f;
         private const float RetreatFallbackTimeoutSeconds = 8f;
         private const float MinimumAmmoFractionToShoot = 0.01f;
@@ -53,6 +64,7 @@ namespace Oxide.Plugins
         private const float DebugSidePanelMenuSuppressSeconds = 20f;
         private const float DebugSidePanelMenuCloseSuppressSeconds = 2f;
         private const string AdminPanelUi = "RaidlandsRoamBots.AdminPanel";
+        private const string BotAvatarImagePrefix = "raidlands_roambot_avatar_";
         private const int AdminPanelMaximumPopulation = 500;
         private static readonly string[] DebugSidePanelMenuCommandPrefixes =
         {
@@ -101,6 +113,7 @@ namespace Oxide.Plugins
             "utility",
             "rewards",
             "advisor",
+            "learning",
             "debug",
             "danger"
         };
@@ -114,6 +127,9 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin ServerRewards;
 
+        [PluginReference]
+        private Plugin ImageLibrary;
+
         private Configuration config;
         private StoredData data;
         private readonly System.Random random = new System.Random();
@@ -125,15 +141,20 @@ namespace Oxide.Plugins
         private readonly List<BaseEntity> botPlacedEntities = new List<BaseEntity>();
         private readonly List<BotUtilityEntity> botUtilityEntities = new List<BotUtilityEntity>();
         private readonly List<UtilityDangerZone> utilityDangerZones = new List<UtilityDangerZone>();
+        private readonly HashSet<string> registeredAvatarImages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, KitEligibility> eligibleKits = new Dictionary<string, KitEligibility>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, SquadBlackboard> squadBlackboards = new Dictionary<int, SquadBlackboard>();
         private readonly Dictionary<string, float> recentSoundBroadcasts = new Dictionary<string, float>(StringComparer.Ordinal);
         private readonly Dictionary<string, float> consoleLogLastAt = new Dictionary<string, float>(StringComparer.Ordinal);
         private readonly List<DecisionTrace> pendingDecisionTraces = new List<DecisionTrace>();
+        private readonly List<PlayerObservationTrace> pendingObservationTraces = new List<PlayerObservationTrace>();
+        private readonly Dictionary<ulong, PlayerObservationEpisode> observationEpisodes = new Dictionary<ulong, PlayerObservationEpisode>();
         private readonly Dictionary<string, PendingAdvisorDecision> pendingAdvisorDecisions = new Dictionary<string, PendingAdvisorDecision>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<ulong, PendingBotPlayerDeath> pendingBotPlayerDeaths = new Dictionary<ulong, PendingBotPlayerDeath>();
         private readonly Dictionary<ulong, RecentBotDeath> recentBotDeaths = new Dictionary<ulong, RecentBotDeath>();
         private readonly HashSet<string> missingSecretWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private AdvisorStats advisorStats = new AdvisorStats();
+        private BehaviorModelData behaviorModels = new BehaviorModelData();
         private Dictionary<string, string> secrets;
         private string secretsConfigSource;
         private IDecisionAdvisor decisionAdvisor;
@@ -145,9 +166,12 @@ namespace Oxide.Plugins
         private Timer nameplateTimer;
         private Timer scoreboardTimer;
         private Timer decisionTraceSaveTimer;
+        private Timer observationTraceSaveTimer;
+        private Timer learningTimer;
         private Timer saveTimer;
         private int teamSequence;
         private float spawnRetryBlockedUntil;
+        private float lastDecisionTracePruneCheckAt;
 
         private class Configuration
         {
@@ -216,6 +240,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Decision Advisor")]
             public DecisionAdvisorConfig DecisionAdvisor = new DecisionAdvisorConfig();
+
+            [JsonProperty("Player Observation Learning")]
+            public PlayerObservationLearningConfig Learning = new PlayerObservationLearningConfig();
 
             [JsonProperty("Bot Kill Integration")]
             public BotKillIntegrationConfig BotKillIntegration = new BotKillIntegrationConfig();
@@ -542,6 +569,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Hard Stuck Failed Paths To Despawn")]
             public int HardStuckFailedPathsToDespawn = 30;
+
+            [JsonProperty("Hard Stuck Despawn Seconds")]
+            public float HardStuckDespawnSeconds = 180f;
 
             [JsonProperty("Stuck Memory Seconds")]
             public float StuckMemorySeconds = 75f;
@@ -878,6 +908,15 @@ namespace Oxide.Plugins
             [JsonProperty("Min Seconds Between Requests Per Bot")]
             public float MinSecondsBetweenRequestsPerBot = 8f;
 
+            [JsonProperty("Require Real Player Within Meters")]
+            public float RequireRealPlayerWithinMeters = 350f;
+
+            [JsonProperty("Require Active Player Engagement")]
+            public bool RequireActivePlayerEngagement = true;
+
+            [JsonProperty("Player Engagement Memory Seconds")]
+            public float PlayerEngagementMemorySeconds = 45f;
+
             [JsonProperty("Ask When Bot Is Stuck")]
             public bool AskWhenBotIsStuck = true;
 
@@ -896,6 +935,15 @@ namespace Oxide.Plugins
             [JsonProperty("Log Decision Traces")]
             public bool LogDecisionTraces = true;
 
+            [JsonProperty("Max Decision Trace File Megabytes")]
+            public int MaxDecisionTraceFileMegabytes = 128;
+
+            [JsonProperty("Max Decision Trace Lines After Prune")]
+            public int MaxDecisionTraceLinesAfterPrune = 50000;
+
+            [JsonProperty("Decision Trace Prune Check Interval Seconds")]
+            public float DecisionTracePruneCheckIntervalSeconds = 300f;
+
             [JsonProperty("Max Recent Events In Request")]
             public int MaxRecentEventsInRequest = 24;
 
@@ -910,6 +958,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Suppress DeathNotes For Roam Bot Kills")]
             public bool SuppressDeathNotesForRoamBotKills = true;
+
+            [JsonProperty("Use Bot Avatar As Chat Sender")]
+            public bool UseBotAvatarAsChatSender = true;
 
             [JsonProperty("Chat Format")]
             public string ChatFormat = "<color=#838383>[<color=#80D000>DeathNotes</color>] {message}</color>";
@@ -928,6 +979,85 @@ namespace Oxide.Plugins
 
             [JsonProperty("RP Reward Message")]
             public string RpRewardMessage = "<color=#ce422b>[Raidlands]</color> You earned <color=#B6F34A>{rp} RP</color> for killing <color=#C4FF00>{victim}</color>.";
+
+            [JsonProperty("Bot Avatars")]
+            public List<BotAvatarConfig> BotAvatars = DefaultBotAvatars();
+        }
+
+        private class BotAvatarConfig
+        {
+            public string Key = "";
+
+            [JsonProperty("Display Name")]
+            public string DisplayName = "";
+
+            [JsonProperty("Image Url")]
+            public string ImageUrl = "";
+
+            [JsonProperty("Image File")]
+            public string ImageFile = "";
+
+            [JsonProperty("Chat User Id")]
+            public string ChatUserId = "";
+        }
+
+        private static List<BotAvatarConfig> DefaultBotAvatars()
+        {
+            return new List<BotAvatarConfig>
+            {
+                new BotAvatarConfig { Key = "raider-red", DisplayName = "Raider Red", ImageFile = "oxide/data/RaidlandsRoamBots/avatars/raider-red.png", ChatUserId = "76561199000010461" },
+                new BotAvatarConfig { Key = "scrap-jacket", DisplayName = "Scrap Jacket", ImageFile = "oxide/data/RaidlandsRoamBots/avatars/scrap-jacket.png", ChatUserId = "76561199000010462" },
+                new BotAvatarConfig { Key = "hazmat-echo", DisplayName = "Hazmat Echo", ImageFile = "oxide/data/RaidlandsRoamBots/avatars/hazmat-echo.png", ChatUserId = "76561199000010463" },
+                new BotAvatarConfig { Key = "roadside-ghost", DisplayName = "Roadside Ghost", ImageFile = "oxide/data/RaidlandsRoamBots/avatars/roadside-ghost.png", ChatUserId = "76561199000010464" },
+                new BotAvatarConfig { Key = "launch-watcher", DisplayName = "Launch Watcher", ImageFile = "oxide/data/RaidlandsRoamBots/avatars/launch-watcher.png", ChatUserId = "76561199000010465" }
+            };
+        }
+
+        private class PlayerObservationLearningConfig
+        {
+            public bool Enabled = false;
+
+            [JsonProperty("Apply Mode")]
+            public string ApplyMode = LearningApplyOff;
+
+            [JsonProperty("Source")]
+            public string Source = LearningSourceAdminTesters;
+
+            [JsonProperty("Observed Player SteamIds")]
+            public List<string> ObservedPlayerSteamIds = new List<string>();
+
+            [JsonProperty("Player Profile Spawn Weights")]
+            public Dictionary<string, int> PlayerProfileSpawnWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            [JsonProperty("Log Observation Traces")]
+            public bool LogObservationTraces = true;
+
+            [JsonProperty("Sample Interval Seconds")]
+            public float SampleIntervalSeconds = 1f;
+
+            [JsonProperty("Outcome Window Seconds")]
+            public float OutcomeWindowSeconds = 10f;
+
+            [JsonProperty("Minimum Global Observations")]
+            public int MinimumGlobalObservations = 12;
+
+            [JsonProperty("Minimum Profile Observations")]
+            public int MinimumProfileObservations = 8;
+
+            [JsonProperty("Maximum Global Score Delta")]
+            public float MaximumGlobalScoreDelta = 24f;
+
+            [JsonProperty("Maximum Profile Score Delta")]
+            public float MaximumProfileScoreDelta = 36f;
+
+            [JsonProperty("Shadow Calculates Score Deltas")]
+            public bool ShadowCalculatesScoreDeltas = true;
+
+            [JsonProperty("Low Confidence Observation Weight")]
+            public float LowConfidenceObservationWeight = 0.35f;
+
+            [JsonProperty("High Confidence Target Context Threshold")]
+            public float HighConfidenceTargetContextThreshold = 0.75f;
         }
 
         private class PersistenceConfig
@@ -1006,6 +1136,128 @@ namespace Oxide.Plugins
             public Dictionary<string, BotClanStats> bot_clans = new Dictionary<string, BotClanStats>(StringComparer.OrdinalIgnoreCase);
         }
 
+        private class BehaviorModelData
+        {
+            public int schema_version = 1;
+            public string last_global_build_utc = "";
+            public Dictionary<string, LearnedBehaviorModel> skill_models = new Dictionary<string, LearnedBehaviorModel>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, LearnedBehaviorModel> player_profiles = new Dictionary<string, LearnedBehaviorModel>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class LearnedBehaviorModel
+        {
+            public string key = "";
+            public string model_type = "";
+            public string display_name = "";
+            public string source_steam_id64 = "";
+            public string built_at_utc = "";
+            public int observations;
+            public int positive_observations;
+            public float success_rate;
+            public int target_linked_observations;
+            public int high_confidence_observations;
+            public float average_target_context_confidence;
+            public float weighted_success_rate;
+            public SkillDefinition skill = new SkillDefinition();
+            public Dictionary<string, float> action_score_deltas = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, float> weapon_class_biases = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            public string summary = "";
+        }
+
+        private class PlayerObservationTrace
+        {
+            public string trace_id = "";
+            public string source_steam_id64 = "";
+            public string source_display_name = "";
+            public float started_at;
+            public float ended_at;
+            public float duration_seconds;
+            public string observed_action = "";
+            public string weapon_shortname = "";
+            public string weapon_class = "";
+            public float health_fraction;
+            public float distance_to_target;
+            public bool had_line_of_sight;
+            public float target_exposure_fraction;
+            public string target_context_source = "";
+            public float target_context_confidence;
+            public string target_bot_key = "";
+            public string target_bot_name = "";
+            public ulong target_net_id;
+            public int target_context_events;
+            public float sampled_distance_to_nearest_bot = -1f;
+            public bool sampled_had_line_of_sight;
+            public float sampled_target_exposure_fraction;
+            public int sampled_nearby_enemies;
+            public float combat_distance_to_target = -1f;
+            public bool combat_had_line_of_sight;
+            public float combat_target_exposure_fraction;
+            public int combat_target_visible_probe_points;
+            public int combat_target_total_probe_points;
+            public int nearby_allies;
+            public int nearby_enemies;
+            public int shots_fired;
+            public int damage_events_dealt;
+            public int damage_events_taken;
+            public float damage_dealt;
+            public float damage_taken;
+            public int explosives_thrown;
+            public int melee_swings;
+            public int kills;
+            public bool died;
+            public float response_seconds;
+            public float outcome_score;
+            public Vector3 start_position;
+            public Vector3 end_position;
+        }
+
+        private class PlayerObservationEpisode
+        {
+            public ulong UserId;
+            public string UserIdString = "";
+            public string DisplayName = "";
+            public float StartedAt;
+            public float LastSampleAt;
+            public Vector3 StartPosition;
+            public Vector3 LastPosition;
+            public string ObservedAction = "";
+            public string WeaponShortname = "";
+            public string WeaponClass = "";
+            public float HealthFraction;
+            public float DistanceToTarget = -1f;
+            public bool HadLineOfSight;
+            public float TargetExposureFraction;
+            public string TargetContextSource = ObservationContextNone;
+            public float TargetContextConfidence;
+            public string TargetBotKey = "";
+            public string TargetBotName = "";
+            public ulong TargetNetId;
+            public int TargetContextEvents;
+            public float TargetContextAt;
+            public float SampledDistanceToNearestBot = -1f;
+            public bool SampledHadLineOfSight;
+            public float SampledTargetExposureFraction;
+            public int SampledNearbyEnemies;
+            public float CombatDistanceToTarget = -1f;
+            public bool CombatHadLineOfSight;
+            public float CombatTargetExposureFraction;
+            public int CombatTargetVisibleProbePoints;
+            public int CombatTargetTotalProbePoints;
+            public int NearbyAllies;
+            public int NearbyEnemies;
+            public int ShotsFired;
+            public int DamageEventsDealt;
+            public int DamageEventsTaken;
+            public float DamageDealt;
+            public float DamageTaken;
+            public int ExplosivesThrown;
+            public int MeleeSwings;
+            public int Kills;
+            public bool Died;
+            public float FirstContactAt;
+            public float FirstShotAt;
+        }
+
         private class PlayerNpcStats
         {
             public string steam_id64 = "";
@@ -1020,6 +1272,8 @@ namespace Oxide.Plugins
             public string display_name = "";
             public string kit_name = "";
             public string skill_tier = "";
+            public string behavior_model_key = "";
+            public string player_profile_key = "";
             public string clan_key = "";
             public string clan_tag = "";
             public string clan_name = "";
@@ -1047,6 +1301,17 @@ namespace Oxide.Plugins
             public string KitName;
             public string SkillTier;
             public SkillDefinition Skill;
+            public SkillDefinition BaseSkill;
+            public string BehaviorModelKey = "";
+            public string PlayerProfileKey = "";
+            public string ProfileSourceName = "";
+            public string ProfileSourceSteamId = "";
+            public string AvatarKey = "";
+            public string AvatarDisplayName = "";
+            public string AvatarImageName = "";
+            public string AvatarChatUserId = "";
+            public float LastLearnedScoreDelta;
+            public string LastLearnedReason = "none";
             public int TeamId;
             public string SquadRole = "solo";
             public string ClanKey = "";
@@ -1436,6 +1701,14 @@ namespace Oxide.Plugins
             public float ExpiresAt;
         }
 
+        private class PendingBotPlayerDeath
+        {
+            public BaseCombatEntity KillerEntity;
+            public BotRuntime KillerRuntime;
+            public HitInfo HitInfo;
+            public float ExpiresAt;
+        }
+
         private class AdvisorStats
         {
             public int TotalRequests;
@@ -1449,6 +1722,8 @@ namespace Oxide.Plugins
             public int LowConfidenceResponses;
             public int LateResponses;
             public int TimeoutResponses;
+            public int ProximitySkips;
+            public int EngagementSkips;
             public string LastStatus = "none";
             public string LastBotKey = "";
             public string LastActionId = "";
@@ -1475,6 +1750,10 @@ namespace Oxide.Plugins
             public float TargetExposureFraction;
             public float TargetConfidence;
             public float DistanceToTarget;
+            public float NearestRealPlayerDistance;
+            public float AdvisorRealPlayerGateMeters;
+            public bool EngagedWithRealPlayer;
+            public string EngagementSignal = "";
             public float SecondsSinceLastSeen;
             public float SecondsSinceLastHeard;
             public int NearbyAllies;
@@ -1503,7 +1782,11 @@ namespace Oxide.Plugins
             public string Id;
             [JsonIgnore]
             public TacticalActionId ActionId;
+            public float BaseHeuristicScore;
             public float HeuristicScore;
+            public float LearnedScoreDelta;
+            public string LearnedModelKey = "";
+            public string LearnedReason = "";
             public string Risk;
             public string ReasonFromCode;
             public Vector3 Destination;
@@ -1538,6 +1821,10 @@ namespace Oxide.Plugins
             public string fallback_reason;
             public string final_action;
             public float final_score;
+            public string behavior_model_key;
+            public string player_profile_key;
+            public float learned_score_delta;
+            public string learned_reason;
             public string protection_state;
             public string barricade_anchor_state;
             public string medical_state;
@@ -1585,12 +1872,16 @@ namespace Oxide.Plugins
         {
             permission.RegisterPermission(AdminPermission, this);
             LoadData();
+            LoadBehaviorModels();
         }
 
         private void OnServerInitialized()
         {
             RefreshEligibleKits();
             RefreshDecisionAdvisor();
+            RefreshLearningTimer();
+            RegisterBotAvatarImages();
+            MaybePruneDecisionTraceFile(DecisionTraceDataPath(), true);
             CreateScoreboards();
             UpdateScoreboards();
 
@@ -1610,12 +1901,17 @@ namespace Oxide.Plugins
             DestroyAdminPanels();
             debugSidePanelSuppressedUntil.Clear();
             pendingAdvisorDecisions.Clear();
+            observationEpisodes.Clear();
+            learningTimer?.Destroy();
+            learningTimer = null;
             if (config?.Persistence?.KillBotsOnPluginUnload == true)
             {
                 KillAllBots(!config.Persistence.LeaveCorpses);
             }
             SaveData();
+            SaveBehaviorModels();
             FlushDecisionTraces();
+            FlushObservationTraces();
         }
 
         private void OnPluginLoaded(Plugin plugin)
@@ -1638,6 +1934,92 @@ namespace Oxide.Plugins
             {
                 serverRewardsUnavailableWarned = false;
             }
+
+            if (plugin?.Name == "ImageLibrary")
+            {
+                registeredAvatarImages.Clear();
+                timer.Once(2f, RegisterBotAvatarImages);
+            }
+        }
+
+        private void RegisterBotAvatarImages()
+        {
+            if (ImageLibrary == null || config?.BotKillIntegration?.BotAvatars == null)
+            {
+                return;
+            }
+
+            foreach (var avatar in config.BotKillIntegration.BotAvatars)
+            {
+                if (avatar == null || string.IsNullOrWhiteSpace(avatar.Key))
+                {
+                    continue;
+                }
+
+                var imageName = BotAvatarImageName(avatar.Key);
+
+                if (registeredAvatarImages.Contains(imageName))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(avatar.ImageUrl))
+                    {
+                        ImageLibrary.Call("AddImage", avatar.ImageUrl, imageName, 0UL);
+                        registeredAvatarImages.Add(imageName);
+                        continue;
+                    }
+
+                    var imagePath = ResolveBotAvatarImagePath(avatar.ImageFile);
+
+                    if (!string.IsNullOrWhiteSpace(imagePath) && File.Exists(imagePath))
+                    {
+                        ImageLibrary.Call("AddImageData", imageName, File.ReadAllBytes(imagePath), 0UL);
+                        registeredAvatarImages.Add(imageName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ThrottledWarning($"avatar-register:{imageName}", $"Could not register roam bot avatar '{avatar.Key}' with ImageLibrary: {ex.Message}");
+                }
+            }
+        }
+
+        private string ResolveBotAvatarImagePath(string configuredPath)
+        {
+            var normalized = NormalizeRelativePath(configuredPath);
+
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "";
+            }
+
+            if (Path.IsPathRooted(normalized))
+            {
+                return normalized;
+            }
+
+            const string oxideDataPrefix = "oxide/data/";
+            const string dataPrefix = "data/";
+
+            if (normalized.StartsWith(oxideDataPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.Combine(Interface.Oxide.DataDirectory, normalized.Substring(oxideDataPrefix.Length).Replace('/', Path.DirectorySeparatorChar));
+            }
+
+            if (normalized.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.Combine(Interface.Oxide.DataDirectory, normalized.Substring(dataPrefix.Length).Replace('/', Path.DirectorySeparatorChar));
+            }
+
+            return Path.Combine(Interface.Oxide.DataDirectory, normalized.Replace('/', Path.DirectorySeparatorChar));
+        }
+
+        private string BotAvatarImageName(string key)
+        {
+            return $"{BotAvatarImagePrefix}{NormalizeAdminKey(key)}";
         }
 
         private void StartRuntime()
@@ -1671,6 +2053,8 @@ namespace Oxide.Plugins
             scoreboardTimer = null;
             decisionTraceSaveTimer?.Destroy();
             decisionTraceSaveTimer = null;
+            observationTraceSaveTimer?.Destroy();
+            observationTraceSaveTimer = null;
         }
 
         private void NormalizeConfig()
@@ -2053,6 +2437,7 @@ namespace Oxide.Plugins
             config.AI.StuckRecoveryCooldownSeconds = Math.Max(0.5f, config.AI.StuckRecoveryCooldownSeconds);
             config.AI.StuckRecoverySearchRadius = Math.Max(6f, config.AI.StuckRecoverySearchRadius);
             config.AI.HardStuckFailedPathsToDespawn = Clamp(config.AI.HardStuckFailedPathsToDespawn, 0, 200);
+            config.AI.HardStuckDespawnSeconds = Mathf.Clamp(config.AI.HardStuckDespawnSeconds, 0f, 900f);
             config.AI.StuckMemorySeconds = Mathf.Clamp(config.AI.StuckMemorySeconds <= 0f ? defaults.AI.StuckMemorySeconds : config.AI.StuckMemorySeconds, 5f, 300f);
             config.AI.StuckMemoryRadius = Mathf.Clamp(config.AI.StuckMemoryRadius <= 0f ? defaults.AI.StuckMemoryRadius : config.AI.StuckMemoryRadius, 3f, 30f);
             config.AI.MaxStuckMemoryPoints = Clamp(config.AI.MaxStuckMemoryPoints <= 0 ? defaults.AI.MaxStuckMemoryPoints : config.AI.MaxStuckMemoryPoints, 1, 50);
@@ -2075,8 +2460,38 @@ namespace Oxide.Plugins
             config.DecisionAdvisor.MinimumConfidence = Mathf.Clamp01(config.DecisionAdvisor.MinimumConfidence);
             config.DecisionAdvisor.MaxConcurrentRequests = Math.Max(0, config.DecisionAdvisor.MaxConcurrentRequests);
             config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot = Math.Max(0f, config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot);
+            config.DecisionAdvisor.RequireRealPlayerWithinMeters = Mathf.Clamp(config.DecisionAdvisor.RequireRealPlayerWithinMeters, 0f, 5000f);
+            config.DecisionAdvisor.PlayerEngagementMemorySeconds = Mathf.Clamp(config.DecisionAdvisor.PlayerEngagementMemorySeconds <= 0f ? defaults.DecisionAdvisor.PlayerEngagementMemorySeconds : config.DecisionAdvisor.PlayerEngagementMemorySeconds, 1f, 300f);
             config.DecisionAdvisor.MaxRecentEventsInRequest = Math.Max(0, config.DecisionAdvisor.MaxRecentEventsInRequest);
             config.DecisionAdvisor.MaxCandidateActions = Clamp(config.DecisionAdvisor.MaxCandidateActions, 1, 16);
+            config.DecisionAdvisor.MaxDecisionTraceFileMegabytes = Clamp(config.DecisionAdvisor.MaxDecisionTraceFileMegabytes, 0, 4096);
+            config.DecisionAdvisor.MaxDecisionTraceLinesAfterPrune = Clamp(config.DecisionAdvisor.MaxDecisionTraceLinesAfterPrune, 0, 1000000);
+            config.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds = Mathf.Clamp(config.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds <= 0f ? defaults.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds : config.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds, 15f, 3600f);
+
+            if (config.Learning == null)
+            {
+                config.Learning = defaults.Learning;
+            }
+
+            config.Learning.ApplyMode = NormalizeLearningApplyMode(config.Learning.ApplyMode);
+            config.Learning.Source = string.IsNullOrWhiteSpace(config.Learning.Source) ? LearningSourceAdminTesters : config.Learning.Source.Trim().ToLowerInvariant();
+            config.Learning.SampleIntervalSeconds = Mathf.Clamp(config.Learning.SampleIntervalSeconds <= 0f ? defaults.Learning.SampleIntervalSeconds : config.Learning.SampleIntervalSeconds, 0.25f, 10f);
+            config.Learning.OutcomeWindowSeconds = Mathf.Clamp(config.Learning.OutcomeWindowSeconds <= 0f ? defaults.Learning.OutcomeWindowSeconds : config.Learning.OutcomeWindowSeconds, 3f, 60f);
+            config.Learning.MinimumGlobalObservations = Math.Max(1, config.Learning.MinimumGlobalObservations);
+            config.Learning.MinimumProfileObservations = Math.Max(1, config.Learning.MinimumProfileObservations);
+            config.Learning.MaximumGlobalScoreDelta = Mathf.Clamp(config.Learning.MaximumGlobalScoreDelta <= 0f ? defaults.Learning.MaximumGlobalScoreDelta : config.Learning.MaximumGlobalScoreDelta, 0f, 80f);
+            config.Learning.MaximumProfileScoreDelta = Mathf.Clamp(config.Learning.MaximumProfileScoreDelta <= 0f ? defaults.Learning.MaximumProfileScoreDelta : config.Learning.MaximumProfileScoreDelta, 0f, 100f);
+            config.Learning.LowConfidenceObservationWeight = Mathf.Clamp(config.Learning.LowConfidenceObservationWeight <= 0f ? defaults.Learning.LowConfidenceObservationWeight : config.Learning.LowConfidenceObservationWeight, 0.05f, 1f);
+            config.Learning.HighConfidenceTargetContextThreshold = Mathf.Clamp(config.Learning.HighConfidenceTargetContextThreshold <= 0f ? defaults.Learning.HighConfidenceTargetContextThreshold : config.Learning.HighConfidenceTargetContextThreshold, 0.1f, 1f);
+            config.Learning.ObservedPlayerSteamIds = (config.Learning.ObservedPlayerSteamIds ?? new List<string>())
+                .Where(IsSteamId64)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            config.Learning.PlayerProfileSpawnWeights = (config.Learning.PlayerProfileSpawnWeights ?? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase))
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && entry.Value > 0)
+                .GroupBy(entry => NormalizeProfileKey(entry.Key), StringComparer.OrdinalIgnoreCase)
+                .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+                .ToDictionary(group => group.Key, group => Clamp(group.Sum(entry => entry.Value), 0, 1000), StringComparer.OrdinalIgnoreCase);
 
             if (config.BotKillIntegration == null)
             {
@@ -2087,6 +2502,7 @@ namespace Oxide.Plugins
             config.BotKillIntegration.KillMessage = string.IsNullOrWhiteSpace(config.BotKillIntegration.KillMessage) ? defaults.BotKillIntegration.KillMessage : config.BotKillIntegration.KillMessage.Trim();
             config.BotKillIntegration.ServerRewardsRpPerBotKill = Clamp(config.BotKillIntegration.ServerRewardsRpPerBotKill, 0, 100000);
             config.BotKillIntegration.RpRewardMessage = string.IsNullOrWhiteSpace(config.BotKillIntegration.RpRewardMessage) ? defaults.BotKillIntegration.RpRewardMessage : config.BotKillIntegration.RpRewardMessage.Trim();
+            config.BotKillIntegration.BotAvatars = NormalizeBotAvatars(config.BotKillIntegration.BotAvatars, defaults.BotKillIntegration.BotAvatars);
 
             if (config.Persistence == null)
             {
@@ -2129,6 +2545,61 @@ namespace Oxide.Plugins
             }
 
             return AdvisorModeFallbackOnly;
+        }
+
+        private List<BotAvatarConfig> NormalizeBotAvatars(List<BotAvatarConfig> source, List<BotAvatarConfig> fallback)
+        {
+            var normalized = (source ?? new List<BotAvatarConfig>())
+                .Where(avatar => avatar != null)
+                .Select(avatar => new BotAvatarConfig
+                {
+                    Key = NormalizeAdminKey(avatar.Key),
+                    DisplayName = CleanName(avatar.DisplayName),
+                    ImageUrl = (avatar.ImageUrl ?? "").Trim(),
+                    ImageFile = NormalizeRelativePath(avatar.ImageFile),
+                    ChatUserId = IsSteamId64(avatar.ChatUserId) ? avatar.ChatUserId.Trim() : ""
+                })
+                .Where(avatar => !string.IsNullOrWhiteSpace(avatar.Key))
+                .GroupBy(avatar => avatar.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
+
+            if (normalized.Count == 0)
+            {
+                normalized = (fallback ?? DefaultBotAvatars())
+                    .Select(avatar => new BotAvatarConfig
+                    {
+                        Key = NormalizeAdminKey(avatar.Key),
+                        DisplayName = CleanName(avatar.DisplayName),
+                        ImageUrl = (avatar.ImageUrl ?? "").Trim(),
+                        ImageFile = NormalizeRelativePath(avatar.ImageFile),
+                        ChatUserId = IsSteamId64(avatar.ChatUserId) ? avatar.ChatUserId.Trim() : ""
+                    })
+                    .Where(avatar => !string.IsNullOrWhiteSpace(avatar.Key))
+                    .ToList();
+            }
+
+            foreach (var avatar in normalized)
+            {
+                if (string.IsNullOrWhiteSpace(avatar.DisplayName))
+                {
+                    avatar.DisplayName = avatar.Key;
+                }
+            }
+
+            return normalized;
+        }
+
+        private string NormalizeRelativePath(string path)
+        {
+            var normalized = (path ?? "").Trim().Replace('\\', '/');
+
+            while (normalized.StartsWith("./", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(2);
+            }
+
+            return normalized;
         }
 
         private void RefreshDecisionAdvisor()
@@ -2286,6 +2757,1419 @@ namespace Oxide.Plugins
             saveTimer?.Destroy();
             saveTimer = null;
             Interface.Oxide.DataFileSystem.WriteObject(StatsDataFile, data);
+        }
+
+        private void LoadBehaviorModels()
+        {
+            try
+            {
+                behaviorModels = Interface.Oxide.DataFileSystem.ReadObject<BehaviorModelData>(BehaviorModelDataFile) ?? new BehaviorModelData();
+            }
+            catch
+            {
+                behaviorModels = new BehaviorModelData();
+            }
+
+            NormalizeBehaviorModels();
+        }
+
+        private void SaveBehaviorModels()
+        {
+            NormalizeBehaviorModels();
+            Interface.Oxide.DataFileSystem.WriteObject(BehaviorModelDataFile, behaviorModels);
+        }
+
+        private void NormalizeBehaviorModels()
+        {
+            if (behaviorModels == null)
+            {
+                behaviorModels = new BehaviorModelData();
+            }
+
+            behaviorModels.schema_version = Math.Max(1, behaviorModels.schema_version);
+
+            if (behaviorModels.skill_models == null)
+            {
+                behaviorModels.skill_models = new Dictionary<string, LearnedBehaviorModel>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            if (behaviorModels.player_profiles == null)
+            {
+                behaviorModels.player_profiles = new Dictionary<string, LearnedBehaviorModel>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            behaviorModels.skill_models = behaviorModels.skill_models
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && entry.Value != null)
+                .GroupBy(entry => NormalizeAdminKey(entry.Key), StringComparer.OrdinalIgnoreCase)
+                .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+                .ToDictionary(group => group.Key, group => NormalizeLearnedModel(group.Last().Value, group.Key, "skill"), StringComparer.OrdinalIgnoreCase);
+            behaviorModels.player_profiles = behaviorModels.player_profiles
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && entry.Value != null)
+                .GroupBy(entry => NormalizeProfileKey(entry.Key), StringComparer.OrdinalIgnoreCase)
+                .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+                .ToDictionary(group => group.Key, group => NormalizeLearnedModel(group.Last().Value, group.Key, "profile"), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private LearnedBehaviorModel NormalizeLearnedModel(LearnedBehaviorModel model, string fallbackKey, string fallbackType)
+        {
+            model = model ?? new LearnedBehaviorModel();
+            model.key = string.Equals(fallbackType, "profile", StringComparison.OrdinalIgnoreCase)
+                ? NormalizeProfileKey(string.IsNullOrWhiteSpace(model.key) ? fallbackKey : model.key)
+                : NormalizeAdminKey(string.IsNullOrWhiteSpace(model.key) ? fallbackKey : model.key);
+            model.model_type = string.IsNullOrWhiteSpace(model.model_type) ? fallbackType : NormalizeAdminKey(model.model_type);
+            model.display_name = CleanName(string.IsNullOrWhiteSpace(model.display_name) ? model.key : model.display_name);
+            model.source_steam_id64 = IsSteamId64(model.source_steam_id64) ? model.source_steam_id64 : "";
+            model.built_at_utc = model.built_at_utc ?? "";
+            model.observations = Math.Max(0, model.observations);
+            model.positive_observations = Clamp(model.positive_observations, 0, model.observations);
+            model.success_rate = model.observations <= 0 ? 0f : Mathf.Clamp01(model.success_rate);
+            model.target_linked_observations = Clamp(model.target_linked_observations, 0, model.observations);
+            model.high_confidence_observations = Clamp(model.high_confidence_observations, 0, model.observations);
+            model.average_target_context_confidence = Mathf.Clamp01(model.average_target_context_confidence);
+            model.weighted_success_rate = model.observations <= 0 ? 0f : Mathf.Clamp01(model.weighted_success_rate);
+            model.skill = NormalizeSkillDefinition(model.key, CloneSkillDefinition(model.skill), SkillFor(model.key));
+            model.action_score_deltas = NormalizeModelFloatMap(model.action_score_deltas, string.Equals(model.model_type, "profile", StringComparison.OrdinalIgnoreCase) ? config.Learning.MaximumProfileScoreDelta : config.Learning.MaximumGlobalScoreDelta);
+            model.weapon_class_biases = NormalizeModelFloatMap(model.weapon_class_biases, Math.Max(2f, config.Learning.MaximumProfileScoreDelta * 0.35f));
+            model.summary = model.summary ?? "";
+            return model;
+        }
+
+        private Dictionary<string, float> NormalizeModelFloatMap(Dictionary<string, float> source, float maxAbs)
+        {
+            maxAbs = Math.Max(0f, maxAbs);
+            return (source ?? new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase))
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !float.IsNaN(entry.Value) && !float.IsInfinity(entry.Value))
+                .GroupBy(entry => NormalizeAdminKey(entry.Key), StringComparer.OrdinalIgnoreCase)
+                .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+                .ToDictionary(group => group.Key, group => Mathf.Clamp(group.Average(entry => entry.Value), -maxAbs, maxAbs), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private string NormalizeLearningApplyMode(string mode)
+        {
+            switch (NormalizeAdminKey(mode))
+            {
+                case LearningApplyShadow:
+                    return LearningApplyShadow;
+                case LearningApplyGlobal:
+                    return LearningApplyGlobal;
+                case LearningApplyProfiles:
+                    return LearningApplyProfiles;
+                default:
+                    return LearningApplyOff;
+            }
+        }
+
+        private string NormalizeProfileKey(string key)
+        {
+            var text = (key ?? "").Trim().ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return "";
+            }
+
+            var builder = new System.Text.StringBuilder();
+
+            foreach (var character in text)
+            {
+                if (char.IsLetterOrDigit(character) || character == '_' || character == '-')
+                {
+                    builder.Append(character);
+                }
+                else if (character == ' ' || character == '.')
+                {
+                    builder.Append('_');
+                }
+            }
+
+            var normalized = builder.ToString().Trim('_', '-');
+            return normalized.Length <= 48 ? normalized : normalized.Substring(0, 48).Trim('_', '-');
+        }
+
+        private void RefreshLearningTimer()
+        {
+            learningTimer?.Destroy();
+            learningTimer = null;
+
+            if (config?.Learning?.Enabled != true)
+            {
+                observationEpisodes.Clear();
+                return;
+            }
+
+            learningTimer = timer.Every(Math.Max(0.25f, config.Learning.SampleIntervalSeconds), ObservationTick);
+        }
+
+        private void ObservationTick()
+        {
+            if (config?.Learning?.Enabled != true)
+            {
+                observationEpisodes.Clear();
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            var observed = new HashSet<ulong>();
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (!ShouldObservePlayer(player))
+                {
+                    continue;
+                }
+
+                observed.Add(player.userID);
+                var episode = GetOrCreateObservationEpisode(player, now);
+                UpdateObservationSample(player, episode, now);
+            }
+
+            foreach (var entry in observationEpisodes.ToList())
+            {
+                var episode = entry.Value;
+
+                if (episode == null || !observed.Contains(entry.Key))
+                {
+                    FlushObservationEpisode(episode, now);
+                    observationEpisodes.Remove(entry.Key);
+                    continue;
+                }
+
+                if (now - episode.StartedAt >= Math.Max(3f, config.Learning.OutcomeWindowSeconds))
+                {
+                    FlushObservationEpisode(episode, now);
+                    observationEpisodes.Remove(entry.Key);
+                }
+            }
+        }
+
+        private bool ShouldObservePlayer(BasePlayer player)
+        {
+            if (config?.Learning?.Enabled != true || !IsRealPlayer(player) || !player.IsConnected || player.IsDead() || player.IsSleeping() || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return false;
+            }
+
+            if (string.Equals(config.Learning.Source, LearningSourceAdminTesters, StringComparison.OrdinalIgnoreCase))
+            {
+                return config.Learning.ObservedPlayerSteamIds != null
+                    && config.Learning.ObservedPlayerSteamIds.Contains(player.UserIDString, StringComparer.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+
+        private PlayerObservationEpisode GetOrCreateObservationEpisode(BasePlayer player, float now)
+        {
+            if (player == null)
+            {
+                return null;
+            }
+
+            if (observationEpisodes.TryGetValue(player.userID, out var episode) && episode != null)
+            {
+                if (now - episode.StartedAt >= Math.Max(3f, config.Learning.OutcomeWindowSeconds))
+                {
+                    FlushObservationEpisode(episode, now);
+                    observationEpisodes.Remove(player.userID);
+                }
+                else
+                {
+                    return episode;
+                }
+            }
+
+            episode = new PlayerObservationEpisode
+            {
+                UserId = player.userID,
+                UserIdString = player.UserIDString,
+                DisplayName = CleanName(PlayerName(player)),
+                StartedAt = now,
+                LastSampleAt = now,
+                StartPosition = player.transform.position,
+                LastPosition = player.transform.position,
+                HealthFraction = PlayerHealthFraction(player)
+            };
+
+            observationEpisodes[player.userID] = episode;
+            return episode;
+        }
+
+        private void UpdateObservationSample(BasePlayer player, PlayerObservationEpisode episode, float now)
+        {
+            if (player == null || episode == null)
+            {
+                return;
+            }
+
+            var position = player.transform.position;
+            var previousPosition = episode.LastPosition == Vector3.zero ? position : episode.LastPosition;
+            var previousSampleAt = episode.LastSampleAt <= 0f ? now : episode.LastSampleAt;
+            var dt = Math.Max(0.1f, now - previousSampleAt);
+            var speed = Distance2D(position, previousPosition) / dt;
+            var item = player.GetActiveItem();
+            var shortname = item?.info?.shortname ?? "";
+            var combatProfile = BuildCombatProfile(shortname);
+
+            episode.DisplayName = CleanName(PlayerName(player));
+            episode.WeaponShortname = shortname;
+            episode.WeaponClass = combatProfile.WeaponClass;
+            episode.HealthFraction = PlayerHealthFraction(player);
+            episode.LastSampleAt = now;
+            episode.LastPosition = position;
+            episode.NearbyAllies = BasePlayer.activePlayerList.Count(other => other != null && other != player && IsRealPlayer(other) && other.IsConnected && !other.IsDead() && !other.IsSleeping() && Vector3.Distance(position, other.transform.position) <= 45f);
+            episode.NearbyEnemies = activeBots.Count(entry => IsLiveBot(entry.Key) && Vector3.Distance(position, entry.Key.transform.position) <= config.AI.VisionRange);
+            episode.SampledNearbyEnemies = episode.NearbyEnemies;
+
+            var nearestBot = activeBots
+                .Where(entry => IsLiveBot(entry.Key))
+                .OrderBy(entry => Vector3.Distance(position, entry.Key.transform.position))
+                .FirstOrDefault();
+
+            if (nearestBot.Key != null)
+            {
+                var visibility = ObservationVisibilityFromPlayerToTarget(player, nearestBot.Key);
+                episode.SampledDistanceToNearestBot = Vector3.Distance(position, nearestBot.Key.transform.position);
+                episode.SampledHadLineOfSight = visibility.CanSee;
+                episode.SampledTargetExposureFraction = Mathf.Clamp01(visibility.ExposedFraction);
+                ApplyObservationTargetContext(player, episode, nearestBot.Key, nearestBot.Value, ObservationContextNearestBotSample, now, 0.35f, false);
+
+                if (episode.SampledHadLineOfSight && episode.FirstContactAt <= 0f)
+                {
+                    episode.FirstContactAt = now;
+                }
+
+                if (string.IsNullOrWhiteSpace(episode.ObservedAction) && episode.SampledHadLineOfSight)
+                {
+                    episode.ObservedAction = ActionIdString(TacticalActionId.AcquireVisibleTarget);
+                }
+            }
+            else
+            {
+                episode.SampledDistanceToNearestBot = -1f;
+                episode.SampledHadLineOfSight = false;
+                episode.SampledTargetExposureFraction = 0f;
+
+                if (episode.TargetContextConfidence <= 0f)
+                {
+                    episode.DistanceToTarget = -1f;
+                    episode.HadLineOfSight = false;
+                    episode.TargetExposureFraction = 0f;
+                    episode.TargetContextSource = ObservationContextNone;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(episode.ObservedAction) && speed >= 2.2f)
+            {
+                episode.ObservedAction = ActionIdString(TacticalActionId.RoamToPoint);
+            }
+        }
+
+        private void ApplyObservationTargetContext(BasePlayer player, PlayerObservationEpisode episode, BaseCombatEntity targetEntity, BotRuntime targetRuntime, string source, float now, float confidence, bool combatEvent)
+        {
+            if (player == null || episode == null || targetEntity == null)
+            {
+                return;
+            }
+
+            confidence = Mathf.Clamp01(confidence);
+            var visibility = ObservationVisibilityFromPlayerToTarget(player, targetEntity);
+            var distance = Vector3.Distance(player.transform.position, targetEntity.transform.position);
+            var sourceId = string.IsNullOrWhiteSpace(source) ? ObservationContextNone : NormalizeAdminKey(source);
+
+            if (combatEvent)
+            {
+                episode.TargetContextEvents++;
+                episode.CombatDistanceToTarget = distance;
+                episode.CombatHadLineOfSight = visibility.CanSee;
+                episode.CombatTargetExposureFraction = Mathf.Clamp01(visibility.ExposedFraction);
+                episode.CombatTargetVisibleProbePoints = Math.Max(0, visibility.VisibleProbePoints);
+                episode.CombatTargetTotalProbePoints = Math.Max(0, visibility.TotalProbePoints);
+            }
+
+            var shouldPromote = confidence >= episode.TargetContextConfidence
+                || combatEvent
+                || string.IsNullOrWhiteSpace(episode.TargetContextSource)
+                || string.Equals(episode.TargetContextSource, ObservationContextNone, StringComparison.OrdinalIgnoreCase);
+
+            if (!shouldPromote)
+            {
+                return;
+            }
+
+            episode.DistanceToTarget = distance;
+            episode.HadLineOfSight = visibility.CanSee;
+            episode.TargetExposureFraction = Mathf.Clamp01(visibility.ExposedFraction);
+            episode.TargetContextSource = sourceId;
+            episode.TargetContextConfidence = confidence;
+            episode.TargetBotKey = targetRuntime?.BotKey ?? "";
+            episode.TargetBotName = targetRuntime?.DisplayName ?? "";
+            episode.TargetNetId = NetId(targetEntity);
+            episode.TargetContextAt = now;
+        }
+
+        private VisionResult ObservationVisibilityFromPlayerToTarget(BasePlayer player, BaseCombatEntity targetEntity)
+        {
+            var result = new VisionResult();
+
+            if (player == null || targetEntity == null)
+            {
+                return result;
+            }
+
+            var targetPlayer = targetEntity as BasePlayer;
+
+            if (targetPlayer != null)
+            {
+                return TargetVisibility(player, targetPlayer, config.AI.MinimumExposedTargetFraction);
+            }
+
+            result.TotalProbePoints = 1;
+            var from = EyePosition(player);
+            var to = EyePosition(targetEntity);
+
+            if (from == Vector3.zero || to == Vector3.zero)
+            {
+                return result;
+            }
+
+            var clear = !IsWorldLineBlocked(from, to, player, targetEntity);
+            result.VisibleProbePoints = clear ? 1 : 0;
+            result.ExposedFraction = clear ? 1f : 0f;
+            result.CanSee = clear;
+            result.BlockReason = clear ? "visible" : "solid";
+            result.BestVisiblePoint = clear ? to : Vector3.zero;
+            return result;
+        }
+
+        private void RecordLearningPlayerEvent(BasePlayer player, string action, float now, float damageDealt = 0f, float damageTaken = 0f, bool kill = false, bool died = false, bool explosive = false, bool melee = false, BaseCombatEntity targetEntity = null, BotRuntime targetRuntime = null)
+        {
+            if (!ShouldObservePlayer(player))
+            {
+                return;
+            }
+
+            var episode = GetOrCreateObservationEpisode(player, now);
+            UpdateObservationSample(player, episode, now);
+
+            if (episode == null)
+            {
+                return;
+            }
+
+            if (targetEntity != null)
+            {
+                ApplyObservationTargetContext(player, episode, targetEntity, targetRuntime ?? RuntimeFor(targetEntity), ObservationContextCombatTarget, now, targetEntity is BasePlayer ? 1f : 0.85f, true);
+            }
+
+            var actionId = NormalizeAdminKey(action);
+
+            if (!string.IsNullOrWhiteSpace(actionId))
+            {
+                episode.ObservedAction = actionId;
+            }
+
+            if (actionId == ActionIdString(TacticalActionId.AcquireVisibleTarget) || actionId == ActionIdString(TacticalActionId.SuppressTarget))
+            {
+                episode.ShotsFired++;
+
+                if (episode.FirstShotAt <= 0f)
+                {
+                    episode.FirstShotAt = now;
+                }
+            }
+
+            if (damageDealt > 0f)
+            {
+                episode.DamageDealt += damageDealt;
+                episode.DamageEventsDealt++;
+            }
+
+            if (damageTaken > 0f)
+            {
+                episode.DamageTaken += damageTaken;
+                episode.DamageEventsTaken++;
+
+                if (string.IsNullOrWhiteSpace(episode.ObservedAction) || actionId == ActionIdString(TacticalActionId.RetreatToCover))
+                {
+                    episode.ObservedAction = ActionIdString(TacticalActionId.RetreatToCover);
+                }
+            }
+
+            if (explosive)
+            {
+                episode.ExplosivesThrown++;
+            }
+
+            if (melee)
+            {
+                episode.MeleeSwings++;
+            }
+
+            if (kill)
+            {
+                episode.Kills++;
+            }
+
+            if (died)
+            {
+                episode.Died = true;
+            }
+        }
+
+        private float PlayerHealthFraction(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return 0f;
+            }
+
+            try
+            {
+                return Mathf.Clamp01(player.Health() / Math.Max(1f, player.MaxHealth()));
+            }
+            catch
+            {
+                return Mathf.Clamp01(player.health / 100f);
+            }
+        }
+
+        private float HitDamageTotal(HitInfo info)
+        {
+            try
+            {
+                return Math.Max(0f, info?.damageTypes?.Total() ?? 0f);
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
+        private void FlushObservationEpisode(PlayerObservationEpisode episode, float now)
+        {
+            if (episode == null || config?.Learning?.LogObservationTraces != true)
+            {
+                return;
+            }
+
+            var duration = Math.Max(0f, now - episode.StartedAt);
+
+            if (!HasMeaningfulObservation(episode, duration))
+            {
+                return;
+            }
+
+            var responseSeconds = episode.FirstContactAt > 0f && episode.FirstShotAt > 0f
+                ? Math.Max(0f, episode.FirstShotAt - episode.FirstContactAt)
+                : 0f;
+            var trace = new PlayerObservationTrace
+            {
+                trace_id = $"{episode.UserIdString}-{episode.StartedAt.ToString("0.000", CultureInfo.InvariantCulture)}",
+                source_steam_id64 = episode.UserIdString,
+                source_display_name = episode.DisplayName,
+                started_at = episode.StartedAt,
+                ended_at = now,
+                duration_seconds = duration,
+                observed_action = NormalizeAdminKey(string.IsNullOrWhiteSpace(episode.ObservedAction) ? ActionIdString(TacticalActionId.RoamToPoint) : episode.ObservedAction),
+                weapon_shortname = episode.WeaponShortname ?? "",
+                weapon_class = string.IsNullOrWhiteSpace(episode.WeaponClass) ? "default" : episode.WeaponClass,
+                health_fraction = Mathf.Clamp01(episode.HealthFraction),
+                distance_to_target = episode.DistanceToTarget,
+                had_line_of_sight = episode.HadLineOfSight,
+                target_exposure_fraction = Mathf.Clamp01(episode.TargetExposureFraction),
+                target_context_source = string.IsNullOrWhiteSpace(episode.TargetContextSource) ? ObservationContextNone : episode.TargetContextSource,
+                target_context_confidence = Mathf.Clamp01(episode.TargetContextConfidence),
+                target_bot_key = episode.TargetBotKey ?? "",
+                target_bot_name = episode.TargetBotName ?? "",
+                target_net_id = episode.TargetNetId,
+                target_context_events = Math.Max(0, episode.TargetContextEvents),
+                sampled_distance_to_nearest_bot = episode.SampledDistanceToNearestBot,
+                sampled_had_line_of_sight = episode.SampledHadLineOfSight,
+                sampled_target_exposure_fraction = Mathf.Clamp01(episode.SampledTargetExposureFraction),
+                sampled_nearby_enemies = Math.Max(0, episode.SampledNearbyEnemies),
+                combat_distance_to_target = episode.CombatDistanceToTarget,
+                combat_had_line_of_sight = episode.CombatHadLineOfSight,
+                combat_target_exposure_fraction = Mathf.Clamp01(episode.CombatTargetExposureFraction),
+                combat_target_visible_probe_points = Math.Max(0, episode.CombatTargetVisibleProbePoints),
+                combat_target_total_probe_points = Math.Max(0, episode.CombatTargetTotalProbePoints),
+                nearby_allies = Math.Max(0, episode.NearbyAllies),
+                nearby_enemies = Math.Max(0, episode.NearbyEnemies),
+                shots_fired = Math.Max(0, episode.ShotsFired),
+                damage_events_dealt = Math.Max(0, episode.DamageEventsDealt),
+                damage_events_taken = Math.Max(0, episode.DamageEventsTaken),
+                damage_dealt = Math.Max(0f, episode.DamageDealt),
+                damage_taken = Math.Max(0f, episode.DamageTaken),
+                explosives_thrown = Math.Max(0, episode.ExplosivesThrown),
+                melee_swings = Math.Max(0, episode.MeleeSwings),
+                kills = Math.Max(0, episode.Kills),
+                died = episode.Died,
+                response_seconds = responseSeconds,
+                start_position = episode.StartPosition,
+                end_position = episode.LastPosition
+            };
+
+            trace.outcome_score = TraceOutcomeScore(trace);
+            QueueObservationTrace(trace);
+        }
+
+        private bool HasMeaningfulObservation(PlayerObservationEpisode episode, float duration)
+        {
+            if (episode == null || duration < 0.25f)
+            {
+                return false;
+            }
+
+            return episode.ShotsFired > 0
+                || episode.DamageEventsDealt > 0
+                || episode.DamageEventsTaken > 0
+                || episode.ExplosivesThrown > 0
+                || episode.MeleeSwings > 0
+                || episode.Kills > 0
+                || episode.Died
+                || episode.HadLineOfSight && !string.IsNullOrWhiteSpace(episode.ObservedAction);
+        }
+
+        private void FlushAllObservationEpisodes(bool writeTraces)
+        {
+            var now = Time.realtimeSinceStartup;
+
+            foreach (var episode in observationEpisodes.Values.ToList())
+            {
+                if (writeTraces)
+                {
+                    FlushObservationEpisode(episode, now);
+                }
+            }
+
+            observationEpisodes.Clear();
+
+            if (writeTraces)
+            {
+                FlushObservationTraces();
+            }
+        }
+
+        private void QueueObservationTrace(PlayerObservationTrace trace)
+        {
+            if (trace == null || config?.Learning?.Enabled != true || config?.Learning?.LogObservationTraces != true)
+            {
+                return;
+            }
+
+            pendingObservationTraces.Add(trace);
+
+            if (observationTraceSaveTimer == null || observationTraceSaveTimer.Destroyed)
+            {
+                observationTraceSaveTimer = timer.Once(5f, FlushObservationTraces);
+            }
+        }
+
+        private void FlushObservationTraces()
+        {
+            observationTraceSaveTimer = null;
+
+            if (pendingObservationTraces.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var dataPath = ObservationTraceDataPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(dataPath));
+                var lines = pendingObservationTraces.Select(trace => JsonConvert.SerializeObject(trace, Formatting.None)).ToArray();
+                File.AppendAllLines(dataPath, lines);
+                pendingObservationTraces.Clear();
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write roam bot player observation traces: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private string ObservationTraceDataPath()
+        {
+            return Path.Combine(Interface.Oxide.DataFileSystem.Directory, ObservationTraceDataFile);
+        }
+
+        private string TrainingRunDataPath()
+        {
+            return Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingRunDataFile);
+        }
+
+        private List<PlayerObservationTrace> ReadObservationTraces(int maxLines = 50000)
+        {
+            var path = ObservationTraceDataPath();
+
+            if (!File.Exists(path))
+            {
+                return new List<PlayerObservationTrace>();
+            }
+
+            try
+            {
+                var lines = File.ReadLines(path);
+
+                if (maxLines > 0)
+                {
+                    lines = lines.Reverse().Take(maxLines).Reverse();
+                }
+
+                return lines
+                    .Select(ParseObservationTraceLine)
+                    .Where(trace => trace != null && IsSteamId64(trace.source_steam_id64))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read roam bot player observation traces: {ex.GetType().Name}: {ex.Message}");
+                return new List<PlayerObservationTrace>();
+            }
+        }
+
+        private PlayerObservationTrace ParseObservationTraceLine(string line)
+        {
+            try
+            {
+                return JsonConvert.DeserializeObject<PlayerObservationTrace>(line);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private int BuildGlobalBehaviorModels(List<PlayerObservationTrace> traces, out string summary)
+        {
+            traces = (traces ?? new List<PlayerObservationTrace>())
+                .Where(IsUsableObservationTrace)
+                .ToList();
+
+            if (traces.Count < config.Learning.MinimumGlobalObservations)
+            {
+                summary = $"not_enough_observations count={traces.Count} minimum={config.Learning.MinimumGlobalObservations}";
+                return 0;
+            }
+
+            var sorted = traces.OrderBy(trace => trace.outcome_score).ToList();
+            var half = Math.Max(config.Learning.MinimumGlobalObservations, sorted.Count / 2);
+            var casual = sorted.Take(half).ToList();
+            var dangerous = sorted.Skip(Math.Max(0, sorted.Count - half)).ToList();
+            var average = traces;
+
+            behaviorModels.skill_models["casual"] = BuildModelFromTraces("casual", "skill", "Casual learned behavior", casual, config.Learning.MaximumGlobalScoreDelta);
+            behaviorModels.skill_models["average"] = BuildModelFromTraces("average", "skill", "Average learned behavior", average, config.Learning.MaximumGlobalScoreDelta);
+            behaviorModels.skill_models["dangerous"] = BuildModelFromTraces("dangerous", "skill", "Dangerous learned behavior", dangerous, config.Learning.MaximumGlobalScoreDelta);
+            behaviorModels.last_global_build_utc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            SaveBehaviorModels();
+            summary = $"global_models=3 observations={traces.Count} casual={casual.Count} average={average.Count} dangerous={dangerous.Count}";
+            AppendTrainingRun("global", "ok", summary);
+            return 3;
+        }
+
+        private bool BuildPlayerProfile(string playerQuery, string profileKey, out string message)
+        {
+            profileKey = NormalizeProfileKey(profileKey);
+
+            if (string.IsNullOrWhiteSpace(profileKey))
+            {
+                message = "Profile key must contain letters, numbers, underscores, or dashes.";
+                return false;
+            }
+
+            FlushAllObservationEpisodes(true);
+            var traces = ReadObservationTraces();
+
+            if (!ResolveLearningPlayerIdentity(playerQuery, traces, out var steamId, out var displayName))
+            {
+                message = $"No connected player or observation trace matched '{playerQuery}'.";
+                return false;
+            }
+
+            var playerTraces = traces
+                .Where(trace => string.Equals(trace.source_steam_id64, steamId, StringComparison.OrdinalIgnoreCase))
+                .Where(IsUsableObservationTrace)
+                .ToList();
+
+            if (playerTraces.Count < config.Learning.MinimumProfileObservations)
+            {
+                message = $"Profile '{profileKey}' needs {config.Learning.MinimumProfileObservations} observations for {displayName} ({steamId}); found {playerTraces.Count}.";
+                return false;
+            }
+
+            var model = BuildModelFromTraces(profileKey, "profile", displayName, playerTraces, config.Learning.MaximumProfileScoreDelta, steamId);
+            behaviorModels.player_profiles[profileKey] = model;
+            SaveBehaviorModels();
+            message = $"Built profile '{profileKey}' from {playerTraces.Count} observations for {displayName} ({steamId}).";
+            AppendTrainingRun("profile", "ok", $"{profileKey} steam={steamId} observations={playerTraces.Count}");
+            return true;
+        }
+
+        private bool ResolveLearningPlayerIdentity(string query, List<PlayerObservationTrace> traces, out string steamId, out string displayName)
+        {
+            steamId = "";
+            displayName = "";
+            query = (query ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return false;
+            }
+
+            var active = FindActivePlayer(query);
+
+            if (active != null)
+            {
+                steamId = active.UserIDString;
+                displayName = CleanName(PlayerName(active));
+                return true;
+            }
+
+            if (IsSteamId64(query))
+            {
+                var trace = traces?.LastOrDefault(item => string.Equals(item.source_steam_id64, query, StringComparison.OrdinalIgnoreCase));
+                steamId = query;
+                displayName = CleanName(trace?.source_display_name ?? query);
+                return true;
+            }
+
+            var match = (traces ?? new List<PlayerObservationTrace>())
+                .LastOrDefault(trace => (trace.source_display_name ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0);
+
+            if (match == null)
+            {
+                return false;
+            }
+
+            steamId = match.source_steam_id64;
+            displayName = CleanName(match.source_display_name);
+            return IsSteamId64(steamId);
+        }
+
+        private LearnedBehaviorModel BuildModelFromTraces(string key, string modelType, string displayName, IEnumerable<PlayerObservationTrace> source, float maxDelta, string sourceSteamId = "")
+        {
+            var traces = (source ?? new List<PlayerObservationTrace>())
+                .Where(IsUsableObservationTrace)
+                .ToList();
+            var positives = traces.Count(trace => trace.outcome_score > 0f);
+            var targetLinked = traces.Count(IsCombatLinkedObservationTrace);
+            var highConfidence = traces.Count(trace => TraceTargetContextConfidence(trace) >= config.Learning.HighConfidenceTargetContextThreshold);
+            var averageContextConfidence = traces.Count <= 0 ? 0f : traces.Average(TraceTargetContextConfidence);
+            var weightedSuccessRate = WeightedTraceFraction(traces, trace => trace.outcome_score > 0f);
+            var model = new LearnedBehaviorModel
+            {
+                key = string.Equals(modelType, "profile", StringComparison.OrdinalIgnoreCase) ? NormalizeProfileKey(key) : NormalizeAdminKey(key),
+                model_type = modelType,
+                display_name = CleanName(displayName),
+                source_steam_id64 = IsSteamId64(sourceSteamId) ? sourceSteamId : "",
+                built_at_utc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                observations = traces.Count,
+                positive_observations = positives,
+                success_rate = traces.Count <= 0 ? 0f : positives / (float) traces.Count,
+                target_linked_observations = targetLinked,
+                high_confidence_observations = highConfidence,
+                average_target_context_confidence = averageContextConfidence,
+                weighted_success_rate = weightedSuccessRate,
+                skill = SkillFromTraces(key, modelType, traces),
+                action_score_deltas = ActionDeltasFromTraces(traces, maxDelta),
+                weapon_class_biases = WeaponClassBiasesFromTraces(traces, Math.Max(2f, maxDelta * 0.35f))
+            };
+
+            var topActions = model.action_score_deltas
+                .OrderByDescending(entry => Math.Abs(entry.Value))
+                .Take(4)
+                .Select(entry => $"{entry.Key}:{entry.Value:0.0}");
+            model.summary = $"success={model.success_rate:0.00}; weighted={model.weighted_success_rate:0.00}; ctx={model.average_target_context_confidence:0.00}; linked={model.target_linked_observations}/{model.observations}; top={string.Join(",", topActions)}";
+            return NormalizeLearnedModel(model, model.key, modelType);
+        }
+
+        private bool IsUsableObservationTrace(PlayerObservationTrace trace)
+        {
+            return trace != null
+                && IsSteamId64(trace.source_steam_id64)
+                && !string.IsNullOrWhiteSpace(trace.observed_action)
+                && trace.duration_seconds >= 0.2f;
+        }
+
+        private bool IsCombatLinkedObservationTrace(PlayerObservationTrace trace)
+        {
+            if (trace == null)
+            {
+                return false;
+            }
+
+            return trace.target_context_events > 0
+                || string.Equals(NormalizeAdminKey(trace.target_context_source), ObservationContextCombatTarget, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private float TraceTargetContextConfidence(PlayerObservationTrace trace)
+        {
+            if (trace == null)
+            {
+                return 0f;
+            }
+
+            if (trace.target_context_confidence > 0f)
+            {
+                return Mathf.Clamp01(trace.target_context_confidence);
+            }
+
+            var hasTargetContext = trace.distance_to_target >= 0f
+                || trace.sampled_distance_to_nearest_bot >= 0f
+                || trace.had_line_of_sight
+                || trace.target_exposure_fraction > 0f
+                || trace.nearby_enemies > 0;
+            var hasCombatOutcome = trace.damage_events_dealt > 0
+                || trace.damage_events_taken > 0
+                || trace.damage_dealt > 0f
+                || trace.damage_taken > 0f
+                || trace.kills > 0
+                || trace.died;
+
+            if (!hasTargetContext)
+            {
+                return hasCombatOutcome ? 0.12f : 0f;
+            }
+
+            if (hasCombatOutcome && !trace.had_line_of_sight && trace.target_exposure_fraction <= 0f && trace.nearby_enemies <= 0)
+            {
+                return 0.18f;
+            }
+
+            return hasCombatOutcome ? 0.35f : 0.45f;
+        }
+
+        private float TraceTrainingWeight(PlayerObservationTrace trace)
+        {
+            var low = Mathf.Clamp(config?.Learning?.LowConfidenceObservationWeight ?? 0.35f, 0.05f, 1f);
+            return Mathf.Clamp(Mathf.Lerp(low, 1f, TraceTargetContextConfidence(trace)), low, 1f);
+        }
+
+        private float WeightedTraceSum(IEnumerable<PlayerObservationTrace> traces, Func<PlayerObservationTrace, float> selector)
+        {
+            if (traces == null || selector == null)
+            {
+                return 0f;
+            }
+
+            var total = 0f;
+
+            foreach (var trace in traces)
+            {
+                if (trace == null)
+                {
+                    continue;
+                }
+
+                total += TraceTrainingWeight(trace) * selector(trace);
+            }
+
+            return total;
+        }
+
+        private float WeightedTraceAverage(IEnumerable<PlayerObservationTrace> traces, Func<PlayerObservationTrace, float> selector, float fallback = 0f)
+        {
+            if (traces == null || selector == null)
+            {
+                return fallback;
+            }
+
+            var total = 0f;
+            var weight = 0f;
+
+            foreach (var trace in traces)
+            {
+                if (trace == null)
+                {
+                    continue;
+                }
+
+                var traceWeight = TraceTrainingWeight(trace);
+                total += traceWeight * selector(trace);
+                weight += traceWeight;
+            }
+
+            return weight <= 0.0001f ? fallback : total / weight;
+        }
+
+        private float WeightedTraceFraction(IEnumerable<PlayerObservationTrace> traces, Func<PlayerObservationTrace, bool> predicate)
+        {
+            if (traces == null || predicate == null)
+            {
+                return 0f;
+            }
+
+            var selected = 0f;
+            var total = 0f;
+
+            foreach (var trace in traces)
+            {
+                if (trace == null)
+                {
+                    continue;
+                }
+
+                var weight = TraceTrainingWeight(trace);
+                total += weight;
+
+                if (predicate(trace))
+                {
+                    selected += weight;
+                }
+            }
+
+            return total <= 0.0001f ? 0f : Mathf.Clamp01(selected / total);
+        }
+
+        private SkillDefinition SkillFromTraces(string key, string modelType, List<PlayerObservationTrace> traces)
+        {
+            var tier = string.Equals(modelType, "skill", StringComparison.OrdinalIgnoreCase) ? NormalizeAdminKey(key) : "average";
+            var fallback = SkillFor(tier);
+            var skill = CloneSkillDefinition(fallback) ?? new SkillDefinition();
+
+            if (traces == null || traces.Count == 0)
+            {
+                return NormalizeSkillDefinition(tier, skill, fallback);
+            }
+
+            var successRate = WeightedTraceFraction(traces, trace => trace.outcome_score > 0f);
+            var shots = Math.Max(1f, WeightedTraceSum(traces, trace => trace.shots_fired));
+            var accuracyProxy = Mathf.Clamp01((WeightedTraceSum(traces, trace => trace.damage_events_dealt) + WeightedTraceSum(traces, trace => trace.kills) * 1.5f) / shots);
+            var responseTraces = traces.Where(trace => trace.response_seconds > 0f).Select(trace => trace.response_seconds).ToList();
+            var response = responseTraces.Count == 0 ? (skill.ReactionMinSeconds + skill.ReactionMaxSeconds) * 0.5f : WeightedTraceAverage(traces.Where(trace => trace.response_seconds > 0f), trace => trace.response_seconds, (skill.ReactionMinSeconds + skill.ReactionMaxSeconds) * 0.5f);
+            var aggression = WeightedTraceFraction(traces, IsAggressiveObservedAction);
+            var defensive = WeightedTraceFraction(traces, IsDefensiveObservedAction);
+
+            skill.ReactionMinSeconds = Mathf.Clamp(response * 0.42f, 0.12f, 1.1f);
+            skill.ReactionMaxSeconds = Mathf.Clamp(Math.Max(skill.ReactionMinSeconds + 0.12f, response * 0.95f), skill.ReactionMinSeconds, 1.8f);
+            skill.AimErrorDegrees = Mathf.Clamp(Mathf.Lerp(3.5f, 0.2f, accuracyProxy), 0.05f, 5.5f);
+            skill.AimWarmupSeconds = Mathf.Clamp(Mathf.Lerp(2.8f, 0.8f, successRate), 0.4f, 3.5f);
+            skill.AimWarmupInitialExtraDegrees = Mathf.Clamp(Mathf.Lerp(3.2f, 0.35f, accuracyProxy), 0.1f, 5f);
+            skill.Aggression = Mathf.Clamp01(skill.Aggression * 0.35f + aggression * 0.65f);
+            skill.Courage = Mathf.Clamp01(skill.Courage * 0.35f + (successRate * 0.55f + aggression * 0.25f + (1f - defensive) * 0.20f));
+            skill.TacticalNoise = Mathf.Clamp01(Mathf.Lerp(0.34f, 0.05f, successRate) + ActionEntropy(traces) * 0.08f);
+
+            if (string.Equals(tier, "casual", StringComparison.OrdinalIgnoreCase))
+            {
+                skill.ReactionMinSeconds = Mathf.Clamp(skill.ReactionMinSeconds + 0.18f, 0.18f, 1.3f);
+                skill.ReactionMaxSeconds = Mathf.Clamp(skill.ReactionMaxSeconds + 0.28f, skill.ReactionMinSeconds, 1.8f);
+                skill.AimErrorDegrees = Mathf.Clamp(skill.AimErrorDegrees + 0.55f, 0.25f, 6f);
+                skill.AimWarmupInitialExtraDegrees = Mathf.Clamp(skill.AimWarmupInitialExtraDegrees + 0.65f, 0.25f, 5.5f);
+                skill.Aggression = Mathf.Clamp01(skill.Aggression - 0.08f);
+                skill.Courage = Mathf.Clamp01(skill.Courage - 0.08f);
+                skill.TacticalNoise = Mathf.Clamp01(skill.TacticalNoise + 0.10f);
+            }
+            else if (string.Equals(tier, "dangerous", StringComparison.OrdinalIgnoreCase))
+            {
+                skill.ReactionMinSeconds = Mathf.Clamp(skill.ReactionMinSeconds - 0.10f, 0.08f, 0.9f);
+                skill.ReactionMaxSeconds = Mathf.Clamp(skill.ReactionMaxSeconds - 0.16f, skill.ReactionMinSeconds + 0.05f, 1.3f);
+                skill.AimErrorDegrees = Mathf.Clamp(skill.AimErrorDegrees - 0.35f, 0.05f, 4.5f);
+                skill.AimWarmupInitialExtraDegrees = Mathf.Clamp(skill.AimWarmupInitialExtraDegrees - 0.35f, 0.05f, 4f);
+                skill.Aggression = Mathf.Clamp01(skill.Aggression + 0.10f);
+                skill.Courage = Mathf.Clamp01(skill.Courage + 0.12f);
+                skill.TacticalNoise = Mathf.Clamp01(skill.TacticalNoise - 0.08f);
+            }
+
+            return NormalizeSkillDefinition(tier, skill, fallback);
+        }
+
+        private Dictionary<string, float> ActionDeltasFromTraces(List<PlayerObservationTrace> traces, float maxDelta)
+        {
+            var result = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+
+            if (traces == null || traces.Count == 0)
+            {
+                return result;
+            }
+
+            var overallOutcome = WeightedTraceAverage(traces, trace => trace.outcome_score);
+            var total = Math.Max(0.0001f, traces.Sum(TraceTrainingWeight));
+
+            foreach (var group in traces.GroupBy(trace => NormalizeAdminKey(trace.observed_action), StringComparer.OrdinalIgnoreCase))
+            {
+                var action = group.Key;
+
+                if (string.IsNullOrWhiteSpace(action))
+                {
+                    continue;
+                }
+
+                var grouped = group.ToList();
+                var count = grouped.Sum(TraceTrainingWeight);
+                var frequency = count / total;
+                var outcomeDelta = WeightedTraceAverage(grouped, trace => trace.outcome_score) - overallOutcome;
+                var frequencyBias = Mathf.Clamp((frequency - 0.12f) * 28f, -6f, 10f);
+                var delta = outcomeDelta * 12f + frequencyBias;
+                result[action] = Mathf.Clamp(delta, -maxDelta, maxDelta);
+            }
+
+            foreach (TacticalActionId actionId in Enum.GetValues(typeof(TacticalActionId)))
+            {
+                var action = ActionIdString(actionId);
+
+                if (actionId != TacticalActionId.None && !result.ContainsKey(action))
+                {
+                    result[action] = 0f;
+                }
+            }
+
+            return result;
+        }
+
+        private Dictionary<string, float> WeaponClassBiasesFromTraces(List<PlayerObservationTrace> traces, float maxDelta)
+        {
+            var result = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+
+            if (traces == null || traces.Count == 0)
+            {
+                return result;
+            }
+
+            var overallOutcome = WeightedTraceAverage(traces, trace => trace.outcome_score);
+
+            foreach (var group in traces.GroupBy(trace => NormalizeAdminKey(string.IsNullOrWhiteSpace(trace.weapon_class) ? "default" : trace.weapon_class), StringComparer.OrdinalIgnoreCase))
+            {
+                var weaponClass = group.Key;
+
+                if (string.IsNullOrWhiteSpace(weaponClass))
+                {
+                    continue;
+                }
+
+                result[weaponClass] = Mathf.Clamp((WeightedTraceAverage(group, trace => trace.outcome_score) - overallOutcome) * 8f, -maxDelta, maxDelta);
+            }
+
+            return result;
+        }
+
+        private float TraceOutcomeScore(PlayerObservationTrace trace)
+        {
+            if (trace == null)
+            {
+                return 0f;
+            }
+
+            var score = 0f;
+            score += trace.damage_dealt * 0.018f;
+            score -= trace.damage_taken * 0.014f;
+            score += trace.kills * 1.35f;
+            score -= trace.died ? 1.15f : 0f;
+            score += trace.had_line_of_sight ? Mathf.Clamp01(trace.target_exposure_fraction) * 0.25f * TraceTargetContextConfidence(trace) : 0f;
+            score += trace.shots_fired > 0 && trace.damage_events_dealt > 0 ? 0.20f : 0f;
+            score += trace.explosives_thrown > 0 ? 0.12f : 0f;
+            score -= trace.damage_events_taken > 0 && trace.damage_dealt <= 0f ? 0.20f : 0f;
+            return Mathf.Clamp(score, -3f, 4f);
+        }
+
+        private bool IsAggressiveObservedAction(PlayerObservationTrace trace)
+        {
+            var action = NormalizeAdminKey(trace?.observed_action);
+            return action == ActionIdString(TacticalActionId.AcquireVisibleTarget)
+                || action == ActionIdString(TacticalActionId.PushTarget)
+                || action == ActionIdString(TacticalActionId.FlankLeft)
+                || action == ActionIdString(TacticalActionId.FlankRight)
+                || action == ActionIdString(TacticalActionId.ThrowGrenade)
+                || action == ActionIdString(TacticalActionId.WideSwing);
+        }
+
+        private bool IsDefensiveObservedAction(PlayerObservationTrace trace)
+        {
+            var action = NormalizeAdminKey(trace?.observed_action);
+            return action == ActionIdString(TacticalActionId.MoveToCover)
+                || action == ActionIdString(TacticalActionId.RetreatToCover)
+                || action == ActionIdString(TacticalActionId.Tuck)
+                || action == ActionIdString(TacticalActionId.ThrowSmoke)
+                || action == ActionIdString(TacticalActionId.PlaceBarricade);
+        }
+
+        private float ActionEntropy(List<PlayerObservationTrace> traces)
+        {
+            if (traces == null || traces.Count == 0)
+            {
+                return 0f;
+            }
+
+            var total = traces.Count;
+            var entropy = 0f;
+            var groups = traces.GroupBy(trace => NormalizeAdminKey(trace.observed_action)).Where(group => !string.IsNullOrWhiteSpace(group.Key)).ToList();
+
+            if (groups.Count <= 1)
+            {
+                return 0f;
+            }
+
+            foreach (var group in groups)
+            {
+                var p = group.Count() / (float) total;
+                entropy -= p * Mathf.Log(Mathf.Max(0.0001f, p), 2f);
+            }
+
+            return Mathf.Clamp01(entropy / Mathf.Log(groups.Count, 2f));
+        }
+
+        private void AppendTrainingRun(string runType, string status, string summary)
+        {
+            try
+            {
+                var path = TrainingRunDataPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                var row = new JObject
+                {
+                    ["built_at_utc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                    ["run_type"] = runType ?? "",
+                    ["status"] = status ?? "",
+                    ["summary"] = summary ?? "",
+                    ["apply_mode"] = config?.Learning?.ApplyMode ?? LearningApplyOff,
+                    ["skill_models"] = behaviorModels?.skill_models?.Count ?? 0,
+                    ["player_profiles"] = behaviorModels?.player_profiles?.Count ?? 0
+                };
+                File.AppendAllLines(path, new[] { row.ToString(Formatting.None) });
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write roam bot training run summary: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private LearnedBehaviorModel SelectSpawnPlayerProfileModel()
+        {
+            if (config?.Learning == null
+                || config.Learning.ApplyMode != LearningApplyProfiles
+                || config.Learning.PlayerProfileSpawnWeights == null
+                || config.Learning.PlayerProfileSpawnWeights.Count == 0
+                || behaviorModels?.player_profiles == null
+                || behaviorModels.player_profiles.Count == 0)
+            {
+                return null;
+            }
+
+            var key = WeightedKey(config.Learning.PlayerProfileSpawnWeights, "");
+
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            return behaviorModels.player_profiles.TryGetValue(NormalizeProfileKey(key), out var model) ? model : null;
+        }
+
+        private LearnedBehaviorModel ActiveSkillBehaviorModel(string skillTier)
+        {
+            if (config?.Learning == null || behaviorModels?.skill_models == null)
+            {
+                return null;
+            }
+
+            var mode = NormalizeLearningApplyMode(config.Learning.ApplyMode);
+
+            if (mode != LearningApplyShadow && mode != LearningApplyGlobal && mode != LearningApplyProfiles)
+            {
+                return null;
+            }
+
+            var key = NormalizeAdminKey(skillTier);
+            return behaviorModels.skill_models.TryGetValue(key, out var model) ? model : null;
+        }
+
+        private bool ShouldApplyGlobalSkillModelAtSpawn()
+        {
+            var mode = NormalizeLearningApplyMode(config?.Learning?.ApplyMode);
+            return mode == LearningApplyGlobal || mode == LearningApplyProfiles;
+        }
+
+        private SkillDefinition SkillFromBehaviorModel(LearnedBehaviorModel model, string skillTier, SkillDefinition fallback)
+        {
+            if (model?.skill == null)
+            {
+                return CloneSkillDefinition(fallback) ?? SkillFor(skillTier);
+            }
+
+            return NormalizeSkillDefinition(skillTier, CloneSkillDefinition(model.skill), fallback ?? SkillFor(skillTier));
+        }
+
+        private void ApplyLearnedBehaviorScoring(BaseCombatEntity bot, BotRuntime runtime, List<TacticalActionCandidate> candidates, float now)
+        {
+            if (runtime == null || candidates == null || candidates.Count == 0)
+            {
+                return;
+            }
+
+            var mode = NormalizeLearningApplyMode(config?.Learning?.ApplyMode);
+            var shadow = mode == LearningApplyShadow && config.Learning.ShadowCalculatesScoreDeltas;
+            var applying = mode == LearningApplyGlobal || mode == LearningApplyProfiles;
+
+            if (!shadow && !applying)
+            {
+                runtime.LastLearnedScoreDelta = 0f;
+                runtime.LastLearnedReason = "off";
+                return;
+            }
+
+            var model = BehaviorModelForRuntime(runtime, shadow);
+
+            if (model == null)
+            {
+                runtime.LastLearnedScoreDelta = 0f;
+                runtime.LastLearnedReason = "no_model";
+                return;
+            }
+
+            RefreshCombatProfile(bot, runtime);
+            var cap = string.Equals(model.model_type, "profile", StringComparison.OrdinalIgnoreCase)
+                ? config.Learning.MaximumProfileScoreDelta
+                : config.Learning.MaximumGlobalScoreDelta;
+            var weaponClass = NormalizeAdminKey(runtime.Combat?.WeaponClass ?? "default");
+            var weaponBias = 0f;
+
+            if (model.weapon_class_biases != null && model.weapon_class_biases.TryGetValue(weaponClass, out var foundWeaponBias))
+            {
+                weaponBias = foundWeaponBias;
+            }
+
+            foreach (var candidate in candidates)
+            {
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                var action = NormalizeAdminKey(string.IsNullOrWhiteSpace(candidate.Id) ? ActionIdString(candidate.ActionId) : candidate.Id);
+                var delta = 0f;
+
+                if (model.action_score_deltas != null && model.action_score_deltas.TryGetValue(action, out var actionDelta))
+                {
+                    delta += actionDelta;
+                }
+
+                if (IsWeaponBiasedCandidate(candidate.ActionId))
+                {
+                    delta += weaponBias;
+                }
+
+                delta = Mathf.Clamp(delta, -cap, cap);
+                candidate.BaseHeuristicScore = candidate.BaseHeuristicScore == 0f ? candidate.HeuristicScore : candidate.BaseHeuristicScore;
+                candidate.LearnedScoreDelta = delta;
+                candidate.LearnedModelKey = model.key;
+                candidate.LearnedReason = $"{model.model_type}:{model.key}:{mode}";
+
+                if (applying)
+                {
+                    candidate.HeuristicScore = candidate.BaseHeuristicScore + delta;
+                }
+            }
+
+            var best = candidates.OrderByDescending(candidate => Math.Abs(candidate?.LearnedScoreDelta ?? 0f)).FirstOrDefault();
+            runtime.LastLearnedScoreDelta = best?.LearnedScoreDelta ?? 0f;
+            runtime.LastLearnedReason = best == null ? "none" : $"{model.model_type}:{model.key}:{mode}";
+        }
+
+        private bool IsWeaponBiasedCandidate(TacticalActionId actionId)
+        {
+            switch (actionId)
+            {
+                case TacticalActionId.AcquireVisibleTarget:
+                case TacticalActionId.PushTarget:
+                case TacticalActionId.FlankLeft:
+                case TacticalActionId.FlankRight:
+                case TacticalActionId.ThrowGrenade:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private LearnedBehaviorModel BehaviorModelForRuntime(BotRuntime runtime, bool includeShadow)
+        {
+            if (runtime == null || behaviorModels == null)
+            {
+                return null;
+            }
+
+            var mode = NormalizeLearningApplyMode(config?.Learning?.ApplyMode);
+
+            if (mode == LearningApplyOff || mode == LearningApplyShadow && !includeShadow)
+            {
+                return null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(runtime.PlayerProfileKey)
+                && behaviorModels.player_profiles != null
+                && behaviorModels.player_profiles.TryGetValue(NormalizeProfileKey(runtime.PlayerProfileKey), out var profileModel))
+            {
+                return profileModel;
+            }
+
+            if (!string.IsNullOrWhiteSpace(runtime.BehaviorModelKey))
+            {
+                if (behaviorModels.skill_models != null && behaviorModels.skill_models.TryGetValue(NormalizeAdminKey(runtime.BehaviorModelKey), out var skillModel))
+                {
+                    return skillModel;
+                }
+
+                if (behaviorModels.player_profiles != null && behaviorModels.player_profiles.TryGetValue(NormalizeProfileKey(runtime.BehaviorModelKey), out var profileByBehaviorKey))
+                {
+                    return profileByBehaviorKey;
+                }
+            }
+
+            return ActiveSkillBehaviorModel(runtime.SkillTier);
+        }
+
+        private string LearningRuntimeStatus(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return "none";
+            }
+
+            var model = string.IsNullOrWhiteSpace(runtime.BehaviorModelKey) ? "none" : runtime.BehaviorModelKey;
+            var profile = string.IsNullOrWhiteSpace(runtime.PlayerProfileKey) ? "" : $"/{runtime.PlayerProfileKey}";
+            var source = string.IsNullOrWhiteSpace(runtime.ProfileSourceName) ? "" : $" src={runtime.ProfileSourceName}";
+            var delta = runtime.LastLearnedScoreDelta.ToString("0.0", CultureInfo.InvariantCulture);
+            return $"{NormalizeLearningApplyMode(config?.Learning?.ApplyMode)}:{model}{profile} delta={delta} reason={runtime.LastLearnedReason}{source}";
+        }
+
+        private string LearningStatusLine()
+        {
+            var traceCount = CountObservationTraceLines();
+            return $"Raidlands roam bot learning: enabled={config.Learning.Enabled}, apply={config.Learning.ApplyMode}, source={config.Learning.Source}, allowlisted={config.Learning.ObservedPlayerSteamIds.Count}, active_episodes={observationEpisodes.Count}, pending_traces={pendingObservationTraces.Count}, saved_traces={traceCount}, skill_models={behaviorModels.skill_models.Count}, profiles={behaviorModels.player_profiles.Count}.";
+        }
+
+        private string LearningReportLine(int minutes)
+        {
+            var now = Time.realtimeSinceStartup;
+            var traces = ReadObservationTraces();
+
+            if (minutes > 0)
+            {
+                traces = traces.Where(trace => trace.ended_at <= 0f || now - trace.ended_at <= minutes * 60f).ToList();
+            }
+
+            var players = traces.Select(trace => trace.source_steam_id64).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            var avgOutcome = traces.Count == 0 ? 0f : traces.Average(trace => trace.outcome_score);
+            var avgContext = traces.Count == 0 ? 0f : traces.Average(TraceTargetContextConfidence);
+            var linked = traces.Count(IsCombatLinkedObservationTrace);
+            var highConfidence = traces.Count(trace => TraceTargetContextConfidence(trace) >= config.Learning.HighConfidenceTargetContextThreshold);
+            var topActions = traces
+                .GroupBy(trace => NormalizeAdminKey(trace.observed_action), StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .Take(5)
+                .Select(group => $"{group.Key}:{group.Count()}");
+            return $"Raidlands roam bot learning report ({(minutes <= 0 ? "all" : minutes + "m")}): traces={traces.Count}, players={players}, avg_outcome={avgOutcome:0.00}, target_context={avgContext:0.00}, combat_linked={linked}, high_confidence={highConfidence}, actions={string.Join(", ", topActions)}.";
+        }
+
+        private int CountObservationTraceLines()
+        {
+            var path = ObservationTraceDataPath();
+
+            try
+            {
+                return File.Exists(path) ? File.ReadLines(path).Count() : 0;
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private void QueueSaveData()
@@ -2584,11 +4468,23 @@ namespace Oxide.Plugins
         {
             var skillTier = WeightedKey(config.SkillWeights, "average");
             var skill = SkillFor(skillTier);
+            var baseSkill = CloneSkillDefinition(skill);
+            var profileModel = SelectSpawnPlayerProfileModel();
+            var behaviorModel = profileModel ?? ActiveSkillBehaviorModel(skillTier);
+            var behaviorModelKey = behaviorModel?.key ?? "";
+            var playerProfileKey = profileModel?.key ?? "";
+
+            if (profileModel != null || ShouldApplyGlobalSkillModelAtSpawn())
+            {
+                skill = SkillFromBehaviorModel(behaviorModel, skillTier, skill);
+            }
+
             var kit = ShouldApplyKit(bot) ? ChooseKit() : null;
             var displayName = ChooseProfileName();
             var botKey = BotKey(displayName);
             var playerBot = bot as BasePlayer;
             var clan = ClanForTeam(teamId);
+            var avatar = ChooseBotAvatar(displayName, teamId);
 
             if (playerBot != null)
             {
@@ -2605,6 +4501,15 @@ namespace Oxide.Plugins
                 KitName = kit?.Name ?? "legacy_scientist",
                 SkillTier = skillTier,
                 Skill = skill,
+                BaseSkill = baseSkill,
+                BehaviorModelKey = behaviorModelKey,
+                PlayerProfileKey = playerProfileKey,
+                ProfileSourceName = profileModel?.display_name ?? "",
+                ProfileSourceSteamId = profileModel?.source_steam_id64 ?? "",
+                AvatarKey = avatar?.Key ?? "",
+                AvatarDisplayName = avatar?.DisplayName ?? "",
+                AvatarImageName = avatar == null ? "" : BotAvatarImageName(avatar.Key),
+                AvatarChatUserId = avatar?.ChatUserId ?? "",
                 TeamId = teamId,
                 ClanKey = clan.Key,
                 ClanTag = clan.Tag,
@@ -2634,6 +4539,7 @@ namespace Oxide.Plugins
             if (playerBot != null)
             {
                 GiveBotMedicalItems(playerBot);
+                NormalizeBotInventoryWeaponDamage(playerBot, runtime);
             }
 
             RefreshCombatProfile(bot, runtime);
@@ -2660,6 +4566,85 @@ namespace Oxide.Plugins
             {
                 ThrottledWarning($"kit-give:{kitName}", $"Kits plugin could not give {kitName} to {bot.displayName}: {message}");
             }
+        }
+
+        private void NormalizeBotInventoryWeaponDamage(BasePlayer bot, BotRuntime runtime)
+        {
+            if (bot?.inventory == null)
+            {
+                return;
+            }
+
+            var changed = false;
+            changed |= NormalizeBotContainerWeaponDamage(bot.inventory.containerBelt, runtime);
+            changed |= NormalizeBotContainerWeaponDamage(bot.inventory.containerMain, runtime);
+
+            if (changed)
+            {
+                bot.SendNetworkUpdateImmediate();
+            }
+        }
+
+        private bool NormalizeBotContainerWeaponDamage(ItemContainer container, BotRuntime runtime)
+        {
+            if (container?.itemList == null)
+            {
+                return false;
+            }
+
+            var changed = false;
+
+            foreach (var item in container.itemList)
+            {
+                changed |= NormalizeBotItemWeaponDamage(item, runtime);
+            }
+
+            return changed;
+        }
+
+        private bool NormalizeBotActiveWeaponDamage(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            var player = bot as BasePlayer;
+            var item = player?.GetActiveItem();
+
+            if (!NormalizeBotItemWeaponDamage(item, runtime))
+            {
+                return false;
+            }
+
+            item?.GetHeldEntity()?.SendNetworkUpdate();
+            player?.SendNetworkUpdateImmediate();
+            return true;
+        }
+
+        private bool NormalizeBotItemWeaponDamage(Item item, BotRuntime runtime)
+        {
+            var attackEntity = item?.GetHeldEntity() as AttackEntity;
+
+            if (attackEntity == null)
+            {
+                return false;
+            }
+
+            return NormalizeBotWeaponDamage(attackEntity, item?.info?.shortname ?? "", runtime);
+        }
+
+        private bool NormalizeBotWeaponDamage(AttackEntity attackEntity, string weaponShortname, BotRuntime runtime)
+        {
+            if (attackEntity == null || Mathf.Abs(attackEntity.npcDamageScale - PlayerLikeDamageScale) <= 0.001f)
+            {
+                return false;
+            }
+
+            var previous = attackEntity.npcDamageScale;
+            attackEntity.npcDamageScale = PlayerLikeDamageScale;
+
+            DebugLog(
+                $"npc-damage-scale:{runtime?.BotKey ?? weaponShortname}",
+                $"{runtime?.DisplayName ?? "Roam bot"} normalized {weaponShortname} NPC weapon damage scale {previous.ToString("0.###", CultureInfo.InvariantCulture)} -> {PlayerLikeDamageScale.ToString("0.###", CultureInfo.InvariantCulture)}.",
+                30f);
+
+            return true;
         }
 
         private void GiveBotMedicalItems(BasePlayer bot)
@@ -2759,6 +4744,11 @@ namespace Oxide.Plugins
                 bot.Kill(BaseNetworkable.DestroyMode.None);
             }
 
+            if (config?.Enabled == true)
+            {
+                timer.Once(config.RespawnDelaySeconds, MaintainPopulation);
+            }
+
             if (!string.IsNullOrWhiteSpace(reason))
             {
                 ThrottledInfo($"despawn:{reason}", $"Despawned roam bot after {reason}.");
@@ -2809,6 +4799,7 @@ namespace Oxide.Plugins
             var victimRuntime = RuntimeFor(victim);
             var attackerRuntime = RuntimeFor(attackerEntity);
             var now = Time.realtimeSinceStartup;
+            var damageTotal = HitDamageTotal(info);
 
             if (victimRuntime != null && attackerRuntime != null)
             {
@@ -2850,12 +4841,20 @@ namespace Oxide.Plugins
             if (victimRuntime != null && IsRealPlayer(attacker))
             {
                 RememberDamageSource(victim, victimRuntime, attacker, now, info);
+                RecordLearningPlayerEvent(attacker, ActionIdString(TacticalActionId.AcquireVisibleTarget), now, damageDealt: damageTotal, targetEntity: victim, targetRuntime: victimRuntime);
                 return null;
             }
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer))
             {
                 RememberDamageDealt(attackerEntity, attackerRuntime, victimPlayer, now);
+                RecordLearningPlayerEvent(victimPlayer, ActionIdString(TacticalActionId.RetreatToCover), now, damageTaken: damageTotal, targetEntity: attackerEntity, targetRuntime: attackerRuntime);
+
+                if (damageTotal >= Math.Max(0.1f, victimPlayer.Health()))
+                {
+                    ApplyBotNativeDeathInfo(victimPlayer, attackerEntity, attackerRuntime, info);
+                    ProtectBotNativeDeathInfoFromScientistOverride(victimPlayer, attackerEntity, attackerRuntime, info, now);
+                }
             }
 
             return null;
@@ -2979,11 +4978,19 @@ namespace Oxide.Plugins
 
             if (botRuntime != null)
             {
+                NormalizeBotWeaponDamage(projectile, projectile?.GetItem()?.info?.shortname ?? "", botRuntime);
                 ApplyBotAimError(projectileShoot, player, botRuntime, Time.realtimeSinceStartup);
                 return;
             }
 
-            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            if (!IsRealPlayer(player) || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            RecordLearningPlayerEvent(player, ActionIdString(TacticalActionId.AcquireVisibleTarget), Time.realtimeSinceStartup);
+
+            if (!config.AI.AllowHearing)
             {
                 return;
             }
@@ -3096,7 +5103,14 @@ namespace Oxide.Plugins
 
         private void OnRocketLaunched(BasePlayer player, BaseEntity entity)
         {
-            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            if (!IsRealPlayer(player) || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            RecordLearningPlayerEvent(player, ActionIdString(TacticalActionId.ThrowGrenade), Time.realtimeSinceStartup, explosive: true);
+
+            if (!config.AI.AllowHearing)
             {
                 return;
             }
@@ -3106,7 +5120,14 @@ namespace Oxide.Plugins
 
         private void OnExplosiveThrown(BasePlayer player, BaseEntity entity)
         {
-            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            if (!IsRealPlayer(player) || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            RecordLearningPlayerEvent(player, ActionIdString(TacticalActionId.ThrowGrenade), Time.realtimeSinceStartup, explosive: true);
+
+            if (!config.AI.AllowHearing)
             {
                 return;
             }
@@ -3116,7 +5137,14 @@ namespace Oxide.Plugins
 
         private void OnMeleeAttack(BasePlayer player, HitInfo info)
         {
-            if (!IsRealPlayer(player) || !config.AI.AllowHearing || ShouldIgnoreSafeZonePlayer(player))
+            if (!IsRealPlayer(player) || ShouldIgnoreSafeZonePlayer(player))
+            {
+                return;
+            }
+
+            RecordLearningPlayerEvent(player, ActionIdString(TacticalActionId.PushTarget), Time.realtimeSinceStartup, melee: true);
+
+            if (!config.AI.AllowHearing)
             {
                 return;
             }
@@ -3138,13 +5166,28 @@ namespace Oxide.Plugins
             var attacker = ResolveKillerPlayer(victim, info);
             var attackerEntity = ResolveKillerEntity(victim, info, attacker);
             var attackerRuntime = RuntimeFor(attackerEntity);
+            var now = Time.realtimeSinceStartup;
+            var pendingBotPlayerDeath = TakePendingBotPlayerDeath(victimPlayer, info, now);
+
+            if (pendingBotPlayerDeath != null)
+            {
+                if (pendingBotPlayerDeath.KillerEntity != null && !pendingBotPlayerDeath.KillerEntity.IsDestroyed)
+                {
+                    attackerEntity = pendingBotPlayerDeath.KillerEntity;
+                }
+
+                if (pendingBotPlayerDeath.KillerRuntime != null)
+                {
+                    attackerRuntime = pendingBotPlayerDeath.KillerRuntime;
+                }
+            }
 
             if (victimRuntime != null)
             {
                 TrackRecentBotDeath(victim, victimRuntime);
                 if (victimPlayer != null)
                 {
-                    MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), Time.realtimeSinceStartup);
+                    MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), now);
                 }
 
                 activeBots.Remove(victim);
@@ -3157,6 +5200,7 @@ namespace Oxide.Plugins
 
                     if (IsRealPlayer(attacker) && attackerRuntime == null)
                     {
+                        RecordLearningPlayerEvent(attacker, ActionIdString(TacticalActionId.AcquireVisibleTarget), now, kill: true, targetEntity: victim, targetRuntime: victimRuntime);
                         var playerStats = EnsurePlayerStats(attacker);
                         playerStats.npc_kills++;
                         HandlePlayerKilledBot(attacker, victim, victimRuntime, info);
@@ -3183,6 +5227,7 @@ namespace Oxide.Plugins
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer) && !ShouldIgnoreSafeZonePlayer(victimPlayer))
             {
+                RecordLearningPlayerEvent(victimPlayer, ActionIdString(TacticalActionId.RetreatToCover), now, died: true, targetEntity: attackerEntity, targetRuntime: attackerRuntime);
                 var playerStats = EnsurePlayerStats(victimPlayer);
                 playerStats.deaths_by_npc++;
                 var botStats = EnsureBotStats(attackerRuntime);
@@ -3195,7 +5240,7 @@ namespace Oxide.Plugins
 
             if (victimPlayer != null)
             {
-                MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), Time.realtimeSinceStartup);
+                MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), now);
             }
         }
 
@@ -3325,8 +5370,10 @@ namespace Oxide.Plugins
             {
                 LoadConfig();
                 LoadData();
+                LoadBehaviorModels();
                 RefreshEligibleKits();
                 RefreshDecisionAdvisor();
+                RefreshLearningTimer();
 
                 if (config.Enabled)
                 {
@@ -3578,6 +5625,7 @@ namespace Oxide.Plugins
         {
             NormalizeConfig();
             SaveConfig();
+            RefreshLearningTimer();
             spawnRetryBlockedUntil = 0f;
 
             if (refreshAdvisor)
@@ -3671,8 +5719,11 @@ namespace Oxide.Plugins
 
             LoadConfig();
             LoadData();
+            LoadBehaviorModels();
             RefreshEligibleKits();
             RefreshDecisionAdvisor();
+            RefreshLearningTimer();
+            MaybePruneDecisionTraceFile(DecisionTraceDataPath(), true);
 
             if (config.Enabled)
             {
@@ -4023,12 +6074,30 @@ namespace Oxide.Plugins
             {
                 FlushDecisionTraces();
                 var path = DecisionTraceDataPath();
+                string pruneMessage;
+                var pruned = TryPruneDecisionTraceFile(path, true, out pruneMessage);
                 var count = File.Exists(path) ? File.ReadLines(path).Count() : 0;
-                Reply(arg, $"Decision trace JSONL: {path} ({count} lines).");
+                var size = File.Exists(path) ? new FileInfo(path).Length : 0L;
+
+                if (pruned)
+                {
+                    Reply(arg, pruneMessage);
+                }
+
+                Reply(arg, $"Decision trace JSONL: {path} ({count} lines, {FormatFileSize(size)}). Retention: max={config.DecisionAdvisor.MaxDecisionTraceFileMegabytes} MB, keep={config.DecisionAdvisor.MaxDecisionTraceLinesAfterPrune} recent lines.");
                 return;
             }
 
-            Reply(arg, "Usage: raidbots.decisions [last [count]|bot <name/key> [count]|export]");
+            if (mode == "prune")
+            {
+                FlushDecisionTraces();
+                string message;
+                TryPruneDecisionTraceFile(DecisionTraceDataPath(), true, out message);
+                Reply(arg, message);
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.decisions [last [count]|bot <name/key> [count]|export|prune]");
         }
 
         [ConsoleCommand("raidbots.advisor")]
@@ -4118,6 +6187,279 @@ namespace Oxide.Plugins
             }
 
             Reply(arg, "Usage: raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot name/key]");
+        }
+
+        [ConsoleCommand("raidbots.learn")]
+        private void CmdLearn(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var mode = ArgString(arg, 0).ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(mode) || mode == "status")
+            {
+                Reply(arg, LearningStatusLine());
+                Reply(arg, "Usage: raidbots.learn status|observe on|off|allow <player>|unallow <player>|build|report [minutes]|export|apply off|shadow|global|profiles|profile list|show|build|delete|weight");
+                return;
+            }
+
+            if (mode == "observe")
+            {
+                if (!TryReadBoolArg(arg, 1, out var enabled))
+                {
+                    Reply(arg, $"Raidlands roam bot observation is {config.Learning.Enabled}. Use raidbots.learn observe on|off.");
+                    return;
+                }
+
+                config.Learning.Enabled = enabled;
+                NormalizeConfig();
+                SaveConfig();
+                RefreshLearningTimer();
+                Reply(arg, $"Raidlands roam bot player observation set to {config.Learning.Enabled}.");
+                return;
+            }
+
+            if (mode == "allow" || mode == "unallow")
+            {
+                var query = ArgStringFrom(arg, 1);
+
+                if (string.IsNullOrWhiteSpace(query))
+                {
+                    Reply(arg, $"Usage: raidbots.learn {mode} <player name or steam id>");
+                    return;
+                }
+
+                var player = FindActivePlayer(query);
+                var steamId = player?.UserIDString ?? (IsSteamId64(query) ? query.Trim() : "");
+
+                if (!IsSteamId64(steamId))
+                {
+                    Reply(arg, $"No connected player or SteamID matched '{query}'.");
+                    return;
+                }
+
+                if (mode == "allow")
+                {
+                    if (!config.Learning.ObservedPlayerSteamIds.Contains(steamId, StringComparer.OrdinalIgnoreCase))
+                    {
+                        config.Learning.ObservedPlayerSteamIds.Add(steamId);
+                    }
+
+                    NormalizeConfig();
+                    SaveConfig();
+                    RefreshLearningTimer();
+                    Reply(arg, $"Added {CleanName(player == null ? query : PlayerName(player))} ({steamId}) to RoamBots observation allowlist.");
+                    return;
+                }
+
+                var removed = config.Learning.ObservedPlayerSteamIds.RemoveAll(value => string.Equals(value, steamId, StringComparison.OrdinalIgnoreCase));
+                NormalizeConfig();
+                SaveConfig();
+                RefreshLearningTimer();
+                Reply(arg, removed > 0 ? $"Removed {steamId} from RoamBots observation allowlist." : $"{steamId} was not on the RoamBots observation allowlist.");
+                return;
+            }
+
+            if (mode == "build")
+            {
+                FlushAllObservationEpisodes(true);
+                var traces = ReadObservationTraces();
+                var built = BuildGlobalBehaviorModels(traces, out var summary);
+                Reply(arg, built > 0 ? $"Built RoamBots learned global skill models. {summary}" : $"No global models built: {summary}");
+                return;
+            }
+
+            if (mode == "report")
+            {
+                var minutes = 60;
+
+                if (TryReadIntArg(arg, 1, out var requested))
+                {
+                    minutes = Clamp(requested, 0, 10080);
+                }
+
+                FlushObservationTraces();
+                Reply(arg, LearningReportLine(minutes));
+                return;
+            }
+
+            if (mode == "export")
+            {
+                FlushObservationTraces();
+                SaveBehaviorModels();
+                Reply(arg, $"RoamBots learning files: traces={ObservationTraceDataPath()} ({CountObservationTraceLines()} lines), models={Path.Combine(Interface.Oxide.DataFileSystem.Directory, BehaviorModelDataFile + ".json")}, training={TrainingRunDataPath()}.");
+                return;
+            }
+
+            if (mode == "clear")
+            {
+                FlushAllObservationEpisodes(false);
+                pendingObservationTraces.Clear();
+                observationTraceSaveTimer?.Destroy();
+                observationTraceSaveTimer = null;
+
+                var path = ObservationTraceDataPath();
+
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                AppendTrainingRun("clear", "ok", "observation traces cleared by admin command");
+                Reply(arg, "Cleared RoamBots player observation traces and pending episodes. Learned models were left intact.");
+                return;
+            }
+
+            if (mode == "apply")
+            {
+                var requested = ArgString(arg, 1);
+                var normalized = NormalizeLearningApplyMode(requested);
+
+                if (string.IsNullOrWhiteSpace(requested) || normalized == LearningApplyOff && NormalizeAdminKey(requested) != LearningApplyOff)
+                {
+                    Reply(arg, "Usage: raidbots.learn apply off|shadow|global|profiles");
+                    return;
+                }
+
+                config.Learning.ApplyMode = normalized;
+                NormalizeConfig();
+                SaveConfig();
+                Reply(arg, $"RoamBots learned behavior apply mode set to {config.Learning.ApplyMode}.");
+                return;
+            }
+
+            if (mode == "profile")
+            {
+                CmdLearnProfile(arg);
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.learn status|observe on|off|allow|unallow|build|report|export|apply|profile");
+        }
+
+        private void CmdLearnProfile(ConsoleSystem.Arg arg)
+        {
+            var action = ArgString(arg, 1).ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(action) || action == "list")
+            {
+                if (behaviorModels.player_profiles.Count == 0)
+                {
+                    Reply(arg, "No RoamBots player profiles have been built yet.");
+                    return;
+                }
+
+                foreach (var entry in behaviorModels.player_profiles.OrderBy(entry => entry.Key).Take(20))
+                {
+                    var weight = config.Learning.PlayerProfileSpawnWeights != null && config.Learning.PlayerProfileSpawnWeights.TryGetValue(entry.Key, out var configuredWeight)
+                        ? configuredWeight
+                        : 0;
+                    Reply(arg, $"{entry.Key}: source={entry.Value.display_name} ({entry.Value.source_steam_id64}), observations={entry.Value.observations}, success={entry.Value.success_rate:0.00}, weight={weight}, {entry.Value.summary}");
+                }
+
+                return;
+            }
+
+            if (action == "show")
+            {
+                var key = NormalizeProfileKey(ArgString(arg, 2));
+
+                if (string.IsNullOrWhiteSpace(key) || !behaviorModels.player_profiles.TryGetValue(key, out var model))
+                {
+                    Reply(arg, "Usage: raidbots.learn profile show <profileKey>");
+                    return;
+                }
+
+                var deltas = string.Join(", ", model.action_score_deltas.OrderByDescending(entry => Math.Abs(entry.Value)).Take(8).Select(entry => $"{entry.Key}:{entry.Value:0.0}"));
+                Reply(arg, $"Profile {key}: source={model.display_name} ({model.source_steam_id64}), built={model.built_at_utc}, observations={model.observations}, success={model.success_rate:0.00}, weighted={model.weighted_success_rate:0.00}, ctx={model.average_target_context_confidence:0.00}, linked={model.target_linked_observations}, high_conf={model.high_confidence_observations}, skill aim={model.skill.AimErrorDegrees:0.00}, reaction={model.skill.ReactionMinSeconds:0.00}-{model.skill.ReactionMaxSeconds:0.00}, aggression={model.skill.Aggression:0.00}, deltas={deltas}");
+                return;
+            }
+
+            if (action == "build")
+            {
+                if (arg?.Args == null || arg.Args.Length < 4)
+                {
+                    Reply(arg, "Usage: raidbots.learn profile build <player name or steam id> <profileKey>");
+                    return;
+                }
+
+                var profileKey = ArgString(arg, arg.Args.Length - 1);
+                var playerQuery = ArgStringRange(arg, 2, arg.Args.Length - 1);
+
+                if (BuildPlayerProfile(playerQuery, profileKey, out var message))
+                {
+                    Reply(arg, message);
+                }
+                else
+                {
+                    Reply(arg, $"Could not build RoamBots profile: {message}");
+                }
+
+                return;
+            }
+
+            if (action == "delete")
+            {
+                var key = NormalizeProfileKey(ArgString(arg, 2));
+
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    Reply(arg, "Usage: raidbots.learn profile delete <profileKey>");
+                    return;
+                }
+
+                var removed = behaviorModels.player_profiles.Remove(key);
+                config.Learning.PlayerProfileSpawnWeights?.Remove(key);
+                SaveBehaviorModels();
+                NormalizeConfig();
+                SaveConfig();
+                Reply(arg, removed ? $"Deleted RoamBots player profile '{key}'. Bots will fall back to skill-tier behavior if that profile was selected." : $"No RoamBots player profile named '{key}' exists.");
+                return;
+            }
+
+            if (action == "weight")
+            {
+                var key = NormalizeProfileKey(ArgString(arg, 2));
+
+                if (string.IsNullOrWhiteSpace(key) || !TryReadIntArg(arg, 3, out var weight))
+                {
+                    Reply(arg, "Usage: raidbots.learn profile weight <profileKey> <weight>");
+                    return;
+                }
+
+                if (!behaviorModels.player_profiles.ContainsKey(key))
+                {
+                    Reply(arg, $"No RoamBots player profile named '{key}' exists.");
+                    return;
+                }
+
+                if (config.Learning.PlayerProfileSpawnWeights == null)
+                {
+                    config.Learning.PlayerProfileSpawnWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                weight = Clamp(weight, 0, 1000);
+
+                if (weight <= 0)
+                {
+                    config.Learning.PlayerProfileSpawnWeights.Remove(key);
+                }
+                else
+                {
+                    config.Learning.PlayerProfileSpawnWeights[key] = weight;
+                }
+
+                NormalizeConfig();
+                SaveConfig();
+                Reply(arg, $"RoamBots player profile '{key}' spawn weight set to {weight}.");
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.learn profile list|show <key>|build <player> <key>|delete <key>|weight <key> <weight>");
         }
 
         [ConsoleCommand("raidbots.land")]
@@ -4769,6 +7111,19 @@ namespace Oxide.Plugins
             return string.IsNullOrWhiteSpace(key) ? "roamer" : key;
         }
 
+        private BotAvatarConfig ChooseBotAvatar(string displayName, int teamId)
+        {
+            var avatars = config?.BotKillIntegration?.BotAvatars;
+
+            if (avatars == null || avatars.Count == 0)
+            {
+                return null;
+            }
+
+            var seed = unchecked((uint)((displayName ?? "").GetHashCode() ^ teamId ^ activeBots.Count));
+            return avatars[(int)(seed % (uint)avatars.Count)];
+        }
+
         private bool TryFindSpawnPosition(out Vector3 position, out string preferredPrefab)
         {
             var mode = NormalizeSpawnMode(config.Spawn.SpawnMode);
@@ -5364,7 +7719,8 @@ namespace Oxide.Plugins
 
                 if (ShouldDespawnHardStuck(bot, runtime, now))
                 {
-                    DespawnBot(bot, $"hard-stuck pathing ({runtime.ConsecutiveFailedPaths} failed paths, state={runtime.State})");
+                    var stuckSeconds = runtime.Movement.StuckSince <= 0f ? 0f : now - runtime.Movement.StuckSince;
+                    DespawnBot(bot, $"hard-stuck pathing ({runtime.ConsecutiveFailedPaths} failed paths, stuck {stuckSeconds.ToString("0", CultureInfo.InvariantCulture)}s, state={runtime.State})");
                     continue;
                 }
 
@@ -5379,6 +7735,7 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                ApplyLearnedBehaviorScoring(bot, runtime, candidates, now);
                 request.CandidateActions = candidates;
                 var decision = DecideOrFallback(bot, runtime, request, candidates, now);
                 ExecuteDecision(bot, runtime, decision, now);
@@ -5846,7 +8203,7 @@ namespace Oxide.Plugins
             AddAdminButton(container, panel, "X", "raidbots.ui close", 0.91f, 0.94f, 0.98f, 0.985f, "0.45 0.12 0.12 0.95", 13);
 
             var tabX = 0.025f;
-            var tabWidth = 0.102f;
+            var tabWidth = 0.092f;
 
             foreach (var adminTab in AdminPanelTabs)
             {
@@ -5884,6 +8241,9 @@ namespace Oxide.Plugins
                     break;
                 case "advisor":
                     BuildAdminAdvisorTab(container, panel);
+                    break;
+                case "learning":
+                    BuildAdminLearningTab(container, panel);
                     break;
                 case "debug":
                     BuildAdminDebugTab(container, panel);
@@ -6011,14 +8371,15 @@ namespace Oxide.Plugins
             AddAdminIntControl(container, panel, "Barricade cap", "max_barricades", config.AI.MaxActiveBotBarricades, 1, 5, 0.53f, 0.65f, 0.95f, "utility");
             AddAdminIntControl(container, panel, "Med amount", "bot_med_amount", config.AI.BotMedicalItemAmount, 1, 3, 0.05f, 0.565f, 0.47f, "utility");
             AddAdminIntControl(container, panel, "Stuck paths", "hard_stuck_paths", config.AI.HardStuckFailedPathsToDespawn, 5, 20, 0.53f, 0.565f, 0.95f, "utility");
-            AddAdminFloatControl(container, panel, "Grenade CD", "grenade_cooldown", config.AI.GrenadeCooldownSeconds, 5f, 15f, 0.05f, 0.48f, 0.47f, "utility");
-            AddAdminFloatControl(container, panel, "Team nade CD", "team_grenade_cooldown", config.AI.TeamGrenadeCooldownSeconds, 2f, 10f, 0.53f, 0.48f, 0.95f, "utility");
-            AddAdminFloatControl(container, panel, "Grenade max", "grenade_max", config.AI.GrenadeMaxThrowDistance, 2f, 10f, 0.05f, 0.395f, 0.47f, "utility");
-            AddAdminFloatControl(container, panel, "Smoke max", "smoke_max", config.AI.SmokeMaxThrowDistance, 2f, 10f, 0.53f, 0.395f, 0.95f, "utility");
-            AddAdminFloatControl(container, panel, "Barricade CD", "barricade_cooldown", config.AI.BarricadeCooldownSeconds, 2f, 10f, 0.05f, 0.31f, 0.47f, "utility");
-            AddAdminFloatControl(container, panel, "Cover heal", "cover_heal", config.AI.LowHealthCoverHealPerSecond, 1f, 5f, 0.53f, 0.31f, 0.95f, "utility");
-            AddAdminFloatControl(container, panel, "Base radius", "base_radius", config.AI.BaseAvoidanceRadius, 1f, 5f, 0.05f, 0.225f, 0.47f, "utility");
-            AddAdminFloatControl(container, panel, "Base hold", "base_hold", config.AI.BaseHoldSeconds, 2f, 10f, 0.53f, 0.225f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Stuck despawn", "hard_stuck_seconds", config.AI.HardStuckDespawnSeconds, 30f, 60f, 0.05f, 0.48f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Grenade CD", "grenade_cooldown", config.AI.GrenadeCooldownSeconds, 5f, 15f, 0.53f, 0.48f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Team nade CD", "team_grenade_cooldown", config.AI.TeamGrenadeCooldownSeconds, 2f, 10f, 0.05f, 0.395f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Grenade max", "grenade_max", config.AI.GrenadeMaxThrowDistance, 2f, 10f, 0.53f, 0.395f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Smoke max", "smoke_max", config.AI.SmokeMaxThrowDistance, 2f, 10f, 0.05f, 0.31f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Barricade CD", "barricade_cooldown", config.AI.BarricadeCooldownSeconds, 2f, 10f, 0.53f, 0.31f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Cover heal", "cover_heal", config.AI.LowHealthCoverHealPerSecond, 1f, 5f, 0.05f, 0.225f, 0.47f, "utility");
+            AddAdminFloatControl(container, panel, "Base radius", "base_radius", config.AI.BaseAvoidanceRadius, 1f, 5f, 0.53f, 0.225f, 0.95f, "utility");
+            AddAdminFloatControl(container, panel, "Base hold", "base_hold", config.AI.BaseHoldSeconds, 2f, 10f, 0.05f, 0.14f, 0.47f, "utility");
         }
 
         private void BuildAdminRewardsTab(CuiElementContainer container, string panel)
@@ -6058,6 +8419,43 @@ namespace Oxide.Plugins
             AddAdminIntControl(container, panel, "Concurrent", "advisor_concurrent", config.DecisionAdvisor.MaxConcurrentRequests, 1, 2, 0.53f, 0.315f, 0.95f, "advisor");
             AddAdminIntControl(container, panel, "Events", "advisor_events", config.DecisionAdvisor.MaxRecentEventsInRequest, 2, 8, 0.05f, 0.23f, 0.47f, "advisor");
             AddAdminIntControl(container, panel, "Candidates", "advisor_candidates", config.DecisionAdvisor.MaxCandidateActions, 1, 4, 0.53f, 0.23f, 0.95f, "advisor");
+            AddAdminFloatControl(container, panel, "Player gate", "advisor_player_gate", config.DecisionAdvisor.RequireRealPlayerWithinMeters, 50f, 100f, 0.05f, 0.145f, 0.47f, "advisor");
+            AddAdminToggle(container, panel, "Engaged only", "advisor_engaged_only", config.DecisionAdvisor.RequireActivePlayerEngagement, 0.53f, 0.145f, 0.77f, "advisor");
+        }
+
+        private void BuildAdminLearningTab(CuiElementContainer container, string panel)
+        {
+            AddAdminSection(container, panel, "Player Observation Learning", 0.04f, 0.815f, 0.96f, 0.85f);
+            AddAdminButton(container, panel, "Observe On", "raidbots.learn observe on", 0.05f, 0.76f, 0.20f, 0.815f, config.Learning.Enabled ? "0.14 0.42 0.22 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Observe Off", "raidbots.learn observe off", 0.215f, 0.76f, 0.37f, 0.815f, !config.Learning.Enabled ? "0.42 0.18 0.12 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Build Global", "raidbots.learn build", 0.385f, 0.76f, 0.56f, 0.815f, "0.16 0.31 0.48 0.96");
+            AddAdminButton(container, panel, "Report", "raidbots.learn report 60", 0.575f, 0.76f, 0.72f, 0.815f, "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Export", "raidbots.learn export", 0.735f, 0.76f, 0.88f, 0.815f, "0.18 0.21 0.26 0.96");
+
+            AddAdminMetric(container, panel, "Mode", config.Learning.ApplyMode, 0.05f, 0.67f);
+            AddAdminMetric(container, panel, "Allowed", config.Learning.ObservedPlayerSteamIds.Count.ToString(CultureInfo.InvariantCulture), 0.29f, 0.67f);
+            AddAdminMetric(container, panel, "Skill models", behaviorModels?.skill_models?.Count.ToString(CultureInfo.InvariantCulture) ?? "0", 0.53f, 0.67f);
+            AddAdminMetric(container, panel, "Profiles", behaviorModels?.player_profiles?.Count.ToString(CultureInfo.InvariantCulture) ?? "0", 0.77f, 0.67f);
+
+            AddAdminButton(container, panel, "Apply Off", "raidbots.learn apply off", 0.05f, 0.56f, 0.20f, 0.615f, config.Learning.ApplyMode == LearningApplyOff ? "0.42 0.18 0.12 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Shadow", "raidbots.learn apply shadow", 0.215f, 0.56f, 0.37f, 0.615f, config.Learning.ApplyMode == LearningApplyShadow ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Global", "raidbots.learn apply global", 0.385f, 0.56f, 0.54f, 0.615f, config.Learning.ApplyMode == LearningApplyGlobal ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+            AddAdminButton(container, panel, "Profiles", "raidbots.learn apply profiles", 0.555f, 0.56f, 0.72f, 0.615f, config.Learning.ApplyMode == LearningApplyProfiles ? "0.14 0.34 0.52 0.96" : "0.18 0.21 0.26 0.96");
+
+            AddAdminFloatControl(container, panel, "Sample sec", "learning_sample", config.Learning.SampleIntervalSeconds, 0.25f, 1f, 0.05f, 0.45f, 0.47f, "learning");
+            AddAdminFloatControl(container, panel, "Outcome sec", "learning_outcome", config.Learning.OutcomeWindowSeconds, 1f, 5f, 0.53f, 0.45f, 0.95f, "learning");
+            AddAdminFloatControl(container, panel, "Global delta", "learning_global_delta", config.Learning.MaximumGlobalScoreDelta, 2f, 8f, 0.05f, 0.365f, 0.47f, "learning");
+            AddAdminFloatControl(container, panel, "Profile delta", "learning_profile_delta", config.Learning.MaximumProfileScoreDelta, 2f, 8f, 0.53f, 0.365f, 0.95f, "learning");
+
+            var latestProfiles = behaviorModels?.player_profiles == null || behaviorModels.player_profiles.Count == 0
+                ? "none"
+                : string.Join(", ", behaviorModels.player_profiles.Keys.OrderBy(key => key).Take(5));
+            var spawnWeights = config.Learning.PlayerProfileSpawnWeights == null || config.Learning.PlayerProfileSpawnWeights.Count == 0
+                ? "none"
+                : string.Join(", ", config.Learning.PlayerProfileSpawnWeights.OrderBy(entry => entry.Key).Take(5).Select(entry => $"{entry.Key}:{entry.Value}"));
+            AddAdminLabel(container, panel, $"Recent profiles: {AdminEscape(AdminShorten(latestProfiles, 120))}", 0.05f, 0.25f, 0.95f, 0.305f, 10, TextAnchor.MiddleLeft, "0.74 0.80 0.86 1");
+            AddAdminLabel(container, panel, $"Profile spawn weights: {AdminEscape(AdminShorten(spawnWeights, 120))}", 0.05f, 0.19f, 0.95f, 0.245f, 10, TextAnchor.MiddleLeft, "0.74 0.80 0.86 1");
+            AddAdminLabel(container, panel, "Use console: raidbots.learn allow <player>, profile build <player> <key>, profile weight <key> <weight>.", 0.05f, 0.11f, 0.95f, 0.17f, 10, TextAnchor.MiddleLeft, "0.95 0.78 0.58 1");
         }
 
         private void BuildAdminDebugTab(CuiElementContainer container, string panel)
@@ -6283,6 +8681,7 @@ namespace Oxide.Plugins
                 + $"\nAction: {action}"
                 + $"\nLOS: {(runtime.Memory.HasLineOfSight ? "Y" : "N")}  Exposure: {runtime.Memory.TargetExposureFraction:0.00} ({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints})"
                 + $"\nSkill: <color={skillColor}>{runtime.SkillTier}</color>  Kit: {runtime.KitName}  Aim: {aimStatus}"
+                + $"\nLearning: {LearningRuntimeStatus(runtime)}"
                 + $"\nHP: {health}/{maxHealth}  Weapon: {weapon}  Ammo: {ammo}"
                 + $"\nClan: {BotClanLabel(runtime)}"
                 + $"\nK/D: {stats.kills}/{stats.deaths} ({kd})  Team: {runtime.TeamId}  Role: {runtime.SquadRole}"
@@ -7130,6 +9529,7 @@ namespace Oxide.Plugins
         private DecisionRequest BuildDecisionRequest(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
             var target = runtime.Memory.Target;
+            var engagementSignal = PlayerEngagementSignal(bot, runtime, now);
             var request = new DecisionRequest
             {
                 RequestId = $"{runtime.BotKey}-{now.ToString("0.000", CultureInfo.InvariantCulture)}",
@@ -7148,6 +9548,10 @@ namespace Oxide.Plugins
                 TargetExposureFraction = runtime.Memory.TargetExposureFraction,
                 TargetConfidence = runtime.Memory.TargetConfidence,
                 DistanceToTarget = target == null ? -1f : Vector3.Distance(bot.transform.position, target.transform.position),
+                NearestRealPlayerDistance = DistanceToNearestRealPlayer(bot.transform.position),
+                AdvisorRealPlayerGateMeters = config.DecisionAdvisor.RequireRealPlayerWithinMeters,
+                EngagedWithRealPlayer = !string.IsNullOrWhiteSpace(engagementSignal),
+                EngagementSignal = string.IsNullOrWhiteSpace(engagementSignal) ? "none" : engagementSignal,
                 SecondsSinceLastSeen = runtime.Memory.LastSeenAt <= 0f ? 999f : now - runtime.Memory.LastSeenAt,
                 SecondsSinceLastHeard = runtime.Memory.LastHeardAt <= 0f ? 999f : now - runtime.Memory.LastHeardAt,
                 NearbyAllies = NearbyAllies(bot, runtime),
@@ -7216,6 +9620,10 @@ namespace Oxide.Plugins
                 ["target_exposure_fraction"] = request.TargetExposureFraction,
                 ["target_confidence"] = request.TargetConfidence,
                 ["distance_to_target"] = request.DistanceToTarget,
+                ["nearest_real_player_distance"] = request.NearestRealPlayerDistance,
+                ["advisor_real_player_gate_meters"] = request.AdvisorRealPlayerGateMeters,
+                ["engaged_with_real_player"] = request.EngagedWithRealPlayer,
+                ["engagement_signal"] = request.EngagementSignal ?? "none",
                 ["seconds_since_last_seen"] = request.SecondsSinceLastSeen,
                 ["seconds_since_last_heard"] = request.SecondsSinceLastHeard,
                 ["nearby_allies"] = request.NearbyAllies,
@@ -8655,6 +11063,7 @@ namespace Oxide.Plugins
             {
                 Id = ActionIdString(actionId),
                 ActionId = actionId,
+                BaseHeuristicScore = score,
                 HeuristicScore = score,
                 Risk = risk,
                 ReasonFromCode = reason,
@@ -8672,7 +11081,7 @@ namespace Oxide.Plugins
             };
             DecisionAdvisorResult advisorResult = null;
 
-            if (ShouldAskAdvisor(runtime, candidates, now))
+            if (ShouldAskAdvisor(bot, runtime, request, candidates, now))
             {
                 decision.AdvisorRequested = true;
                 runtime.Decisions.LastAdvisorRequestAt = now;
@@ -8731,6 +11140,10 @@ namespace Oxide.Plugins
                     fallback_reason = decision.FallbackReason,
                     final_action = decision.Selected?.Id ?? "none",
                     final_score = decision.Selected?.HeuristicScore ?? 0f,
+                    behavior_model_key = runtime.BehaviorModelKey ?? "",
+                    player_profile_key = runtime.PlayerProfileKey ?? "",
+                    learned_score_delta = decision.Selected?.LearnedScoreDelta ?? 0f,
+                    learned_reason = decision.Selected?.LearnedReason ?? runtime.LastLearnedReason ?? "none",
                     protection_state = runtime.LastProtectionReason ?? "none",
                     barricade_anchor_state = BarricadeAnchorStatus(runtime, now),
                     medical_state = MedicalStatus(bot, runtime, now),
@@ -8811,6 +11224,10 @@ namespace Oxide.Plugins
                     fallback_reason = accepted ? $"{config.DecisionAdvisor.Mode}_advisor_validated_heuristic_executed" : $"advisor_rejected:{status}",
                     final_action = fallback?.Id ?? "none",
                     final_score = fallback?.HeuristicScore ?? 0f,
+                    behavior_model_key = runtime?.BehaviorModelKey ?? "",
+                    player_profile_key = runtime?.PlayerProfileKey ?? "",
+                    learned_score_delta = fallback?.LearnedScoreDelta ?? 0f,
+                    learned_reason = fallback?.LearnedReason ?? runtime?.LastLearnedReason ?? "none",
                     protection_state = runtime?.LastProtectionReason ?? "none",
                     barricade_anchor_state = runtime == null ? "none" : BarricadeAnchorStatus(runtime, now),
                     medical_state = runtime == null ? "none" : MedicalStatus(null, runtime, now),
@@ -8956,9 +11373,9 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool ShouldAskAdvisor(BotRuntime runtime, List<TacticalActionCandidate> candidates, float now)
+        private bool ShouldAskAdvisor(BaseCombatEntity bot, BotRuntime runtime, DecisionRequest request, List<TacticalActionCandidate> candidates, float now)
         {
-            if (config.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled || candidates.Count <= 1)
+            if (config.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled || runtime == null || candidates == null || candidates.Count <= 1)
             {
                 return false;
             }
@@ -8968,9 +11385,90 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            return config.DecisionAdvisor.AskWhenActionScoresAreClose && AreTopScoresClose(candidates)
+            var hasDecisionTrigger = config.DecisionAdvisor.AskWhenActionScoresAreClose && AreTopScoresClose(candidates)
                 || config.DecisionAdvisor.AskWhenBotIsStuck && runtime.ConsecutiveFailedPaths > 0
                 || config.DecisionAdvisor.AskWhenPushRetreatOrFlankIsHighImpact && HasHighImpactCandidate(candidates);
+
+            if (!hasDecisionTrigger)
+            {
+                return false;
+            }
+
+            string engagementStatus;
+
+            if (!CanAskAdvisorForPlayerEngagement(bot, runtime, request, now, out engagementStatus))
+            {
+                runtime.Decisions.LastAdvisorStatus = engagementStatus;
+                advisorStats.EngagementSkips++;
+                advisorStats.LastStatus = engagementStatus;
+                return false;
+            }
+
+            string proximityStatus;
+
+            if (!CanAskAdvisorNearRealPlayer(bot, request, out proximityStatus))
+            {
+                runtime.Decisions.LastAdvisorStatus = proximityStatus;
+                advisorStats.ProximitySkips++;
+                advisorStats.LastStatus = proximityStatus;
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool CanAskAdvisorForPlayerEngagement(BaseCombatEntity bot, BotRuntime runtime, DecisionRequest request, float now, out string status)
+        {
+            status = "";
+
+            if (config.DecisionAdvisor.RequireActivePlayerEngagement != true)
+            {
+                return true;
+            }
+
+            if (request?.EngagedWithRealPlayer == true)
+            {
+                return true;
+            }
+
+            var engagementSignal = PlayerEngagementSignal(bot, runtime, now);
+
+            if (!string.IsNullOrWhiteSpace(engagementSignal))
+            {
+                return true;
+            }
+
+            status = "advisor_skipped_not_engaged_with_player";
+            return false;
+        }
+
+        private bool CanAskAdvisorNearRealPlayer(BaseCombatEntity bot, DecisionRequest request, out string status)
+        {
+            status = "";
+            var gateMeters = Math.Max(0f, config.DecisionAdvisor.RequireRealPlayerWithinMeters);
+
+            if (gateMeters <= 0f)
+            {
+                return true;
+            }
+
+            var nearestDistance = request?.NearestRealPlayerDistance ?? -1f;
+
+            if (nearestDistance < 0f && bot != null)
+            {
+                nearestDistance = DistanceToNearestRealPlayer(bot.transform.position);
+            }
+
+            if (nearestDistance >= 0f && nearestDistance <= gateMeters)
+            {
+                return true;
+            }
+
+            status = nearestDistance < 0f
+                ? $"advisor_skipped_no_real_player_within_{gateMeters.ToString("0", CultureInfo.InvariantCulture)}m"
+                : $"advisor_skipped_nearest_real_player_{nearestDistance.ToString("0", CultureInfo.InvariantCulture)}m_over_{gateMeters.ToString("0", CultureInfo.InvariantCulture)}m";
+
+            return false;
         }
 
         private bool AreTopScoresClose(List<TacticalActionCandidate> candidates)
@@ -9306,6 +11804,7 @@ namespace Oxide.Plugins
                 var lines = pendingDecisionTraces.Select(trace => JsonConvert.SerializeObject(trace, Formatting.None)).ToArray();
                 File.AppendAllLines(dataPath, lines);
                 pendingDecisionTraces.Clear();
+                MaybePruneDecisionTraceFile(dataPath, false);
             }
             catch (Exception ex)
             {
@@ -9328,14 +11827,189 @@ namespace Oxide.Plugins
             }
 
             var normalizedBotKey = (botKey ?? "").Trim();
-            var lines = File.ReadLines(path)
-                .Where(line => string.IsNullOrWhiteSpace(normalizedBotKey) || DecisionTraceLineMatchesBot(line, normalizedBotKey))
-                .Reverse()
-                .Take(Math.Max(1, count))
-                .Reverse()
-                .ToList();
+            return ReadRecentDecisionTraceLines(path, Math.Max(1, count), normalizedBotKey, DecisionTraceReadMaxBytes());
+        }
 
-            return lines;
+        private bool MaybePruneDecisionTraceFile(string path, bool force)
+        {
+            string message;
+            var pruned = TryPruneDecisionTraceFile(path, force, out message);
+
+            if (pruned && !string.IsNullOrWhiteSpace(message))
+            {
+                Puts(message);
+            }
+
+            return pruned;
+        }
+
+        private bool TryPruneDecisionTraceFile(string path, bool force, out string message)
+        {
+            message = "";
+
+            try
+            {
+                var decisionConfig = config?.DecisionAdvisor;
+
+                if (decisionConfig == null)
+                {
+                    message = "Decision trace pruning skipped: decision advisor config is not loaded.";
+                    return false;
+                }
+
+                if (decisionConfig.MaxDecisionTraceFileMegabytes <= 0 || decisionConfig.MaxDecisionTraceLinesAfterPrune <= 0)
+                {
+                    message = "Decision trace pruning is disabled by config.";
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    message = "Decision trace file does not exist yet.";
+                    return false;
+                }
+
+                var now = Time.realtimeSinceStartup;
+                var interval = Math.Max(15f, decisionConfig.DecisionTracePruneCheckIntervalSeconds);
+
+                if (!force && lastDecisionTracePruneCheckAt > 0f && now - lastDecisionTracePruneCheckAt < interval)
+                {
+                    message = $"Decision trace pruning skipped: next check in {(interval - (now - lastDecisionTracePruneCheckAt)):0}s.";
+                    return false;
+                }
+
+                lastDecisionTracePruneCheckAt = now;
+                var info = new FileInfo(path);
+                var maxBytes = DecisionTraceMaxBytes();
+
+                if (info.Length <= maxBytes)
+                {
+                    message = $"Decision trace file is already within retention: {FormatFileSize(info.Length)} / {FormatFileSize(maxBytes)}.";
+                    return false;
+                }
+
+                var beforeBytes = info.Length;
+                var retainedLines = ReadRecentDecisionTraceLines(path, decisionConfig.MaxDecisionTraceLinesAfterPrune, "", maxBytes);
+                var tempPath = path + ".tmp";
+
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllLines(tempPath, retainedLines);
+
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                File.Move(tempPath, path);
+
+                var afterBytes = new FileInfo(path).Length;
+                message = $"Pruned decision trace JSONL from {FormatFileSize(beforeBytes)} to {FormatFileSize(afterBytes)}; kept {retainedLines.Count} recent line{(retainedLines.Count == 1 ? "" : "s")} (cap {FormatFileSize(maxBytes)} / {decisionConfig.MaxDecisionTraceLinesAfterPrune} lines).";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                message = $"Could not prune roam bot decision traces: {ex.GetType().Name}: {ex.Message}";
+                PrintWarning(message);
+                return false;
+            }
+        }
+
+        private List<string> ReadRecentDecisionTraceLines(string path, int count, string botKey, long maxBytesToScan)
+        {
+            var matches = new List<string>();
+
+            if (count <= 0 || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return matches;
+            }
+
+            var normalizedBotKey = (botKey ?? "").Trim();
+
+            try
+            {
+                const int bufferSize = 65536;
+                var buffer = new byte[bufferSize];
+                var carry = "";
+
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    var position = stream.Length;
+                    var bytesScanned = 0L;
+
+                    while (position > 0 && matches.Count < count && (maxBytesToScan <= 0L || bytesScanned < maxBytesToScan))
+                    {
+                        var remainingScanBytes = maxBytesToScan <= 0L ? position : Math.Min(position, maxBytesToScan - bytesScanned);
+
+                        if (remainingScanBytes <= 0L)
+                        {
+                            break;
+                        }
+
+                        var bytesToRead = (int) Math.Min(bufferSize, remainingScanBytes);
+                        position -= bytesToRead;
+                        stream.Seek(position, SeekOrigin.Begin);
+                        var read = stream.Read(buffer, 0, bytesToRead);
+
+                        if (read <= 0)
+                        {
+                            break;
+                        }
+
+                        bytesScanned += read;
+                        var chunk = System.Text.Encoding.UTF8.GetString(buffer, 0, read) + carry;
+                        var lines = chunk.Split('\n');
+                        carry = lines.Length > 0 ? lines[0] : "";
+
+                        for (var index = lines.Length - 1; index >= 1 && matches.Count < count; index--)
+                        {
+                            var line = lines[index].TrimEnd('\r');
+
+                            if (ShouldIncludeDecisionTraceLine(line, normalizedBotKey))
+                            {
+                                matches.Add(line);
+                            }
+                        }
+                    }
+
+                    if (position <= 0 && matches.Count < count && ShouldIncludeDecisionTraceLine(carry, normalizedBotKey))
+                    {
+                        matches.Add(carry.TrimEnd('\r'));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read roam bot decision traces: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            matches.Reverse();
+            return matches;
+        }
+
+        private bool ShouldIncludeDecisionTraceLine(string line, string normalizedBotKey)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return false;
+            }
+
+            return string.IsNullOrWhiteSpace(normalizedBotKey) || DecisionTraceLineMatchesBot(line, normalizedBotKey);
+        }
+
+        private long DecisionTraceMaxBytes()
+        {
+            var megabytes = Math.Max(1, config?.DecisionAdvisor?.MaxDecisionTraceFileMegabytes ?? 128);
+            return megabytes * 1024L * 1024L;
+        }
+
+        private long DecisionTraceReadMaxBytes()
+        {
+            return Math.Max(8L * 1024L * 1024L, DecisionTraceMaxBytes());
         }
 
         private bool DecisionTraceLineMatchesBot(string line, string botKey)
@@ -9370,12 +12044,19 @@ namespace Oxide.Plugins
                 var protection = (string) json["protection_state"] ?? "none";
                 var anchor = (string) json["barricade_anchor_state"] ?? "none";
                 var medical = (string) json["medical_state"] ?? "none";
+                var model = (string) json["behavior_model_key"] ?? "";
+                var profile = (string) json["player_profile_key"] ?? "";
+                var learnedDelta = json.Value<float?>("learned_score_delta") ?? 0f;
+                var learnedReason = (string) json["learned_reason"] ?? "none";
                 var candidates = (json["candidates"] as JArray)?.Count ?? 0;
                 var advisor = string.IsNullOrWhiteSpace(advisorAction)
                     ? $"advisor={advisorStatus}"
                     : $"advisor={advisorStatus}/{advisorAction} conf={advisorConfidence:0.00} latency={advisorLatency}ms";
+                var learning = string.IsNullOrWhiteSpace(model)
+                    ? "learn=none"
+                    : $"learn={model}{(string.IsNullOrWhiteSpace(profile) ? "" : "/" + profile)} delta={learnedDelta:0.0} reason={learnedReason}";
 
-                return $"{botId}: state={state}, action={finalAction}, score={finalScore:0.0}, candidates={candidates}, protect={protection}, anchor={anchor}, heal={medical}, {advisor}, fallback={fallback}";
+                return $"{botId}: state={state}, action={finalAction}, score={finalScore:0.0}, candidates={candidates}, {learning}, protect={protection}, anchor={anchor}, heal={medical}, {advisor}, fallback={fallback}";
             }
             catch
             {
@@ -9394,14 +12075,16 @@ namespace Oxide.Plugins
                 ? "not_used"
                 : (HasResolvedAdvisorApiKey() ? "set" : "missing");
             var keySource = DescribeSecretSource(decisionConfig.ApiKey);
+            var playerGate = decisionConfig.RequireRealPlayerWithinMeters <= 0f ? "off" : KillDistanceLabel(decisionConfig.RequireRealPlayerWithinMeters);
+            var engagementGate = decisionConfig.RequireActivePlayerEngagement ? $"on/{decisionConfig.PlayerEngagementMemorySeconds.ToString("0", CultureInfo.InvariantCulture)}s" : "off";
 
-            return $"Raidlands roam bot advisor: enabled={decisionConfig.Enabled}, provider={decisionConfig.Provider}, mode={decisionConfig.Mode}, shadow={decisionConfig.ShadowMode}, configured={advisor.IsConfigured}, endpoint={endpoint}, model={model}, apiKey={key}, apiKeySource={keySource}, pending={pendingAdvisorDecisions.Count}/{decisionConfig.MaxConcurrentRequests}, last={advisorStats.LastStatus}.";
+            return $"Raidlands roam bot advisor: enabled={decisionConfig.Enabled}, provider={decisionConfig.Provider}, mode={decisionConfig.Mode}, shadow={decisionConfig.ShadowMode}, engagedOnly={engagementGate}, playerGate={playerGate}, configured={advisor.IsConfigured}, endpoint={endpoint}, model={model}, apiKey={key}, apiKeySource={keySource}, pending={pendingAdvisorDecisions.Count}/{decisionConfig.MaxConcurrentRequests}, last={advisorStats.LastStatus}.";
         }
 
         private string AdvisorStatsLine()
         {
             PruneExpiredAdvisorRequests(Time.realtimeSinceStartup);
-            return $"Raidlands roam bot advisor stats: requests={advisorStats.TotalRequests}, submitted={advisorStats.SubmittedRequests}, pending={pendingAdvisorDecisions.Count}, sync_failures={advisorStats.SynchronousFailures}, ok={advisorStats.SuccessResponses}, rejected={advisorStats.RejectedResponses}, invalid_json={advisorStats.InvalidJsonResponses}, invalid_action={advisorStats.InvalidActionResponses}, low_confidence={advisorStats.LowConfidenceResponses}, late={advisorStats.LateResponses}, http={advisorStats.HttpFailures}, timeout={advisorStats.TimeoutResponses}, last={advisorStats.LastStatus}/{advisorStats.LastActionId} conf={advisorStats.LastConfidence:0.00} latency={advisorStats.LastLatencyMilliseconds}ms.";
+            return $"Raidlands roam bot advisor stats: requests={advisorStats.TotalRequests}, submitted={advisorStats.SubmittedRequests}, pending={pendingAdvisorDecisions.Count}, engagement_skips={advisorStats.EngagementSkips}, proximity_skips={advisorStats.ProximitySkips}, sync_failures={advisorStats.SynchronousFailures}, ok={advisorStats.SuccessResponses}, rejected={advisorStats.RejectedResponses}, invalid_json={advisorStats.InvalidJsonResponses}, invalid_action={advisorStats.InvalidActionResponses}, low_confidence={advisorStats.LowConfidenceResponses}, late={advisorStats.LateResponses}, http={advisorStats.HttpFailures}, timeout={advisorStats.TimeoutResponses}, last={advisorStats.LastStatus}/{advisorStats.LastActionId} conf={advisorStats.LastConfidence:0.00} latency={advisorStats.LastLatencyMilliseconds}ms.";
         }
 
         private string ActionIdString(TacticalActionId actionId)
@@ -12297,6 +14980,7 @@ namespace Oxide.Plugins
                 return new CombatProfile();
             }
 
+            NormalizeBotActiveWeaponDamage(bot, runtime);
             var shortname = ActiveWeaponShortname(bot);
 
             if (runtime.Combat != null && string.Equals(runtime.Combat.WeaponShortname, shortname, StringComparison.OrdinalIgnoreCase))
@@ -12544,6 +15228,7 @@ namespace Oxide.Plugins
             }
 
             var weaponShortname = activeItem?.info?.shortname ?? "";
+            NormalizeBotWeaponDamage(projectile, weaponShortname, RuntimeFor(bot));
             var capacity = MagazineCapacity(magazine, weaponShortname);
 
             if (magazine.contents > 0)
@@ -12750,17 +15435,29 @@ namespace Oxide.Plugins
 
         private bool ShouldDespawnHardStuck(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
-            if (bot == null || runtime == null || config.AI.HardStuckFailedPathsToDespawn <= 0)
+            if (bot == null || runtime == null)
             {
                 return false;
             }
 
-            if (!runtime.Movement.IsStuck || runtime.Movement.StuckSince <= 0f || runtime.ConsecutiveFailedPaths < config.AI.HardStuckFailedPathsToDespawn)
+            if (!runtime.Movement.IsStuck || runtime.Movement.StuckSince <= 0f)
             {
                 return false;
             }
 
-            return now - runtime.Movement.StuckSince >= Math.Max(10f, config.AI.StuckDetectionSeconds * 3f);
+            var stuckSeconds = now - runtime.Movement.StuckSince;
+
+            if (config.AI.HardStuckDespawnSeconds > 0f && stuckSeconds >= config.AI.HardStuckDespawnSeconds)
+            {
+                return true;
+            }
+
+            if (config.AI.HardStuckFailedPathsToDespawn <= 0 || runtime.ConsecutiveFailedPaths < config.AI.HardStuckFailedPathsToDespawn)
+            {
+                return false;
+            }
+
+            return stuckSeconds >= Math.Max(10f, config.AI.StuckDetectionSeconds * 3f);
         }
 
         private BasePlayer NearestRealPlayer(Vector3 position)
@@ -12769,6 +15466,80 @@ namespace Oxide.Plugins
                 .Where(player => IsRealPlayer(player) && player.IsConnected && !player.IsDead() && !player.IsSleeping() && !ShouldIgnoreSafeZonePlayer(player))
                 .OrderBy(player => Vector3.Distance(position, player.transform.position))
                 .FirstOrDefault();
+        }
+
+        private float DistanceToNearestRealPlayer(Vector3 position)
+        {
+            var player = NearestRealPlayer(position);
+            return player == null ? -1f : Vector3.Distance(position, player.transform.position);
+        }
+
+        private string PlayerEngagementSignal(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            if (bot == null || runtime?.Memory == null)
+            {
+                return "";
+            }
+
+            var memory = runtime.Memory;
+            var window = Math.Max(1f, config?.DecisionAdvisor?.PlayerEngagementMemorySeconds ?? 45f);
+            var target = ActiveRealPlayerForEngagement(memory.TargetUserId);
+
+            if (target != null)
+            {
+                if (memory.HasLineOfSight
+                    && (memory.Target == target || CombatTargetId(memory.Target) == CombatTargetId(target) || memory.TargetUserId == CombatTargetId(target)))
+                {
+                    return "visible_player";
+                }
+
+                if (memory.LastSeenAt > 0f && now - memory.LastSeenAt <= window)
+                {
+                    return "recent_seen_player";
+                }
+
+                var hearingWindow = Math.Min(window, Math.Max(1f, config.AI.SoundInvestigationCommitmentSeconds));
+
+                if (memory.LastHeardAt > 0f && now - memory.LastHeardAt <= hearingWindow)
+                {
+                    return "recent_heard_player";
+                }
+
+                if (runtime.LastDamageDealtAt > 0f && now - runtime.LastDamageDealtAt <= window)
+                {
+                    return "recent_damage_to_player";
+                }
+            }
+
+            if (IsEngageableRealPlayer(memory.LastDamageSourcePlayer)
+                && memory.LastDamagedAt > 0f
+                && now - memory.LastDamagedAt <= window)
+            {
+                return "recent_damage_from_player";
+            }
+
+            return "";
+        }
+
+        private BasePlayer ActiveRealPlayerForEngagement(ulong targetId)
+        {
+            if (targetId == 0UL)
+            {
+                return null;
+            }
+
+            var player = FindCombatTargetById(targetId);
+            return IsEngageableRealPlayer(player) ? player : null;
+        }
+
+        private bool IsEngageableRealPlayer(BasePlayer player)
+        {
+            return player != null
+                && IsRealPlayer(player)
+                && player.IsConnected
+                && !player.IsDead()
+                && !player.IsSleeping()
+                && !ShouldIgnoreSafeZonePlayer(player);
         }
 
         private bool TryInvokeBool(object target, string methodName, params object[] args)
@@ -12812,7 +15583,7 @@ namespace Oxide.Plugins
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
             var now = Time.realtimeSinceStartup;
-            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            return $"type={runtime.EntityType}, state={runtime.State}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, learn={LearningRuntimeStatus(runtime)}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
         }
 
         private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)
@@ -13218,6 +15989,7 @@ namespace Oxide.Plugins
                 return;
             }
 
+            ApplyBotNativeDeathInfo(victim, killerEntity, killerRuntime, info);
             BroadcastKillFeed(killerEntity, killerRuntime, victim, null, info);
         }
 
@@ -13240,7 +16012,133 @@ namespace Oxide.Plugins
 
             var message = FormatKillFeedTemplate(config.BotKillIntegration.KillMessage, killerEntity, killerRuntime, victimEntity, victimRuntime, info, 0);
             var formatted = (config.BotKillIntegration.ChatFormat ?? "{message}").Replace("{message}", message);
+
+            if (killerRuntime != null
+                && config.BotKillIntegration.UseBotAvatarAsChatSender
+                && TrySendBotChatMessage(killerRuntime, formatted))
+            {
+                return;
+            }
+
             PrintToChat(formatted);
+        }
+
+        private bool TrySendBotChatMessage(BotRuntime runtime, string formatted)
+        {
+            if (runtime == null || string.IsNullOrWhiteSpace(runtime.AvatarChatUserId) || string.IsNullOrWhiteSpace(formatted))
+            {
+                return false;
+            }
+
+            if (!ulong.TryParse(runtime.AvatarChatUserId, out var chatUserId) || chatUserId == 0UL)
+            {
+                return false;
+            }
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (player == null || !player.IsConnected)
+                {
+                    continue;
+                }
+
+                player.SendConsoleCommand("chat.add", 2, chatUserId, formatted);
+            }
+
+            return true;
+        }
+
+        private void ApplyBotNativeDeathInfo(BasePlayer victim, BaseCombatEntity killerEntity, BotRuntime killerRuntime, HitInfo info)
+        {
+            if (victim == null || killerRuntime == null || victim.lifeStory == null)
+            {
+                return;
+            }
+
+            if (victim.lifeStory.deathInfo == null)
+            {
+                victim.lifeStory.deathInfo = new ProtoBuf.PlayerLifeStory.DeathInfo();
+            }
+
+            var deathInfo = victim.lifeStory.deathInfo;
+            deathInfo.attackerName = BotChatName(killerRuntime);
+
+            if (ulong.TryParse(killerRuntime.AvatarChatUserId, out var avatarSteamId) && avatarSteamId != 0UL)
+            {
+                deathInfo.attackerSteamID = avatarSteamId;
+            }
+
+            var weaponName = KillWeaponName(info, null);
+
+            if (!string.IsNullOrWhiteSpace(weaponName) && !string.Equals(weaponName, "Unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                deathInfo.inflictorName = weaponName;
+            }
+
+            var distanceMeters = KillDistanceMeters(killerEntity, victim, info);
+
+            if (distanceMeters >= 0f)
+            {
+                deathInfo.attackerDistance = distanceMeters;
+            }
+
+            victim.SetOverrideDeathBlow(deathInfo);
+        }
+
+        private void ProtectBotNativeDeathInfoFromScientistOverride(BasePlayer victim, BaseCombatEntity killerEntity, BotRuntime killerRuntime, HitInfo info, float now)
+        {
+            if (victim == null || killerRuntime == null || info == null)
+            {
+                return;
+            }
+
+            var victimId = CombatTargetId(victim);
+
+            if (victimId == 0UL)
+            {
+                return;
+            }
+
+            pendingBotPlayerDeaths[victimId] = new PendingBotPlayerDeath
+            {
+                KillerEntity = killerEntity,
+                KillerRuntime = killerRuntime,
+                HitInfo = info,
+                ExpiresAt = now + 6f
+            };
+
+            // ScientistNPC.AttackerInfo() forces the native death card name back to "Scientist".
+            // Clearing only the death-blow initiator lets Rust keep weapon/hit data while preserving our override.
+            info.Initiator = null;
+        }
+
+        private PendingBotPlayerDeath TakePendingBotPlayerDeath(BasePlayer victim, HitInfo info, float now)
+        {
+            if (victim == null)
+            {
+                return null;
+            }
+
+            var victimId = CombatTargetId(victim);
+
+            if (victimId == 0UL || !pendingBotPlayerDeaths.TryGetValue(victimId, out var pending))
+            {
+                return null;
+            }
+
+            pendingBotPlayerDeaths.Remove(victimId);
+
+            if (pending == null || pending.ExpiresAt < now)
+            {
+                return null;
+            }
+
+            if (pending.HitInfo != null && info != null && !ReferenceEquals(pending.HitInfo, info))
+            {
+                return null;
+            }
+
+            return pending;
         }
 
         private bool TryAwardBotKillRp(BasePlayer killer, BotRuntime victimRuntime, out int amount)
@@ -13346,6 +16244,26 @@ namespace Oxide.Plugins
             return distanceMeters < 0f
                 ? "unknown range"
                 : $"{distanceMeters.ToString("0", CultureInfo.InvariantCulture)}m";
+        }
+
+        private string FormatFileSize(long bytes)
+        {
+            if (bytes >= 1024L * 1024L * 1024L)
+            {
+                return $"{(bytes / (1024f * 1024f * 1024f)).ToString("0.0", CultureInfo.InvariantCulture)} GB";
+            }
+
+            if (bytes >= 1024L * 1024L)
+            {
+                return $"{(bytes / (1024f * 1024f)).ToString("0.0", CultureInfo.InvariantCulture)} MB";
+            }
+
+            if (bytes >= 1024L)
+            {
+                return $"{(bytes / 1024f).ToString("0.0", CultureInfo.InvariantCulture)} KB";
+            }
+
+            return $"{bytes.ToString(CultureInfo.InvariantCulture)} B";
         }
 
         private float KillDistanceMeters(BaseCombatEntity killerEntity, BaseCombatEntity victimEntity, HitInfo info)
@@ -13637,6 +16555,8 @@ namespace Oxide.Plugins
             stats.display_name = runtime.DisplayName;
             stats.kit_name = runtime.KitName;
             stats.skill_tier = runtime.SkillTier;
+            stats.behavior_model_key = runtime.BehaviorModelKey ?? "";
+            stats.player_profile_key = runtime.PlayerProfileKey ?? "";
             stats.clan_key = runtime.ClanKey;
             stats.clan_tag = runtime.ClanTag;
             stats.clan_name = runtime.ClanName;
@@ -13970,6 +16890,9 @@ namespace Oxide.Plugins
                     config.DecisionAdvisor.UseStructuredResponseSchema = !config.DecisionAdvisor.UseStructuredResponseSchema;
                     refreshAdvisor = true;
                     return true;
+                case "advisor_engaged_only":
+                    config.DecisionAdvisor.RequireActivePlayerEngagement = !config.DecisionAdvisor.RequireActivePlayerEngagement;
+                    return true;
                 case "advisor_ask_stuck":
                     config.DecisionAdvisor.AskWhenBotIsStuck = !config.DecisionAdvisor.AskWhenBotIsStuck;
                     return true;
@@ -14277,11 +17200,29 @@ namespace Oxide.Plugins
                 case "base_hold":
                     config.AI.BaseHoldSeconds = Math.Max(2f, value);
                     return true;
+                case "hard_stuck_seconds":
+                    config.AI.HardStuckDespawnSeconds = Mathf.Clamp(value, 0f, 900f);
+                    return true;
                 case "advisor_confidence":
                     config.DecisionAdvisor.MinimumConfidence = Mathf.Clamp01(value);
                     return true;
                 case "advisor_min_seconds":
                     config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot = Math.Max(0f, value);
+                    return true;
+                case "advisor_player_gate":
+                    config.DecisionAdvisor.RequireRealPlayerWithinMeters = Mathf.Clamp(value, 0f, 5000f);
+                    return true;
+                case "learning_sample":
+                    config.Learning.SampleIntervalSeconds = Mathf.Clamp(value, 0.25f, 10f);
+                    return true;
+                case "learning_outcome":
+                    config.Learning.OutcomeWindowSeconds = Mathf.Clamp(value, 3f, 60f);
+                    return true;
+                case "learning_global_delta":
+                    config.Learning.MaximumGlobalScoreDelta = Mathf.Clamp(value, 0f, 80f);
+                    return true;
+                case "learning_profile_delta":
+                    config.Learning.MaximumProfileScoreDelta = Mathf.Clamp(value, 0f, 100f);
                     return true;
                 case "nameplate_refresh":
                     config.Debug.DebugNameplateRefreshSeconds = Mathf.Clamp(value, 0.25f, 5f);
@@ -14434,11 +17375,29 @@ namespace Oxide.Plugins
                 case "base_hold":
                     value = config.AI.BaseHoldSeconds;
                     return true;
+                case "hard_stuck_seconds":
+                    value = config.AI.HardStuckDespawnSeconds;
+                    return true;
                 case "advisor_confidence":
                     value = config.DecisionAdvisor.MinimumConfidence;
                     return true;
                 case "advisor_min_seconds":
                     value = config.DecisionAdvisor.MinSecondsBetweenRequestsPerBot;
+                    return true;
+                case "advisor_player_gate":
+                    value = config.DecisionAdvisor.RequireRealPlayerWithinMeters;
+                    return true;
+                case "learning_sample":
+                    value = config.Learning.SampleIntervalSeconds;
+                    return true;
+                case "learning_outcome":
+                    value = config.Learning.OutcomeWindowSeconds;
+                    return true;
+                case "learning_global_delta":
+                    value = config.Learning.MaximumGlobalScoreDelta;
+                    return true;
+                case "learning_profile_delta":
+                    value = config.Learning.MaximumProfileScoreDelta;
                     return true;
                 case "nameplate_refresh":
                     value = config.Debug.DebugNameplateRefreshSeconds;
@@ -14580,6 +17539,20 @@ namespace Oxide.Plugins
             }
 
             return string.Join(" ", arg.Args.Skip(index).Select(value => value.ToString()).Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
+        }
+
+        private string ArgStringRange(ConsoleSystem.Arg arg, int startInclusive, int endExclusive)
+        {
+            if (arg?.Args == null || arg.Args.Length <= startInclusive || endExclusive <= startInclusive)
+            {
+                return "";
+            }
+
+            return string.Join(" ", arg.Args
+                .Skip(startInclusive)
+                .Take(Math.Max(0, Math.Min(endExclusive, arg.Args.Length) - startInclusive))
+                .Select(value => value.ToString())
+                .Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
         }
 
         private List<KeyValuePair<BaseCombatEntity, BotRuntime>> ActiveBotEntries()

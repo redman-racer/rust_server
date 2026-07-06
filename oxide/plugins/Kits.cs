@@ -699,8 +699,7 @@ namespace Oxide.Plugins
         {            
             UI4 position = KitAlign.Get(index);
 
-            UI.Panel(container, UI_MENU, Configuration.Menu.Color4.Get, new UI4(position.xMin, position.yMax, position.xMax, position.yMax + 0.04f));
-            UI.Label(container, UI_MENU, kit.Name, 14, new UI4(position.xMin, position.yMax, position.xMax, position.yMax + 0.04f));
+            AddHeaderPanel(container, new UI4(position.xMin, position.yMax, position.xMax, position.yMax + 0.04f), kit.Name, 14, TextAnchor.MiddleCenter, 0f);
 
             UI.Panel(container, UI_MENU, Configuration.Menu.Panel.Get, position);
 
@@ -892,17 +891,14 @@ namespace Oxide.Plugins
 
         private void CreateKitLayout(BasePlayer player, CuiElementContainer container, KitData.Kit kit)
         {
-            UI.Panel(container, UI_MENU, Configuration.Menu.Color1.Get, new UI4(0.505f, 0.88f, 0.995f, 0.92f));
-            UI.Label(container, UI_MENU, Message("UI.KitItems", player.userID), 14, new UI4(0.51f, 0.88f, 0.995f, 0.92f), TextAnchor.MiddleLeft);
+            AddHeaderPanel(container, new UI4(0.505f, 0.88f, 0.995f, 0.92f), Message("UI.KitItems", player.userID));
 
             // Main Items
-            UI.Panel(container, UI_MENU, Configuration.Menu.Color4.Get, new UI4(0.505f, 0.835f, 0.995f, 0.875f));
-            UI.Label(container, UI_MENU, Message("UI.MainItems", player.userID), 14, new UI4(0.51f, 0.835f, 0.995f, 0.875f), TextAnchor.MiddleLeft);
+            AddHeaderPanel(container, new UI4(0.505f, 0.835f, 0.995f, 0.875f), Message("UI.MainItems", player.userID));
             CreateInventoryItems(player, container, MainAlign, kit.MainItems, 24);
             
             // Wear Items
-            UI.Panel(container, UI_MENU, Configuration.Menu.Color4.Get, new UI4(0.505f, 0.365f, 0.995f, 0.405f));
-            UI.Label(container, UI_MENU, Message("UI.WearItems", player.userID), 14, new UI4(0.51f, 0.365f, 0.995f, 0.405f), TextAnchor.MiddleLeft);
+            AddHeaderPanel(container, new UI4(0.505f, 0.365f, 0.995f, 0.405f), Message("UI.WearItems", player.userID));
             CreateInventoryItems(player, container, WearAlign, kit.WearItems, 8);
             
             /*// Backpack slot
@@ -912,8 +908,7 @@ namespace Oxide.Plugins
                 UI.Image(container, UI_MENU, itemData.ItemID, itemData.Skin, new UI4(0.97f, 0.3675f, 0.9925f, 0.4025f));*/
             
             // Belt Items
-            UI.Panel(container, UI_MENU, Configuration.Menu.Color4.Get, new UI4(0.505f, 0.2225f, 0.995f, 0.2625f));
-            UI.Label(container, UI_MENU, Message("UI.BeltItems", player.userID), 14, new UI4(0.51f, 0.2225f, 0.995f, 0.2625f), TextAnchor.MiddleLeft);
+            AddHeaderPanel(container, new UI4(0.505f, 0.2225f, 0.995f, 0.2625f), Message("UI.BeltItems", player.userID));
             CreateInventoryItems(player, container, BeltAlign, kit.BeltItems, 6);            
         }
 
@@ -997,6 +992,15 @@ namespace Oxide.Plugins
 
         #region Editor Helpers
         private const float EDITOR_ELEMENT_HEIGHT = 0.04f;
+        private const float HEADER_ACCENT_WIDTH = 0.006f;
+        private const float HEADER_TEXT_PADDING = 0.012f;
+
+        private void AddHeaderPanel(CuiElementContainer container, UI4 bounds, string title, int size = 14, TextAnchor align = TextAnchor.MiddleLeft, float textPadding = HEADER_TEXT_PADDING)
+        {
+            UI.Panel(container, UI_MENU, Configuration.Menu.Color4.Get, bounds);
+            UI.Panel(container, UI_MENU, Configuration.Menu.Color1.Get, new UI4(bounds.xMin, bounds.yMin, bounds.xMin + HEADER_ACCENT_WIDTH, bounds.yMax));
+            UI.Label(container, UI_MENU, title, size, new UI4(bounds.xMin + textPadding, bounds.yMin, bounds.xMax, bounds.yMax), align);
+        }
 
         private void AddInputField(CuiElementContainer container, int index, string title, string fieldName, object currentValue, int additionalHeight = 0)
         {
@@ -1025,8 +1029,7 @@ namespace Oxide.Plugins
             float yMin = GetVerticalPos(index, 0.88f);
             float yMax = yMin + EDITOR_ELEMENT_HEIGHT;
 
-            UI.Panel(container, UI_MENU, Configuration.Menu.Color1.Get, new UI4(0.005f, yMin, 0.495f, yMax));
-            UI.Label(container, UI_MENU, title, 14, new UI4(0.01f, yMin, 0.495f, yMax), TextAnchor.MiddleLeft);
+            AddHeaderPanel(container, new UI4(0.005f, yMin, 0.495f, yMax), title);
         }
 
         private void AddLabelField(CuiElementContainer container, int index, string title, string value, int additionalHeight = 0)
@@ -2776,12 +2779,12 @@ namespace Oxide.Plugins
                 CopyPasteParams = new[] { "deployables", "true", "inventories", "true" },
                 Menu = new ConfigData.MenuOptions
                 {
-                    Panel = new ConfigData.UIColor { Hex = "#232323", Alpha = 1f },
-                    Disabled = new ConfigData.UIColor { Hex = "#3e3e42", Alpha = 1f },
-                    Color1 = new ConfigData.UIColor { Hex = "#007acc", Alpha = 1f },
-                    Color2 = new ConfigData.UIColor { Hex = "#6a8b38", Alpha = 1f },
-                    Color3 = new ConfigData.UIColor { Hex = "#d85540", Alpha = 1f },
-                    Color4 = new ConfigData.UIColor { Hex = "#d08822", Alpha = 1f },
+                    Panel = new ConfigData.UIColor { Hex = "#0f0f0f", Alpha = 1f },
+                    Disabled = new ConfigData.UIColor { Hex = "#3a3d3f", Alpha = 1f },
+                    Color1 = new ConfigData.UIColor { Hex = "#e4572e", Alpha = 1f },
+                    Color2 = new ConfigData.UIColor { Hex = "#2b2b2b", Alpha = 1f },
+                    Color3 = new ConfigData.UIColor { Hex = "#e4572e", Alpha = 1f },
+                    Color4 = new ConfigData.UIColor { Hex = "#2b2b2b", Alpha = 1f },
                     DefaultKitURL = "https://chaoscode.io/oxide/Images/kiticon.png",
                     MagnifyIconURL = "https://chaoscode.io/oxide/Images/magnifyingglass.png"
                 },

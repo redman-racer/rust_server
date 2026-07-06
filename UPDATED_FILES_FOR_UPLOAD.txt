@@ -1,37 +1,52 @@
-Raidlands RoamBots advisor restore + sharper skill aim tuning - 2026-07-06
+Raidlands RoamBots victim-linked learning context - 2026-07-06
 
 What changed:
-- RaidlandsRoamBots v0.3.41 restores the checked-in Decision Advisor block to OpenAI-compatible shadow mode with endpoint/model/key placeholder intact.
-- `${OPENAI_ROAM_BOT_API_KEY}` now resolves from the Rust server process environment first; `oxide/config/Secrets.local.json` is optional and no longer required for the advisor placeholder path.
-- Removed local ignored `oxide/config/Secrets.local.json` from this workspace.
-- RaidlandsRoamBots keeps bot hit damage at normal Rust weapon damage and makes misses real by applying a much tighter skill-scaled projectile aim cone.
-- Skill `AimErrorDegrees` now actively affects fired bot projectiles instead of only existing in config.
-- Bots still start a new aim warmup whenever they switch to a target, but the opening slop is much smaller and settles faster.
-- Default v0.3.40 warmup tuning:
-  - casual: 1.5 base degrees, +3.0 initial warmup degrees, settles over 2.5 seconds
-  - average: 0.75 base degrees, +1.5 initial warmup degrees, settles over 1.75 seconds
-  - dangerous: 0.2 base degrees, +0.4 initial warmup degrees, settles over 1.0 seconds
-- The debug side panel now shows `Aim:` and `raidbots.list` now shows `aim=`, with current cone error and warmup progress.
+- RaidlandsRoamBots is now v0.3.50.
+- Player observation traces now distinguish passive nearest-bot samples from combat-linked target context.
+- Player-vs-bot damage, kills, and deaths promote the actual tracked bot involved into the primary target fields.
+- Fresh combat rows include target context fields such as `target_context_source`, `target_context_confidence`, `target_bot_key`, `combat_distance_to_target`, `combat_had_line_of_sight`, and combat exposure probe counts.
+- Older/noisy rows are still usable, but model builds now weight low-confidence target context less heavily by default.
+- `raidbots.learn report` and `raidbots.learn profile show` now expose target-context quality numbers for training-file review.
 
 Rust server plugin/config files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
 - oxide/config/RaidlandsRoamBots.json
-- oxide/config/Secrets.example.json
+
+Avatar image assets to keep/upload if they are not already live:
+- oxide/data/RaidlandsRoamBots/avatars/raider-red.png
+- oxide/data/RaidlandsRoamBots/avatars/scrap-jacket.png
+- oxide/data/RaidlandsRoamBots/avatars/hazmat-echo.png
+- oxide/data/RaidlandsRoamBots/avatars/roadside-ghost.png
+- oxide/data/RaidlandsRoamBots/avatars/launch-watcher.png
 
 Docs/reference files to upload or keep with the repo handoff:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 - UPDATED_FILES_FOR_UPLOAD.txt
 
 Reload after upload:
+- oxide.reload ImageLibrary
 - oxide.reload RaidlandsRoamBots
 
-Live smoke checks:
-- Run `raidbots.debug on`, spawn or keep at least one tracked bot, then run `raidbots.list`.
-- Expected: each bot line includes `aim=<degrees>deg/<percent>%`.
-- Start a fresh fight or force a target switch. Expected: aim starts above the skill's base error but settles quickly; dangerous bots should feel close to player-accurate after roughly one second.
-- Confirm hits still feel like the held weapon's normal Rust damage; the balance change is misses/accuracy, not fake lower damage on successful hits.
+Learning trace smoke:
+- raidbots.learn status
+- raidbots.learn allow <player name or steamid>
+- raidbots.learn observe on
+- Fight tracked RoamBots long enough to deal/take damage and ideally kill or die to a tracked bot.
+- raidbots.learn report 60
+- raidbots.learn export
+- raidbots.learn profile build <player name or steamid> <profileKey>
+- raidbots.learn profile show <profileKey>
+- raidbots.learn apply shadow
+
+Expected learning smoke:
+- `raidbots.learn report 60` shows nonzero traces and should show `combat_linked` increasing after damage/kill/death rows.
+- Fresh JSONL damage/kill/death rows should include `target_context_source":"combat_target"` and a high `target_context_confidence`.
+- Rows that only sampled a nearby bot without combat remain `nearest_bot_sample` context and train at lower weight.
+- Profile summaries should include `weighted`, `ctx`, `linked`, and `high_conf` values in addition to the existing success and action delta output.
+- Existing older `player_observation_traces.jsonl` rows remain readable; they are inferred as lower-confidence when distance/LOS/exposure do not line up with combat outcomes.
 
 Local verification:
-- `oxide/config/RaidlandsRoamBots.json` parsed successfully.
-- `git diff --check` passed for the edited handoff files, with only the repo's normal LF-to-CRLF working-copy warnings.
-- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.41 against `RustDedicated_Data/Managed`; remaining warnings are expected plugin-reference/future-field warnings.
+- `oxide/config/RaidlandsRoamBots.json` parses successfully.
+- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.50 against `RustDedicated_Data/Managed` with `Oxide.References.dll` excluded to avoid duplicate JSON types.
+- Remaining compile warnings are expected plugin-reference/future-field warnings.
+- Live Oxide reload and the learning trace smoke above are still required to prove the runtime hook data on the server.

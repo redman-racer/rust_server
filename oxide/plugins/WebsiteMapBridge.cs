@@ -14,7 +14,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteMapBridge", "Raidlands", "1.0.0")]
+    [Info("WebsiteMapBridge", "Raidlands", "1.0.1")]
     [Description("Publishes the current RustMapApi map image to the Raidlands website.")]
     public class WebsiteMapBridge : CovalencePlugin
     {
@@ -118,8 +118,9 @@ namespace Oxide.Plugins
         [ConsoleCommand("rl_map_publish")]
         private void PublishCommand(ConsoleSystem.Arg arg)
         {
-            if (arg.Connection != null && !arg.IsAdmin)
+            if (!CanUsePublishCommand(arg))
             {
+                ReplyToCommand(arg, "You must be server console, RCON, or auth level 2 to publish the website map.");
                 return;
             }
 
@@ -132,14 +133,30 @@ namespace Oxide.Plugins
 
                 if (!float.TryParse(arg.GetString(1, ""), out parsedScale) || parsedScale <= 0f)
                 {
-                    arg.ReplyWith("Invalid syntax. Use rl_map_publish <renderName:optional> <resolutionScale:optional>");
+                    ReplyToCommand(arg, "Invalid syntax. Use rl_map_publish <renderName:optional> <resolutionScale:optional>");
                     return;
                 }
 
                 scale = parsedScale;
             }
 
-            PublishMap("manual command", message => arg.ReplyWith(message), true, renderName, scale);
+            PublishMap("manual command", message => ReplyToCommand(arg, message), true, renderName, scale);
+        }
+
+        private bool CanUsePublishCommand(ConsoleSystem.Arg arg)
+        {
+            if (arg == null || arg.Connection == null || arg.IsRcon || arg.IsAdmin)
+            {
+                return true;
+            }
+
+            return arg.Connection.authLevel >= 2;
+        }
+
+        private void ReplyToCommand(ConsoleSystem.Arg arg, string message)
+        {
+            Puts(message);
+            arg?.ReplyWith(message);
         }
 
         private void QueueAutoPublish(string reason)

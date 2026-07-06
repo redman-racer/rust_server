@@ -228,6 +228,7 @@
     "Stuck Recovery Cooldown Seconds": 2.5,
     "Stuck Recovery Search Radius": 18.0,
     "Hard Stuck Failed Paths To Despawn": 30,
+    "Hard Stuck Despawn Seconds": 180.0,
     "Stuck Memory Seconds": 75.0,
     "Stuck Memory Radius": 9.0,
     "Maximum Stuck Memory Points": 14,
@@ -350,24 +351,85 @@
     "Minimum Confidence": 0.55,
     "Max Concurrent Requests": 2,
     "Min Seconds Between Requests Per Bot": 8.0,
+    "Require Real Player Within Meters": 350.0,
+    "Require Active Player Engagement": true,
+    "Player Engagement Memory Seconds": 45.0,
     "Ask When Bot Is Stuck": true,
     "Ask When Action Scores Are Close": true,
     "Ask When Push Retreat Or Flank Is High Impact": true,
     "Ask When Same Action Failed Repeatedly": true,
     "Ask When Squad State Changes Sharply": true,
     "Log Decision Traces": true,
+    "Max Decision Trace File Megabytes": 128,
+    "Max Decision Trace Lines After Prune": 50000,
+    "Decision Trace Prune Check Interval Seconds": 300.0,
     "Max Recent Events In Request": 24,
     "Max Candidate Actions": 8
+  },
+  "Player Observation Learning": {
+    "Enabled": false,
+    "Apply Mode": "off",
+    "Source": "admin_testers",
+    "Observed Player SteamIds": [],
+    "Player Profile Spawn Weights": {},
+    "Log Observation Traces": true,
+    "Sample Interval Seconds": 1.0,
+    "Outcome Window Seconds": 10.0,
+    "Minimum Global Observations": 12,
+    "Minimum Profile Observations": 8,
+    "Maximum Global Score Delta": 24.0,
+    "Maximum Profile Score Delta": 36.0,
+    "Shadow Calculates Score Deltas": true,
+    "Low Confidence Observation Weight": 0.35,
+    "High Confidence Target Context Threshold": 0.75
   },
   "Bot Kill Integration": {
     "Broadcast Player-Like Kill Messages": true,
     "Suppress DeathNotes For Roam Bot Kills": true,
+    "Use Bot Avatar As Chat Sender": true,
     "Chat Format": "<color=#838383>[<color=#80D000>DeathNotes</color>] {message}</color>",
     "Kill Message": "<color=#C4FF00>{killer}</color> killed <color=#C4FF00>{victim}</color> with <color=#C4FF00>{weapon}</color> from <color=#C4FF00>{distance}</color> ({method}).",
     "Award ServerRewards RP": true,
     "RP Reward Per Bot Kill": 5,
     "Tell Killer About RP Reward": true,
-    "RP Reward Message": "<color=#ce422b>[Raidlands]</color> You earned <color=#B6F34A>{rp} RP</color> for killing <color=#C4FF00>{victim}</color>."
+    "RP Reward Message": "<color=#ce422b>[Raidlands]</color> You earned <color=#B6F34A>{rp} RP</color> for killing <color=#C4FF00>{victim}</color>.",
+    "Bot Avatars": [
+      {
+        "Key": "raider-red",
+        "Display Name": "Raider Red",
+        "Image Url": "",
+        "Image File": "oxide/data/RaidlandsRoamBots/avatars/raider-red.png",
+        "Chat User Id": "76561199000010461"
+      },
+      {
+        "Key": "scrap-jacket",
+        "Display Name": "Scrap Jacket",
+        "Image Url": "",
+        "Image File": "oxide/data/RaidlandsRoamBots/avatars/scrap-jacket.png",
+        "Chat User Id": "76561199000010462"
+      },
+      {
+        "Key": "hazmat-echo",
+        "Display Name": "Hazmat Echo",
+        "Image Url": "",
+        "Image File": "oxide/data/RaidlandsRoamBots/avatars/hazmat-echo.png",
+        "Chat User Id": "76561199000010463"
+      },
+      {
+        "Key": "roadside-ghost",
+        "Display Name": "Roadside Ghost",
+        "Image Url": "",
+        "Image File": "oxide/data/RaidlandsRoamBots/avatars/roadside-ghost.png",
+        "Chat User Id": "76561199000010464"
+      },
+      {
+        "Key": "launch-watcher",
+        "Display Name": "Launch Watcher",
+        "Image Url": "",
+        "Image File": "oxide/data/RaidlandsRoamBots/avatars/launch-watcher.png",
+        "Chat User Id": "76561199000010465"
+      }
+    ]
   },
   "Persistence": {
     "Kill Bots On Plugin Unload": false,

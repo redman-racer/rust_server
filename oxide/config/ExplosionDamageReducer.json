@@ -1,0 +1,12 @@
+
+{
+  "Apply reduced damage to the attacker": true,
+  "Rocket": 35,
+  "High Velocity Rocket": 45,
+  "HE Grenade": 80,
+  "version": {
+    "Major": 1,
+    "Minor": 1,
+    "Patch": 0
+  }
+}

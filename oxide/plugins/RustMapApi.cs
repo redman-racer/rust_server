@@ -104,224 +104,224 @@ internal class RustMapApi : RustPlugin
     {
         ["Harbor"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/ND4c70v.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/harbor.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Giant Excavator Pit"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/hmUKFwS.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/giant-excavator-pit.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Junkyard"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/V8D4ZGc.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/junkyard.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Launch Site"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/gjdynsc.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/launch-site.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Water Treatment Plant"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/5L2Gdag.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/water-treatment-plant.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Military Tunnel"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/6RwXvC2.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/military-tunnel.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Airfield"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/KhQXhIs.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/airfield.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Power Plant"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/ZxqiBc6.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/power-plant.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Train Yard"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/wVifXqr.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/train-yard.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Outpost"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/hb7JZ9i.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/outpost.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Bandit Camp"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/cIR4YOt.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/bandit-camp.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Sewer Branch"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/PbKZQdZ.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/sewer-branch.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["HQM Quarry"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/bGFogbM.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/quarry.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Satellite Dish"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/XwSpCJY.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/satellite-dish.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["The Dome"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/mPRgBF2.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/the-dome.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Sulfur Quarry"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/bGFogbM.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/quarry.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Stone Quarry"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/bGFogbM.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/quarry.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Power Sub Station"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/LQUknms.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/power-sub-station.png",
             Width = 60,
             Height = 60,
             Show = false
         },
         ["Water Well"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/TASWRD0.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/water-well.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Abandoned Cabins"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/xigwDcW.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/abandoned-cabins.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Wild Swamp"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/2tcTYKA.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/wild-swamp.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Abandoned Supermarket"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/ZyP2W9F.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/abandoned-supermarket.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Mining Outpost"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/C0acqvj.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/mining-outpost.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Oxum's Gas Station"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/oW1bDdF.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/oxums-gas-station.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Cave"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/ByKJj9C.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/cave.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Lighthouse"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/r5vbzhm.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/lighthouse.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Large Oil Rig"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/AAhZO7k.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/oil-rig.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Oil Rig"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/AAhZO7k.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/oil-rig.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Fishing Village"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/7UCs5BO.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/fishing-village.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Large Fishing Village"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/7UCs5BO.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/fishing-village.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Ranch"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/VQjSjzA.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/ranch.png",
             Width = 60,
             Height = 60,
             Show = true
         },
         ["Large Barn"] = new IconConfig
         {
-            ImageUrl = "https://i.imgur.com/VQjSjzA.png",
+            ImageUrl = "https://raidlands.net/assets/media/map-icons/rustmapapi/ranch.png",
             Width = 60,
             Height = 60,
             Show = true
@@ -1252,7 +1252,7 @@ internal class RustMapApi : RustPlugin
                     }
                 }
 
-                if (!config.Show)
+                if (!config.Show || !HasUsableIcon(config))
                 {
                     continue;
                 }
@@ -1266,7 +1266,7 @@ internal class RustMapApi : RustPlugin
 
         foreach (CustomIcons customIcon in _pluginConfig.CustomIcons)
         {
-            if (!customIcon.Show)
+            if (!customIcon.Show || !HasUsableIcon(customIcon))
             {
                 continue;
             }
@@ -1274,6 +1274,14 @@ internal class RustMapApi : RustPlugin
             AddImageToOverlay(customIcon.XPos, customIcon.ZPos, posScale, overlays, customIcon, $"Custom Image: {customIcon.ImageUrl}");
         }
         return overlays;
+    }
+
+    private static bool HasUsableIcon(IconConfig config)
+    {
+        return config != null &&
+               !string.IsNullOrEmpty(config.ImageUrl) &&
+               config.Image != null &&
+               config.Image.Length > 0;
     }
 
     private static void AddImageToOverlay(float x,float z, float posScale , List<Hash<string, object>> overlays, IconConfig config, string name)

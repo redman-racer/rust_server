@@ -214,7 +214,7 @@ Do not call the LLM from these ticks directly. The tick should submit a decision
 
 The new config should make the single-mode design obvious.
 
-This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.40. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup or staged live-release profile.
+This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0.3.50. The checked-in `oxide/config/RaidlandsRoamBots.json` may intentionally differ when it is holding a focused local test setup or staged live-release profile.
 
 ```json
 {
@@ -394,6 +394,7 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Stuck Recovery Cooldown Seconds": 2.5,
     "Stuck Recovery Search Radius": 18.0,
     "Hard Stuck Failed Paths To Despawn": 30,
+    "Hard Stuck Despawn Seconds": 180.0,
     "Stuck Memory Seconds": 75.0,
     "Stuck Memory Radius": 9.0,
     "Maximum Stuck Memory Points": 14,
@@ -516,14 +517,38 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Minimum Confidence": 0.55,
     "Max Concurrent Requests": 2,
     "Min Seconds Between Requests Per Bot": 8.0,
+    "Require Real Player Within Meters": 350.0,
+    "Require Active Player Engagement": true,
+    "Player Engagement Memory Seconds": 45.0,
     "Ask When Bot Is Stuck": true,
     "Ask When Action Scores Are Close": true,
     "Ask When Push Retreat Or Flank Is High Impact": true,
     "Ask When Same Action Failed Repeatedly": true,
     "Ask When Squad State Changes Sharply": true,
     "Log Decision Traces": true,
+    "Max Decision Trace File Megabytes": 128,
+    "Max Decision Trace Lines After Prune": 50000,
+    "Decision Trace Prune Check Interval Seconds": 300.0,
     "Max Recent Events In Request": 24,
     "Max Candidate Actions": 8
+  },
+
+  "Player Observation Learning": {
+    "Enabled": false,
+    "Apply Mode": "off",
+    "Source": "admin_testers",
+    "Observed Player SteamIds": [],
+    "Player Profile Spawn Weights": {},
+    "Log Observation Traces": true,
+    "Sample Interval Seconds": 1.0,
+    "Outcome Window Seconds": 10.0,
+    "Minimum Global Observations": 12,
+    "Minimum Profile Observations": 8,
+    "Maximum Global Score Delta": 24.0,
+    "Maximum Profile Score Delta": 36.0,
+    "Shadow Calculates Score Deltas": true,
+    "Low Confidence Observation Weight": 0.35,
+    "High Confidence Target Context Threshold": 0.75
   },
 
   "Bot Kill Integration": {
@@ -1969,6 +1994,7 @@ Collect the data needed to decide whether LLM assistance is useful.
 raidbots.decisions last
 raidbots.decisions bot <number>
 raidbots.decisions export
+raidbots.decisions prune
 ```
 
 4. Add trace fields:
@@ -2915,13 +2941,14 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.40 Sharper Skill Aim Tuning
+## Current Progress Through v0.3.50 Victim-Linked Learning Context
 
 ### Files updated
 
 ```text
 oxide/plugins/RaidlandsRoamBots.cs
 oxide/config/RaidlandsRoamBots.json
+oxide/data/RaidlandsRoamBots/avatars/*.png
 Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_POPULATION_AI_2026-07-04.md
 UPDATED_FILES_FOR_UPLOAD.txt
@@ -2930,14 +2957,21 @@ UPDATED_FILES_FOR_UPLOAD.txt
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.40
+Plugin version: RaidlandsRoamBots v0.3.50
 Brain mode: playerlike_tactical_brain
 Current checked-in config: disabled by default, target=50, min=0, max=200
 Current checked-in release profile: near-player spawning around any active non-safe-zone player, no hardcoded tester anchor, random land fallback disabled, debug UI disabled, debug console logs disabled, bot clan wars enabled
-Current decision advisor config: disabled fallback_only provider none; deterministic heuristic decisions execute unless an owner explicitly configures advisor plumbing
+Current decision advisor config: openai_compatible shadow mode with `${OPENAI_ROAM_BOT_API_KEY}` indirection, active real-player engagement required before any HTTP advisor request, a 350m real-player proximity safety cap after engagement, and deterministic heuristic actions still executing
+Current bot death-screen identity config: five bot avatar identities, chat sender IDs for bot-caused kills, native Rust `PlayerLifeStory.DeathInfo` patching, `BasePlayer.SetOverrideDeathBlow(...)`, and lethal-hit `ScientistNPC.AttackerInfo` overwrite prevention for the `KILLED BY` death-screen card
 Current body candidates: scientistnpc_roam, scientistnpc_full_any, scientistnpc_junkpile_pistol
 Current stats data shape: players, bots, bot_clans
 Current decision trace path: oxide/data/RaidlandsRoamBots/decision_traces.jsonl
+Current decision trace retention: prune to 128 MB or 50000 recent lines, checked every 300s and on reload/export/prune command
+Current learning trace path: oxide/data/RaidlandsRoamBots/player_observation_traces.jsonl
+Current learning trace context: passive rows keep nearest-bot sample fields, while damage/kill/death rows promote the tracked bot involved as `target_context_source=combat_target` with confidence, bot key/name, combat distance, LOS, exposure, and probe counts.
+Current learning confidence weighting: low-confidence rows still train at 0.35 weight by default, while high-confidence target context starts at 0.75 confidence.
+Current learned model path: oxide/data/RaidlandsRoamBots/behavior_models.json
+Current training run path: oxide/data/RaidlandsRoamBots/training_runs.jsonl
 Required admin permission: raidlandsroambots.admin
 ```
 
@@ -2960,6 +2994,8 @@ raidbots.nuke [active|debug|all]
 raidbots.debug on|off
 raidbots.decisions [last [count]|bot <name/key> [count]|export]
 raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot name/key]
+raidbots.learn status|observe on|off|allow <player>|unallow <player>|build|report [minutes]|export|clear|apply off|shadow|global|profiles
+raidbots.learn profile list|show <profileKey>|build <player> <profileKey>|delete <profileKey>|weight <profileKey> <weight>
 raidbots.land on|off
 raidbots.target [population]
 raidbots.mode [near_players|random]
@@ -2969,7 +3005,7 @@ raidbots.goto <player-name-or-steamid> [bot-number]
 raidbots.killall
 ```
 
-Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, aim warmup/error, cover/flank points, active barricade count, utility status, protection trigger/source, barricade-anchor state, medical source/fire lock, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Protect`, `Anchor`, `Formation`, and `Bad spots` details.
+Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, aim warmup/error, learned model/profile keys, learned score deltas, cover/flank points, active barricade count, utility status, protection trigger/source, barricade-anchor state, medical source/fire lock, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Learning`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Protect`, `Anchor`, `Formation`, and `Bad spots` details.
 
 ### Implemented
 
@@ -3005,6 +3041,13 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - v0.3.30 still executes deterministic heuristic actions only. Shadow/canary modes are validation and trace surfaces in this adapter pass; remote advisor actions are not applied to live movement/combat yet.
   - v0.3.32 makes fallback-only deterministic behavior the checked-in release default again, so live rollout does not depend on an external advisor or make outbound advisor calls unless the owner opts in.
   - v0.3.41 restores the checked-in live advisor block to `openai_compatible` shadow mode, resolves `${OPENAI_ROAM_BOT_API_KEY}` from the process environment first, and keeps `oxide/config/Secrets.local.json` optional instead of required.
+  - v0.3.42 adds disabled-by-default `Player Observation Learning` with allowlisted tester observation, compact JSONL combat episodes, global skill-tier model builds, saved player profile builds, profile spawn weights, and `off|shadow|global|profiles` apply modes.
+  - v0.3.42 applies learned score deltas only after legal tactical candidates are built and before fallback/advisor validation. Learned models cannot invent actions; they reweight `BuildCandidateActions` output and the normal validation/fallback path remains the safety baseline.
+  - v0.3.42 stores learned runtime/debug fields (`BehaviorModelKey`, `PlayerProfileKey`, base skill, learned score delta, admin-only profile source) and keeps public bot display names fictional.
+  - v0.3.43 gates advisor submissions behind `Decision Advisor -> Require Real Player Within Meters` (350m by default). Bot-vs-bot fights, stuck recovery, and high-impact decisions still use deterministic fallback, but no HTTP LLM request is sent unless a connected real player is close enough.
+  - v0.3.44 adds bounded decision trace retention so `oxide/data/RaidlandsRoamBots/decision_traces.jsonl` no longer grows without limit while trace logging is enabled.
+  - v0.3.45 adds `Decision Advisor -> Require Active Player Engagement` (default `true`) and `Player Engagement Memory Seconds` (default `45`). Advisor requests now require a fresh real-player engagement signal first, such as current LOS, recent last-seen memory, recent damage to/from a real player, or recent player sound investigation; the 350m gate remains as the second safety cap.
+  - v0.3.50 adds victim-linked observation context for player-vs-bot damage, kills, and deaths. The learner now records whether the primary distance/LOS/exposure fields came from a passive nearest-bot sample or from the actual tracked bot involved in combat, and model builds weight low-confidence legacy/noisy rows less heavily.
 
 - Phase 6 partial:
   - Added candidate-player filtering, FOV checks, plugin-controlled line-of-sight checks, target memory, reaction delay, and LOS-required shooting.
@@ -3031,12 +3074,14 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - Poor range affects action scoring and repositioning only; bot weapon damage is left at Rust's normal hit damage.
   - v0.3.39 wires skill `AimErrorDegrees` into bot projectile velocity and adds skill-specific aim warmup. Casual bots start with 10 extra degrees and settle over 5s, average bots start with 6 extra degrees and settle over 3s, and dangerous bots start with 3 extra degrees and settle over 1.5s. Hits that still land keep normal Rust weapon damage.
   - v0.3.40 tightens aim substantially after live feedback: casual settles to 1.5 degrees after 2.5s, average settles to 0.75 degrees after 1.75s, and dangerous settles to 0.2 degrees after 1s. Warmup extras are now 3.0, 1.5, and 0.4 degrees respectively.
+  - v0.3.48 corrects Rust's separate NPC weapon damage scalar on bot-held `AttackEntity` weapons. Kit weapons such as `rifle.ak` keep normal player-like weapon/ammo damage even though the physical body is still a legacy `ScientistNPC`.
 
 - Phase 11 baseline plus advanced stuck memory:
   - Fixed stuck detection so repeated commands to the same destination no longer reset movement progress.
   - Added latched stuck state, repeated failure counts, `stuck_recovery` decision flags, alternate nearby navmesh recovery destinations, and `stuck=true/false` diagnostics.
   - v0.3.26 adds expiring per-bot bad-destination memory for blocked, base-blocked, navigator-failed, and no-progress movement targets.
   - Recovery, cover, peek, retreat, investigate, flank, regroup, push, and roam candidate sampling now avoid recently failed destinations within the configured memory radius before resorting to hard-stuck despawn.
+  - v0.3.43 adds `Hard Stuck Despawn Seconds` (180s default) so a bot latched as stuck will despawn and queue population maintenance after the configured respawn delay even if it has not reached the failed-path threshold.
 
 - Phase 12 baseline:
   - Squad blackboards now assign `solo`, `anchor`, `flanker`, and `pusher` roles.
@@ -3075,6 +3120,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
 
 - Phase 17 partial:
   - Added `raidbots.decisions last [count]`, `raidbots.decisions bot <name/key> [count]`, and `raidbots.decisions export` for reading JSONL decision traces from the console.
+  - v0.3.44 adds automatic decision-trace pruning after trace flushes, on plugin/server reload, and during `raidbots.decisions export`; `raidbots.decisions prune` forces an immediate prune. Console trace reads now tail the JSONL file from the end instead of reversing the full file.
   - v0.3.30 adds `raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot name/key]` so server owners can instantly disable advisor plumbing, inspect provider state without printing secrets, and read the latest advisor trace.
 
 - Test/debug tooling:
@@ -3138,15 +3184,26 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, cl
   - v0.3.37 suppresses and destroys the right-side debug side panel when common menu/admin UI commands fire, including Kits editor commands such as `kits.creator`, so the next debug refresh does not re-add the side panel above another plugin's menu. Close commands use a short suppression window so the panel can return shortly after the menu closes.
   - v0.3.38 fixes the v0.3.37 close-window bug where `kits.close` could not shorten an existing menu suppression timer. Normal menu commands now use a shorter fallback suppression window, while close commands actively release the side panel after a brief delay.
   - v0.3.39 adds `Aim:` to the debug side panel and `aim=` to `raidbots.list`, showing current projectile cone error and warmup progress for the active target.
+  - v0.3.42 adds a `Learning` admin tab plus `raidbots.learn` commands for tester allowlisting, observation toggles, model status, build/report/export, apply mode, and player profile list/show/build/delete/weight management.
+  - v0.3.50 extends `raidbots.learn report` and `raidbots.learn profile show` with target-context quality counts so training-file reviews can quickly distinguish combat-linked rows from inferred nearest-bot samples.
+  - v0.3.43 adds admin/config controls for the advisor real-player gate and the hard-stuck despawn timer, plus `proximity_skips` in advisor stats.
+  - v0.3.44 adds config-level decision trace retention controls and the manual `raidbots.decisions prune` command for live cleanup of oversized JSONL traces.
+  - v0.3.45 adds the Advisor tab `Engaged only` switch, `engagedOnly=...` status output, `engagement_skips` advisor stats, and `engaged_with_real_player` / `engagement_signal` fields in allowed advisor payloads.
+  - v0.3.48 normalizes `npcDamageScale` to `1.0` after kits are applied, when the active weapon is refreshed/reloaded, and when bot projectiles fire, so legacy scientist bodies no longer make player kit guns hit like reduced NPC weapons.
 
 - Bot kill integration:
   - v0.3.31 adds player-like roam bot kill chat, tracked-bot DeathNotes suppression, and optional ServerRewards RP payout for real players who kill roam bots.
   - v0.3.34 extends kill chat to bot kills against real players and bot kills against different-clan bots. The killfeed template now supports `{weapon}`, `{method}`, `{distance}`, `{distance_m}`, `{killer_clan}`, and `{victim_clan}`, and DeathNotes suppression applies to any death involving a tracked roam bot to avoid duplicate generic NPC lines.
+  - v0.3.46 added configurable bot avatar identities. Each spawned bot picks one configured avatar, and bot-caused death chat can be sent through `chat.add` with that avatar's configured chat SteamID.
+  - v0.3.47 removes the RoamBots CUI kill-feed popup and patches the victim's native Rust `PlayerLifeStory.DeathInfo` with the bot name/avatar SteamID so the real death screen `KILLED BY` card targets the bot identity instead of generic `Scientist`.
+  - v0.3.49 hardens native death-screen identity by feeding the same bot death info through Rust's `BasePlayer.SetOverrideDeathBlow(...)` path, setting attacker distance, and clearing only the lethal bot hit's native `HitInfo.Initiator` after RoamBots records the pending killer. This prevents `ScientistNPC.AttackerInfo(...)` from overwriting the custom death-screen card back to `Scientist` while preserving RoamBots stats/killfeed attribution.
+  - v0.3.46 adds five generated local portrait assets under `oxide/data/RaidlandsRoamBots/avatars/`: `raider-red.png`, `scrap-jacket.png`, `hazmat-echo.png`, `roadside-ghost.png`, and `launch-watcher.png`.
 
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.40.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.50.
+Compile used the local duplicate-reference workaround: include `Newtonsoft.Json.dll` and exclude `Oxide.References.dll`.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
 
@@ -3159,12 +3216,12 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 - raidbots.enable 1 spawned a tracked bot after the first two legacy body prefabs failed navigator placement and the known-working scientistnpc_junkpile_pistol prefab was accepted.
 - Follow-up body preparation showed the Raidlands kit weapon applied: weapon=rifle:rifle.ak, ammo=1.00, held=rifle.ak:BaseProjectile.
 - raidbots.list showed the new diagnostics surface: exposure=0.00(0/0), weapon=rifle:rifle.ak, cover=none, stuck=False, navPath=True, navDisabled=False.
-- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, v0.3.30 advisor adapter commands, v0.3.31 kill chat/RP integration, v0.3.32 release defaults, v0.3.33 admin panel/high-cap defaults, v0.3.34 enhanced killfeed/quiet-console/clan-war behavior, v0.3.35 protection/healing/barricade-anchor polish, v0.3.40 sharper aim tuning, foliage, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
+- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, v0.3.30 advisor adapter commands, v0.3.31 kill chat/RP integration, v0.3.32 release defaults, v0.3.33 admin panel/high-cap defaults, v0.3.34 enhanced killfeed/quiet-console/clan-war behavior, v0.3.35 protection/healing/barricade-anchor polish, v0.3.40 sharper aim tuning, v0.3.42 learned skill/profile behavior, v0.3.43 advisor proximity gate and hard-stuck timer, v0.3.44 decision trace retention, v0.3.45 active player engagement advisor gate, v0.3.47/v0.3.49 native death-screen identity, v0.3.48 NPC weapon damage normalization, v0.3.50 victim-linked observation context, foliage, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
 ```
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.40 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, keeps external advisor plumbing opt-in for live release, and still needs live validation for the implemented squad/clan coordination, different-clan bot combat, first-pass destination reservation, terrain-layer spawn rejection, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, cumulative protection-damage reactions, skill-distance cover/barricade preference, categorized medical behavior, long-range barricade anchor mode, effective-cover validation, retreat-loop escape, state-independent visible shooting, inventory-backed medical item use, retreat-wall placement, wall-cap recycling, weapon auto-reload, aim warmup, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, stuck destination memory, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, normal unscaled damage, enhanced player-like kill/RP output, quiet-console behavior, and the `/raidbots admin` CUI.
+Please live-test v0.3.50 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, keeps external advisor HTTP calls gated first by active real-player engagement and then by the 350m safety cap, keeps learned behavior off until explicitly applied, bounds the decision trace JSONL file, and still needs live validation for the implemented learned observation/profile loop with victim-linked target context, squad/clan coordination, different-clan bot combat, first-pass destination reservation, terrain-layer spawn rejection, base-boundary behavior, foliage LOS gating, real bot-placed wooden cover barricades, cumulative protection-damage reactions, skill-distance cover/barricade preference, categorized medical behavior, long-range barricade anchor mode, effective-cover validation, retreat-loop escape, state-independent visible shooting, inventory-backed medical item use, retreat-wall placement, wall-cap recycling, weapon auto-reload, aim warmup, NPC weapon damage normalization, sight-gate tuning, immediate perception firing, slope-wall validation, hard-stuck cleanup, 180-second stuck despawn replacement, stuck destination memory, real F1/smoke utility, grenade danger-zone avoidance, player-like HP, normal unscaled damage, enhanced player-like kill/RP output, native death-screen bot identity, quiet-console behavior, decision trace pruning, and the `/raidbots admin` CUI.
 
 Recommended first test ladder:
 
@@ -3181,8 +3238,10 @@ Recommended first test ladder:
 10. Break LOS and confirm it stops shooting and moves to last-seen/search behavior.
 11. Damage it from cover and confirm it investigates the damage/heard position.
 12. Check oxide/data/RaidlandsRoamBots/decision_traces.jsonl for fallback traces when hard decisions trigger.
-13. Use raidbots.list while fighting and watch exposure=X.XX(Y/Z), weapon=<class>, cover=<point>, stuck=<bool>, protect=<state>, anchor=<state>, heal=<reason>, formation=<reason>, and utility=<reason>.
-14. If the three-bot smoke looks healthy, ramp through `raidbots.target 25`, then `raidbots.target 50`, while watching server performance and spawn spacing.
+13. Use raidbots.list while fighting and watch exposure=X.XX(Y/Z), weapon=<class>, aim=<degrees>/<warmup>, learn=<mode/model>, cover=<point>, stuck=<bool>, protect=<state>, anchor=<state>, heal=<reason>, formation=<reason>, and utility=<reason>.
+14. Learning smoke: `raidbots.learn allow <tester>`, `raidbots.learn observe on`, fight near bots, then `raidbots.learn report 60` and `raidbots.learn build`.
+15. Profile smoke after enough traces: `raidbots.learn profile build <tester> <profileKey>`, `raidbots.learn profile weight <profileKey> 10`, `raidbots.learn apply profiles`, spawn a fresh bot, and confirm public names stay fictional while admin/debug surfaces show the profile key/source.
+16. If the three-bot smoke looks healthy, ramp through `raidbots.target 25`, then `raidbots.target 50`, while watching server performance and spawn spacing.
 ```
 
 v0.3.29 terrain-layer spawn retest:
@@ -3268,7 +3327,7 @@ v0.3.35 clan/foliage/base/barricade/protection/healing/ammo/utility/health/damag
 20. Expected: `raidbots.list` / the side panel should not show `LOS: Y` with high exposure while the bot is visually hidden by dense foliage. It may search or reposition, but should not keep firing through the bush.
 21. Break LOS around 150m-190m after contact.
 22. Expected: clan members should keep searching/pushing the last-known or damage position during the fresh-contact window instead of immediately scattering back to a neutral regroup. When two bots would choose the same shared destination, later decisions should show `formation=...offset...` or the side panel should show `Formation: ...offset...`, and bots should spread instead of stacking directly on one point.
-23. If a bot stands in place with `stuck=Y`, watch the panel and `raidbots.list`. Expected: it should select stuck recovery; if failed paths continue past the hard-stuck threshold, the tracked bot despawns instead of remaining as a fake/dead-shell combatant.
+23. If a bot stands in place with `stuck=Y`, watch the panel and `raidbots.list`. Expected: it should select stuck recovery; if it remains latched as stuck for `AI -> Hard Stuck Despawn Seconds` (180s default) or failed paths continue past the hard-stuck threshold, the tracked bot despawns and queues a replacement check after the configured respawn delay.
 24. Damage a low-health bot while its nearest retreat cover is farther than 10m.
 25. Expected: it should choose `place_barricade` before crossing the open field, then fight from the wall for the configured commitment/anchor rules unless the wall is compromised or the target leaves useful range.
 26. If `Shooting: N` appears while the bot has a target, check `Fire:`. Expected blockers are concrete reasons such as `no_ammo`, `no_los`, `out_of_range`, `syringe_lock`, `target_in_base`, `no_attack_interface`, or `start_failed`.
@@ -3289,13 +3348,17 @@ v0.3.30+ optional advisor adapter smoke:
 ```text
 1. oxide.reload RaidlandsRoamBots
 2. raidbots.advisor status
-3. Expected live advisor profile: enabled=True, provider=openai_compatible, mode=shadow, endpoint=set, model=set, pending=0/2.
+3. Expected live advisor profile: enabled=True, provider=openai_compatible, mode=shadow, engagedOnly=on/45s, playerGate=350m, endpoint=set, model=set, pending=0/2.
 4. Put the API key in the Rust server process environment as `OPENAI_ROAM_BOT_API_KEY`, then run `raidbots.reload` or `oxide.reload RaidlandsRoamBots`.
 5. Run `raidbots.advisor shadow`.
-6. Fight or path-test until a hard decision trigger fires, then run `raidbots.decisions last 5`.
-7. Expected with a configured advisor: responses may validate or reject, but the selected heuristic action still executes normally in this adapter pass.
-8. Run `raidbots.advisor stats`; pending requests should return to 0 after responses/timeouts.
-9. Run `raidbots.advisor off` before normal release play unless intentionally keeping shadow telemetry on.
+6. Leave only idle/outpost players within 350m of active bots and wait for hard decision triggers, then run `raidbots.advisor stats`.
+7. Expected idle/not-engaged case: `engagement_skips` should increase and `submitted` should not increase for those skipped decisions.
+8. Move more than 350m away from an actively engaged bot/player fight and wait for hard decision triggers, then run `raidbots.advisor stats`.
+9. Expected away from engaged players: `proximity_skips` should increase and `submitted` should not increase for those skipped decisions.
+10. Fight or path-test within 350m until a hard decision trigger fires, then run `raidbots.decisions last 5`.
+11. Expected with a configured advisor and active nearby real-player engagement: responses may validate or reject, but the selected heuristic action still executes normally in this adapter pass.
+12. Run `raidbots.advisor stats`; pending requests should return to 0 after responses/timeouts.
+13. Run `raidbots.advisor off` before normal release play unless intentionally keeping shadow telemetry on.
 ```
 
 ### Known not-yet-implemented
