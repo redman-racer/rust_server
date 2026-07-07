@@ -1,0 +1,47 @@
+{
+  "Enabled": true,
+  "Sentry Item": {
+    "Shortname": "autoturret",
+    "Display Name": "Outpost Sentry Turret",
+    "Skin": 0,
+    "Require Display Name Match": true
+  },
+  "Outpost Sentry Prefab Candidates": [
+    "assets/prefabs/npc/autoturret/sentry.scientist.static.prefab"
+  ],
+  "Outpost Sentry Short Prefab Name Candidates": [
+    "sentry.scientist.static"
+  ],
+  "Required Spawned Short Prefab Name": "sentry.scientist.static",
+  "Force Attack All": true,
+  "Use Normal Turret Authorization": true,
+  "Clear Authorized Players On Spawned NPC Sentries": false,
+  "Post Spawn Attack All Reapply Delays Seconds": [
+    0.05,
+    0.25,
+    1.0,
+    3.0
+  ],
+  "Sentry Tuning": {
+    "Enable Range Tuning": true,
+    "Use Vanilla Auto Turret Prefab Range As Base": true,
+    "Fallback Normal Auto Turret Range Metres": 30.0,
+    "Range Multiplier": 1.3,
+    "Enable Durability Tuning": true,
+    "Effective Max Health": 500.0,
+    "Incoming Damage Multiplier": 1.0,
+    "Use Manual Damage Handling": true,
+    "Clear Native Base Protection": true,
+    "Ignore Pure Decay Damage": true,
+    "Log Damage Events": false
+  },
+  "Remove TurretSwitches Child Entities From Spawned NPC Sentries": false,
+  "Enable TurretSwitches Compatibility": true,
+  "Default New Sentries Online": false,
+  "Enable Hammer Pickup": true,
+  "Enable RemoverTool Integration": true,
+  "Return Item On Hammer Pickup": true,
+  "Return Item When RemoverTool Refunds": true,
+  "Replacement Delay Seconds": 0.1,
+  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>"
+}

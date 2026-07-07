@@ -535,6 +535,57 @@ namespace Oxide.Plugins
                 DegreeToRadian(player.GetNetworkRotation().eulerAngles.y), args).Item1;
         }
 
+        [HookMethod(nameof(API_RaidlandsTryTrackedPasteAtPosition))]
+        public object API_RaidlandsTryTrackedPasteAtPosition(object trackingId, object filename, object rawPosition,
+            object rawArgs, object rawRotationDegrees = null)
+        {
+            var trackingIdString = trackingId?.ToString();
+            var pasteFile = filename?.ToString();
+
+            if (string.IsNullOrWhiteSpace(trackingIdString))
+                return "Raidlands tracked paste id was not supplied";
+
+            if (string.IsNullOrWhiteSpace(pasteFile))
+                return Lang("FILE_NOT_EXISTS", _consolePlayer.Id);
+
+            Vector3 pastePosition;
+            if (!TryGetRaidlandsVector3(rawPosition, out pastePosition))
+                return "Raidlands tracked paste position was not supplied";
+
+            float rotationDegrees;
+            if (!TryGetRaidlandsFloat(rawRotationDegrees, 0f, out rotationDegrees))
+                return "Raidlands tracked paste rotation was invalid";
+
+            PasteData pasteData = null;
+            Action callback = () =>
+            {
+                if (pasteData == null)
+                    return;
+
+                var pastedEntityIds = pasteData.PastedEntities
+                    .Where(entity => entity != null && !entity.IsDestroyed && entity.net != null && entity.net.ID.IsValid)
+                    .Select(entity => entity.net.ID.Value)
+                    .Distinct()
+                    .ToList();
+
+                Interface.CallHook("OnRaidlandsTrackedPasteFinished", trackingIdString, pasteData.Filename,
+                    pastedEntityIds, pasteData.Player, pasteData.StartPos);
+            };
+
+            var result = TryPaste(pastePosition, pasteFile, _consolePlayer, DegreeToRadian(rotationDegrees),
+                NormalizeRaidlandsPasteArgs(rawArgs), callback: callback);
+
+            pasteData = result.Item2;
+
+            if (pasteData == null)
+            {
+                Interface.CallHook("OnRaidlandsTrackedPasteFailed", trackingIdString, pasteFile, result.Item1,
+                    pastePosition);
+            }
+
+            return result.Item1;
+        }
+
         [HookMethod(nameof(API_RaidlandsTryPasteFromSteamId))]
         public object API_RaidlandsTryPasteFromSteamId(ulong userId, string filename, string[] args)
         {
@@ -605,6 +656,58 @@ namespace Oxide.Plugins
             }
 
             return false;
+        }
+
+        private bool TryGetRaidlandsVector3(object rawValue, out Vector3 position)
+        {
+            position = Vector3.zero;
+
+            if (rawValue == null)
+                return false;
+
+            if (rawValue is Vector3 vector)
+            {
+                position = vector;
+                return true;
+            }
+
+            try
+            {
+                position = rawValue.ToString().ToVector3();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryGetRaidlandsFloat(object rawValue, float defaultValue, out float value)
+        {
+            value = defaultValue;
+
+            if (rawValue == null)
+                return true;
+
+            if (rawValue is float floatValue)
+            {
+                value = floatValue;
+                return true;
+            }
+
+            if (rawValue is double doubleValue)
+            {
+                value = (float)doubleValue;
+                return true;
+            }
+
+            if (rawValue is int intValue)
+            {
+                value = intValue;
+                return true;
+            }
+
+            return float.TryParse(rawValue.ToString(), out value);
         }
 
         private object TryPasteFromVector3(Vector3 pos, float rotationCorrection, string filename, string[] args,

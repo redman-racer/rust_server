@@ -1078,7 +1078,14 @@ namespace Oxide.Plugins
 
                 // Create Item
                 string sanitizedName = UniqueTagREGEX.Replace(entry.Key, string.Empty);
-                Item item = ItemManager.CreateByPartialName(sanitizedName, amount);
+                Item item = CreateRaidlandsLootItem(sanitizedName, amount, skinId, customName)
+                    ?? ItemManager.CreateByPartialName(sanitizedName, amount);
+                if (item is null)
+                {
+                    Log($"ERROR: item \"{entry.Key}\" could not be created! System returned null entry!");
+                    return (null, null);
+                }
+
                 if (!string.IsNullOrWhiteSpace(customName))
                     item.name = customName;
                 item.skin = skinId;
@@ -1090,9 +1097,6 @@ namespace Oxide.Plugins
                     item.ChangeConditionPercentage(GetRNG(durability.MinDurability, durability.MaxDurability));
 
                 item.MarkDirty();
-
-                if (item is null)
-                    Log($"ERROR: item \"{entry.Key}\" could not be created! System returned null entry!");
 
                 // Add for future duplicate checking.
                 currentItemEntries.Add(entry.Key);
@@ -1400,7 +1404,11 @@ namespace Oxide.Plugins
                 foreach (var bonusItemEntry in additionalItems)
                 {
                     var _bonusItemEntry = bonusItemEntry.Value;
-                    Item bonusItem = ItemManager.CreateByName(bonusItemEntry.Key, GetRNG(_bonusItemEntry.Min, _bonusItemEntry.Max) * _config.Loot.LootMultiplier, _bonusItemEntry.SkinId);
+                    int amount = GetRNG(_bonusItemEntry.Min, _bonusItemEntry.Max) * _config.Loot.LootMultiplier;
+                    Item bonusItem = CreateRaidlandsLootItem(bonusItemEntry.Key, amount, _bonusItemEntry.SkinId, _bonusItemEntry.DisplayName)
+                        ?? ItemManager.CreateByName(bonusItemEntry.Key, amount, _bonusItemEntry.SkinId);
+                    if (bonusItem is null)
+                        continue;
 
                     // Apply attachments if applicable
                     _bonusItemEntry.ApplyAttachments(bonusItem);
@@ -2243,7 +2251,9 @@ namespace Oxide.Plugins
             foreach (var gItemEntry in guaranteedItemEntries)
             {
                 // Spawn item. No rng, just spawn em.
-                Item gItem = ItemManager.CreateByPartialName(gItemEntry.Key, GetRNG(gItemEntry.Value.Min, gItemEntry.Value.Max), gItemEntry.Value.SkinId);
+                int amount = GetRNG(gItemEntry.Value.Min, gItemEntry.Value.Max);
+                Item gItem = CreateRaidlandsLootItem(gItemEntry.Key, amount, gItemEntry.Value.SkinId, gItemEntry.Value.DisplayName)
+                    ?? ItemManager.CreateByPartialName(gItemEntry.Key, amount, gItemEntry.Value.SkinId);
                 if (gItem is null)
                     continue;
 
@@ -2470,20 +2480,22 @@ namespace Oxide.Plugins
                 throw new Exception($"Error: invalid shortname {itemShortname}. Should not happen, contact developer.");
             
             Item item;
+            int amount = GetRNG(lootEntry.Min, lootEntry.Max) * _config.Loot.LootMultiplier;
             if (asBP && itemDef.Blueprint is not null && itemDef.Blueprint.isResearchable)
             {
                 item = ItemManager.Create(BlueprintBaseDef);
                 item.blueprintTarget = itemDef.itemid;
             } else
             {
-                item = ItemManager.Create(itemDef);
+                item = CreateRaidlandsLootItem(itemShortname, amount, lootEntry.SkinId, lootEntry.DisplayName)
+                    ?? ItemManager.Create(itemDef);
             }
             
             if (item is null)
                 return default;
 
             // Apply custom properties
-            item.amount = GetRNG(lootEntry.Min, lootEntry.Max) * _config.Loot.LootMultiplier;
+            item.amount = amount;
             item.skin = lootEntry.SkinId;
 
             if (!string.IsNullOrWhiteSpace(lootEntry.DisplayName))
@@ -2524,6 +2536,7 @@ namespace Oxide.Plugins
 
             bool asBP = RNG.NextDouble() < _config.Generic.BlueprintWeight && !blockBPs;
             string itemEntryName = string.Empty;
+            int selectedAmount = 0;
             int maxRetry = 10 * itemCount;
             int limit = 0;
 
@@ -2601,11 +2614,13 @@ namespace Oxide.Plugins
                 }
                 else
                 {
-                    item = ItemManager.Create(itemDef);
+                    selectedAmount = GetRNG(lootEntry.Min, lootEntry.Max) * _config.Loot.LootMultiplier;
+                    item = CreateRaidlandsLootItem(itemShortname, selectedAmount, lootEntry.SkinId, lootEntry.DisplayName)
+                        ?? ItemManager.Create(itemDef);
                 }
 
                 // Shouldn't happen
-                if (item.info is null)
+                if (item?.info is null)
                 {
                     if (--maxRetry <= 0)
                         break;
@@ -2629,7 +2644,10 @@ namespace Oxide.Plugins
             }
 
             // Apply custom properties
-            item.amount = GetRNG(lootEntry.Min, lootEntry.Max) * _config.Loot.LootMultiplier;
+            if (selectedAmount <= 0)
+                selectedAmount = GetRNG(lootEntry.Min, lootEntry.Max) * _config.Loot.LootMultiplier;
+
+            item.amount = selectedAmount;
             item.skin = lootEntry.SkinId;
 
             if (!string.IsNullOrWhiteSpace(lootEntry.DisplayName))
@@ -2650,6 +2668,30 @@ namespace Oxide.Plugins
 
             item.OnVirginSpawn();
             return (new ItemConvertInfo(item, lootEntry.CanConvertToBlueprint ?? false), bonusItems);
+        }
+
+        private static Item? CreateRaidlandsLootItem(string shortname, int amount, ulong skin, string? displayName)
+        {
+            string normalizedShortname = NormalizeRaidlandsLootShortname(shortname);
+            if (!IsRaidlandsCustomLootShortname(normalizedShortname))
+                return null;
+
+            return Interface.CallHook("OnRaidlandsCreateLootItem", normalizedShortname, Math.Max(1, amount), skin, displayName ?? string.Empty) as Item;
+        }
+
+        private static string NormalizeRaidlandsLootShortname(string shortname)
+        {
+            if (string.IsNullOrWhiteSpace(shortname))
+                return string.Empty;
+
+            string normalized = UniqueTagREGEX?.Replace(shortname, string.Empty) ?? shortname;
+            return normalized.Replace(".blueprint", string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsRaidlandsCustomLootShortname(string shortname)
+        {
+            return string.Equals(shortname, "supertea", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(shortname, "maxhealthtea.pure", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool ItemExists(string name) =>

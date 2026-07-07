@@ -1,4 +1,5 @@
 {
+  "ConfigVersion": 2,
   "Title": "LiveAdmin",
   "AccentColor": "0.12 0.58 0.55 1",
   "WarningColor": "0.96 0.62 0.18 1",
@@ -11,9 +12,272 @@
     "BetterChat",
     "ZoneManager"
   ],
+  "CommonGroups": [
+    "admin",
+    "moderator",
+    "vip",
+    "default"
+  ],
+  "CommonPermissions": [
+    "liveadmin.use",
+    "liveadmin.players.view",
+    "liveadmin.players.moderate",
+    "liveadmin.players.teleport",
+    "liveadmin.reports.view",
+    "liveadmin.reports.manage",
+    "liveadmin.stafftools.view",
+    "liveadmin.stafftools.moderate",
+    "liveadmin.stafftools.fun",
+    "liveadmin.stafftools.dangerous",
+    "liveadmin.owner",
+    "liveadmin.plugins.view",
+    "liveadmin.plugins.manage",
+    "liveadmin.groups.view",
+    "liveadmin.groups.manage",
+    "liveadmin.permissions.view",
+    "liveadmin.permissions.manage",
+    "liveadmin.server.actions",
+    "liveadmin.players.kick",
+    "liveadmin.players.ban",
+    "liveadmin.players.mute",
+    "liveadmin.players.notes",
+    "liveadmin.players.inventory.view",
+    "liveadmin.players.inventory.modify",
+    "liveadmin.stafftools.actions",
+    "liveadmin.stafftools.inventory",
+    "liveadmin.stafftools.groups",
+    "liveadmin.stafftools.tickets",
+    "liveadmin.server.info",
+    "liveadmin.server.quickactions",
+    "liveadmin.server.wipe.view",
+    "liveadmin.server.wipe.manage",
+    "liveadmin.server.wipe.force",
+    "liveadmin.plugins.reload",
+    "liveadmin.plugins.config.view",
+    "liveadmin.plugins.config.edit",
+    "liveadmin.plugins.config.restore",
+    "liveadmin.audit.view",
+    "liveadmin.audit.manage"
+  ],
   "ProtectedGroups": [
     "admin",
     "owner"
+  ],
+  "MuteCommand": "mute {id} {duration} {reason}",
+  "UnmuteCommand": "unmute {id}",
+  "AllowGlobalChatAnnouncements": false,
+  "AnnounceMutes": true,
+  "MuteAnnouncement": "{name} was muted for {duration}: {reason}",
+  "AnnounceUnmutes": true,
+  "UnmuteAnnouncement": "{name} has been unmuted.",
+  "UseInventoryViewerPlugin": true,
+  "InventoryViewerCommand": "viewinv {id}",
+  "UseGodmodeForPassive": true,
+  "GodmodeCommand": "god {id}",
+  "VanishCommand": "vanish",
+  "SafeMode": false,
+  "EnableCommandSafety": true,
+  "AllowOwnerCommandSafetyBypass": false,
+  "ForceWipeDryRunDefault": true,
+  "BlockedCommandPrefixes": [
+    "quit",
+    "global.quit",
+    "server.stop",
+    "oxide.grant user",
+    "oxide.grant group admin",
+    "oxide.grant group owner",
+    "oxide.usergroup add",
+    "oxide.usergroup remove"
+  ],
+  "OwnerOnlyCommandPrefixes": [
+    "oxide.grant",
+    "oxide.revoke",
+    "oxide.reload",
+    "oxide.unload",
+    "oxide.load",
+    "server.writecfg"
+  ],
+  "AutoWipeEnabled": false,
+  "AutoWipeIntervalDays": 3,
+  "AutoWipeTimeUtc": "18:00",
+  "AutoWipeMap": false,
+  "AutoWipeBlueprints": false,
+  "AutoWipeSeed": "random",
+  "AutoWipeMapSize": 3500,
+  "AutoWipeCustomMapUrl": "",
+  "AutoWipeAnnouncement": "Scheduled server wipe is starting now.",
+  "AutoWipeDiscordCommandText": "",
+  "ForceWipeDiscordCommandText": "",
+  "AutoWipeCommandText": "say Scheduled normal wipe is starting now.||server.save||writecfg",
+  "ForceWipeCommandText": "say ADMIN FORCE WIPE is starting now. Server will restart shortly.||server.save||writecfg||quit",
+  "MapWipeDeletePathText": "server/{identity}/save/*.sav||server/{identity}/save/*.map||server/{identity}/save/*.sav.*",
+  "BlueprintWipeDeletePathText": "server/{identity}/player.blueprints*.db||server/{identity}/player.blueprints*.db-journal",
+  "AutoWipeCommands": [
+    "say Scheduled normal wipe is starting now.",
+    "server.save",
+    "writecfg"
+  ],
+  "ForceWipeCommands": [
+    "say ADMIN FORCE WIPE is starting now. Server will restart shortly.",
+    "server.save",
+    "writecfg",
+    "quit"
+  ],
+  "AutoWipeDiscordCommands": [],
+  "ForceWipeDiscordCommands": [],
+  "ForceWipeDeletesFiles": false,
+  "WipeFileRoot": "/server/server/rust",
+  "MapWipeDeletePaths": [
+    "server/{identity}/save/*.sav",
+    "server/{identity}/save/*.map",
+    "server/{identity}/save/*.sav.*"
+  ],
+  "BlueprintWipeDeletePaths": [
+    "server/{identity}/player.blueprints*.db",
+    "server/{identity}/player.blueprints*.db-journal"
+  ],
+  "PlayerActions": [
+    {
+      "Label": "Unmute",
+      "Command": "unmute {id}",
+      "Permission": "liveadmin.players.moderate",
+      "Confirm": true
+    },
+    {
+      "Label": "Freeze",
+      "Command": "freeze {id}",
+      "Permission": "liveadmin.players.moderate",
+      "Confirm": true
+    },
+    {
+      "Label": "Spectate",
+      "Command": "spectate {id}",
+      "Permission": "liveadmin.players.moderate",
+      "Confirm": false
+    },
+    {
+      "Label": "Kill",
+      "Command": "killplayer {id}",
+      "Permission": "liveadmin.stafftools.dangerous",
+      "Confirm": true
+    }
+  ],
+  "RolePresets": [
+    {
+      "Name": "Owner",
+      "Description": "Full LiveAdmin access.",
+      "Permissions": [
+        "liveadmin.use",
+        "liveadmin.owner",
+        "liveadmin.players.view",
+        "liveadmin.players.moderate",
+        "liveadmin.players.teleport",
+        "liveadmin.reports.view",
+        "liveadmin.reports.manage",
+        "liveadmin.plugins.view",
+        "liveadmin.plugins.manage",
+        "liveadmin.groups.view",
+        "liveadmin.groups.manage",
+        "liveadmin.permissions.view",
+        "liveadmin.permissions.manage",
+        "liveadmin.server.actions",
+        "liveadmin.stafftools.view",
+        "liveadmin.stafftools.moderate",
+        "liveadmin.stafftools.fun",
+        "liveadmin.stafftools.dangerous",
+        "liveadmin.players.kick",
+        "liveadmin.players.ban",
+        "liveadmin.players.mute",
+        "liveadmin.players.notes",
+        "liveadmin.players.inventory.view",
+        "liveadmin.players.inventory.modify",
+        "liveadmin.stafftools.actions",
+        "liveadmin.stafftools.inventory",
+        "liveadmin.stafftools.groups",
+        "liveadmin.stafftools.tickets",
+        "liveadmin.server.info",
+        "liveadmin.server.quickactions",
+        "liveadmin.server.wipe.view",
+        "liveadmin.server.wipe.manage",
+        "liveadmin.server.wipe.force",
+        "liveadmin.plugins.reload",
+        "liveadmin.plugins.config.view",
+        "liveadmin.plugins.config.edit",
+        "liveadmin.plugins.config.restore",
+        "liveadmin.audit.view",
+        "liveadmin.audit.manage"
+      ]
+    },
+    {
+      "Name": "Senior Admin",
+      "Description": "Operational moderation without destructive wipe or config editing by default.",
+      "Permissions": [
+        "liveadmin.use",
+        "liveadmin.players.view",
+        "liveadmin.players.moderate",
+        "liveadmin.players.kick",
+        "liveadmin.players.ban",
+        "liveadmin.players.mute",
+        "liveadmin.players.notes",
+        "liveadmin.players.teleport",
+        "liveadmin.players.inventory.view",
+        "liveadmin.players.inventory.modify",
+        "liveadmin.reports.view",
+        "liveadmin.reports.manage",
+        "liveadmin.stafftools.view",
+        "liveadmin.stafftools.actions",
+        "liveadmin.stafftools.inventory",
+        "liveadmin.stafftools.tickets",
+        "liveadmin.plugins.view",
+        "liveadmin.plugins.reload",
+        "liveadmin.server.quickactions",
+        "liveadmin.audit.view"
+      ]
+    },
+    {
+      "Name": "Moderator",
+      "Description": "Normal moderation, tickets, notes, mute, kick, and optional teleport.",
+      "Permissions": [
+        "liveadmin.use",
+        "liveadmin.players.view",
+        "liveadmin.players.moderate",
+        "liveadmin.players.kick",
+        "liveadmin.players.mute",
+        "liveadmin.players.notes",
+        "liveadmin.players.teleport",
+        "liveadmin.reports.view",
+        "liveadmin.reports.manage",
+        "liveadmin.stafftools.view",
+        "liveadmin.stafftools.actions",
+        "liveadmin.stafftools.tickets"
+      ]
+    },
+    {
+      "Name": "Support Staff",
+      "Description": "View players/reports and add notes with non-destructive support tools.",
+      "Permissions": [
+        "liveadmin.use",
+        "liveadmin.players.view",
+        "liveadmin.players.notes",
+        "liveadmin.reports.view",
+        "liveadmin.stafftools.view",
+        "liveadmin.stafftools.actions",
+        "liveadmin.stafftools.tickets"
+      ]
+    },
+    {
+      "Name": "Read Only",
+      "Description": "Read-only access to panels and audit logs.",
+      "Permissions": [
+        "liveadmin.use",
+        "liveadmin.players.view",
+        "liveadmin.reports.view",
+        "liveadmin.plugins.view",
+        "liveadmin.groups.view",
+        "liveadmin.permissions.view",
+        "liveadmin.audit.view"
+      ]
+    }
   ],
   "QuickCommands": [
     {

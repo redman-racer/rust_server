@@ -1,52 +1,352 @@
-Raidlands RoamBots victim-linked learning context - 2026-07-06
+Raidlands sentry/scientist turret range + durability tuning - 2026-07-07
 
 What changed:
-- RaidlandsRoamBots is now v0.3.50.
-- Player observation traces now distinguish passive nearest-bot samples from combat-linked target context.
-- Player-vs-bot damage, kills, and deaths promote the actual tracked bot involved into the primary target fields.
-- Fresh combat rows include target context fields such as `target_context_source`, `target_context_confidence`, `target_bot_key`, `combat_distance_to_target`, `combat_had_line_of_sight`, and combat exposure probe counts.
-- Older/noisy rows are still usable, but model builds now weight low-confidence target context less heavily by default.
-- `raidbots.learn report` and `raidbots.learn profile show` now expose target-context quality numbers for training-file review.
+- RaidlandsSentryTurrets is now v1.0.8.
+- Player-deployed scientist/static sentries now get config-backed runtime tuning on spawn, server init, and delayed reapply.
+- Range is capped to `Range Multiplier` x normal auto-turret range. Defaults use the live vanilla auto-turret prefab range as the base, fallback `30m`, multiplier `1.3`.
+- Durability now uses manual damage handling for managed NPC sentries so native NPC sentry protection cannot make them indestructible.
+- Default durability is `Effective Max Health=500` and `Incoming Damage Multiplier=1`, intended as the first-pass 5-HV-ish balance while preserving relative damage from bullets, rockets, C4, 40mm, etc.
+- `Log Damage Events=false` can be enabled temporarily to capture live weapon/ammo damage totals and tune `Effective Max Health` or `Incoming Damage Multiplier`.
+- `oxide/config/RaidlandsSentryTurrets.json` is now checked in so the new knobs can be uploaded directly instead of waiting for Oxide to generate them.
+
+Rust server plugin/config files to upload for this latest update:
+- oxide/plugins/RaidlandsSentryTurrets.cs
+- oxide/config/RaidlandsSentryTurrets.json
+
+Reload after upload:
+- oxide.reload RaidlandsSentryTurrets
+
+Sentry smoke:
+- Run `oxide.reload RaidlandsSentryTurrets`.
+- Existing managed sentries should be normalized on reload; newly placed Outpost Sentry Turrets should normalize immediately after conversion.
+- Place a test Outpost Sentry Turret in a safe spot and verify its target range is much shorter than the previous scientist sentry behavior, about 1.3x a normal auto turret.
+- Damage it with HV rockets and other raid ammo. Expected first-pass balance: about 5 HV rockets to kill, with other damage types staying proportional to their Rust damage events.
+- If live HV totals are not close enough, set `Log Damage Events=true`, reload, hit one test sentry, then tune `Effective Max Health` or `Incoming Damage Multiplier` from the logged `incoming`/`applied` values.
+
+Local verification:
+- oxide/config/RaidlandsSentryTurrets.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsSentryTurrets.cs v1.0.8 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining warnings are expected Oxide plugin-reference warnings and existing obsolete SetFlag warnings.
+- Live Oxide reload and in-game range/HV smoke are still required to prove runtime balance.
+
+---
+
+Raidlands Super Serum loot-table identity + drink effect - 2026-07-07
+
+What changed:
+- RaidlandsConsumables is now v1.0.13.
+- Super Serum consumption now plays Rust's native tea drink gesture effect: `assets/bundled/prefabs/fx/gestures/drink_tea.prefab`.
+- The drink effect is configurable under `Consumption Effect` in `oxide/config/RaidlandsConsumables.json`.
+- Super Serum buffs now come from the native `ItemModConsumable` modifier definitions on the configured pure tea and pie source items, so Rust's own modifier limits decide what stacks.
+- Super Serum max health is explicitly polished to `120 HP` with `Force Target Max Health=true` / `Target Max Health=120`; native max-health tea entries are skipped so this does not double-stack.
+- The unsafe old manual `Modifier Values` list has been cleared in native mode; this prevents the 1900 HP / extreme yield display from the prior generic modifier values.
+- RaidlandsConsumables now exposes `OnRaidlandsCreateLootItem` so loot-table systems can ask the consumables plugin to create real Super Serum items.
+- BetterLoot now routes `supertea` and legacy `maxhealthtea.pure` loot entries through that Raidlands hook across ungrouped loot, loot groups, guaranteed items, and bonus items.
+- `oxide/data/BetterLoot/LootTables.json` now names the live `supertea` row `Super Serum` as a fallback marker for the consumables plugin.
+- RaidlandsConsumables also now uses the current Rust `ModifierDefintion` list API when refreshing tea modifiers, so a reload compiles against the current server build.
+
+Rust server plugin/config/data files to upload for this latest update:
+- oxide/plugins/RaidlandsConsumables.cs
+- oxide/plugins/BetterLoot.cs
+- oxide/config/RaidlandsConsumables.json
+- oxide/data/BetterLoot/LootTables.json
+
+Do not upload for this update:
+- oxide/config/BetterLoot.json (local copy was refreshed from the attached live-before config and matches it byte-for-byte, but this update does not require BetterLoot config changes)
+
+Reload after upload:
+- oxide.reload RaidlandsConsumables
+- oxide.reload BetterLoot
+
+Super Serum loot smoke:
+- Run `oxide.reload RaidlandsConsumables` first, then `oxide.reload BetterLoot`.
+- Players who already had the broken 1900 HP serum should be refreshed by the RaidlandsConsumables reload because the plugin removes existing tea-source modifiers before reapplying native source modifiers. If a player still shows the broken panel, force a fresh player state by death/respawn and retest.
+- Open or refresh a BetterLoot-supported container that can roll `supertea`.
+- Expected: the item is named `Super Serum` and consuming/drinking it activates the Raidlands serum path.
+- Expected on consume: nearby players hear the tea drink/slurp effect, chat says `Super Serum active. Buffs will persist until death.`, max health lands at `120 HP` rather than 1900 HP, and the buff panel shows normal pure tea/pie-scale values instead of extreme generic multipliers.
+- Also test the admin grant path with `raidlands.serum.give <playerNameOrSteamId> 1`; expected: consuming the granted item plays the same drink effect and activates the same serum state.
+
+Local verification:
+- oxide/config/RaidlandsConsumables.json parses successfully.
+- oxide/data/BetterLoot/LootTables.json parses successfully.
+- Local `oxide/config/BetterLoot.json` was refreshed from the attached live-before file and matches it byte-for-byte.
+- Attached live-before `oxide/data/BetterLoot/LootTables.json` matches the repo data after JSON parsing when ignoring the one intended `supertea` display-name change to `Super Serum`.
+- Roslyn compile check passed for oxide/plugins/RaidlandsConsumables.cs v1.0.13 and oxide/plugins/BetterLoot.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining compile warnings are expected BetterLoot nullable-context/unused-field warnings plus the expected RaidlandsConsumables config-field warning for Skin.
+- Live Oxide reload and in-game smoke are still required to prove audio and loot-container runtime behavior.
+
+---
+
+RaidlandsEvents raid-base scoring modal + optional RP rewards - 2026-07-07
+
+What changed:
+- RaidlandsEvents is now v0.1.5.
+- Active public raid-base events now track player contribution scores inside the event radius:
+  - player kills/deaths
+  - player damage
+  - pasted event-entity damage
+  - explosive pasted event-entity damage bonus
+  - tool cupboard destruction credit
+- `revents.score <instanceId|all>` prints active raid-base leaderboards.
+- `/eventsmanager` active rows now include Score buttons that open an in-panel scoreboard modal/table.
+- The scoreboard modal includes rank, player, score, kills, deaths, PvP damage, base damage, explosive damage, TC credit, reward state, Refresh, Close, and Retry RP controls.
+- Completion chat announces the winner and top leaderboard.
+- Optional ServerRewards RP placement payouts are implemented but disabled by default.
+- Failed/missing ServerRewards payouts queue in RaidlandsEvents data and can be retried with `revents.rewards retry`.
+- `revents.rewards list|retry` manages pending RP rewards.
+
+Rust server plugin/config files to upload for this latest update:
+- oxide/plugins/RaidlandsEvents.cs
+- oxide/config/RaidlandsEvents.json
+
+Docs/reference files updated:
+- Docs/events-manager/RaidlandsEvents_RaidBase_MVP_Implementation_Status.md
+- UPDATED_FILES_FOR_UPLOAD.txt
+
+Reload after upload:
+- oxide.reload RaidlandsEvents
+
+Scoring smoke:
+- Run `oxide.reload RaidlandsEvents`.
+- Enable/start a known layout, for example `revents.layouts enable justintoactive-1` then `revents.start justintoactive-1 here`.
+- Have two non-admin test players fight inside the event radius and damage the pasted base.
+- Run `revents.score all`.
+- Expected: score rows show player damage, kills/deaths, event entity damage, explosive damage, and total score movement.
+- Open `/eventsmanager` and click Score on the active raid base.
+- Expected: an in-panel leaderboard modal/table opens and can refresh or close cleanly.
+- Destroy the tracked TC.
+- Expected: completion chat announces the winner/top leaderboard and cleanup still runs after the configured delay.
+
+Optional RP payout smoke:
+- Keep `Rewards.Enabled=false` and `Award ServerRewards RP=false` until scoring is proven live.
+- To payout-test intentionally, set both to true in `oxide/config/RaidlandsEvents.json`, reload RaidlandsEvents, complete a small scored event, then run `revents.rewards list`.
+- Expected: qualified placement winners receive RP through ServerRewards.
+- If ServerRewards is missing/rejects a payout, expected: `revents.rewards list` shows a queued reward; after fixing ServerRewards, run `revents.rewards retry`.
+
+Local verification:
+- oxide/config/RaidlandsEvents.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsEvents.cs v0.1.5 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining warnings are expected Oxide plugin-reference warnings for CopyPaste and ServerRewards.
+- Live Oxide reload and the smoke steps above are still required to prove in-game runtime behavior.
+
+---
+
+Raidlands sentry/scientist turret kits + event paste attack-all - 2026-07-07
+
+What changed:
+- RaidlandsSentryTurrets is now v1.0.7.
+- Kits can now create Outpost Sentry Turret items through the same `OnRaidlandsCreateKitItem` seam used by Super Serum.
+- The hook only catches intentional sentry kit rows: `Shortname=autoturret` plus display name `Outpost Sentry Turret` by default, so ordinary auto-turret kit rows stay ordinary.
+- Existing local Kits data already contains:
+  - `sentry` -> `kits.sentry.small` -> 1 Outpost Sentry Turret.
+  - `sentry_large` -> `kits.sentry.large` -> 5 Outpost Sentry Turrets.
+- RaidlandsEvents is now v0.1.3.
+- Events Manager tracked CopyPaste completions now force pasted auto/scientist turrets to attack all by clearing authorization, disabling peacekeeper/friendly mode, clearing the current target, and reapplying that state after paste completion.
+- `oxide/config/RaidlandsEvents.json` now exposes `Force Pasted Turrets Attack All` and the reapply delay list under `Paste`.
+
+Rust server plugin/config files to upload for this latest update:
+- oxide/plugins/RaidlandsSentryTurrets.cs
+- oxide/plugins/RaidlandsEvents.cs
+- oxide/config/RaidlandsEvents.json
+
+Relevant data file to verify/upload if live does not already have the sentry kit rows:
+- oxide/data/Kits/kits_data.json
+
+Docs/reference files updated:
+- Docs/events-manager/RaidlandsEvents_RaidBase_MVP_Implementation_Status.md
+- UPDATED_FILES_FOR_UPLOAD.txt
+
+Reload after upload:
+- oxide.reload RaidlandsSentryTurrets
+- oxide.reload RaidlandsEvents
+- oxide.reload Kits (only needed if you upload/update oxide/data/Kits/kits_data.json)
+
+Sentry kit smoke:
+- Run `oxide.reload RaidlandsSentryTurrets`.
+- Give a test player the small sentry kit: `kit give <playerNameOrSteamId> sentry`.
+- Expected: the received item is an Auto Turret named `Outpost Sentry Turret`.
+- Place it in a safe test spot.
+- Expected: it converts into the scientist/static sentry prefab and logs/chats `Outpost Sentry Turret deployed.`
+- Repeat with `kit give <playerNameOrSteamId> sentry_large` and confirm the large kit grants the configured amount.
+
+Events Manager turret smoke:
+- Run `oxide.reload RaidlandsEvents`.
+- Start Justin's base through Events Manager, for example `revents.layouts enable justintoactive-1` then `revents.start justintoactive-1 here`.
+- Expected server log includes `turretsAttackAll=<number>`.
+- Approach the pasted event base as a non-authorized test player.
+- Expected: pasted turrets are hostile/attack-all, not friendly.
+- Stop the event with `revents.stop all` after the test.
+
+Local verification:
+- oxide/config/RaidlandsEvents.json parses successfully.
+- oxide/data/Kits/kits_data.json parses successfully.
+- oxide/data/ServerRewards/products.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsEvents.cs v0.1.3 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Roslyn compile check passed for oxide/plugins/RaidlandsSentryTurrets.cs v1.0.7 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining compile warnings are expected Oxide plugin-reference/obsolete-API warnings.
+- Live Oxide reload and the smoke steps above are still required to prove in-game runtime behavior.
+
+---
+
+Raidlands RoamBots player-like corpse loot - 2026-07-07
+
+Latest RoamBots update:
+- RaidlandsRoamBots is now v0.3.70.
+- Bot deaths now snapshot the bot's actual live inventory after `Kits.GiveKit` and medical-item grants, then copy that live belt/wear/main inventory into the corpse. The drop no longer depends only on a planned kit name.
+- Live inventory snapshots preserve item condition, skin, display name, weapon ammo/ammo type, blueprints, and nested contents/attachments.
+- RoamBot corpses are forced into a player-corpse style panel (`player_corpse`) with the bot display name instead of the generic `Scientist` title.
+- NPC corpses expose one visible grid in this path, so RoamBots flattens the live inventory into that grid as belt/hotbar first, worn armor/clothes second, and main inventory last.
+- Corpse loot can also roll default-access utility kits (`build`, `scuba`) and a low-tier bonus kit (`mp5`, `m16`) through `Kit Selection -> Corpse Loot`.
+- Low-tier bonus loot is capped to 1-3 bots per team via `Maximum Low Tier Bonus Bots Per Team` and defaults to a max of 3.
+- RoamBots now handles `OnCorpsePopulate` for recent bot deaths and returns a `ShouldBLPopulate_NPC` guard so BetterLoot does not replace RoamBot corpse inventories with generic NPC loot.
+
+Rust server plugin/config files to upload for this latest update:
+- oxide/plugins/RaidlandsRoamBots.cs
+- oxide/config/RaidlandsRoamBots.json
+
+Docs/reference files updated:
+- Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
+- UPDATED_FILES_FOR_UPLOAD.txt
+
+Reload after upload:
+- oxide.reload RaidlandsRoamBots
+- raidbots.status
+
+Corpse loot smoke:
+- Run `oxide.reload RaidlandsRoamBots`.
+- Spawn a small group, for example `raidbots.spawn 3`, and kill each bot.
+- Expected: each corpse title shows the bot name instead of `Scientist`, and the corpse contains the actual kit the bot was roaming with. The visible grid should start with the bot's hotbar weapon/meds, then armor/clothes, then ammo/mods/resources.
+- Check a weapon from the corpse; expected: attachments, condition, ammo, and ammo type match the configured kit data.
+- Repeat across several kills; expected: some corpses include extra default-access utility loot such as `build` or `scuba`.
+- Repeat across small groups; expected: only up to three bots in a team can roll an extra low-tier kit such as `mp5` or `m16`.
+- If BetterLoot is loaded, expected: RoamBot corpses keep this player-like loot instead of being replaced by BetterLoot NPC contents.
+
+Admin UI smoke:
+- In game, run `/raidbots admin`.
+- Confirm the panel opens on Home with readable runtime, ambient, managed, and anchor status.
+- Open Chat and confirm the master/AI/banter toggles, quota, contexts, pending requests, endpoint status, and stats line render.
+- Open each primary tab and click the `?` button; confirm the help popup opens and closes.
+- On Home or Population, click Disable and confirm it opens a confirmation dialog instead of immediately disabling runtime; cancel it.
+- On Safety, click Kill Active, Nuke Active, Nuke All, and Reload Config/Data; confirm each opens a matching confirmation dialog and can be cancelled.
+- Open Learning -> Observe/Train/Profiles/Mix and confirm each subpage renders.
+- Click several `?` buttons and close the popups.
+- In Learning -> Mix, confirm `ababmxking` and `sudol` each show 50% and Default shows 0%.
+- Change a profile by `+1`, `-1`, `0`, and exact input; expected: values save and redraw, with Default showing the remaining percent.
+- In Learning -> Train, type a player query/profile key and confirm the draft fields display.
+- In Rewards, edit one text field only if you are ready to save that template.
+
+Bot bullet smoke:
+- oxide.reload RaidlandsRoamBots
+- Enable a small population, for example raidbots.enable 4.
+- Let two different-clan bots fight with rifles/M16s in clear LOS.
+- Expected: bullet hits now reduce HP and can produce a bot kill.
+- For the native-missing path shown in live screenshots, `Dmg:` should show `sim applied <damage>` on landed resolver shots, or `sim miss` / `sim blocked` when the resolver intentionally does not hit.
+- If native damage handles it, `Dmg:` shows `hook in/out:enemy_bot` or `enemy_bot_floor`.
+- If the bridge handles it, `Dmg:` shows `atk enemy_bot_hit` and `br applied <damage>`.
+- If `Dmg:` shows `fire 0s#... atk none hook none`, the bot is firing but the server is not reporting projectile hits on the enemy bot.
+- If grenades still work but bullets do not, capture the visible `Dmg:` line and `raidbots.list` native combat section for the two bots.
+
+Local verification:
+- oxide/config/RaidlandsRoamBots.json parses successfully.
+- oxide/data/Kits/kits_data.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.70 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining compile warnings are expected Oxide plugin-reference/future-field warnings.
+
+---
+
+Raidlands RoamBots bot-vs-bot damage diagnostics - 2026-07-06
+
+What changed:
+- RaidlandsRoamBots is now v0.3.59.
+- Different-clan bot hits still keep normal Rust damage when it is working.
+- The bad sustained-fire fallback idea has been removed; RoamBots no longer injects bot-vs-bot HP loss without a real Rust damage hook.
+- The debug side panel now includes `Dmg:` telemetry showing bot weapon-fire hooks and the latest damage-hook classification.
+- `Dmg:` can distinguish enemy_bot, enemy_bot_floor, same_clan_block, untracked_attacker, untracked_victim, player_to_bot, and bot_to_player.
+- `raidbots.list` legacy combat diagnostics now inspect the bot's actual memory target, including enemy bots, instead of the nearest real player.
+- Advisor HTTP submissions now require a current real-player fight, not just a recent real-player engagement signal.
+- After the existing engagement check, RoamBots now verifies the active memory target or candidate target ids resolve to an engageable real player before any OpenAI-compatible request can be submitted.
+- Bot-vs-bot clan-war decisions now stay on deterministic fallback and report advisor_skipped_not_fighting_real_player instead of spending API calls.
+- Bot-vs-bot same-clan friendly hits now clear the invalid target and stop the attacker instead of letting it keep firing into cancelled damage.
+- Different-clan bot hits now keep normal Rust damage when it is working, but legacy scientist hits that arrive with effectively zero damage are raised to a small weapon-class damage floor so clan-war fights can actually end.
+- This directly investigates the live symptom where two roam bots stand about 5m apart, shoot each other, and neither loses HP.
+- Live config had Map markers enabled with Radius=8 and Alpha=0.65, so the missing-marker issue was not a bad toggle.
+- Native debug map markers now use a calibrated visible display-size conversion instead of the too-small literal meter conversion.
+- With "Debug Bot Map Marker Radius" set to 8, RoamBots now publishes a native map radius of about 0.047.
+- RoamBot marker entities now set globalBroadcast=true before spawn so clients can receive them as map-level debug entities.
+- The /raidbots admin Debug tab now labels that control as "Marker size".
+- The checked-in marker alpha default is reduced from 0.85 to 0.65 so clustered bot markers stay easier to read.
+- This fixes both extremes seen in live testing: first map-sized red/yellow/green disks, then invisible markers.
+- RoamBots exposes a managed NPC lending API for RaidlandsEvents:
+  - REBOT_SpawnGroup(requestJsonOrDictionary)
+  - REBOT_SpawnSingle(requestJsonOrDictionary)
+  - REBOT_DespawnGroup(groupId, reason)
+  - REBOT_DespawnForEvent(eventInstanceId, reason)
+  - REBOT_GetBotOwner(entityIdOrEntity)
+  - REBOT_SetGroupObjective(groupId, objectiveJsonOrDictionary)
+  - REBOT_SetGroupLeash(groupId, center, radius)
+  - REBOT_IsBot(entityIdOrEntity)
+- Managed/event-owned bots carry owner, event instance, group, profile, difficulty, leash, and objective metadata.
+- Ambient population maintenance now counts only ambient bots, so event-owned bots are not trimmed by Target Population and do not trigger ambient refills when they die or despawn.
+- Managed spawn requests accept JSON strings or Oxide-friendly dictionaries with EventInstanceId, GroupKey, Profile, Difficulty, Count, HealthMultiplier, TeamKey, SpawnMode, SpawnPoints, Leash, Roam, LootMode, and ReturnEntityIds.
+- Unmapped profile, weapon, armor, behavior, and loot details are accepted as metadata and returned as warnings while RoamBots falls back to configured kits/tactics.
+- Existing BGrade-facing APIs remain available:
+  - API_IsRaidlandsRoamBot(BaseEntity)
+  - API_GetRaidlandsRoamBotCombatKey(BaseEntity)
 
 Rust server plugin/config files to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
 - oxide/config/RaidlandsRoamBots.json
 
-Avatar image assets to keep/upload if they are not already live:
-- oxide/data/RaidlandsRoamBots/avatars/raider-red.png
-- oxide/data/RaidlandsRoamBots/avatars/scrap-jacket.png
-- oxide/data/RaidlandsRoamBots/avatars/hazmat-echo.png
-- oxide/data/RaidlandsRoamBots/avatars/roadside-ghost.png
-- oxide/data/RaidlandsRoamBots/avatars/launch-watcher.png
-
 Docs/reference files to upload or keep with the repo handoff:
 - Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
+- Docs/RaidlandsEvents_Event_Manager_Build_Plan.md
 - UPDATED_FILES_FOR_UPLOAD.txt
 
 Reload after upload:
-- oxide.reload ImageLibrary
 - oxide.reload RaidlandsRoamBots
 
-Learning trace smoke:
-- raidbots.learn status
-- raidbots.learn allow <player name or steamid>
-- raidbots.learn observe on
-- Fight tracked RoamBots long enough to deal/take damage and ideally kill or die to a tracked bot.
-- raidbots.learn report 60
-- raidbots.learn export
-- raidbots.learn profile build <player name or steamid> <profileKey>
-- raidbots.learn profile show <profileKey>
-- raidbots.learn apply shadow
+Bot clan-war smoke:
+- Enable a small test population with bot clan wars on, for example raidbots.enable 4.
+- Run raidbots.list and pick two different-clan bots that can see each other.
+- Watch their HP, killfeed, and the side-panel `Dmg:` line.
+- If `Dmg:` shows `fire 0s#... hook none`, the bot is firing projectiles but Rust is not producing damage hooks for the target.
+- If `Dmg:` shows `hook in/out:enemy_bot` or `enemy_bot_floor`, the RoamBots damage path is being reached and HP should move.
+- If `Dmg:` shows `same_clan_block`, the target identity/clan assignment is wrong for that duel.
+- If `Dmg:` shows `untracked_attacker` or `untracked_victim`, Rust is producing a damage hook but one side is not resolving to a tracked RoamBot runtime.
+- Run raidbots.list during the duel and check `nav=...combat:target=target_bot/canAttack=.../inRange=.../best=...`; these diagnostics now refer to the actual bot target.
+- If two same-clan bots accidentally target each other, their Fire diagnostic should move to same_clan_bot and they should stop treating each other as the active target.
+- With advisor shadow/canary enabled, run raidbots.advisor stats before and after bot-vs-bot fighting.
+- Expected bot-vs-bot advisor result: submitted does not increase, engagement_skips can increase, and last may show advisor_skipped_not_fighting_real_player.
+- Then fight a bot as a real player and confirm real player combat can still pass the advisor gate when the existing trigger/cooldown/proximity conditions are met.
 
-Expected learning smoke:
-- `raidbots.learn report 60` shows nonzero traces and should show `combat_linked` increasing after damage/kill/death rows.
-- Fresh JSONL damage/kill/death rows should include `target_context_source":"combat_target"` and a high `target_context_confidence`.
-- Rows that only sampled a nearby bot without combat remain `nearest_bot_sample` context and train at lower weight.
-- Profile summaries should include `weighted`, `ctx`, `linked`, and `high_conf` values in addition to the existing success and action delta output.
-- Existing older `player_observation_traces.jsonl` rows remain readable; they are inferred as lower-confidence when distance/LOS/exposure do not line up with combat outcomes.
+Map marker smoke:
+- In game, run /raidbots admin.
+- In Debug, enable Map markers.
+- Run raidbots.enable 3 if bots are not already active.
+- Run raidbots.diag and confirm mapMarkers is on, the marker count is nonzero, and native=0.047 when size is 8.
+- Open the native Rust map and confirm active bots have visible compact skill-colored markers, not giant biome-sized disks.
+- Move/fight long enough to confirm markers still follow bots within the configured update interval.
+- Disable Map markers or run raidbots.nuke debug and confirm marker entities disappear.
+
+Managed API smoke:
+- Use a temporary provider/RCON helper to call REBOT_SpawnGroup with OwnerPlugin=RaidlandsEvents, a unique EventInstanceId, GroupKey, Count=2, two SpawnPoints, Difficulty=elite, and a Leash center/radius.
+- Expected response: Success=true, GroupId set, EntityIds returned, and only fallback warnings for unmapped metadata.
+- Run raidbots.status and confirm ambient and managed counts are separate.
+- Run raidbots.list and confirm managed bots show owner=RaidlandsEvents:<event>/<group> and leash details.
+- Call REBOT_GetBotOwner and REBOT_IsBot for each returned entity/net ID.
+- Call REBOT_SetGroupLeash and REBOT_SetGroupObjective, then confirm raidbots.list reflects the leash update.
+- Call REBOT_DespawnGroup and confirm the managed bots despawn without unwanted ambient refill.
+- Spawn two groups for the same EventInstanceId, call REBOT_DespawnForEvent, and confirm no event-owned bots remain.
+
+Ambient regression smoke:
+- raidbots.enable 1
+- raidbots.status
+- raidbots.list
+- raidbots.killall
+- Expected: ordinary ambient bots still spawn, list, and despawn normally, and managed API capacity does not change ambient Target Population behavior.
 
 Local verification:
-- `oxide/config/RaidlandsRoamBots.json` parses successfully.
-- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.50 against `RustDedicated_Data/Managed` with `Oxide.References.dll` excluded to avoid duplicate JSON types.
-- Remaining compile warnings are expected plugin-reference/future-field warnings.
-- Live Oxide reload and the learning trace smoke above are still required to prove the runtime hook data on the server.
+- oxide/config/RaidlandsRoamBots.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.59 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining compile warnings are expected Oxide plugin-reference/future-field warnings.
+- Live Oxide reload and the smoke steps above are still required to prove in-game runtime behavior.

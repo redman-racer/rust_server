@@ -3358,19 +3358,24 @@ namespace Oxide.Plugins
         #region Serialized Items
         private static Item CreateItem(ItemData itemData, BasePlayer player = null)
         {
-            int itemId = itemData.ItemID;
-            ulong skin = itemData.Skin;
+            Item item = Interface.CallHook("OnRaidlandsCreateKitItem", itemData.Shortname, itemData.Amount, itemData.Skin, itemData.DisplayName) as Item;
 
-            if (player)
+            if (item == null)
             {
-                itemId = _getRedirectedIfNotOwned(player, itemData.ItemID);
-                skin = _canUseSkin(player, itemData.Skin) ? itemData.Skin : 0UL;
-            }
+                int itemId = itemData.ItemID;
+                ulong skin = itemData.Skin;
 
-            Item item = ItemManager.CreateByItemID(itemId, itemData.Amount, skin);
-            
-            if (!string.IsNullOrEmpty(itemData.DisplayName))
-                item.name = itemData.DisplayName;
+                if (player)
+                {
+                    itemId = _getRedirectedIfNotOwned(player, itemData.ItemID);
+                    skin = _canUseSkin(player, itemData.Skin) ? itemData.Skin : 0UL;
+                }
+
+                item = ItemManager.CreateByItemID(itemId, itemData.Amount, skin);
+
+                if (!string.IsNullOrEmpty(itemData.DisplayName))
+                    item.name = itemData.DisplayName;
+            }
 
             if (!string.IsNullOrEmpty(itemData.Text))
                 item.text = itemData.Text;

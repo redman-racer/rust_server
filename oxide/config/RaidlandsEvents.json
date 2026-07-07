@@ -1,0 +1,116 @@
+{
+  "AutoSpawn": {
+    "Enabled": false,
+    "IntervalMinutes": 120.0,
+    "JitterMinutes": 30.0,
+    "MinOnlinePlayers": 4,
+    "MaxActiveRaidBases": 1,
+    "CooldownMinutesAfterRun": 60.0
+  },
+  "LayoutRotation": {
+    "EnabledLayouts": [],
+    "IgnoredLayouts": [
+      "raidlands_portafort",
+      "raidlands_portafort_test"
+    ],
+    "PublicDisplayName": "Public Raid Base"
+  },
+  "LocationRules": {
+    "RandomSearchAttempts": 80,
+    "MinDistanceFromMapEdge": 350.0,
+    "BlockWater": true,
+    "WaterClearance": 1.5,
+    "BlockSafeZones": true,
+    "SafeZoneRadius": 120.0,
+    "BlockMonuments": true,
+    "MonumentRadiusPadding": 85.0,
+    "DefaultMonumentRadius": 80.0,
+    "BlockRoads": true,
+    "RoadCheckHeight": 10.0,
+    "RoadCheckDepth": 40.0,
+    "BlockPlayerBases": true,
+    "PlayerBaseRadius": 95.0,
+    "MinimumDistanceBetweenEvents": 350.0,
+    "MaxSlope": 0.45,
+    "FlatnessSampleRadius": 18.0,
+    "MaxFlatnessDelta": 5.0,
+    "OverlapPadding": 4.0
+  },
+  "Paste": {
+    "CopyPaste Arguments": [
+      "deployables",
+      "true",
+      "inventories",
+      "true",
+      "auth",
+      "false",
+      "entityowner",
+      "false",
+      "autoheight",
+      "false",
+      "height",
+      "0",
+      "blockcollision",
+      "0",
+      "enablesaving",
+      "false"
+    ],
+    "RandomRotationDegreesStep": 90.0,
+    "GroundClearance": 0.25,
+    "Force Pasted Turrets Attack All": true,
+    "Pasted Turret Attack All Reapply Delays Seconds": [
+      0.1,
+      0.5,
+      1.5,
+      3.0
+    ]
+  },
+  "MapMarker": {
+    "Enabled": true,
+    "RadiusMeters": 90.0,
+    "Alpha": 0.65,
+    "Color1": "#ce422b",
+    "Color2": "#f5c542"
+  },
+  "Scoring": {
+    "Enabled": true,
+    "Score Radius Meters": 120.0,
+    "Require Attacker And Victim Inside Radius": true,
+    "Player Kill Points": 100,
+    "Player Damage Points Per 100 Damage": 5.0,
+    "Event Entity Damage Points Per 100 Damage": 1.0,
+    "Explosive Event Entity Damage Bonus Points Per 100 Damage": 4.0,
+    "Tool Cupboard Destroyed Points": 1000,
+    "Minimum Score To Qualify": 250,
+    "Max Leaderboard Entries": 5,
+    "Announce Leaderboard On Completion": true
+  },
+  "Rewards": {
+    "Enabled": false,
+    "Award ServerRewards RP": false,
+    "Tell Players About RP Rewards": true,
+    "Queue Rewards If ServerRewards Missing": true,
+    "Placement RP Rewards": [
+      {
+        "Place": 1,
+        "ServerRewards RP": 10000
+      },
+      {
+        "Place": 2,
+        "ServerRewards RP": 5000
+      },
+      {
+        "Place": 3,
+        "ServerRewards RP": 2500
+      }
+    ]
+  },
+  "Cleanup": {
+    "Remove Markers": true,
+    "Despawn Pasted Entities": true,
+    "Cleanup On Unload": true,
+    "Completion Cleanup Delay Seconds": 60.0,
+    "Forced Cleanup Timeout Seconds": 10800.0
+  },
+  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>"
+}

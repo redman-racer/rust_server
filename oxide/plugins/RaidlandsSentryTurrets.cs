@@ -4,11 +4,12 @@ using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core.Plugins;
+using Rust;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.6")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.8")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
@@ -59,6 +60,9 @@ namespace Oxide.Plugins
             [JsonProperty("Post Spawn Attack All Reapply Delays Seconds")]
             public float[] AttackAllReapplyDelaysSeconds = { 0.05f, 0.25f, 1f, 3f };
 
+            [JsonProperty("Sentry Tuning")]
+            public SentryTuning SentryTuning = new SentryTuning();
+
             [JsonProperty("Remove TurretSwitches Child Entities From Spawned NPC Sentries")]
             public bool RemoveTurretSwitchChildEntities = false;
 
@@ -100,6 +104,42 @@ namespace Oxide.Plugins
 
             [JsonProperty("Require Display Name Match")]
             public bool RequireDisplayNameMatch = true;
+        }
+
+        private class SentryTuning
+        {
+            [JsonProperty("Enable Range Tuning")]
+            public bool EnableRangeTuning = true;
+
+            [JsonProperty("Use Vanilla Auto Turret Prefab Range As Base")]
+            public bool UseVanillaAutoTurretPrefabRangeAsBase = true;
+
+            [JsonProperty("Fallback Normal Auto Turret Range Metres")]
+            public float FallbackNormalAutoTurretRangeMetres = 30f;
+
+            [JsonProperty("Range Multiplier")]
+            public float RangeMultiplier = 1.3f;
+
+            [JsonProperty("Enable Durability Tuning")]
+            public bool EnableDurabilityTuning = true;
+
+            [JsonProperty("Effective Max Health")]
+            public float EffectiveMaxHealth = 500f;
+
+            [JsonProperty("Incoming Damage Multiplier")]
+            public float IncomingDamageMultiplier = 1f;
+
+            [JsonProperty("Use Manual Damage Handling")]
+            public bool UseManualDamageHandling = true;
+
+            [JsonProperty("Clear Native Base Protection")]
+            public bool ClearNativeBaseProtection = true;
+
+            [JsonProperty("Ignore Pure Decay Damage")]
+            public bool IgnorePureDecayDamage = true;
+
+            [JsonProperty("Log Damage Events")]
+            public bool LogDamageEvents = false;
         }
 
         protected override void LoadDefaultConfig()
@@ -156,6 +196,13 @@ namespace Oxide.Plugins
             {
                 config.AttackAllReapplyDelaysSeconds = new Configuration().AttackAllReapplyDelaysSeconds;
             }
+
+            if (config.SentryTuning == null)
+            {
+                config.SentryTuning = new SentryTuning();
+            }
+
+            ValidateSentryTuning(config.SentryTuning);
 
             if (config.UseNormalTurretAuthorization)
             {
@@ -294,6 +341,16 @@ namespace Oxide.Plugins
             return GiveSentryTurretsDetailed(player, Math.Max(1, amount)).Given;
         }
 
+        private object OnRaidlandsCreateKitItem(string shortname, int amount, ulong skin, string displayName)
+        {
+            if (!IsSentryKitItem(shortname, skin, displayName))
+            {
+                return null;
+            }
+
+            return CreateSentryItem(Math.Max(1, amount));
+        }
+
         private void OnEntityBuilt(Planner planner, GameObject gameObject)
         {
             if (!config.Enabled)
@@ -377,6 +434,58 @@ namespace Oxide.Plugins
             return false;
         }
 
+        private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.Enabled || entity == null || info?.damageTypes == null || !IsManagedNpcSentry(entity))
+            {
+                return null;
+            }
+
+            var tuning = config.SentryTuning;
+            if (tuning == null || !tuning.EnableDurabilityTuning || !tuning.UseManualDamageHandling)
+            {
+                return null;
+            }
+
+            var incomingDamage = info.damageTypes.Total();
+            if (incomingDamage <= 0f)
+            {
+                return null;
+            }
+
+            if (tuning.IgnorePureDecayDamage && IsPureDecayDamage(info))
+            {
+                info.damageTypes.ScaleAll(0f);
+                return true;
+            }
+
+            ConfigureSentryDurability(entity, false);
+
+            var damage = incomingDamage * tuning.IncomingDamageMultiplier;
+            if (damage <= 0f)
+            {
+                info.damageTypes.ScaleAll(0f);
+                return true;
+            }
+
+            var oldHealth = entity.Health();
+            var newHealth = oldHealth - damage;
+            if (tuning.LogDamageEvents)
+            {
+                Puts($"Sentry damage: weapon={DescribeDamageSource(info)} incoming={incomingDamage:0.##} applied={damage:0.##} health={Mathf.Max(0f, newHealth):0.##}/{entity.MaxHealth():0.##}");
+            }
+
+            if (newHealth <= 0f)
+            {
+                entity.Die(info);
+                return true;
+            }
+
+            entity.SetHealth(newHealth);
+            entity.SendNetworkUpdate();
+            return true;
+        }
+
         private object OnRemovableEntityGiveRefund(BaseEntity targetEntity, BasePlayer player, string itemName, int amount, long skinId)
         {
             if (!string.Equals(itemName, RemoverToolRefundKey, StringComparison.OrdinalIgnoreCase) || !IsManagedNpcSentry(targetEntity) || player == null)
@@ -450,6 +559,7 @@ namespace Oxide.Plugins
             replacement.skinID = original.skinID;
             replacement.Spawn();
 
+            InitializeNewSentryDurability(replacement as BaseCombatEntity);
             ApplySentryRuntimeState(replacement, authIds);
             ScheduleSentryRuntimeStateReapply(replacement, authIds);
             ConfigurePickup(replacement);
@@ -715,6 +825,27 @@ namespace Oxide.Plugins
                 || string.Equals(item.name ?? "", config.SentryItem.DisplayName ?? "", StringComparison.OrdinalIgnoreCase);
         }
 
+        private bool IsSentryKitItem(string shortname, ulong skin, string displayName)
+        {
+            if (config.SentryItem == null || string.IsNullOrWhiteSpace(shortname))
+            {
+                return false;
+            }
+
+            if (!string.Equals(shortname, config.SentryItem.Shortname, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (config.SentryItem.Skin != 0 && skin != config.SentryItem.Skin)
+            {
+                return false;
+            }
+
+            return !config.SentryItem.RequireDisplayNameMatch
+                || string.Equals(displayName ?? "", config.SentryItem.DisplayName ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void RemoveSwitchChildren(BaseEntity entity)
         {
             if (entity == null || entity.IsDestroyed || entity.children == null || entity.children.Count == 0)
@@ -960,7 +1091,158 @@ namespace Oxide.Plugins
                 DisablePeacekeeperMode(turret);
             }
 
+            ConfigureSentryTuning(turret);
             turret.SendNetworkUpdate();
+        }
+
+        private void ValidateSentryTuning(SentryTuning tuning)
+        {
+            if (tuning.FallbackNormalAutoTurretRangeMetres <= 0f)
+            {
+                tuning.FallbackNormalAutoTurretRangeMetres = 30f;
+            }
+
+            if (tuning.RangeMultiplier <= 0f)
+            {
+                tuning.RangeMultiplier = 1.3f;
+            }
+
+            if (tuning.EffectiveMaxHealth <= 0f)
+            {
+                tuning.EffectiveMaxHealth = 500f;
+            }
+
+            if (tuning.IncomingDamageMultiplier < 0f)
+            {
+                tuning.IncomingDamageMultiplier = 0f;
+            }
+        }
+
+        private void ConfigureSentryTuning(AutoTurret turret)
+        {
+            if (turret == null || turret.IsDestroyed || config.SentryTuning == null)
+            {
+                return;
+            }
+
+            ConfigureSentryRange(turret);
+            ConfigureSentryDurability(turret, true);
+        }
+
+        private void ConfigureSentryRange(AutoTurret turret)
+        {
+            var tuning = config.SentryTuning;
+            if (tuning == null || !tuning.EnableRangeTuning)
+            {
+                return;
+            }
+
+            var range = GetConfiguredSentryRange();
+            turret.sightRange = range;
+
+            var collider = turret.targetTrigger == null ? null : turret.targetTrigger.GetComponent<SphereCollider>();
+            if (collider != null)
+            {
+                collider.radius = range;
+            }
+        }
+
+        private float GetConfiguredSentryRange()
+        {
+            var tuning = config.SentryTuning;
+            var baseRange = tuning.FallbackNormalAutoTurretRangeMetres;
+            if (tuning.UseVanillaAutoTurretPrefabRangeAsBase)
+            {
+                var prefab = GameManager.server.FindPrefab(VanillaAutoTurretPrefab);
+                var prefabTurret = prefab == null ? null : prefab.GetComponent<AutoTurret>();
+                if (prefabTurret != null && prefabTurret.sightRange > 0f)
+                {
+                    baseRange = prefabTurret.sightRange;
+                }
+            }
+
+            return Mathf.Max(1f, baseRange * tuning.RangeMultiplier);
+        }
+
+        private void InitializeNewSentryDurability(BaseCombatEntity entity)
+        {
+            var tuning = config.SentryTuning;
+            if (tuning == null || !tuning.EnableDurabilityTuning || entity == null || entity.IsDestroyed)
+            {
+                return;
+            }
+
+            if (tuning.ClearNativeBaseProtection)
+            {
+                entity.baseProtection = null;
+            }
+
+            entity.SetMaxHealth(tuning.EffectiveMaxHealth);
+            entity.SetHealth(tuning.EffectiveMaxHealth);
+            entity.SendNetworkUpdate();
+        }
+
+        private void ConfigureSentryDurability(BaseCombatEntity entity, bool clampOnly)
+        {
+            var tuning = config.SentryTuning;
+            if (tuning == null || !tuning.EnableDurabilityTuning || entity == null || entity.IsDestroyed)
+            {
+                return;
+            }
+
+            if (tuning.ClearNativeBaseProtection)
+            {
+                entity.baseProtection = null;
+            }
+
+            var targetHealth = tuning.EffectiveMaxHealth;
+            var currentMaxHealth = entity.MaxHealth();
+            var currentHealth = entity.Health();
+            if (currentMaxHealth <= 0f || Math.Abs(currentMaxHealth - targetHealth) > 0.01f)
+            {
+                entity.SetMaxHealth(targetHealth);
+            }
+
+            if (currentHealth <= 0f)
+            {
+                return;
+            }
+
+            if (!clampOnly && currentHealth < targetHealth)
+            {
+                return;
+            }
+
+            if (currentHealth > targetHealth || currentMaxHealth > targetHealth)
+            {
+                entity.SetHealth(targetHealth);
+            }
+        }
+
+        private bool IsPureDecayDamage(HitInfo info)
+        {
+            if (info?.damageTypes == null || !info.damageTypes.Has(DamageType.Decay))
+            {
+                return false;
+            }
+
+            var total = info.damageTypes.Total();
+            return total > 0f && info.damageTypes.Get(DamageType.Decay) >= total - 0.01f;
+        }
+
+        private string DescribeDamageSource(HitInfo info)
+        {
+            if (info == null)
+            {
+                return "unknown";
+            }
+
+            return info.WeaponPrefab?.ShortPrefabName
+                ?? info.Weapon?.ShortPrefabName
+                ?? info.WeaponPrefab?.GetItem()?.info?.shortname
+                ?? info.Weapon?.GetItem()?.info?.shortname
+                ?? info.Initiator?.ShortPrefabName
+                ?? "unknown";
         }
 
         private HashSet<ulong> BuildAuthorizationSet(AutoTurret turret, ulong ownerId)
@@ -1198,7 +1480,12 @@ namespace Oxide.Plugins
 
         private Item CreateSentryItem()
         {
-            var item = ItemManager.CreateByName(config.SentryItem.Shortname, 1, config.SentryItem.Skin);
+            return CreateSentryItem(1);
+        }
+
+        private Item CreateSentryItem(int amount)
+        {
+            var item = ItemManager.CreateByName(config.SentryItem.Shortname, Math.Max(1, amount), config.SentryItem.Skin);
             if (item == null)
             {
                 PrintWarning($"Could not create sentry item '{config.SentryItem.Shortname}'.");

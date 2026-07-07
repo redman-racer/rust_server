@@ -5,7 +5,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsConsumables", "Raidlands", "1.0.8")]
+    [Info("RaidlandsConsumables", "Raidlands", "1.0.13")]
     [Description("Provides Raidlands Super Serum consumables with persistent tea and pie style buffs until death.")]
     public class RaidlandsConsumables : RustPlugin
     {
@@ -15,6 +15,7 @@ namespace Oxide.Plugins
         private StoredData storedData;
         private Timer refreshTimer;
         private readonly Dictionary<global::Modifier.ModifierType, float> modifierValues = new Dictionary<global::Modifier.ModifierType, float>();
+        private readonly List<global::ModifierDefintion> nativeSourceModifiers = new List<global::ModifierDefintion>();
 
         private class Configuration
         {
@@ -27,36 +28,26 @@ namespace Oxide.Plugins
             [JsonProperty("Use Actions")]
             public string[] UseActions = { "consume", "eat", "drink", "use" };
 
+            [JsonProperty("Consumption Effect")]
+            public ConsumptionEffect ConsumptionEffect = new ConsumptionEffect();
+
             [JsonProperty("Refresh Interval Seconds")]
             public float RefreshIntervalSeconds = 30f;
 
             [JsonProperty("Native Modifier Duration Seconds")]
             public float NativeModifierDurationSeconds = 90f;
 
+            [JsonProperty("Use Native Source Item Modifiers")]
+            public bool UseNativeSourceItemModifiers = true;
+
+            [JsonProperty("Force Target Max Health")]
+            public bool ForceTargetMaxHealth = true;
+
+            [JsonProperty("Target Max Health")]
+            public float TargetMaxHealth = 120f;
+
             [JsonProperty("Modifier Values")]
-            public Dictionary<string, float> ModifierValues = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Max_Health"] = 0.2f,
-                ["Ore_Yield"] = 1f,
-                ["Wood_Yield"] = 1f,
-                ["Scrap_Yield"] = 1f,
-                ["Radiation_Resistance"] = 1f,
-                ["Radiation_Exposure_Resistance"] = 1f,
-                ["Comfort"] = 1f,
-                ["Crafting_Quality"] = 1f,
-                ["Warming"] = 1f,
-                ["Cooling"] = 1f,
-                ["CoreTemperatureMinAdjustment"] = 1f,
-                ["CoreTemperatureMaxAdjustment"] = 1f,
-                ["VisionCare"] = 1f,
-                ["MetabolismBooster"] = 1f,
-                ["Harvesting"] = 1f,
-                ["DigestionBoost"] = 1f,
-                ["Farming_BetterGenes"] = 1f,
-                ["Clotting"] = 1f,
-                ["HunterVision"] = 1f,
-                ["DigestionBoostTimeMod"] = 1f
-            };
+            public Dictionary<string, float> ModifierValues = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
 
             [JsonProperty("Metabolism Refresh")]
             public MetabolismRefresh MetabolismRefresh = new MetabolismRefresh();
@@ -108,6 +99,15 @@ namespace Oxide.Plugins
 
             [JsonProperty("Require Display Name Match")]
             public bool RequireDisplayNameMatch = true;
+        }
+
+        private class ConsumptionEffect
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Effect Prefab")]
+            public string EffectPrefab = "assets/bundled/prefabs/fx/gestures/drink_tea.prefab";
         }
 
         private class MetabolismRefresh
@@ -170,19 +170,19 @@ namespace Oxide.Plugins
                 config.UseActions = new Configuration().UseActions;
             }
 
-            if (config.ModifierValues == null)
+            if (config.ConsumptionEffect == null)
             {
-                config.ModifierValues = new Configuration().ModifierValues;
+                config.ConsumptionEffect = new ConsumptionEffect();
             }
-            else
+
+            if (string.IsNullOrWhiteSpace(config.ConsumptionEffect.EffectPrefab))
             {
-                foreach (var entry in new Configuration().ModifierValues)
-                {
-                    if (!config.ModifierValues.ContainsKey(entry.Key))
-                    {
-                        config.ModifierValues[entry.Key] = entry.Value;
-                    }
-                }
+                config.ConsumptionEffect.EffectPrefab = new ConsumptionEffect().EffectPrefab;
+            }
+
+            if (config.ModifierValues == null || config.UseNativeSourceItemModifiers)
+            {
+                config.ModifierValues = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
             }
 
             if (config.RefreshIntervalSeconds < 5f)
@@ -191,7 +191,9 @@ namespace Oxide.Plugins
             }
 
             float maxHealthValue;
-            if (config.ModifierValues.TryGetValue("Max_Health", out maxHealthValue) && (maxHealthValue > 0.25f || maxHealthValue < 0f))
+            if (!config.UseNativeSourceItemModifiers
+                && config.ModifierValues.TryGetValue("Max_Health", out maxHealthValue)
+                && (maxHealthValue > 0.25f || maxHealthValue < 0f))
             {
                 config.ModifierValues["Max_Health"] = 0.2f;
                 PrintWarning("Corrected Super Serum Max_Health modifier to 0.2 for the intended 120 HP cap.");
@@ -200,6 +202,11 @@ namespace Oxide.Plugins
             if (config.NativeModifierDurationSeconds < config.RefreshIntervalSeconds + 5f)
             {
                 config.NativeModifierDurationSeconds = Math.Max(30f, config.RefreshIntervalSeconds * 3f);
+            }
+
+            if (config.TargetMaxHealth < 100f || config.TargetMaxHealth > 200f)
+            {
+                config.TargetMaxHealth = 120f;
             }
 
             if (config.MetabolismRefresh == null)
@@ -234,6 +241,7 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
+            BuildModifierCache();
             StartRefreshTimer();
             foreach (var player in BasePlayer.activePlayerList)
             {
@@ -326,6 +334,26 @@ namespace Oxide.Plugins
             return GiveSerum(player, Math.Max(1, amount));
         }
 
+        private object OnRaidlandsCreateKitItem(string shortname, int amount, ulong skin, string displayName)
+        {
+            return CreateSerumForShortname(shortname, amount);
+        }
+
+        private object OnRaidlandsCreateLootItem(string shortname, int amount, ulong skin, string displayName)
+        {
+            return CreateSerumForShortname(shortname, amount);
+        }
+
+        private Item CreateSerumForShortname(string shortname, int amount)
+        {
+            if (!IsSuperSerumKitShortname(shortname))
+            {
+                return null;
+            }
+
+            return CreateSerum(Math.Max(1, amount));
+        }
+
         public bool IsSuperSerumActive(ulong playerId)
         {
             return storedData.ActivePlayers.Contains(playerId);
@@ -395,9 +423,30 @@ namespace Oxide.Plugins
             }
 
             storedData.ActivePlayers.Add(player.userID);
+            PlayConsumptionEffect(player);
             ApplySerumEffects(player, true);
             SaveData();
             Reply(player, "Super Serum active. Buffs will persist until death.");
+        }
+
+        private void PlayConsumptionEffect(BasePlayer player)
+        {
+            if (player == null
+                || config.ConsumptionEffect == null
+                || !config.ConsumptionEffect.Enabled
+                || string.IsNullOrWhiteSpace(config.ConsumptionEffect.EffectPrefab))
+            {
+                return;
+            }
+
+            try
+            {
+                Effect.server.Run(config.ConsumptionEffect.EffectPrefab, player.transform.position);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not play Super Serum consume effect '{config.ConsumptionEffect.EffectPrefab}': {ex.Message}");
+            }
         }
 
         private void DeactivateSerum(BasePlayer player)
@@ -447,28 +496,15 @@ namespace Oxide.Plugins
 
             if (player.modifiers != null)
             {
-                foreach (var entry in modifierValues)
-                {
-                    player.modifiers.RemoveVariable(entry.Key);
-                }
-
                 player.modifiers.RemoveFromSource(global::Modifier.ModifierSource.Tea);
 
-                foreach (var entry in modifierValues)
+                if (config.UseNativeSourceItemModifiers)
                 {
-                    if (Math.Abs(entry.Value) <= 0.001f)
-                    {
-                        continue;
-                    }
-
-                    var modifier = new global::Modifier();
-                    modifier.Init(
-                        entry.Key,
-                        global::Modifier.ModifierSource.Tea,
-                        entry.Value,
-                        config.NativeModifierDurationSeconds,
-                        config.NativeModifierDurationSeconds);
-                    player.modifiers.Add(modifier);
+                    ApplyNativeSourceModifiers(player);
+                }
+                else
+                {
+                    ApplyManualModifierValues(player);
                 }
 
                 player.modifiers.SendChangesToClient();
@@ -501,18 +537,52 @@ namespace Oxide.Plugins
                 TopOffSerumHealth(player);
                 timer.Once(0.1f, () => TopOffSerumHealth(player));
             }
+            else
+            {
+                ClampSerumHealth(player);
+                timer.Once(0.1f, () => ClampSerumHealth(player));
+            }
 
             player.SendNetworkUpdateImmediate();
         }
 
         private void TopOffSerumHealth(BasePlayer player)
         {
+            NormalizeSerumHealth(player, true);
+        }
+
+        private void ClampSerumHealth(BasePlayer player)
+        {
+            NormalizeSerumHealth(player, false);
+        }
+
+        private void NormalizeSerumHealth(BasePlayer player, bool allowHeal)
+        {
             if (player == null || player.IsDead())
             {
                 return;
             }
 
-            var missingHealth = player.MaxHealth() - player.Health();
+            var targetHealth = TargetSerumHealth(player);
+            if (targetHealth <= 0f)
+            {
+                return;
+            }
+
+            var currentHealth = player.Health();
+            if (currentHealth > targetHealth + 0.01f)
+            {
+                player.SetHealth(targetHealth);
+                player.SendNetworkUpdateImmediate();
+                return;
+            }
+
+            if (!allowHeal)
+            {
+                return;
+            }
+
+            var missingHealth = targetHealth - currentHealth;
             if (missingHealth <= 0.01f)
             {
                 return;
@@ -522,16 +592,104 @@ namespace Oxide.Plugins
             player.SendNetworkUpdateImmediate();
         }
 
+        private float TargetSerumHealth(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return 0f;
+            }
+
+            if (config.ForceTargetMaxHealth && config.TargetMaxHealth > 0f)
+            {
+                return config.TargetMaxHealth;
+            }
+
+            return player.MaxHealth();
+        }
+
+        private void ApplyNativeSourceModifiers(BasePlayer player)
+        {
+            if (nativeSourceModifiers.Count == 0)
+            {
+                BuildNativeSourceModifierCache();
+            }
+
+            var definitions = nativeSourceModifiers;
+            var targetMaxHealthModifier = CreateTargetMaxHealthModifier(player);
+            if (targetMaxHealthModifier != null)
+            {
+                definitions = new List<global::ModifierDefintion>(nativeSourceModifiers.Count + 1);
+                definitions.AddRange(nativeSourceModifiers);
+                definitions.Add(targetMaxHealthModifier);
+            }
+
+            if (definitions.Count == 0)
+            {
+                PrintWarning("No native Super Serum source modifiers were available; check Source Buff Items.");
+                return;
+            }
+
+            global::PlayerModifiers.AddToPlayer(player, definitions, 1f, 1f);
+        }
+
+        private global::ModifierDefintion CreateTargetMaxHealthModifier(BasePlayer player)
+        {
+            if (!config.ForceTargetMaxHealth || config.TargetMaxHealth <= 0f || player == null)
+            {
+                return null;
+            }
+
+            var baseMaxHealth = Math.Max(1f, player.StartMaxHealth());
+            var value = (config.TargetMaxHealth / baseMaxHealth) - 1f;
+            if (value <= 0.001f)
+            {
+                return null;
+            }
+
+            return new global::ModifierDefintion
+            {
+                type = global::Modifier.ModifierType.Max_Health,
+                source = global::Modifier.ModifierSource.Tea,
+                value = value,
+                duration = config.NativeModifierDurationSeconds
+            };
+        }
+
+        private void ApplyManualModifierValues(BasePlayer player)
+        {
+            foreach (var entry in modifierValues)
+            {
+                player.modifiers.RemoveVariable(entry.Key);
+            }
+
+            var definitions = new List<global::ModifierDefintion>();
+            foreach (var entry in modifierValues)
+            {
+                if (Math.Abs(entry.Value) <= 0.001f)
+                {
+                    continue;
+                }
+
+                definitions.Add(new global::ModifierDefintion
+                {
+                    type = entry.Key,
+                    source = global::Modifier.ModifierSource.Tea,
+                    value = entry.Value,
+                    duration = config.NativeModifierDurationSeconds
+                });
+            }
+
+            if (definitions.Count > 0)
+            {
+                player.modifiers.Add(definitions, 1f, 1f);
+            }
+        }
+
         private void ClearPlayerEffects(BasePlayer player)
         {
             if (player == null || player.modifiers == null)
             {
                 return;
-            }
-
-            foreach (var entry in modifierValues)
-            {
-                player.modifiers.RemoveVariable(entry.Key);
             }
 
             player.modifiers.RemoveFromSource(global::Modifier.ModifierSource.Tea);
@@ -560,7 +718,12 @@ namespace Oxide.Plugins
 
         private Item CreateSerum()
         {
-            var item = ItemManager.CreateByName(config.SuperSerumItem.Shortname, 1, config.SuperSerumItem.Skin);
+            return CreateSerum(1);
+        }
+
+        private Item CreateSerum(int amount)
+        {
+            var item = ItemManager.CreateByName(config.SuperSerumItem.Shortname, Math.Max(1, amount), config.SuperSerumItem.Skin);
             if (item == null)
             {
                 PrintWarning($"Could not create Super Serum item '{config.SuperSerumItem.Shortname}'.");
@@ -574,6 +737,12 @@ namespace Oxide.Plugins
 
             item.MarkDirty();
             return item;
+        }
+
+        private bool IsSuperSerumKitShortname(string shortname)
+        {
+            return string.Equals(shortname, config.SuperSerumItem.Shortname, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(shortname, "maxhealthtea.pure", StringComparison.OrdinalIgnoreCase);
         }
 
         private Item FindSerum(BasePlayer player)
@@ -656,6 +825,12 @@ namespace Oxide.Plugins
         private void BuildModifierCache()
         {
             modifierValues.Clear();
+            if (config.UseNativeSourceItemModifiers)
+            {
+                BuildNativeSourceModifierCache();
+                return;
+            }
+
             foreach (var entry in config.ModifierValues)
             {
                 global::Modifier.ModifierType type;
@@ -666,6 +841,67 @@ namespace Oxide.Plugins
                 else
                 {
                     PrintWarning($"Unknown Rust modifier '{entry.Key}' in config; skipping it.");
+                }
+            }
+        }
+
+        private void BuildNativeSourceModifierCache()
+        {
+            nativeSourceModifiers.Clear();
+            if (config.SourceBuffItems == null)
+            {
+                return;
+            }
+
+            foreach (var shortname in config.SourceBuffItems)
+            {
+                if (string.IsNullOrWhiteSpace(shortname))
+                {
+                    continue;
+                }
+
+                var itemDefinition = ItemManager.FindItemDefinition(shortname);
+                if (itemDefinition == null)
+                {
+                    PrintWarning($"Could not find Super Serum source item '{shortname}'.");
+                    continue;
+                }
+
+                var itemMods = itemDefinition.itemMods;
+                if (itemMods == null)
+                {
+                    continue;
+                }
+
+                foreach (var itemMod in itemMods)
+                {
+                    var consume = itemMod as global::ItemModConsume;
+                    var consumable = consume?.GetConsumable();
+                    if (consumable?.modifiers == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var sourceModifier in consumable.modifiers)
+                    {
+                        if (sourceModifier == null || Math.Abs(sourceModifier.value) <= 0.001f)
+                        {
+                            continue;
+                        }
+
+                        if (config.ForceTargetMaxHealth && sourceModifier.type == global::Modifier.ModifierType.Max_Health)
+                        {
+                            continue;
+                        }
+
+                        nativeSourceModifiers.Add(new global::ModifierDefintion
+                        {
+                            type = sourceModifier.type,
+                            source = sourceModifier.source,
+                            value = sourceModifier.value,
+                            duration = sourceModifier.duration
+                        });
+                    }
                 }
             }
         }

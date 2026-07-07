@@ -8,6 +8,7 @@ using UnityEngine;
 
 using Oxide.Core;
 using Oxide.Core.Libraries;
+using Oxide.Core.Plugins;
 using Oxide.Plugins.BGradeExt;
 
 namespace Oxide.Plugins
@@ -21,6 +22,9 @@ namespace Oxide.Plugins
         public static BGrade Instance;
         private static readonly MethodInfo UpdateSurroundingEntitiesMethod = typeof(BuildingBlock).GetMethod("UpdateSurroundingEntities", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
+        [PluginReference]
+        private Plugin RaidlandsRoamBots;
+
         private ListHashSet<string> _registeredPermissions = new ListHashSet<string>();
         private Dictionary<Vector3, int> _lastAttacked = new Dictionary<Vector3, int>();
 
@@ -30,14 +34,15 @@ namespace Oxide.Plugins
 
         private bool ConfigChanged;
 
-        // Timer settings
-        private bool AllowTimer;
-        private int MaxTimer;
-        private int DefaultTimer;
-
         // Last attack settings
         private bool CheckLastAttack;
         private int UpgradeCooldown;
+
+        // PvP lockout settings
+        private bool PvpLockoutEnabled;
+        private int PvpLockoutCooldownSeconds;
+        private float PvpLockoutCancelDamagePercent;
+        private bool CountRaidlandsRoamBotsAsPlayers;
 
         // Command settings
         private List<string> ChatCommands;
@@ -45,9 +50,6 @@ namespace Oxide.Plugins
 
         // Refund settings
         private bool RefundOnBlock;
-
-        // Player Component settings
-        private bool DestroyOnDisconnect;
 
         // Placement / skin update safety settings
         private bool DelayUpgradeOneTick;
@@ -59,9 +61,6 @@ namespace Oxide.Plugins
 
         private void InitConfig()
         {
-            AllowTimer = GetConfig(true, "Timer Settings", "Enabled");
-            DefaultTimer = GetConfig(30, "Timer Settings", "Default Timer");
-            MaxTimer = GetConfig(180, "Timer Settings", "Max Timer");
             ChatCommands = GetConfig(new List<string>
             {
                 "bgrade",
@@ -73,8 +72,11 @@ namespace Oxide.Plugins
             }, "Command Settings", "Console Commands");
             CheckLastAttack = GetConfig(true, "Building Attack Settings", "Enabled");
             UpgradeCooldown = GetConfig(30, "Building Attack Settings", "Cooldown Time");
+            PvpLockoutEnabled = GetConfig(true, "PvP Lockout Settings", "Enabled");
+            PvpLockoutCooldownSeconds = Math.Max(1, GetConfig(30, "PvP Lockout Settings", "Cooldown Seconds"));
+            PvpLockoutCancelDamagePercent = Mathf.Clamp(GetConfig(30f, "PvP Lockout Settings", "Cancel Damage Percent"), 0f, 100f);
+            CountRaidlandsRoamBotsAsPlayers = GetConfig(true, "PvP Lockout Settings", "Count Raidlands Roam Bots As Players");
             RefundOnBlock = GetConfig(true, "Refund Settings", "Refund on Block");
-            DestroyOnDisconnect = GetConfig(false, "Destroy Data on Player Disconnect (for high pop servers)");
 
             // These defaults are intentionally conservative. They avoid mutating the block in the
             // same placement tick and prevent stale skin/mesh data from carrying into the upgrade.
@@ -115,14 +117,13 @@ namespace Oxide.Plugins
 
                 ["Error.InvalidArgs"] = "Invalid arguments, please use /{0} help",
                 ["Error.Resources"] = "You don't have enough resources to upgrade.",
-                ["Error.InvalidTime"] = "Please enter a valid time. '<color=orange>{0}</color>' is not recognised as a number.",
-                ["Error.TimerTooLong"] = "Please enter a time that is below the value of <color=orange>{0}</color>.",
 
                 ["Notice.SetGrade"] = "Automatic upgrading is now set to grade <color=orange>{0}</color>.",
-                ["Notice.SetTime"] = "The disable timer is now set to <color=orange>{0}</color>.",
+                ["Notice.SetGrade.Locked"] = "Automatic upgrading is now set to grade <color=orange>{0}</color> and will resume after your PvP lockout.",
                 ["Notice.Disabled"] = "Automatic upgrading is now disabled.",
-                ["Notice.Disabled.Auto"] = "Automatic upgrading has been automatically disabled.",
-                ["Notice.Time"] = "It'll automatically disable in <color=orange>{0}</color> seconds.",
+                ["Notice.PvpLockout"] = "BGrade is paused for <color=orange>{0}</color> seconds because you were shot by {1}.",
+                ["Notice.PvpRestored"] = "BGrade has resumed at grade <color=orange>{0}</color>.",
+                ["Notice.PvpCancelled"] = "BGrade PvP lockout cancelled. Grade <color=orange>{0}</color> restored.",
 
                 ["Command.Help"] = "<color=orange><size=16>BGrade Command Usages</size></color>",
                 ["Command.Help.0"] = "/{0} 0 - Disables BGrade",
@@ -130,13 +131,15 @@ namespace Oxide.Plugins
                 ["Command.Help.2"] = "/{0} 2 - Upgrades to Stone upon placement",
                 ["Command.Help.3"] = "/{0} 3 - Upgrades to Metal upon placement",
                 ["Command.Help.4"] = "/{0} 4 - Upgrades to Armoured upon placement",
-                ["Command.Help.T"] = "/{0} t <seconds> - Time until BGrade is disabled",
+                ["Command.Help.Persistent"] = "BGrade stays selected until logout, /{0} 0, or a temporary PvP lockout.",
 
                 ["Command.Settings"] = "<color=orange><size=16>Your current settings</size></color>",
-                ["Command.Settings.Timer"] = "Timer: <color=orange>{0}</color> seconds",
                 ["Command.Settings.Grade"] = "Grade: <color=orange>{0}</color>",
+                ["Command.Settings.Lockout"] = "PvP Lockout: <color=orange>{0}</color>",
 
-                ["Words.Disabled"] = "disabled"
+                ["Words.Disabled"] = "disabled",
+                ["Words.Inactive"] = "inactive",
+                ["Words.SecondsRemaining"] = "{0}s remaining"
             }, this);
         }
 
@@ -324,6 +327,132 @@ namespace Oxide.Plugins
             }
         }
 
+        private bool TryResolveQualifyingPvpAttacker(BasePlayer victim, HitInfo info, out string attackerKey, out string attackerName)
+        {
+            attackerKey = null;
+            attackerName = null;
+
+            if (victim == null || info == null || !IsDirectRangedHit(info))
+            {
+                return false;
+            }
+
+            var attackerEntity = info.Initiator as BaseCombatEntity;
+            var attackerPlayer = info.InitiatorPlayer ?? info.Initiator as BasePlayer;
+
+            if (CountRaidlandsRoamBotsAsPlayers && TryGetRaidlandsRoamBotCombatKey(attackerEntity ?? attackerPlayer, out attackerKey, out attackerName))
+            {
+                return true;
+            }
+
+            if (attackerPlayer == null || attackerPlayer == victim || !ReferenceEquals(info.Initiator, attackerPlayer) || !IsSteamId64(attackerPlayer.UserIDString))
+            {
+                return false;
+            }
+
+            attackerKey = $"player:{attackerPlayer.userID}";
+            attackerName = SafeName(attackerPlayer.displayName, "another player");
+            return true;
+        }
+
+        private bool IsDirectRangedHit(HitInfo info)
+        {
+            if (info?.damageTypes == null || !info.IsProjectile())
+            {
+                return false;
+            }
+
+            return info.damageTypes.Has(DamageType.Bullet) || info.damageTypes.Has(DamageType.Arrow);
+        }
+
+        private float ActualHealthDamage(BasePlayer victim, HitInfo info)
+        {
+            if (victim == null || info?.damageTypes == null)
+            {
+                return 0f;
+            }
+
+            var total = Mathf.Max(0f, info.damageTypes.Total());
+            return Mathf.Min(total, Mathf.Max(0f, victim.Health()));
+        }
+
+        private float PlayerMaxHealth(BasePlayer player)
+        {
+            return Mathf.Max(1f, player?.MaxHealth() ?? 100f);
+        }
+
+        private bool TryGetDeathCombatantKey(BaseCombatEntity entity, out string combatantKey)
+        {
+            combatantKey = null;
+
+            if (entity == null)
+            {
+                return false;
+            }
+
+            string botName;
+            if (CountRaidlandsRoamBotsAsPlayers && TryGetRaidlandsRoamBotCombatKey(entity, out combatantKey, out botName))
+            {
+                return true;
+            }
+
+            var player = entity as BasePlayer;
+            if (player == null || !IsSteamId64(player.UserIDString))
+            {
+                return false;
+            }
+
+            combatantKey = $"player:{player.userID}";
+            return true;
+        }
+
+        private bool TryGetRaidlandsRoamBotCombatKey(BaseCombatEntity entity, out string combatantKey, out string displayName)
+        {
+            combatantKey = null;
+            displayName = null;
+
+            if (RaidlandsRoamBots == null || entity == null)
+            {
+                return false;
+            }
+
+            var isBotResult = RaidlandsRoamBots.Call("API_IsRaidlandsRoamBot", entity);
+            if (!(isBotResult is bool) || !(bool)isBotResult)
+            {
+                return false;
+            }
+
+            var keyResult = RaidlandsRoamBots.Call("API_GetRaidlandsRoamBotCombatKey", entity) as string;
+            combatantKey = $"roambot:{(string.IsNullOrWhiteSpace(keyResult) ? EntityId(entity).ToString() : keyResult)}";
+
+            var player = entity as BasePlayer;
+            displayName = SafeName(player?.displayName, "a Raidlands RoamBot");
+            return true;
+        }
+
+        private ulong EntityId(BaseNetworkable entity)
+        {
+            try
+            {
+                return entity?.net?.ID.Value ?? 0UL;
+            }
+            catch
+            {
+                return 0UL;
+            }
+        }
+
+        private bool IsSteamId64(string id)
+        {
+            ulong value;
+            return ulong.TryParse(id, out value) && value >= 76561197960265728UL;
+        }
+
+        private string SafeName(string name, string fallback)
+        {
+            return string.IsNullOrWhiteSpace(name) ? fallback : name;
+        }
+
         #endregion
 
         #region BGrade Player
@@ -333,9 +462,14 @@ namespace Oxide.Plugins
             public static Dictionary<BasePlayer, BGradePlayer> Players = new Dictionary<BasePlayer, BGradePlayer>();
 
             private BasePlayer _player;
-            private Timer _timer;
-            private int _grade;
-            private int _time;
+            private Timer _pvpLockoutTimer;
+            private int _selectedGrade;
+            private bool _pvpLocked;
+            private float _pvpLockoutExpiresAt;
+            private string _pvpLockoutSingleAttackerKey;
+            private bool _pvpLockoutMultipleAttackers;
+            private float _pvpLockoutHealthLost;
+            private float _pvpLockoutMaxHealth;
 
             public void Awake()
             {
@@ -347,75 +481,160 @@ namespace Oxide.Plugins
 
                 _player = attachedPlayer;
                 Players[_player] = this;
-
-                _time = GetTime(false);
             }
 
-            public int GetTime(bool updateTime = true)
+            public int GetGrade()
             {
-                if (!Instance.AllowTimer)
-                {
-                    return 0;
-                }
-
-                if (updateTime)
-                {
-                    UpdateTime();
-                }
-
-                return _time != 0 ? _time : Instance.DefaultTimer;
+                return IsPvpLocked ? 0 : _selectedGrade;
             }
 
-            public void UpdateTime()
+            public int GetSelectedGrade()
             {
-                if (_time <= 0)
-                {
-                    return;
-                }
-
-                DestroyTimer();
-
-                SetTimer(Instance.timer.Once(_time, () =>
-                {
-                    _grade = 0;
-                    DestroyTimer();
-                    _player.ChatMessage("Notice.Disabled.Auto".Lang(_player.UserIDString));
-                }));
+                return _selectedGrade;
             }
 
-            public int GetGrade() => _grade;
-
-            public bool IsTimerValid
+            public bool IsPvpLocked
             {
                 get
                 {
-                    return _timer != null && !_timer.Destroyed;
+                    return _pvpLocked && UnityEngine.Time.realtimeSinceStartup < _pvpLockoutExpiresAt;
                 }
             }
 
-            private void SetTimer(Timer timer)
+            public int PvpLockoutRemainingSeconds
             {
-                _timer = timer;
+                get
+                {
+                    if (!IsPvpLocked)
+                    {
+                        return 0;
+                    }
+
+                    return Mathf.CeilToInt(Mathf.Max(0f, _pvpLockoutExpiresAt - UnityEngine.Time.realtimeSinceStartup));
+                }
             }
 
             public void SetGrade(int newGrade)
             {
-                _grade = newGrade;
+                _selectedGrade = Mathf.Clamp(newGrade, 0, 4);
+
+                if (_selectedGrade == 0)
+                {
+                    ClearPvpLockout(false);
+                }
             }
 
-            public void SetTime(int newTime)
+            public void ApplyPvpHit(string attackerKey, string attackerName, float damageAmount, float maxHealth)
             {
-                _time = newTime;
+                if (_selectedGrade == 0 || string.IsNullOrWhiteSpace(attackerKey))
+                {
+                    return;
+                }
+
+                var wasLocked = IsPvpLocked;
+                if (!wasLocked)
+                {
+                    ResetPvpLockoutTracking();
+                }
+
+                if (string.IsNullOrWhiteSpace(_pvpLockoutSingleAttackerKey))
+                {
+                    _pvpLockoutSingleAttackerKey = attackerKey;
+                }
+                else if (!string.Equals(_pvpLockoutSingleAttackerKey, attackerKey, StringComparison.Ordinal))
+                {
+                    _pvpLockoutMultipleAttackers = true;
+                }
+
+                _pvpLockoutHealthLost += Mathf.Max(0f, damageAmount);
+                _pvpLockoutMaxHealth = Mathf.Max(_pvpLockoutMaxHealth, Mathf.Max(1f, maxHealth));
+                _pvpLocked = true;
+                _pvpLockoutExpiresAt = UnityEngine.Time.realtimeSinceStartup + Instance.PvpLockoutCooldownSeconds;
+
+                DestroyPvpLockoutTimer();
+                _pvpLockoutTimer = Instance.timer.Once(Instance.PvpLockoutCooldownSeconds, () =>
+                {
+                    ClearPvpLockout(true);
+                });
+
+                if (!wasLocked && _player != null && _player.IsConnected)
+                {
+                    _player.ChatMessage("Notice.PvpLockout".Lang(_player.UserIDString, Instance.PvpLockoutCooldownSeconds, Instance.SafeName(attackerName, "another player")));
+                }
             }
 
-            public void DestroyTimer()
+            public bool TryCancelPvpLockout(string killedCombatantKey)
             {
-                _timer?.Destroy();
-                _timer = null;
+                if (!CanCancelPvpLockout(killedCombatantKey))
+                {
+                    return false;
+                }
+
+                var restoredGrade = _selectedGrade;
+                ClearPvpLockout(false);
+
+                if (restoredGrade > 0)
+                {
+                    _player.ChatMessage("Notice.PvpCancelled".Lang(_player.UserIDString, restoredGrade));
+                }
+
+                return true;
+            }
+
+            public void ClearPvpLockout(bool notify)
+            {
+                if (!_pvpLocked && _pvpLockoutTimer == null)
+                {
+                    ResetPvpLockoutTracking();
+                    return;
+                }
+
+                var restoredGrade = _selectedGrade;
+                DestroyPvpLockoutTimer();
+                ResetPvpLockoutTracking();
+
+                if (notify && restoredGrade > 0 && _player != null && _player.IsConnected)
+                {
+                    _player.ChatMessage("Notice.PvpRestored".Lang(_player.UserIDString, restoredGrade));
+                }
+            }
+
+            private bool CanCancelPvpLockout(string killedCombatantKey)
+            {
+                if (!IsPvpLocked || string.IsNullOrWhiteSpace(killedCombatantKey) || _pvpLockoutMultipleAttackers)
+                {
+                    return false;
+                }
+
+                if (!string.Equals(_pvpLockoutSingleAttackerKey, killedCombatantKey, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var maxHealth = Mathf.Max(1f, _pvpLockoutMaxHealth);
+                var lostPercent = (_pvpLockoutHealthLost / maxHealth) * 100f;
+                return lostPercent <= Instance.PvpLockoutCancelDamagePercent;
+            }
+
+            private void ResetPvpLockoutTracking()
+            {
+                _pvpLocked = false;
+                _pvpLockoutExpiresAt = 0f;
+                _pvpLockoutSingleAttackerKey = null;
+                _pvpLockoutMultipleAttackers = false;
+                _pvpLockoutHealthLost = 0f;
+                _pvpLockoutMaxHealth = 0f;
+            }
+
+            private void DestroyPvpLockoutTimer()
+            {
+                _pvpLockoutTimer?.Destroy();
+                _pvpLockoutTimer = null;
             }
 
             public void Destroy()
             {
+                DestroyPvpLockoutTimer();
                 Destroy(this);
             }
 
@@ -442,13 +661,17 @@ namespace Oxide.Plugins
 
             if (!CheckLastAttack)
             {
-                Unsubscribe(nameof(OnEntityDeath));
                 Unsubscribe(nameof(OnServerSave));
             }
 
-            if (!DestroyOnDisconnect)
+            if (!PvpLockoutEnabled)
             {
-                Unsubscribe(nameof(OnPlayerDisconnected));
+                Unsubscribe(nameof(OnEntityTakeDamage));
+            }
+
+            if (!CheckLastAttack && !PvpLockoutEnabled)
+            {
+                Unsubscribe(nameof(OnEntityDeath));
             }
         }
 
@@ -549,11 +772,6 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (AllowTimer)
-            {
-                bgradePlayer.UpdateTime();
-            }
-
             if (DelayUpgradeOneTick)
             {
                 NextTick(() => ApplyGradeUpgrade(buildingBlock, playerGrade));
@@ -590,17 +808,68 @@ namespace Oxide.Plugins
             return false;
         }
 
-        private void OnEntityDeath(BuildingBlock buildingBlock, HitInfo info)
+        private void OnEntityTakeDamage(BasePlayer victim, HitInfo info)
         {
-            var attacker = info?.InitiatorPlayer;
-            if (attacker == null)
+            if (!PvpLockoutEnabled || victim == null || info == null)
             {
                 return;
             }
 
-            if (info.damageTypes.GetMajorityDamageType() == DamageType.Explosion)
+            BGradePlayer bgradePlayer;
+            if (!BGradePlayer.Players.TryGetValue(victim, out bgradePlayer) || bgradePlayer.GetSelectedGrade() == 0)
             {
-                _lastAttacked[buildingBlock.transform.position] = Facepunch.Math.Epoch.Current + UpgradeCooldown;
+                return;
+            }
+
+            string attackerKey;
+            string attackerName;
+            if (!TryResolveQualifyingPvpAttacker(victim, info, out attackerKey, out attackerName))
+            {
+                return;
+            }
+
+            var damageAmount = ActualHealthDamage(victim, info);
+            if (damageAmount <= 0f)
+            {
+                return;
+            }
+
+            bgradePlayer.ApplyPvpHit(attackerKey, attackerName, damageAmount, PlayerMaxHealth(victim));
+        }
+
+        private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            var buildingBlock = entity as BuildingBlock;
+            if (CheckLastAttack && buildingBlock != null)
+            {
+                var attacker = info?.InitiatorPlayer;
+                if (attacker != null && info.damageTypes.GetMajorityDamageType() == DamageType.Explosion)
+                {
+                    _lastAttacked[buildingBlock.transform.position] = Facepunch.Math.Epoch.Current + UpgradeCooldown;
+                }
+            }
+
+            if (!PvpLockoutEnabled || entity == null || info == null)
+            {
+                return;
+            }
+
+            var killer = info.InitiatorPlayer ?? info.Initiator as BasePlayer;
+            if (killer == null || !ReferenceEquals(info.Initiator, killer) || !IsSteamId64(killer.UserIDString))
+            {
+                return;
+            }
+
+            BGradePlayer bgradePlayer;
+            if (!BGradePlayer.Players.TryGetValue(killer, out bgradePlayer))
+            {
+                return;
+            }
+
+            string killedCombatantKey;
+            if (TryGetDeathCombatantKey(entity, out killedCombatantKey))
+            {
+                bgradePlayer.TryCancelPvpLockout(killedCombatantKey);
             }
         }
 
@@ -643,7 +912,6 @@ namespace Oxide.Plugins
                         BGradePlayer bgradePlayer;
                         if ( BGradePlayer.Players.TryGetValue( player, out bgradePlayer ) )
                         {
-                            bgradePlayer.DestroyTimer();
                             bgradePlayer.SetGrade( 0 );
                         }
                         return;
@@ -669,13 +937,7 @@ namespace Oxide.Plugins
                         }
 
                         bgradePlayer.SetGrade(grade);
-                        var time = bgradePlayer.GetTime();
-                        chatMsgs.Add("Notice.SetGrade".Lang(player.UserIDString, grade));
-
-                        if (AllowTimer && time > 0)
-                        {
-                            chatMsgs.Add("Notice.Time".Lang(player.UserIDString, time));
-                        }
+                        chatMsgs.Add((bgradePlayer.IsPvpLocked ? "Notice.SetGrade.Locked" : "Notice.SetGrade").Lang(player.UserIDString, grade));
 
                         player.ChatMessage(string.Join("\n", chatMsgs.ToArray()));
                         return;
@@ -683,48 +945,13 @@ namespace Oxide.Plugins
 
                 case "t":
                     {
-                        if ( !AllowTimer )
-                        {
-                            return;
-                        }
-
-                        if ( args.Length == 1 )
-                        {
-                            goto default;
-                        }
-
-                        int time;
-                        if (!int.TryParse(args[1], out time) || time <= 0)
-                        {
-                            player.ChatMessage("Error.InvalidTime".Lang(player.UserIDString, args[1]));
-                            return;
-                        }
-
-                        if (time > MaxTimer)
-                        {
-                            player.ChatMessage("Error.TimerTooLong".Lang(player.UserIDString, MaxTimer));
-                            return;
-                        }
-
-                        BGradePlayer bgradePlayer;
-                        if ( !BGradePlayer.Players.TryGetValue( player, out bgradePlayer ) )
-                        {
-                            bgradePlayer = player.gameObject.AddComponent<BGradePlayer>();
-                        }
-
-                        player.ChatMessage("Notice.SetTime".Lang(player.UserIDString, time));
-                        bgradePlayer.SetTime(time);
-                        return;
+                        goto default;
                     }
 
                 case "help":
                     {
                         chatMsgs.Add("Command.Help".Lang(player.UserIDString));
-                        if (AllowTimer)
-                        {
-                            chatMsgs.Add("Command.Help.T".Lang(player.UserIDString, command));
-                            chatMsgs.Add("Command.Help.0".Lang(player.UserIDString, command));
-                        }
+                        chatMsgs.Add("Command.Help.0".Lang(player.UserIDString, command));
 
                         for (var i = 1; i < 5; i++)
                         {
@@ -742,14 +969,12 @@ namespace Oxide.Plugins
                         if ( BGradePlayer.Players.TryGetValue( player, out bgradePlayer ) )
                         {
                             chatMsgs.Add( "Command.Settings".Lang( player.UserIDString ) );
-                            if ( AllowTimer )
-                            {
-                                chatMsgs.Add( "Command.Settings.Timer".Lang( player.UserIDString, bgradePlayer.GetTime( false ) ) );
-                            }
-
-                            var fetchedGrade = bgradePlayer.GetGrade();
+                            var fetchedGrade = bgradePlayer.GetSelectedGrade();
                             chatMsgs.Add( "Command.Settings.Grade".Lang( player.UserIDString, fetchedGrade == 0 ? "Words.Disabled".Lang( player.UserIDString ) : fetchedGrade.ToString() ) );
+                            chatMsgs.Add( "Command.Settings.Lockout".Lang( player.UserIDString, bgradePlayer.IsPvpLocked ? "Words.SecondsRemaining".Lang(player.UserIDString, bgradePlayer.PvpLockoutRemainingSeconds) : "Words.Inactive".Lang(player.UserIDString) ) );
                         }
+
+                        chatMsgs.Add("Command.Help.Persistent".Lang(player.UserIDString, command));
 
                         player.ChatMessage(string.Join("\n", chatMsgs.ToArray()));
                         return;
@@ -782,20 +1007,21 @@ namespace Oxide.Plugins
             {
                 bgradePlayer = player.gameObject.AddComponent<BGradePlayer>();
             }
-            var grade = bgradePlayer.GetGrade() + 1;
+            var grade = bgradePlayer.GetSelectedGrade() + 1;
             var count = 0;
 
             if (!player.HasPluginPerm("all"))
             {
                 while (!player.HasPluginPerm(grade.ToString()))
                 {
+                    count++;
                     var newGrade = grade++;
                     if (newGrade > 4)
                     {
                         grade = 1;
                     }
 
-                    if (count > bgradePlayer.GetGrade() + 4)
+                    if (count > bgradePlayer.GetSelectedGrade() + 4)
                     {
                         player.ChatMessage("Permission".Lang(player.UserIDString));
                         return;
@@ -806,13 +1032,8 @@ namespace Oxide.Plugins
 
             var chatMsgs = new List<string>();
             bgradePlayer.SetGrade(grade);
-            var time = bgradePlayer.GetTime();
 
-            chatMsgs.Add("Notice.SetGrade".Lang(player.UserIDString, grade));
-            if (AllowTimer && time > 0)
-            {
-                chatMsgs.Add("Notice.Time".Lang(player.UserIDString, time));
-            }
+            chatMsgs.Add((bgradePlayer.IsPvpLocked ? "Notice.SetGrade.Locked" : "Notice.SetGrade").Lang(player.UserIDString, grade));
 
             player.ChatMessage(string.Join("\n", chatMsgs.ToArray()));
         }

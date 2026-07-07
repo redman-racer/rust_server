@@ -12,30 +12,16 @@
     "drink",
     "use"
   ],
+  "Consumption Effect": {
+    "Enabled": true,
+    "Effect Prefab": "assets/bundled/prefabs/fx/gestures/drink_tea.prefab"
+  },
   "Refresh Interval Seconds": 30.0,
   "Native Modifier Duration Seconds": 90.0,
-  "Modifier Values": {
-    "Max_Health": 0.2,
-    "Ore_Yield": 1.0,
-    "Wood_Yield": 1.0,
-    "Scrap_Yield": 1.0,
-    "Radiation_Resistance": 1.0,
-    "Radiation_Exposure_Resistance": 1.0,
-    "Comfort": 1.0,
-    "Crafting_Quality": 1.0,
-    "Warming": 1.0,
-    "Cooling": 1.0,
-    "CoreTemperatureMinAdjustment": 1.0,
-    "CoreTemperatureMaxAdjustment": 1.0,
-    "VisionCare": 1.0,
-    "MetabolismBooster": 1.0,
-    "Harvesting": 1.0,
-    "DigestionBoost": 1.0,
-    "Farming_BetterGenes": 1.0,
-    "Clotting": 1.0,
-    "HunterVision": 1.0,
-    "DigestionBoostTimeMod": 1.0
-  },
+  "Use Native Source Item Modifiers": true,
+  "Force Target Max Health": true,
+  "Target Max Health": 120.0,
+  "Modifier Values": {},
   "Metabolism Refresh": {
     "Enabled": true,
     "Minimum Calories": 500.0,

@@ -8,12 +8,14 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsPortaforts", "Raidlands", "1.2.5")]
+    [Info("RaidlandsPortaforts", "Raidlands", "1.2.7")]
     [Description("Provides Raidlands Portafort token items backed by CopyPaste placement.")]
     public class RaidlandsPortaforts : RustPlugin
     {
         private const string AdminPermission = "raidlands.portaforts.admin";
         private static readonly int GroundLayer = LayerMask.GetMask("Terrain", "World", "Water", "Default");
+        private static readonly int PlacementBlockLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Deployed", "Vehicle Large");
+        private static readonly int RoadCheckLayer = LayerMask.GetMask("World");
 
         [PluginReference]
         private Plugin CopyPaste;
@@ -23,6 +25,8 @@ namespace Oxide.Plugins
 
         private Configuration config;
         private readonly Dictionary<ulong, float> pendingThrowableTokens = new Dictionary<ulong, float>();
+        private readonly List<MonumentPlacementZone> monumentPlacementZones = new List<MonumentPlacementZone>();
+        private bool monumentPlacementZonesLoaded;
 
         private class Configuration
         {
@@ -63,7 +67,40 @@ namespace Oxide.Plugins
             public float GroundClearance = 0.15f;
 
             [JsonProperty("Deploy On Item Drop")]
-            public bool DeployOnItemDrop = true;
+            public bool DeployOnItemDrop = false;
+
+            [JsonProperty("Validate Placement Footprint")]
+            public bool ValidatePlacementFootprint = true;
+
+            [JsonProperty("Placement Footprint Padding")]
+            public float PlacementFootprintPadding = 0.65f;
+
+            [JsonProperty("Placement Player Clearance")]
+            public float PlacementPlayerClearance = 0.85f;
+
+            [JsonProperty("Block Road Placement")]
+            public bool BlockRoadPlacement = true;
+
+            [JsonProperty("Road Check Height")]
+            public float RoadCheckHeight = 8f;
+
+            [JsonProperty("Road Check Depth")]
+            public float RoadCheckDepth = 30f;
+
+            [JsonProperty("Block Monument Placement")]
+            public bool BlockMonumentPlacement = true;
+
+            [JsonProperty("Monument Radius Padding")]
+            public float MonumentRadiusPadding = 15f;
+
+            [JsonProperty("Default Monument Radius")]
+            public float DefaultMonumentRadius = 50f;
+
+            [JsonProperty("Block Water Placement")]
+            public bool BlockWaterPlacement = true;
+
+            [JsonProperty("Water Clearance")]
+            public float WaterClearance = 0.25f;
 
             [JsonProperty("Deploy On Throwable Throw")]
             public bool DeployOnThrowableThrow = true;
@@ -124,6 +161,13 @@ namespace Oxide.Plugins
             public bool RequireDisplayNameMatch = true;
         }
 
+        private class MonumentPlacementZone
+        {
+            public Vector3 Center;
+            public float Radius;
+            public string Name;
+        }
+
         protected override void LoadDefaultConfig()
         {
             config = new Configuration();
@@ -167,6 +211,41 @@ namespace Oxide.Plugins
             if (config.GroundClearance < 0f)
             {
                 config.GroundClearance = 0.15f;
+            }
+
+            if (config.PlacementFootprintPadding <= 0f)
+            {
+                config.PlacementFootprintPadding = 0.65f;
+            }
+
+            if (config.PlacementPlayerClearance <= 0f)
+            {
+                config.PlacementPlayerClearance = 0.85f;
+            }
+
+            if (config.RoadCheckHeight <= 0f)
+            {
+                config.RoadCheckHeight = 8f;
+            }
+
+            if (config.RoadCheckDepth <= 0f)
+            {
+                config.RoadCheckDepth = 30f;
+            }
+
+            if (config.MonumentRadiusPadding < 0f)
+            {
+                config.MonumentRadiusPadding = 15f;
+            }
+
+            if (config.DefaultMonumentRadius <= 0f)
+            {
+                config.DefaultMonumentRadius = 50f;
+            }
+
+            if (config.WaterClearance < 0f)
+            {
+                config.WaterClearance = 0.25f;
             }
 
             if (config.ThrowableDeployDelaySeconds < 0f)
@@ -220,6 +299,7 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             RegisterTokenIcon();
+            LoadMonumentPlacementZones();
         }
 
         private void OnPluginLoaded(Plugin plugin)
@@ -626,6 +706,11 @@ namespace Oxide.Plugins
             var pasteOrigin = groundPoint;
             pasteOrigin.y = groundPoint.y - lowestRelativeY + config.GroundClearance;
 
+            if (!TryValidatePlacement(player, dataPath, pasteOrigin, out error))
+            {
+                return null;
+            }
+
             args.Add("height");
             args.Add("0");
             args.Add("autoheight");
@@ -634,6 +719,323 @@ namespace Oxide.Plugins
             args.Add(FormatVector(pasteOrigin));
 
             return args.ToArray();
+        }
+
+        private bool TryValidatePlacement(BasePlayer player, string dataPath, Vector3 pasteOrigin, out string error)
+        {
+            error = null;
+
+            if (!config.ValidatePlacementFootprint)
+            {
+                return true;
+            }
+
+            Vector3 min;
+            Vector3 max;
+            if (!TryGetLayoutBounds(dataPath, out min, out max))
+            {
+                error = "Could not read the Portafort footprint. Re-copy the Portafort layout and try again";
+                return false;
+            }
+
+            var yaw = player == null ? 0f : player.GetNetworkRotation().eulerAngles.y;
+            var rotation = Quaternion.Euler(0f, yaw, 0f);
+            var footprintPadding = Math.Max(0.1f, config.PlacementFootprintPadding);
+            var playerClearance = Math.Max(0.25f, config.PlacementPlayerClearance);
+
+            if (PlacementTouchesRestrictedWorld(pasteOrigin, rotation, min, max, footprintPadding, out error))
+            {
+                return false;
+            }
+
+            if (PlacementOverlapsBlockedWorld(pasteOrigin, rotation, min, max, footprintPadding))
+            {
+                error = "That spot is too close to a building, deployable, or vehicle. Aim at open ground and try again";
+                return false;
+            }
+
+            if (PlacementOverlapsPlayer(pasteOrigin, rotation, min, max, playerClearance))
+            {
+                error = "That spot is too close to a player. Aim at clear ground and try again";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool PlacementTouchesRestrictedWorld(Vector3 pasteOrigin, Quaternion rotation, Vector3 min, Vector3 max, float padding, out string error)
+        {
+            error = null;
+
+            foreach (var sample in PlacementFootprintSamples(pasteOrigin, rotation, min, max, padding))
+            {
+                if (config.BlockRoadPlacement && IsRoadSurface(sample))
+                {
+                    error = "You cannot deploy a Portafort on a road. Aim at open ground and try again";
+                    return true;
+                }
+
+                string monumentName;
+                if (config.BlockMonumentPlacement && IsInBlockedMonument(sample, out monumentName))
+                {
+                    error = "You cannot deploy a Portafort inside or too close to a monument. Aim farther away and try again";
+                    return true;
+                }
+
+                if (config.BlockWaterPlacement && IsWaterSurface(sample))
+                {
+                    error = "You cannot deploy a Portafort in water. Aim at dry open ground and try again";
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private IEnumerable<Vector3> PlacementFootprintSamples(Vector3 pasteOrigin, Quaternion rotation, Vector3 min, Vector3 max, float padding)
+        {
+            var minX = min.x - padding;
+            var maxX = max.x + padding;
+            var minZ = min.z - padding;
+            var maxZ = max.z + padding;
+            var centerX = (minX + maxX) * 0.5f;
+            var centerZ = (minZ + maxZ) * 0.5f;
+
+            yield return pasteOrigin + rotation * new Vector3(centerX, 0f, centerZ);
+            yield return pasteOrigin + rotation * new Vector3(minX, 0f, minZ);
+            yield return pasteOrigin + rotation * new Vector3(minX, 0f, maxZ);
+            yield return pasteOrigin + rotation * new Vector3(maxX, 0f, minZ);
+            yield return pasteOrigin + rotation * new Vector3(maxX, 0f, maxZ);
+            yield return pasteOrigin + rotation * new Vector3(centerX, 0f, minZ);
+            yield return pasteOrigin + rotation * new Vector3(centerX, 0f, maxZ);
+            yield return pasteOrigin + rotation * new Vector3(minX, 0f, centerZ);
+            yield return pasteOrigin + rotation * new Vector3(maxX, 0f, centerZ);
+        }
+
+        private bool IsRoadSurface(Vector3 position)
+        {
+            if (RoadCheckLayer == 0)
+            {
+                return false;
+            }
+
+            var start = position + Vector3.up * Math.Max(1f, config.RoadCheckHeight);
+            var distance = Math.Max(1f, config.RoadCheckHeight + config.RoadCheckDepth);
+            foreach (var hit in Physics.RaycastAll(start, Vector3.down, distance, RoadCheckLayer, QueryTriggerInteraction.Ignore))
+            {
+                var colliderName = hit.collider == null ? string.Empty : hit.collider.name;
+                if (colliderName.IndexOf("road", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsWaterSurface(Vector3 position)
+        {
+            if (TerrainMeta.WaterMap == null || TerrainMeta.HeightMap == null)
+            {
+                return false;
+            }
+
+            var terrainHeight = TerrainMeta.HeightMap.GetHeight(position);
+            var waterHeight = TerrainMeta.WaterMap.GetHeight(position);
+            return waterHeight > terrainHeight + Math.Max(0f, config.WaterClearance);
+        }
+
+        private bool IsInBlockedMonument(Vector3 position, out string monumentName)
+        {
+            monumentName = null;
+            EnsureMonumentPlacementZones();
+
+            foreach (var zone in monumentPlacementZones)
+            {
+                var dx = position.x - zone.Center.x;
+                var dz = position.z - zone.Center.z;
+                if (dx * dx + dz * dz > zone.Radius * zone.Radius)
+                {
+                    continue;
+                }
+
+                monumentName = zone.Name;
+                return true;
+            }
+
+            return false;
+        }
+
+        private void EnsureMonumentPlacementZones()
+        {
+            if (monumentPlacementZonesLoaded)
+            {
+                return;
+            }
+
+            LoadMonumentPlacementZones();
+        }
+
+        private void LoadMonumentPlacementZones()
+        {
+            monumentPlacementZones.Clear();
+            monumentPlacementZonesLoaded = true;
+
+            if (TerrainMeta.Path?.Monuments == null)
+            {
+                return;
+            }
+
+            foreach (var monument in TerrainMeta.Path.Monuments)
+            {
+                if (monument == null)
+                {
+                    continue;
+                }
+
+                var radius = GetMonumentPlacementRadius(monument) + Math.Max(0f, config.MonumentRadiusPadding);
+                if (radius <= 0f)
+                {
+                    continue;
+                }
+
+                monumentPlacementZones.Add(new MonumentPlacementZone
+                {
+                    Center = monument.transform.position,
+                    Radius = radius,
+                    Name = GetMonumentShortName(monument)
+                });
+            }
+        }
+
+        private float GetMonumentPlacementRadius(MonumentInfo monument)
+        {
+            switch (GetMonumentShortName(monument))
+            {
+                case "airfield_1": return 255f;
+                case "bandit_town": return 105f;
+                case "cave_large_hard":
+                case "cave_large_medium":
+                case "cave_large_sewers_hard":
+                case "cave_medium_easy":
+                case "cave_medium_hard":
+                case "cave_medium_medium":
+                case "cave_small_easy":
+                case "cave_small_hard":
+                case "cave_small_medium": return 75f;
+                case "compound": return 255f;
+                case "entrance": return 20f;
+                case "excavator_1": return 150f;
+                case "fishing_village_a":
+                case "fishing_village_b":
+                case "fishing_village_c": return 55f;
+                case "gas_station_1": return 60f;
+                case "harbor_1":
+                case "harbor_2": return 135f;
+                case "junkyard_1": return 105f;
+                case "launch_site_1": return 245f;
+                case "lighthouse": return 50f;
+                case "military_tunnel_1": return 105f;
+                case "mining_quarry_a":
+                case "mining_quarry_b":
+                case "mining_quarry_c": return 30f;
+                case "OilrigAI": return 100f;
+                case "OilrigAI2": return 200f;
+                case "power_sub_big_1":
+                case "power_sub_big_2": return 30f;
+                case "power_sub_small_1":
+                case "power_sub_small_2": return 25f;
+                case "powerplant_1": return 145f;
+                case "radtown_small_3": return 95f;
+                case "satellite_dish": return 85f;
+                case "sphere_tank": return 75f;
+                case "stables_a":
+                case "stables_b": return 80f;
+                case "supermarket_1": return 60f;
+                case "swamp_a":
+                case "swamp_b": return 30f;
+                case "swamp_c": return 55f;
+                case "trainyard_1": return 145f;
+                case "warehouse": return 50f;
+                case "water_treatment_plant_1": return 175f;
+                case "water_well_a":
+                case "water_well_b":
+                case "water_well_c":
+                case "water_well_d":
+                case "water_well_e": return 30f;
+            }
+
+            return Math.Max(1f, config.DefaultMonumentRadius);
+        }
+
+        private string GetMonumentShortName(MonumentInfo monument)
+        {
+            var name = monument?.name ?? string.Empty;
+            var separator = name.LastIndexOf('/');
+            return (separator > 0 ? name.Substring(separator + 1) : name).Replace(".prefab", "");
+        }
+
+        private bool PlacementOverlapsBlockedWorld(Vector3 pasteOrigin, Quaternion rotation, Vector3 min, Vector3 max, float padding)
+        {
+            if (PlacementBlockLayer == 0)
+            {
+                return false;
+            }
+
+            var localCenter = new Vector3((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f, (min.z + max.z) * 0.5f);
+            var center = pasteOrigin + rotation * localCenter;
+            var halfExtents = new Vector3(
+                Math.Max(0.5f, (max.x - min.x) * 0.5f + padding),
+                Math.Max(0.5f, (max.y - min.y) * 0.5f + padding),
+                Math.Max(0.5f, (max.z - min.z) * 0.5f + padding));
+
+            return Physics.CheckBox(center, halfExtents, rotation, PlacementBlockLayer, QueryTriggerInteraction.Ignore);
+        }
+
+        private bool PlacementOverlapsPlayer(Vector3 pasteOrigin, Quaternion rotation, Vector3 min, Vector3 max, float clearance)
+        {
+            return PlayerListOverlapsPlacement(BasePlayer.activePlayerList, pasteOrigin, rotation, min, max, clearance)
+                || PlayerListOverlapsPlacement(BasePlayer.sleepingPlayerList, pasteOrigin, rotation, min, max, clearance);
+        }
+
+        private bool PlayerListOverlapsPlacement(IEnumerable<BasePlayer> players, Vector3 pasteOrigin, Quaternion rotation, Vector3 min, Vector3 max, float clearance)
+        {
+            if (players == null)
+            {
+                return false;
+            }
+
+            foreach (var player in players)
+            {
+                if (PlayerOverlapsPlacement(player, pasteOrigin, rotation, min, max, clearance))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool PlayerOverlapsPlacement(BasePlayer player, Vector3 pasteOrigin, Quaternion rotation, Vector3 min, Vector3 max, float clearance)
+        {
+            if (player == null || player.IsDestroyed || player.IsDead())
+            {
+                return false;
+            }
+
+            var position = player.transform.position;
+            var minY = pasteOrigin.y + min.y - clearance;
+            var maxY = pasteOrigin.y + max.y + clearance;
+            if (position.y > maxY || position.y + 1.9f < minY)
+            {
+                return false;
+            }
+
+            var local = Quaternion.Inverse(rotation) * (position - pasteOrigin);
+            return local.x >= min.x - clearance
+                && local.x <= max.x + clearance
+                && local.z >= min.z - clearance
+                && local.z <= max.z + clearance;
         }
 
         private bool HasPositionArgument(string[] args)
@@ -797,9 +1199,67 @@ namespace Oxide.Plugins
             }
         }
 
+        private bool TryGetLayoutBounds(string dataPath, out Vector3 min, out Vector3 max)
+        {
+            min = Vector3.zero;
+            max = Vector3.zero;
+
+            try
+            {
+                var data = Interface.Oxide.DataFileSystem.GetDatafile(dataPath);
+                var entities = data?["entities"] as System.Collections.IEnumerable;
+                if (entities == null)
+                {
+                    return false;
+                }
+
+                var found = false;
+                foreach (var entity in entities)
+                {
+                    Vector3 position;
+                    if (!TryGetRelativePosition(entity, out position))
+                    {
+                        continue;
+                    }
+
+                    if (!found)
+                    {
+                        min = position;
+                        max = position;
+                        found = true;
+                        continue;
+                    }
+
+                    min = Vector3.Min(min, position);
+                    max = Vector3.Max(max, position);
+                }
+
+                return found;
+            }
+            catch (Exception exception)
+            {
+                PrintWarning($"Could not read Portafort layout bounds from '{dataPath}': {exception.Message}");
+                return false;
+            }
+        }
+
         private bool TryGetRelativeY(object entityObject, out float y)
         {
             y = 0f;
+
+            Vector3 position;
+            if (!TryGetRelativePosition(entityObject, out position))
+            {
+                return false;
+            }
+
+            y = position.y;
+            return true;
+        }
+
+        private bool TryGetRelativePosition(object entityObject, out Vector3 position)
+        {
+            position = Vector3.zero;
 
             var entity = entityObject as Dictionary<string, object>;
             if (entity == null)
@@ -819,13 +1279,28 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            object rawX;
             object rawY;
+            object rawZ;
+            if (!pos.TryGetValue("x", out rawX) || rawX == null)
+            {
+                return false;
+            }
+
             if (!pos.TryGetValue("y", out rawY) || rawY == null)
             {
                 return false;
             }
 
-            y = Convert.ToSingle(rawY, CultureInfo.InvariantCulture);
+            if (!pos.TryGetValue("z", out rawZ) || rawZ == null)
+            {
+                return false;
+            }
+
+            position = new Vector3(
+                Convert.ToSingle(rawX, CultureInfo.InvariantCulture),
+                Convert.ToSingle(rawY, CultureInfo.InvariantCulture),
+                Convert.ToSingle(rawZ, CultureInfo.InvariantCulture));
             return true;
         }
 

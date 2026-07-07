@@ -13,19 +13,19 @@
       "bgrade.up"
     ]
   },
-  "Destroy Data on Player Disconnect (for high pop servers)": false,
   "Placement Fix Settings": {
-    "Delay Upgrade One Tick": false,
+    "Delay Upgrade One Tick": true,
     "Reset Skin Before Upgrade": false,
-    "Start Being Rotatable After Upgrade": false,
+    "Start Being Rotatable After Upgrade": true,
     "Update Surrounding Entities After Upgrade": false
+  },
+  "PvP Lockout Settings": {
+    "Cancel Damage Percent": 30.0,
+    "Cooldown Seconds": 30,
+    "Count Raidlands Roam Bots As Players": true,
+    "Enabled": true
   },
   "Refund Settings": {
     "Refund on Block": true
-  },
-  "Timer Settings": {
-    "Default Timer": 30,
-    "Enabled": true,
-    "Max Timer": 180
   }
 }
