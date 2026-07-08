@@ -1,0 +1,14 @@
+{
+  "AutoGenerateCodes": false,
+  "DefaultEnabled": true,
+  "DefaultShareWithTeam": true,
+  "ShowCodeToPlayerOnDeploy": true,
+  "LockAfterCodeSet": true,
+  "AutoPlaceCodeLocks": true,
+  "RequireCodeLockInInventory": false,
+  "ConsumeCodeLockFromInventory": false,
+  "AutoPlaceOnDoors": true,
+  "AutoPlaceOnBoxes": true,
+  "AutoPlaceOnToolCupboards": true,
+  "ChatPrefix": "<color=#8ecae6>AutoCodeLock</color>:"
+}

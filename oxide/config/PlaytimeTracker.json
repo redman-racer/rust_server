@@ -9,12 +9,12 @@
     "Playtime rewards": {
       "Issue rewards for playtime": true,
       "Reward interval (seconds)": 900,
-      "Reward amount": 25
+      "Reward amount": 100
     },
     "Referral rewards": {
       "Issue rewards for player referrals": true,
-      "Referrer reward amount": 5,
-      "Referee reward amount": 3
+      "Referrer reward amount": 500,
+      "Referee reward amount": 300
     },
     "Custom reward multipliers (permission / multiplier)": {
       "playtimetracker.examplevip1": 1.0,

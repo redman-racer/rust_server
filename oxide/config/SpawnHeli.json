@@ -1,11 +1,10 @@
-
-
 {
   "Limit players to one helicopter type at a time": false,
   "Try to auto despawn other helicopter types": false,
   "Minicopter": {
     "Spawn commands": [
-      "mymini"
+      "mymini",
+      "mini"
     ],
     "Fetch commands": [
       "fmini"

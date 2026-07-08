@@ -186,10 +186,36 @@ namespace Oxide.Plugins
                 entity.SetFlag(BaseEntity.Flags.On, true, false);
                 entity.SendNetworkUpdateImmediate();
 
-                if (configData.GenericSettings.lockSignalDrop)
-                    startCargoPlane(position, false, null, "supplysignal", "", true, player.userID);
+                // No-plane supply signal drop: spawn the crate directly above the smoke location instead of creating a CargoPlane.
+                var dropPosition = position;
+                dropPosition.y += 100f;
+
+                Dictionary<string, object> setting;
+                if (setupDropTypes.ContainsKey("supplysignal"))
+                {
+                    setting = new Dictionary<string, object>((Dictionary<string, object>)setupDropTypes["supplysignal"]);
+                    object value;
+                    foreach (var pair in setupDropDefault)
+                        if (!setting.TryGetValue(pair.Key, out value))
+                            setting.Add(pair.Key, setupDropDefault[pair.Key]);
+                }
                 else
-                    startCargoPlane(position, false, null, "supplysignal");
+                    setting = new Dictionary<string, object>((Dictionary<string, object>)setupDropDefault);
+
+                object isSupplyDropActive = Interface.Oxide.CallHook("isSupplyDropActive");
+                setting["betterloot"] = isSupplyDropActive != null && (bool)isSupplyDropActive ? true : false;
+                setting["droptype"] = "supplysignal";
+
+                if (configData.GenericSettings.lockSignalDrop)
+                {
+                    setting["userID"] = player.userID;
+                    createSupplyDrop(dropPosition, new Dictionary<string, object>(setting), true, true, new Vector3(), new Vector3(), "supplysignal", player.userID);
+                }
+                else
+                    createSupplyDrop(dropPosition, new Dictionary<string, object>(setting), true, true, new Vector3(), new Vector3(), "supplysignal");
+
+                setting.Clear();
+                DropNotifier(position, "supplysignal", "", "");
 
                 if (configData.Notifications.notifyDropConsoleSignal)
                     Puts($"SupplySignal thrown by '{player.displayName}' at: {playerposition}");

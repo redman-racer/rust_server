@@ -332,8 +332,8 @@
   },
   "Custom Icons": [
     {
-      "XPos": 0,
-      "ZPos": 0,
+      "XPos": 0.0,
+      "ZPos": 0.0,
       "Width": 200,
       "Height": 200,
       "ImageUrl": "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png",

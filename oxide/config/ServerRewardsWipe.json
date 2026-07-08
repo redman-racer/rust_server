@@ -3,7 +3,7 @@
     "Reset ServerRewards player RP on wipe": false,
     "Only clear RP on force wipe (first Thursday of the month)": true,
     "Backup player RP before wiping": true,
-    "Call 'server.save' after wiping so SR writes new data to disk immediately (protects against server crash)": false
+    "Call 'server.save' after wiping so SR writes new data to disk immediately (protects against server crash)": true
   },
   "Version": {
     "Major": 2,

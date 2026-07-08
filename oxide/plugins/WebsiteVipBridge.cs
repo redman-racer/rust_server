@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -222,7 +223,7 @@ namespace Oxide.Plugins
                 ["golden_vip"] = Bundle("Golden VIP", "rank_golden_vip"),
                 ["diamond_vip"] = Bundle("Diamond VIP", "rank_diamond_vip"),
                 ["ultimate_vip"] = Bundle("Ultimate VIP", "rank_ultimate_vip"),
-                ["titan_vip"] = Bundle("Titan VIP", "rank_titan_vip"),
+                [" _vip"] = Bundle("Titan VIP", "rank_titan_vip"),
                 ["queue_priority"] = Bundle("Queue Priority", "perk_queue_priority"),
                 ["teleport_instant"] = Bundle("Instant Teleport", "perk_teleport_instant"),
                 ["home_5s"] = Bundle("5 Second Home Teleport", "perk_home_5s"),
@@ -3775,21 +3776,7 @@ namespace Oxide.Plugins
 
         private static string RustKitImagePath(string value)
         {
-            var trimmed = (value ?? "").Trim();
-
-            if (trimmed.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
-                && trimmed.IndexOf("/assets/media/kits/", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return trimmed.Substring(0, trimmed.Length - 5) + ".png";
-            }
-
-            if (trimmed.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)
-                && trimmed.StartsWith("assets/media/kits/", StringComparison.OrdinalIgnoreCase))
-            {
-                return trimmed.Substring(0, trimmed.Length - 5) + ".png";
-            }
-
-            return trimmed;
+            return (value ?? "").Trim();
         }
 
         private JArray NormalizeItemArray(JArray source)

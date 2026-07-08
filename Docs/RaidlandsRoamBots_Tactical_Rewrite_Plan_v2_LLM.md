@@ -2953,7 +2953,7 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.67 Quieter Bot Chat
+## Current Progress Through v0.3.71 Native Scientist Audio Muting
 
 ### Files updated
 
@@ -2966,12 +2966,13 @@ oxide/lang/en/BGrade.json
 Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 UPDATED_FILES_FOR_UPLOAD.txt
 UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_INVISIBLE_ADMINS_2026-07-07.md
+UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_SCIENTIST_AUDIO_2026-07-08.md
 ```
 
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.70
+Plugin version: RaidlandsRoamBots v0.3.71
 Brain mode: playerlike_tactical_brain
 Current checked-in config: disabled by default, target=50, min=0, max=200
 Current checked-in release profile: near-player spawning around any active non-safe-zone player, no hardcoded tester anchor, random land fallback disabled, debug UI disabled, debug console logs disabled, bot clan wars enabled
@@ -2980,6 +2981,7 @@ Current bot chat config: master chat enabled, AI replies enabled, deterministic 
 Current bot corpse loot config: enabled under `Kit Selection -> Corpse Loot`; each bot snapshots its actual live inventory after `Kits.GiveKit` and medical grants, then death/corpse/loot hooks copy that live belt/wear/main inventory into the visible corpse grid as belt/hotbar first, worn armor/clothes second, and main inventory last. Corpses can still roll default-access utility kits (`build`, `scuba`) plus capped low-tier bonus kits (`mp5`, `m16`) for up to three bots per team. RoamBots owns recent bot corpse population, forces a player-corpse style panel/name where Rust allows it, and asks BetterLoot to skip those corpses so they keep player-like inventories.
 Current bot death-screen identity config: five bot avatar identities, chat sender IDs for bot-caused kills, native Rust `PlayerLifeStory.DeathInfo` patching, `BasePlayer.SetOverrideDeathBlow(...)`, and lethal-hit `ScientistNPC.AttackerInfo` overwrite prevention for the `KILLED BY` death-screen card
 Current body candidates: scientistnpc_roam, scientistnpc_full_any, scientistnpc_junkpile_pistol
+Current native scientist body audio: muted during body preparation by clearing `ScientistNPC.RadioChatterEffects` and `DeathEffects`, cancelling any queued `PlayRadioChatter` action, and stretching the idle chatter window. This removes native scientist radio/voice/death chatter while leaving RoamBots hearing, bot chat, weapon fire, tactical behavior, killfeed, stats, and loot logic unchanged.
 Current stats data shape: players, bots, bot_clans
 Current decision trace path: oxide/data/RaidlandsRoamBots/decision_traces.jsonl
 Current decision trace retention: prune to 128 MB or 50000 recent lines, checked every 300s and on reload/export/prune command
@@ -3243,6 +3245,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, na
   - v0.3.68 adds player-like bot corpse loot. A bot's selected combat kit is mirrored into the corpse from Kits data, optional default-access utility kits can roll, and up to three bots in a team can roll a low-tier bonus kit. RoamBots now handles recent bot `OnCorpsePopulate` and asks BetterLoot to skip those corpses so the kit-shaped loot is not replaced by generic NPC loot.
   - v0.3.69 fixes the visible NPC corpse layout after live screenshot review. Rust exposes the RoamBot corpse as one `Scientist` loot grid, so death prep now flattens the full kit into the main visible grid in player-readable order: belt/hotbar, worn gear, then main inventory.
   - v0.3.70 fixes the remaining planned-kit mismatch. RoamBots now snapshots each bot's actual live inventory after kit application and medical grants, refreshes that snapshot on death, uses it before kit-data fallback, applies it again in `CanLootEntity`, extends recent corpse loot memory to ten minutes, and sets corpse identity toward a player-corpse panel/title instead of generic `Scientist`.
+  - v0.3.71 mutes native legacy-scientist body chatter. `PrepareNpcBody` now suppresses `ScientistNPC` radio chatter and death chatter by clearing the native radio/death effect arrays and cancelling any queued `PlayRadioChatter` action, without changing RoamBots sound investigation, bot chat, weapon fire, or tactical AI.
 
 - Bot kill integration:
   - v0.3.31 adds player-like roam bot kill chat, tracked-bot DeathNotes suppression, and optional ServerRewards RP payout for real players who kill roam bots.
@@ -3255,7 +3258,7 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, na
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.70 live-inventory corpse loot snapshots.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.71 native scientist audio muting.
 Compile used the local duplicate-reference workaround: include `Newtonsoft.Json.dll` and exclude `Oxide.References.dll` plus the duplicate Newtonsoft provider.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
@@ -3274,7 +3277,7 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.70 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, adds toggleable bot chat with OpenAI chat quota controls and deterministic no-AI kill banter, cuts bot chat trigger odds to half of the first live pass, adds player-like corpse loot based on the bot's live Kits inventory with optional utility/low-tier extras, flattens that loot into the visible corpse grid, keeps external tactical-advisor HTTP calls gated first by active real-player engagement, then by current real-player fight target/candidate validation, then by the 350m safety cap, keeps learned behavior controlled by explicit apply modes and profile percentages, bounds the decision trace JSONL file, adds opt-in globally broadcast native bot map markers with calibrated display-size scaling, exposes the BGrade RoamBot identity API, adds deterministic crouch posture for shooting and cover-healing, adds the RaidlandsEvents managed bot lending API, keeps the close-range different-clan bot damage floor limited to real hit events, fixes bullet damage attribution into that hit-event path, adds a real-hit bridge for enemy-bot projectile hits when native NPC-vs-NPC bullet damage never reaches `OnEntityTakeDamage`, adds a tactical bullet resolver when native NPC-vs-NPC bullet hooks never happen at all, polishes the `/raidbots admin` CUI with guided help and destructive-action confirmations, and still needs live validation for bot corpse inventory layout/BetterLoot skipping, bot chat tone/quota/context expiry, managed spawn/despawn/owner lookup, learned observation/profile loop, squad/clan coordination, different-clan bot combat, terrain-layer spawn rejection, foliage LOS gating, bot-placed cover, medical behavior, utility behavior, normal damage, native death-screen bot identity, native map marker cleanup/follow behavior, persistent BGrade PvP lockout with RoamBot attribution, quiet-console behavior, and decision trace pruning.
+Please live-test v0.3.71 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, adds toggleable bot chat with OpenAI chat quota controls and deterministic no-AI kill banter, cuts bot chat trigger odds to half of the first live pass, adds player-like corpse loot based on the bot's live Kits inventory with optional utility/low-tier extras, flattens that loot into the visible corpse grid, mutes native legacy-scientist radio/death chatter on RoamBot bodies, keeps external tactical-advisor HTTP calls gated first by active real-player engagement, then by current real-player fight target/candidate validation, then by the 350m safety cap, keeps learned behavior controlled by explicit apply modes and profile percentages, bounds the decision trace JSONL file, adds opt-in globally broadcast native bot map markers with calibrated display-size scaling, exposes the BGrade RoamBot identity API, adds deterministic crouch posture for shooting and cover-healing, adds the RaidlandsEvents managed bot lending API, keeps the close-range different-clan bot damage floor limited to real hit events, fixes bullet damage attribution into that hit-event path, adds a real-hit bridge for enemy-bot projectile hits when native NPC-vs-NPC bullet damage never reaches `OnEntityTakeDamage`, adds a tactical bullet resolver when native NPC-vs-NPC bullet hooks never happen at all, polishes the `/raidbots admin` CUI with guided help and destructive-action confirmations, and still needs live validation for native scientist body audio muting, bot corpse inventory layout/BetterLoot skipping, bot chat tone/quota/context expiry, managed spawn/despawn/owner lookup, learned observation/profile loop, squad/clan coordination, different-clan bot combat, terrain-layer spawn rejection, foliage LOS gating, bot-placed cover, medical behavior, utility behavior, normal damage, native death-screen bot identity, native map marker cleanup/follow behavior, persistent BGrade PvP lockout with RoamBot attribution, quiet-console behavior, and decision trace pruning.
 
 Recommended first test ladder:
 
@@ -3296,25 +3299,26 @@ Recommended first test ladder:
 15. Move/fight long enough to confirm markers follow bots within the configured update interval.
 16. raidbots.list
 17. Confirm a legacy scientist body spawns with a Raidlands kit.
-18. Let two different-clan bots fight with rifle/M16/SMG bullets in clear LOS and watch HP, killfeed, and the now-visible side-panel `Dmg:` line. Expected: bullet hits reduce HP and can produce a bot kill. If native damage handles the hit, `Dmg:` shows `hook in/out:enemy_bot` or `enemy_bot_floor`; if the bridge handles it, `Dmg:` shows `atk enemy_bot_hit` and `br applied <damage>`; if the v0.3.64 resolver handles the native-missing path from live testing, `Dmg:` shows `sim applied <damage>`, `sim miss`, or `sim blocked`. If bullets still fail while grenades work, capture `Dmg:` plus `raidbots.list` for `nav=...combat:target=target_bot/canAttack=.../inRange=.../best=...`; `fire n/a#0 atk none hook none sim miss/blocked` means Rust is still emitting no bullet hooks but the resolver is deciding shots are missing or blocked, while `sim applied_no_loss` means another hook is preventing the applied bullet damage from moving HP.
-19. BGrade smoke: run `/bgrade 3`, wait over 30 seconds, place a block, and confirm BGrade still upgrades.
-20. PvP smoke: have a player or RoamBot shoot you with direct ranged damage and confirm BGrade pauses for 30 seconds, then resumes the selected grade.
-21. Cancel smoke: after one player/RoamBot deals no more than 30 percent health damage, kill that same attacker and confirm BGrade resumes immediately.
-22. Stand behind terrain/walls and confirm it investigates or roams but does not shoot.
-23. Step into LOS and confirm it reacts after a short delay, only shoots with LOS, visually crouches during valid shooting/peek windows, and shows `crouch=shooting` in `raidbots.list`.
-24. Toggle the normal admin invis/Vanish feature while the bot has or recently had LOS. Expected: the bot stops shooting within the next tick or hook, `raidbots.list` no longer shows that player as the active target, and the side panel stops showing that player as target.
-25. While still invisible, fire a gun or explosive near the bot. Expected: no sound investigation is created for the hidden admin, and `raidbots.list` does not move to `InvestigateSound` for that admin.
-26. Toggle invis off and step back into LOS. Expected: normal visible-player targeting can resume.
-27. Damage a bot below the low-health threshold, force it into effective cover or a barricade heal, and confirm the side panel shows `Heal:` with a syringe lock while `Crouch:` shows `cover-heal`.
-28. Break LOS or wait for the fight to end and confirm crouch clears after the short configured delay.
-29. Damage it from cover and confirm it investigates the damage/heard position.
-30. raidbots.killall, then confirm native map markers disappear and no bot remains crouched.
-31. Disable Map markers in Debug and confirm no marker entities remain.
-32. Check oxide/data/RaidlandsRoamBots/decision_traces.jsonl for fallback traces when hard decisions trigger, including `crouch_state`.
-33. Use raidbots.list while fighting and watch exposure=X.XX(Y/Z), weapon=<class>, aim=<degrees>/<warmup>, learn=<mode/model>, cover=<point>, stuck=<bool>, protect=<state>, anchor=<state>, heal=<reason>, crouch=<state>, formation=<reason>, utility=<reason>, and mapMarkers=<state/count>.
-34. Learning smoke: `raidbots.learn allow <tester>`, `raidbots.learn observe on`, fight near bots while crouching/shooting, then `raidbots.learn report 60` and `raidbots.learn build`; confirm posture stats appear but do not alter live crouch timing.
-35. Profile smoke after enough traces: `raidbots.learn profile build <tester> <profileKey>`, `raidbots.learn profile show <profileKey>`, `raidbots.learn profile weight <profileKey> 10`, `raidbots.learn apply profiles`, spawn a fresh bot, and confirm public names stay fictional while admin/debug surfaces show the profile key/source plus read-only posture stats.
-36. If the three-bot smoke looks healthy, ramp through `raidbots.target 25`, then `raidbots.target 50`, while watching server performance and spawn spacing.
+18. Listen near a spawned RoamBot for at least one normal idle/alert window and while damaging/killing one. Expected: no native scientist radio chatter, scientist alert voice, or scientist death chatter; weapon fire and RoamBots chat/killfeed behavior still work normally.
+19. Let two different-clan bots fight with rifle/M16/SMG bullets in clear LOS and watch HP, killfeed, and the now-visible side-panel `Dmg:` line. Expected: bullet hits reduce HP and can produce a bot kill. If native damage handles the hit, `Dmg:` shows `hook in/out:enemy_bot` or `enemy_bot_floor`; if the bridge handles it, `Dmg:` shows `atk enemy_bot_hit` and `br applied <damage>`; if the v0.3.64 resolver handles the native-missing path from live testing, `Dmg:` shows `sim applied <damage>`, `sim miss`, or `sim blocked`. If bullets still fail while grenades work, capture `Dmg:` plus `raidbots.list` for `nav=...combat:target=target_bot/canAttack=.../inRange=.../best=...`; `fire n/a#0 atk none hook none sim miss/blocked` means Rust is still emitting no bullet hooks but the resolver is deciding shots are missing or blocked, while `sim applied_no_loss` means another hook is preventing the applied bullet damage from moving HP.
+20. BGrade smoke: run `/bgrade 3`, wait over 30 seconds, place a block, and confirm BGrade still upgrades.
+21. PvP smoke: have a player or RoamBot shoot you with direct ranged damage and confirm BGrade pauses for 30 seconds, then resumes the selected grade.
+22. Cancel smoke: after one player/RoamBot deals no more than 30 percent health damage, kill that same attacker and confirm BGrade resumes immediately.
+23. Stand behind terrain/walls and confirm it investigates or roams but does not shoot.
+24. Step into LOS and confirm it reacts after a short delay, only shoots with LOS, visually crouches during valid shooting/peek windows, and shows `crouch=shooting` in `raidbots.list`.
+25. Toggle the normal admin invis/Vanish feature while the bot has or recently had LOS. Expected: the bot stops shooting within the next tick or hook, `raidbots.list` no longer shows that player as the active target, and the side panel stops showing that player as target.
+26. While still invisible, fire a gun or explosive near the bot. Expected: no sound investigation is created for the hidden admin, and `raidbots.list` does not move to `InvestigateSound` for that admin.
+27. Toggle invis off and step back into LOS. Expected: normal visible-player targeting can resume.
+28. Damage a bot below the low-health threshold, force it into effective cover or a barricade heal, and confirm the side panel shows `Heal:` with a syringe lock while `Crouch:` shows `cover-heal`.
+29. Break LOS or wait for the fight to end and confirm crouch clears after the short configured delay.
+30. Damage it from cover and confirm it investigates the damage/heard position.
+31. raidbots.killall, then confirm native map markers disappear and no bot remains crouched.
+32. Disable Map markers in Debug and confirm no marker entities remain.
+33. Check oxide/data/RaidlandsRoamBots/decision_traces.jsonl for fallback traces when hard decisions trigger, including `crouch_state`.
+34. Use raidbots.list while fighting and watch exposure=X.XX(Y/Z), weapon=<class>, aim=<degrees>/<warmup>, learn=<mode/model>, cover=<point>, stuck=<bool>, protect=<state>, anchor=<state>, heal=<reason>, crouch=<state>, formation=<reason>, utility=<reason>, and mapMarkers=<state/count>.
+35. Learning smoke: `raidbots.learn allow <tester>`, `raidbots.learn observe on`, fight near bots while crouching/shooting, then `raidbots.learn report 60` and `raidbots.learn build`; confirm posture stats appear but do not alter live crouch timing.
+36. Profile smoke after enough traces: `raidbots.learn profile build <tester> <profileKey>`, `raidbots.learn profile show <profileKey>`, `raidbots.learn profile weight <profileKey> 10`, `raidbots.learn apply profiles`, spawn a fresh bot, and confirm public names stay fictional while admin/debug surfaces show the profile key/source plus read-only posture stats.
+37. If the three-bot smoke looks healthy, ramp through `raidbots.target 25`, then `raidbots.target 50`, while watching server performance and spawn spacing.
 ```
 
 v0.3.29 terrain-layer spawn retest:

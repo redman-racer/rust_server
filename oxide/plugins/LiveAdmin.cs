@@ -59,6 +59,8 @@ private const string PermPluginsConfigEdit = "liveadmin.plugins.config.edit";
 private const string PermPluginsConfigRestore = "liveadmin.plugins.config.restore";
 private const string PermAuditView = "liveadmin.audit.view";
 private const string PermAuditManage = "liveadmin.audit.manage";
+private const string PermChatView = "liveadmin.chat.view";
+private const string PermChatManage = "liveadmin.chat.manage";
 private StoredData storedData;
 private PluginConfig config;
 private readonly Dictionary<ulong, PanelState> states = new Dictionary<ulong, PanelState>();
@@ -76,14 +78,16 @@ private string activeWipeSeed;
 private DateTime lastDiskSampleAt = DateTime.MinValue;
 private float cachedDiskGiB;
 private UiSkin activeSkin;
-private readonly string[] tabs = { "dashboard", "players", "staff", "reports", "manage", "wipe", "logs" };
+private readonly string[] tabs = { "dashboard", "players", "staff", "chat", "reports", "manage", "wipe", "logs" };
 private class PanelState
 {
 public string Tab = "dashboard";
 public string SubTab = "plugins";
 public string StaffSubTab = "info";
+public string ChatSubTab = "monitor";
 public string StaffInventoryTab = "main";
 public int StaffInventorySlot = -1;
+public int StaffInventoryPage;
 public int PlayerPage;
 public int PluginPage;
 public int GroupPage;
@@ -93,7 +97,9 @@ public int PermissionPage;
 public int ConfigPage;
 public int GroupDropdownPage;
 public int TicketPage;
+public int ChatPage;
 public string SelectedPlayerId;
+public string SelectedChatId;
 public string SelectedGroup;
 public string SelectedPlugin;
 public string SelectedConfigPlugin;
@@ -112,6 +118,10 @@ public string ServerUrl = string.Empty;
 public string ServerHeaderImage = string.Empty;
 public string PlayerFilter = string.Empty;
 public string ReportFilter = string.Empty;
+public string ChatFilter = string.Empty;
+public string ChatReplyText = string.Empty;
+public string ChatBlacklistText = string.Empty;
+public string ChatTimeoutText = "10m";
 public string PluginFilter = string.Empty;
 public string GroupFilter = string.Empty;
 public string PermissionFilter = string.Empty;
@@ -156,6 +166,18 @@ public bool AnnounceMutes = true;
 public string MuteAnnouncement = "{name} was muted for {duration}: {reason}";
 public bool AnnounceUnmutes = true;
 public string UnmuteAnnouncement = "{name} has been unmuted.";
+public int ChatMessagesStored = 120;
+public string ChatTimeoutDuration = "10m";
+public string ChatTimeoutReason = "Chat moderation";
+public string ChatDeleteCommand = string.Empty;
+public List<string> ChatQuickReplies = new List<string>
+{
+"Please keep chat respectful.",
+"Take this to a ticket if you need staff help.",
+"Stop spamming chat.",
+"That language is not allowed here."
+};
+public List<string> ChatWordBlacklist = new List<string>();
 public bool UseInventoryViewerPlugin = true;
 public string InventoryViewerCommand = "viewinv {id}";
 public bool UseGodmodeForPassive = true;
@@ -186,6 +208,9 @@ public List<string> OwnerOnlyCommandPrefixes = new List<string>
 "server.writecfg"
 };
 public bool AutoWipeEnabled = false;
+public bool AutoWipeUseWeeklySchedule = true;
+public string AutoWipeWeekday = "Thursday";
+public bool AutoWipeForceFirstWeekday = true;
 public int AutoWipeIntervalDays = 7;
 public string AutoWipeTimeUtc = "17:00";
 public bool AutoWipeMap = true;
@@ -255,6 +280,7 @@ private class StoredData
 {
 public List<ReportEntry> Reports = new List<ReportEntry>();
 public List<ActionLog> Logs = new List<ActionLog>();
+public List<ChatEntry> Chat = new List<ChatEntry>();
 public Dictionary<string, List<StaffNote>> Notes = new Dictionary<string, List<StaffNote>>();
 public List<TrackedMute> ActiveMutes = new List<TrackedMute>();
 public Dictionary<string, string> UserSkins = new Dictionary<string, string>();
@@ -335,6 +361,20 @@ public string Details;
 public string Result;
 public string TargetName;
 public string Category;
+}
+private class ChatEntry
+{
+public string Id;
+public string Time;
+public string PlayerId;
+public string PlayerName;
+public string Message;
+public string Channel;
+public bool Blocked;
+public string MatchedWord;
+public bool Deleted;
+public string DeletedBy;
+public string DeletedAt;
 }
 private class StaffNote
 {
@@ -446,6 +486,30 @@ if (string.IsNullOrEmpty(config.UnmuteAnnouncement))
 {
 config.UnmuteAnnouncement = "{name} has been unmuted.";
 }
+if (config.ChatMessagesStored <= 0)
+{
+config.ChatMessagesStored = 120;
+}
+if (string.IsNullOrEmpty(config.ChatTimeoutDuration))
+{
+config.ChatTimeoutDuration = "10m";
+}
+if (string.IsNullOrEmpty(config.ChatTimeoutReason))
+{
+config.ChatTimeoutReason = "Chat moderation";
+}
+if (config.ChatDeleteCommand == null)
+{
+config.ChatDeleteCommand = string.Empty;
+}
+if (config.ChatQuickReplies == null || config.ChatQuickReplies.Count == 0)
+{
+config.ChatQuickReplies = new List<string> { "Please keep chat respectful.", "Take this to a ticket if you need staff help.", "Stop spamming chat.", "That language is not allowed here." };
+}
+if (config.ChatWordBlacklist == null)
+{
+config.ChatWordBlacklist = new List<string>();
+}
 if (string.IsNullOrEmpty(config.InventoryViewerCommand))
 {
 config.InventoryViewerCommand = "viewinv {id}";
@@ -461,6 +525,10 @@ config.VanishCommand = "vanish";
 if (config.AutoWipeIntervalDays <= 0)
 {
 config.AutoWipeIntervalDays = 7;
+}
+if (!TryParseWeekday(config.AutoWipeWeekday, out _))
+{
+config.AutoWipeWeekday = "Thursday";
 }
 if (string.IsNullOrEmpty(config.AutoWipeTimeUtc))
 {
@@ -597,15 +665,24 @@ private List<RolePreset> DefaultRolePresets()
 return new List<RolePreset>
 {
 new RolePreset { Name = "Owner", Description = "Full LiveAdmin access.", Permissions = AllPermissionNames().ToList() },
-new RolePreset { Name = "Senior Admin", Description = "Operational moderation without destructive wipe or config editing by default.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersBan, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermPlayersInventoryView, PermPlayersInventoryModify, PermReportsView, PermReportsManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsTickets, PermPluginsView, PermPluginsReload, PermServerQuickActions, PermAuditView } },
-new RolePreset { Name = "Moderator", Description = "Normal moderation, tickets, notes, mute, kick, and optional teleport.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermReportsView, PermReportsManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsTickets } },
-new RolePreset { Name = "Support Staff", Description = "View players/reports and add notes with non-destructive support tools.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersNotes, PermReportsView, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsTickets } },
+new RolePreset { Name = "Admin", Description = "Operational admin access without owner-only destructive controls.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersBan, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermPlayersInventoryView, PermPlayersInventoryModify, PermReportsView, PermReportsManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups, PermStaffToolsTickets, PermPluginsView, PermPluginsReload, PermServerInfo, PermServerQuickActions, PermServerWipeView, PermAuditView, PermChatView, PermChatManage } },
+new RolePreset { Name = "Staff", Description = "Staff tools, tickets, notes, chat moderation, and safe player support controls.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermReportsView, PermReportsManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsTickets, PermChatView, PermChatManage } },
+new RolePreset { Name = "Moderator", Description = "Normal moderation, tickets, notes, mute, kick, and chat monitoring.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersMute, PermPlayersNotes, PermReportsView, PermReportsManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsTickets, PermChatView, PermChatManage } },
+new RolePreset { Name = "Senior Admin", Description = "Legacy senior-admin preset retained for existing configs.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersBan, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermPlayersInventoryView, PermPlayersInventoryModify, PermReportsView, PermReportsManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsTickets, PermPluginsView, PermPluginsReload, PermServerQuickActions, PermAuditView, PermChatView, PermChatManage } },
+new RolePreset { Name = "Support Staff", Description = "View players/reports and add notes with non-destructive support tools.", Permissions = new List<string> { PermUse, PermPlayersView, PermPlayersNotes, PermReportsView, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsTickets, PermChatView } },
 new RolePreset { Name = "Read Only", Description = "Read-only access to panels and audit logs.", Permissions = new List<string> { PermUse, PermPlayersView, PermReportsView, PermPluginsView, PermGroupsView, PermPermissionsView, PermAuditView } }
 };
 }
 private void NormalizeRolePresets()
 {
 if (config.RolePresets == null) config.RolePresets = DefaultRolePresets();
+foreach (var defaultPreset in DefaultRolePresets())
+{
+if (!config.RolePresets.Any(p => p != null && p.Name.Equals(defaultPreset.Name, StringComparison.OrdinalIgnoreCase)))
+{
+config.RolePresets.Add(defaultPreset);
+}
+}
 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 var normalized = new List<RolePreset>();
 foreach (var preset in config.RolePresets.Where(p => p != null && !string.IsNullOrEmpty(p.Name)))
@@ -705,6 +782,22 @@ private void OnPlayerConnected(BasePlayer player)
 {
 ClearRuntimePlayerState(player);
 }
+private object OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
+{
+if (player == null || string.IsNullOrEmpty(message)) return null;
+var matched = MatchBlacklistedWord(message);
+var blocked = !string.IsNullOrEmpty(matched);
+AddChatEntry(player, message, channel.ToString(), blocked, matched);
+if (blocked)
+{
+player.ChatMessage("<color=#d14a3c>Your message was blocked by chat moderation.</color>");
+LogBlocked(null, "Chat", "Blacklist", player.UserIDString, player.displayName, matched);
+RefreshOpenPanels("chat");
+return true;
+}
+RefreshOpenPanels("chat");
+return null;
+}
 private void ClearRuntimePlayerState(BasePlayer player)
 {
 if (player == null) return;
@@ -739,7 +832,7 @@ PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups,
 PermStaffToolsTickets, PermServerInfo, PermServerQuickActions,
 PermServerWipeView, PermServerWipeManage, PermServerWipeForce,
 PermPluginsReload, PermPluginsConfigView, PermPluginsConfigEdit,
-PermPluginsConfigRestore, PermAuditView, PermAuditManage
+PermPluginsConfigRestore, PermAuditView, PermAuditManage, PermChatView, PermChatManage
 };
 }
 private void SaveData()
@@ -760,6 +853,7 @@ if (string.IsNullOrEmpty(report.UpdatedAt)) report.UpdatedAt = report.CreatedAt;
 if (report.Notes == null) report.Notes = new List<TicketNote>();
 }
 if (storedData.Logs == null) storedData.Logs = new List<ActionLog>();
+if (storedData.Chat == null) storedData.Chat = new List<ChatEntry>();
 if (storedData.Notes == null) storedData.Notes = new Dictionary<string, List<StaffNote>>();
 if (storedData.ActiveMutes == null) storedData.ActiveMutes = new List<TrackedMute>();
 if (string.IsNullOrEmpty(storedData.NextAutoWipeUtc)) storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
@@ -1059,15 +1153,25 @@ break;
 case "staffsubtab":
 state.StaffSubTab = Get(args, 1, "info").ToLowerInvariant();
 break;
+case "chatsubtab":
+state.ChatSubTab = Get(args, 1, "monitor").ToLowerInvariant();
+break;
 case "staffinv":
 state.StaffSubTab = "inventory";
 state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, "main"));
 state.StaffInventorySlot = -1;
+state.StaffInventoryPage = 0;
 break;
 case "staffinvslot":
 state.StaffSubTab = "inventory";
 state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, state.StaffInventoryTab));
 state.StaffInventorySlot = ToInt(Get(args, 2, "-1"), -1);
+break;
+case "staffinvpage":
+state.StaffSubTab = "inventory";
+state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, state.StaffInventoryTab));
+state.StaffInventoryPage = Math.Max(0, state.StaffInventoryPage + ToInt(Get(args, 2, "0")));
+state.StaffInventorySlot = -1;
 break;
 case "skin":
 SetPlayerSkin(player, Get(args, 1, "default"));
@@ -1098,6 +1202,10 @@ break;
 case "selectreport":
 state.SelectedReportId = ToInt(Get(args, 1, "0"));
 state.Tab = "reports";
+break;
+case "selectchat":
+state.SelectedChatId = Get(args, 1, null);
+state.Tab = "chat";
 break;
 case "cyclegroup":
 CycleSelectedGroup(state, ToInt(Get(args, 1, "0")));
@@ -1194,6 +1302,21 @@ state.MuteReason = string.IsNullOrEmpty(value) ? "Staff action" : value;
 }
 Draw(player);
 }
+[ConsoleCommand("liveadmin.chatfield")]
+private void ChatFieldCommand(ConsoleSystem.Arg arg)
+{
+var player = arg.Player();
+if (player == null || !CanAny(player, PermOwner, PermChatManage)) return;
+var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
+if (args.Length == 0) return;
+var state = GetState(player);
+var field = args[0].ToLowerInvariant();
+var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : string.Empty;
+if (field == "reply") state.ChatReplyText = value;
+else if (field == "blacklist") state.ChatBlacklistText = value;
+else if (field == "timeout") state.ChatTimeoutText = string.IsNullOrEmpty(value) ? config.ChatTimeoutDuration : value;
+Draw(player);
+}
 [ConsoleCommand("liveadmin.notefield")]
 private void NoteFieldCommand(ConsoleSystem.Arg arg)
 {
@@ -1275,6 +1398,17 @@ return;
 config.AutoWipeTimeUtc = string.IsNullOrEmpty(value) ? "17:00" : value;
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 }
+else if (field == "weekday")
+{
+if (!TryParseWeekday(value, out var weekday))
+{
+Reply(player, "Wipe day must be a weekday, for example Thursday.");
+LogFailed(player, "Wipe", "WipeField", field, string.Empty, value);
+return;
+}
+config.AutoWipeWeekday = weekday.ToString();
+storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
+}
 else if (field == "seed")
 {
 config.AutoWipeSeed = string.IsNullOrEmpty(value) ? "random" : value;
@@ -1348,6 +1482,10 @@ if (type == "quick" && args.Length > 2)
 {
 target = string.Join(" ", args.Skip(2).ToArray()).Trim('"');
 }
+if ((type == "chatreply" || type == "chatwarn") && args.Length > 3)
+{
+value = string.Join(" ", args.Skip(3).ToArray()).Trim();
+}
 var state = GetState(player);
 switch (type)
 {
@@ -1411,6 +1549,31 @@ case "deleteticket":
 if (!CanManageTickets(player) || IsRateLimited(player, "deleteticket:" + target, 2.0)) return;
 RequireConfirm(player, "deleteticket", target, string.Empty, $"Delete ticket #{target}?");
 break;
+case "chatdelete":
+if (!CanManageChat(player) || IsRateLimited(player, "chatdelete:" + target, 1.0)) return;
+DeleteChatEntry(player, target);
+break;
+case "chatwarn":
+if (!CanManageChat(player) || IsRateLimited(player, "chatwarn:" + target, 1.0)) return;
+WarnChatPlayer(player, target, value);
+break;
+case "chattimeout":
+if (!CanManageChat(player) || IsRateLimited(player, "chattimeout:" + target, 2.0)) return;
+TimeoutChatPlayer(player, target);
+break;
+case "chatreply":
+if (!CanManageChat(player) || IsRateLimited(player, "chatreply:" + target, 1.0)) return;
+ReplyToChatPlayer(player, target, value);
+break;
+case "chatblacklistadd":
+if (!CanManageChat(player) || BlockedBySafeMode(player, "chatblacklistadd", "Chat")) return;
+AddChatBlacklistWord(player, string.IsNullOrEmpty(value) ? state.ChatBlacklistText : value);
+state.ChatBlacklistText = string.Empty;
+break;
+case "chatblacklistremove":
+if (!CanManageChat(player) || BlockedBySafeMode(player, "chatblacklistremove", "Chat")) return;
+RemoveChatBlacklistWord(player, target);
+break;
 case "plugin":
 if (!CanReloadPlugins(player) || BlockedBySafeMode(player, "plugin", "Plugin") || IsRateLimited(player, "plugin:" + target + ":" + value, 2.0)) return;
 RequireConfirm(player, $"plugin:{value}", target, string.Empty, $"{value} plugin {target}?");
@@ -1430,6 +1593,10 @@ break;
 case "revokegroup":
 if (!Can(player, PermPermissionsManage) || BlockedBySafeMode(player, "revokegroup", "Permission") || IsRateLimited(player, "revokegroup:" + target + ":" + value, 2.0)) return;
 RequireConfirm(player, "revokegroup", target, value, $"Revoke {value} from group {target}?");
+break;
+case "applypreset":
+if (!Can(player, PermPermissionsManage) || BlockedBySafeMode(player, "applypreset", "Permission") || IsRateLimited(player, "applypreset:" + target + ":" + value, 3.0)) return;
+RequireConfirm(player, "applypreset", target, value, $"Apply {value} preset permissions to group {target}?");
 break;
 case "note":
 if (!CanAny(player, PermOwner, PermPlayersModerate, PermPlayersNotes)) return;
@@ -1462,6 +1629,25 @@ break;
 case "wipebp":
 if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipebp", "Wipe")) return;
 config.AutoWipeBlueprints = !config.AutoWipeBlueprints;
+SaveConfig();
+break;
+case "wipeschedule":
+if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipeschedule", "Wipe")) return;
+config.AutoWipeUseWeeklySchedule = !config.AutoWipeUseWeeklySchedule;
+storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
+SaveConfig();
+SaveData();
+break;
+case "wipefirstforce":
+if (!CanForceWipe(player) || BlockedBySafeMode(player, "wipefirstforce", "Wipe")) return;
+config.AutoWipeForceFirstWeekday = !config.AutoWipeForceFirstWeekday;
+storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
+SaveConfig();
+SaveData();
+break;
+case "wipedryrun":
+if (!CanForceWipe(player) || BlockedBySafeMode(player, "wipedryrun", "Wipe")) return;
+config.ForceWipeDryRunDefault = !config.ForceWipeDryRunDefault;
 SaveConfig();
 break;
 case "wipedelete":
@@ -1573,6 +1759,10 @@ else if (action == "revokegroup" && Can(player, PermPermissionsManage) && !Block
 RunServerCommand(player, $"oxide.revoke group {ConsoleArg(target)} {ConsoleArg(value)}", $"revoke {value} from {target}");
 Log(player, "RevokeGroupPermission", target, value);
 }
+else if (action == "applypreset" && Can(player, PermPermissionsManage) && !BlockedBySafeMode(player, "applypreset", "Permission"))
+{
+ApplyRolePresetToGroup(player, target, value);
+}
 else if (action == "mute" && CanMute(player) && CanTargetPlayer(player, target, "mute"))
 {
 RunMuteAction(player, target);
@@ -1638,6 +1828,7 @@ if (!string.IsNullOrEmpty(state.PendingAction)) DrawConfirm(container, state);
 else if (state.Tab == "dashboard") DrawDashboard(container, player);
 else if (state.Tab == "players") DrawPlayers(container, player, state);
 else if (state.Tab == "staff") DrawStaffTools(container, player, state);
+else if (state.Tab == "chat") DrawChat(container, player, state);
 else if (state.Tab == "reports") DrawReports(container, player, state);
 else if (state.Tab == "manage") DrawManage(container, player, state);
 else if (state.Tab == "wipe") DrawWipe(container, player);
@@ -1893,7 +2084,16 @@ private void DrawStaffInventoryTab(CuiElementContainer container, BasePlayer pla
 {
 state.StaffInventoryTab = CleanInventoryTab(state.StaffInventoryTab);
 var view = GetInventoryView(selected, state.StaffInventoryTab);
+var pageSize = view.Columns * view.Rows;
+var itemCount = view.Container == null ? 0 : view.Container.itemList.Count;
+var maxInventoryPage = Math.Max(0, (itemCount - 1) / Math.Max(1, pageSize));
+state.StaffInventoryPage = Math.Min(state.StaffInventoryPage, maxInventoryPage);
 var selectedInventoryItem = GetInventoryItemAt(view.Container, state.StaffInventorySlot);
+var visibleRows = 1;
+var gridTop = 0.68;
+var gridBottom = InventoryGridBottom(gridTop, visibleRows);
+var gridRight = InventoryGridRight(view.Columns);
+var visibleSlots = Math.Min(pageSize, Math.Max(pageSize, itemCount - state.StaffInventoryPage * pageSize));
 Label(container, $"{UiRoot}.Body.StaffDetail.InventoryTitle", $"{UiRoot}.Body.StaffDetail", "INVENTORY", 17, "0.04 0.90", "0.36 0.985", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.StaffDetail.InventoryPlayer", $"{UiRoot}.Body.StaffDetail", Shorten(selected.displayName, 28), 10, "0.38 0.91", "0.64 0.97", TextAnchor.MiddleLeft);
 Button(container, $"{UiRoot}.Body.StaffDetail.InventoryOpen", $"{UiRoot}.Body.StaffDetail", "Open Viewer", CanViewInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} openinv" : string.Empty, config.AccentColor, "0.70 0.91", "0.86 0.975", 8);
@@ -1909,8 +2109,14 @@ Button(container, $"{UiRoot}.Body.StaffDetail.InventoryGiveCurrent", $"{UiRoot}.
 Label(container, $"{UiRoot}.Body.StaffDetail.InventorySelected", $"{UiRoot}.Body.StaffDetail", SelectedInventoryText(selectedInventoryItem, state.StaffInventorySlot), 8, "0.64 0.75", "0.78 0.805", TextAnchor.MiddleLeft);
 Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRemoveOne", $"{UiRoot}.Body.StaffDetail", "Remove 1", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} removeinv:{view.Key}:{state.StaffInventorySlot}:1" : string.Empty, selectedInventoryItem != null ? config.WarningColor : "0.12 0.12 0.12 0.65", "0.80 0.75", "0.88 0.805", 7);
 Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRemoveStack", $"{UiRoot}.Body.StaffDetail", "Stack", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} removeinv:{view.Key}:{state.StaffInventorySlot}:stack" : string.Empty, selectedInventoryItem != null ? config.DangerColor : "0.12 0.12 0.12 0.65", "0.895 0.75", "0.955 0.805", 7);
-Label(container, $"{UiRoot}.Body.StaffDetail.InventoryCount", $"{UiRoot}.Body.StaffDetail", $"{view.Title}: {(view.Container == null ? 0 : view.Container.itemList.Count)} items", 10, "0.73 0.822", "0.95 0.872", TextAnchor.MiddleRight);
-DrawInventoryContainer(container, player, state, selected, view.Key, view.Title, view.Container, 0.04, view.GridBottom, 0.88, 0.68, view.Columns, view.Rows, view.MaxSlots);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventoryCount", $"{UiRoot}.Body.StaffDetail", $"{view.Title}: {itemCount} items", 10, "0.73 0.822", "0.95 0.872", TextAnchor.MiddleRight);
+DrawInventoryContainer(container, player, state, selected, view.Key, view.Title, view.Container, state.StaffInventoryPage * pageSize, 0.04, gridBottom, gridRight, gridTop, view.Columns, visibleRows, visibleSlots);
+if (maxInventoryPage > 0)
+{
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryPagePrev", $"{UiRoot}.Body.StaffDetail", "<", $"liveadmin.ui staffinvpage {view.Key} -1", "0.12 0.13 0.14 1", "0.80 0.62", "0.84 0.67", 8);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventoryPageLabel", $"{UiRoot}.Body.StaffDetail", $"Page {state.StaffInventoryPage + 1}/{maxInventoryPage + 1}", 8, "0.845 0.62", "0.91 0.67", TextAnchor.MiddleCenter);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryPageNext", $"{UiRoot}.Body.StaffDetail", ">", $"liveadmin.ui staffinvpage {view.Key} 1", "0.12 0.13 0.14 1", "0.915 0.62", "0.955 0.67", 8);
+}
 Label(container, $"{UiRoot}.Body.StaffDetail.InventoryHint", $"{UiRoot}.Body.StaffDetail", "Click an item to select it, then use Remove 1 or Stack. Open Viewer uses Inventory Viewer; this grid is the quick-edit fallback.", 8, "0.04 0.08", "0.96 0.13", TextAnchor.MiddleLeft);
 }
 private void DrawInventoryTabButton(CuiElementContainer container, PanelState state, string key, string title, double x, ItemContainer itemContainer)
@@ -1918,7 +2124,7 @@ private void DrawInventoryTabButton(CuiElementContainer container, PanelState st
 var active = state.StaffInventoryTab == key;
 Button(container, $"{UiRoot}.Body.StaffDetail.InventoryTab.{key}", $"{UiRoot}.Body.StaffDetail", $"{title} {(itemContainer == null ? 0 : itemContainer.itemList.Count)}", $"liveadmin.ui staffinv {key}", active ? config.AccentColor : "0.12 0.13 0.14 1", $"{x} 0.855", $"{x + 0.12} 0.905", 8);
 }
-private void DrawInventoryContainer(CuiElementContainer container, BasePlayer player, PanelState state, BasePlayer selected, string key, string title, ItemContainer itemContainer, double x1, double y1, double x2, double y2, int columns, int rows, int maxSlots)
+private void DrawInventoryContainer(CuiElementContainer container, BasePlayer player, PanelState state, BasePlayer selected, string key, string title, ItemContainer itemContainer, int startSlot, double x1, double y1, double x2, double y2, int columns, int rows, int maxSlots)
 {
 Panel(container, $"{UiRoot}.Body.StaffDetail.Inventory.{key}", $"{UiRoot}.Body.StaffDetail", "0.035 0.04 0.04 0.72", $"{x1} {y1}", $"{x2} {y2}");
 Label(container, $"{UiRoot}.Body.StaffDetail.Inventory.{key}.Title", $"{UiRoot}.Body.StaffDetail.Inventory.{key}", $"{title} {(itemContainer == null ? 0 : itemContainer.itemList.Count)}", 9, "0.02 0.90", "0.98 0.995", TextAnchor.MiddleLeft);
@@ -1927,17 +2133,18 @@ var usableBottom = 0.05;
 var gap = 0.01;
 var slotW = (1.0 - gap * (columns + 1)) / columns;
 var slotH = (usableTop - usableBottom - gap * (rows + 1)) / rows;
-for (var slot = 0; slot < maxSlots; slot++)
+for (var visualSlot = 0; visualSlot < maxSlots; visualSlot++)
 {
-var col = slot % columns;
-var row = slot / columns;
+var col = visualSlot % columns;
+var row = visualSlot / columns;
 if (row >= rows) break;
 var sx1 = gap + col * (slotW + gap);
 var sy2 = usableTop - gap - row * (slotH + gap);
 var sy1 = sy2 - slotH;
 var sx2 = sx1 + slotW;
-var item = GetInventoryItemAt(itemContainer, slot);
-DrawInventorySlot(container, player, state, selected, key, slot, item, sx1, sy1, sx2, sy2);
+var actualSlot = startSlot + visualSlot;
+var item = GetInventoryItemAt(itemContainer, actualSlot);
+DrawInventorySlot(container, player, state, selected, key, actualSlot, item, sx1, sy1, sx2, sy2);
 }
 }
 private void DrawInventorySlot(CuiElementContainer container, BasePlayer player, PanelState state, BasePlayer selected, string key, int slot, Item item, double x1, double y1, double x2, double y2)
@@ -1962,9 +2169,26 @@ private InventoryView GetInventoryView(BasePlayer selected, string key)
 {
 key = CleanInventoryTab(key);
 if (key == "belt") return new InventoryView { Key = "belt", Title = "Belt", Container = selected.inventory?.containerBelt, Columns = 6, Rows = 1, MaxSlots = 6, GridBottom = 0.43 };
-if (key == "wear") return new InventoryView { Key = "wear", Title = "Wear", Container = selected.inventory?.containerWear, Columns = 4, Rows = 2, MaxSlots = 8, GridBottom = 0.30 };
-if (key == "backpack") return new InventoryView { Key = "backpack", Title = "Backpack", Container = GetBackpackContainer(selected), Columns = 7, Rows = 4, MaxSlots = 28, GridBottom = 0.16 };
-return new InventoryView { Key = "main", Title = "Main", Container = selected.inventory?.containerMain, Columns = 7, Rows = 4, MaxSlots = 28, GridBottom = 0.16 };
+if (key == "wear") return new InventoryView { Key = "wear", Title = "Wear", Container = selected.inventory?.containerWear, Columns = 6, Rows = 1, MaxSlots = 8, GridBottom = 0.43 };
+if (key == "backpack") return new InventoryView { Key = "backpack", Title = "Backpack", Container = GetBackpackContainer(selected), Columns = 6, Rows = 1, MaxSlots = 36, GridBottom = 0.43 };
+return new InventoryView { Key = "main", Title = "Main", Container = selected.inventory?.containerMain, Columns = 6, Rows = 1, MaxSlots = 24, GridBottom = 0.43 };
+}
+private int InventoryVisibleRows(InventoryView view)
+{
+var count = view?.Container == null ? 0 : view.Container.itemList.Count;
+var rowsNeeded = Math.Max(1, (int)Math.Ceiling(count / (double)Math.Max(1, view.Columns)));
+return Math.Max(1, Math.Min(view.Rows, rowsNeeded));
+}
+private double InventoryGridBottom(double top, int rows)
+{
+var safeRows = Math.Max(1, rows);
+if (safeRows >= 5) return 0.13;
+var height = 0.09 + safeRows * 0.115;
+return Math.Max(0.16, top - height);
+}
+private double InventoryGridRight(int columns)
+{
+return Math.Min(0.88, 0.04 + Math.Max(1, columns) * 0.12 + 0.02);
 }
 private string CleanInventoryTab(string key)
 {
@@ -1978,9 +2202,6 @@ return ShortenCompact(value, 16);
 private Item GetInventoryItemAt(ItemContainer itemContainer, int slot)
 {
 if (itemContainer == null || slot < 0) return null;
-var positioned = itemContainer.itemList.FirstOrDefault(item => item != null && item.position == slot);
-if (positioned != null) return positioned;
-if (itemContainer.itemList.Any(item => item != null && item.position >= 0)) return null;
 return slot < itemContainer.itemList.Count ? itemContainer.itemList[slot] : null;
 }
 private string SelectedInventoryText(Item item, int slot)
@@ -2211,6 +2432,98 @@ Label(container, $"{UiRoot}.Body.Tickets.Detail.Note.{SafeName(note.Time)}.Text"
 y -= 0.085;
 }
 }
+private void DrawChat(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+Header(container, "Chat");
+if (!CanViewChat(player)) { NoAccess(container); return; }
+EnsureDataDefaults();
+if (state.ChatSubTab != "blacklist") state.ChatSubTab = "monitor";
+Button(container, $"{UiRoot}.Body.Chat.Sub.Monitor", $"{UiRoot}.Body", "Monitor", "liveadmin.ui chatsubtab monitor", state.ChatSubTab == "monitor" ? config.AccentColor : "0.12 0.13 0.14 1", "0.04 0.835", "0.18 0.895", 11);
+Button(container, $"{UiRoot}.Body.Chat.Sub.Blacklist", $"{UiRoot}.Body", "Blacklist", "liveadmin.ui chatsubtab blacklist", state.ChatSubTab == "blacklist" ? config.AccentColor : "0.12 0.13 0.14 1", "0.20 0.835", "0.34 0.895", 11);
+if (state.ChatSubTab == "blacklist")
+{
+DrawChatBlacklist(container, player, state);
+return;
+}
+DrawFilterStatus(container, $"{UiRoot}.Body", "Chat", state.ChatFilter, "chat", "0.04 0.765", "0.58 0.815");
+var messages = (storedData.Chat ?? new List<ChatEntry>())
+.Where(c => c != null && !c.Deleted && (MatchesFilter(c.PlayerName, state.ChatFilter) || MatchesFilter(c.PlayerId, state.ChatFilter) || MatchesFilter(c.Message, state.ChatFilter) || MatchesFilter(c.Channel, state.ChatFilter)))
+.OrderByDescending(c => c.Time)
+.ToList();
+var pageSize = 10;
+var maxPage = Math.Max(0, (messages.Count - 1) / pageSize);
+state.ChatPage = Math.Min(state.ChatPage, maxPage);
+var page = messages.Skip(state.ChatPage * pageSize).Take(pageSize).ToList();
+Panel(container, $"{UiRoot}.Body.Chat.List", $"{UiRoot}.Body", "0.055 0.058 0.052 0.90", "0.04 0.14", "0.62 0.745");
+var y = 0.88;
+foreach (var entry in page)
+{
+var selected = state.SelectedChatId == entry.Id;
+var color = entry.Blocked ? "0.26 0.08 0.06 0.86" : selected ? config.AccentColor : "0.075 0.080 0.072 0.86";
+var row = $"{UiRoot}.Body.Chat.Row.{SafeName(entry.Id)}";
+Panel(container, row, $"{UiRoot}.Body.Chat.List", color, $"0.025 {y}", $"0.975 {y + 0.075}");
+Label(container, $"{row}.Meta", row, $"{entry.Time}  {Shorten(entry.PlayerName, 18)}  {entry.Channel}", 7, "0.02 0.52", "0.42 0.98", TextAnchor.MiddleLeft);
+Label(container, $"{row}.Msg", row, Shorten(entry.Message, 82), 8, "0.02 0.02", "0.78 0.52", TextAnchor.MiddleLeft);
+Button(container, $"{row}.Open", row, selected ? "Selected" : "Open", $"liveadmin.ui selectchat {entry.Id}", selected ? config.WarningColor : config.AccentColor, "0.80 0.18", "0.97 0.82", 8);
+y -= 0.084;
+}
+Pager(container, state.ChatPage, messages.Count, pageSize, "chat");
+Panel(container, $"{UiRoot}.Body.Chat.Detail", $"{UiRoot}.Body", "0.075 0.080 0.072 0.94", "0.64 0.14", "0.96 0.745");
+var selectedEntry = FindChatEntry(state.SelectedChatId) ?? page.FirstOrDefault();
+if (selectedEntry == null)
+{
+Label(container, $"{UiRoot}.Body.Chat.Empty", $"{UiRoot}.Body.Chat.Detail", "No chat messages captured yet.", 11, "0.06 0.78", "0.94 0.92", TextAnchor.MiddleCenter);
+return;
+}
+state.SelectedChatId = selectedEntry.Id;
+var canManage = CanManageChat(player);
+Label(container, $"{UiRoot}.Body.Chat.Detail.Title", $"{UiRoot}.Body.Chat.Detail", Shorten(selectedEntry.PlayerName, 26), 15, "0.05 0.90", "0.95 0.99", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Chat.Detail.Id", $"{UiRoot}.Body.Chat.Detail", selectedEntry.PlayerId, 8, "0.05 0.84", "0.95 0.90", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Chat.Detail.Msg", $"{UiRoot}.Body.Chat.Detail", Shorten(selectedEntry.Message, 120), 9, "0.05 0.72", "0.95 0.83", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.Chat.Warn", $"{UiRoot}.Body.Chat.Detail", "Warn", canManage ? $"liveadmin.ui act chatwarn {selectedEntry.Id}" : string.Empty, config.WarningColor, "0.05 0.63", "0.30 0.70", 8);
+Button(container, $"{UiRoot}.Body.Chat.Timeout", $"{UiRoot}.Body.Chat.Detail", "Timeout", canManage ? $"liveadmin.ui act chattimeout {selectedEntry.Id}" : string.Empty, config.DangerColor, "0.35 0.63", "0.62 0.70", 8);
+Button(container, $"{UiRoot}.Body.Chat.Delete", $"{UiRoot}.Body.Chat.Detail", "Delete Msg", canManage ? $"liveadmin.ui act chatdelete {selectedEntry.Id}" : string.Empty, config.DangerColor, "0.67 0.63", "0.95 0.70", 8);
+if (string.IsNullOrEmpty(config.ChatDeleteCommand))
+{
+Label(container, $"{UiRoot}.Body.Chat.DeleteHint", $"{UiRoot}.Body.Chat.Detail", "Delete hides it here. Set ChatDeleteCommand for external chat removal.", 7, "0.05 0.595", "0.95 0.625", TextAnchor.MiddleLeft);
+}
+Label(container, $"{UiRoot}.Body.Chat.TimeoutLabel", $"{UiRoot}.Body.Chat.Detail", "Timeout duration", 8, "0.05 0.525", "0.38 0.585", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Chat.TimeoutBox", $"{UiRoot}.Body.Chat.Detail", "0.02 0.025 0.03 0.98", "0.40 0.525", "0.95 0.585");
+Input(container, $"{UiRoot}.Body.Chat.TimeoutInput", $"{UiRoot}.Body.Chat.TimeoutBox", string.IsNullOrEmpty(state.ChatTimeoutText) ? config.ChatTimeoutDuration : state.ChatTimeoutText, "liveadmin.chatfield timeout", 8, "0.03 0", "0.97 1");
+Panel(container, $"{UiRoot}.Body.Chat.ReplyBox", $"{UiRoot}.Body.Chat.Detail", "0.02 0.025 0.03 0.98", "0.05 0.415", "0.95 0.495");
+Input(container, $"{UiRoot}.Body.Chat.ReplyInput", $"{UiRoot}.Body.Chat.ReplyBox", state.ChatReplyText, "liveadmin.chatfield reply", 8, "0.03 0", "0.97 1");
+Button(container, $"{UiRoot}.Body.Chat.ReplySend", $"{UiRoot}.Body.Chat.Detail", "Send Reply", canManage ? $"liveadmin.ui act chatreply {selectedEntry.Id}" : string.Empty, config.AccentColor, "0.62 0.33", "0.95 0.395", 8);
+var quickY = 0.235;
+foreach (var reply in (config.ChatQuickReplies ?? new List<string>()).Take(4))
+{
+Button(container, $"{UiRoot}.Body.Chat.Quick.{SafeName(reply)}", $"{UiRoot}.Body.Chat.Detail", Shorten(reply, 42), canManage ? $"liveadmin.ui act chatreply {selectedEntry.Id} {reply}" : string.Empty, "0.12 0.13 0.14 1", $"0.05 {quickY}", $"0.95 {quickY + 0.055}", 7, TextAnchor.MiddleLeft);
+quickY -= 0.065;
+}
+}
+private void DrawChatBlacklist(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+var canManage = CanManageChat(player);
+Panel(container, $"{UiRoot}.Body.Chat.BlacklistPanel", $"{UiRoot}.Body", "0.055 0.058 0.052 0.92", "0.04 0.14", "0.96 0.745");
+Label(container, $"{UiRoot}.Body.Chat.BlacklistPanel.Title", $"{UiRoot}.Body.Chat.BlacklistPanel", "Word Blacklist", 16, "0.04 0.88", "0.40 0.98", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Chat.BlacklistPanel.Box", $"{UiRoot}.Body.Chat.BlacklistPanel", "0.02 0.025 0.03 0.98", "0.04 0.76", "0.68 0.84");
+Input(container, $"{UiRoot}.Body.Chat.BlacklistPanel.Input", $"{UiRoot}.Body.Chat.BlacklistPanel.Box", state.ChatBlacklistText, "liveadmin.chatfield blacklist", 9, "0.03 0", "0.97 1");
+Button(container, $"{UiRoot}.Body.Chat.BlacklistPanel.Add", $"{UiRoot}.Body.Chat.BlacklistPanel", "Add Word", canManage ? "liveadmin.ui act chatblacklistadd selected" : string.Empty, config.AccentColor, "0.72 0.76", "0.94 0.84", 9);
+var words = (config.ChatWordBlacklist ?? new List<string>()).OrderBy(w => w).ToList();
+var y = 0.64;
+if (words.Count == 0)
+{
+Label(container, $"{UiRoot}.Body.Chat.BlacklistPanel.Empty", $"{UiRoot}.Body.Chat.BlacklistPanel", "No blacklisted words configured.", 11, "0.04 0.58", "0.94 0.68", TextAnchor.MiddleLeft);
+return;
+}
+foreach (var word in words.Take(8))
+{
+var row = $"{UiRoot}.Body.Chat.BlacklistPanel.Word.{SafeName(word)}";
+Panel(container, row, $"{UiRoot}.Body.Chat.BlacklistPanel", "0.075 0.080 0.072 0.90", $"0.04 {y}", $"0.94 {y + 0.075}");
+Label(container, $"{row}.Text", row, word, 10, "0.03 0", "0.70 1", TextAnchor.MiddleLeft);
+Button(container, $"{row}.Remove", row, "Remove", canManage ? $"liveadmin.ui act chatblacklistremove {word}" : string.Empty, config.DangerColor, "0.76 0.16", "0.96 0.84", 8);
+y -= 0.085;
+}
+}
 private void DrawWipe(CuiElementContainer container, BasePlayer player)
 {
 Header(container, "Wipe");
@@ -2377,16 +2690,20 @@ DrawGroupDropdown(container, state, groups);
 return;
 }
 var currentPerms = permission.GetGroupPermissions(state.SelectedGroup, false).OrderBy(p => p).ToList();
-Label(container, $"{UiRoot}.Body.Perms.Detail.Count", $"{UiRoot}.Body.Perms.Detail", $"Direct permissions: {currentPerms.Count}", 11, "0.04 0.72", "0.48 0.79", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Perms.Detail.PresetsTitle", $"{UiRoot}.Body.Perms.Detail", "Role presets:", 9, "0.04 0.735", "0.18 0.785", TextAnchor.MiddleLeft);
+DrawRolePresetButton(container, player, state.SelectedGroup, "Admin", 0.18, 0.735);
+DrawRolePresetButton(container, player, state.SelectedGroup, "Staff", 0.34, 0.735);
+DrawRolePresetButton(container, player, state.SelectedGroup, "Moderator", 0.50, 0.735);
+Label(container, $"{UiRoot}.Body.Perms.Detail.Count", $"{UiRoot}.Body.Perms.Detail", $"Direct permissions: {currentPerms.Count}", 10, "0.68 0.735", "0.96 0.785", TextAnchor.MiddleRight);
 var allPermissions = GetKnownPermissions()
 .Where(p => state.SelectedPlugin == "all" || p.StartsWith(state.SelectedPlugin + ".", StringComparison.OrdinalIgnoreCase))
 .Where(p => MatchesFilter(p, state.PermissionFilter))
 .ToList();
 var permPageSize = 6;
 var permPage = allPermissions.Skip(state.PermissionPage * permPageSize).Take(permPageSize).ToList();
-Label(container, $"{UiRoot}.Body.Perms.Detail.Total", $"{UiRoot}.Body.Perms.Detail", $"Registered permissions: {allPermissions.Count}", 11, "0.50 0.72", "0.96 0.79", TextAnchor.MiddleRight);
-DrawFilterStatus(container, $"{UiRoot}.Body.Perms.Detail", "Permissions", state.PermissionFilter, "permissions", "0.04 0.64", "0.96 0.705");
-var y = 0.52;
+Label(container, $"{UiRoot}.Body.Perms.Detail.Total", $"{UiRoot}.Body.Perms.Detail", $"Registered permissions: {allPermissions.Count}", 10, "0.50 0.645", "0.96 0.70", TextAnchor.MiddleRight);
+DrawFilterStatus(container, $"{UiRoot}.Body.Perms.Detail", "Permissions", state.PermissionFilter, "permissions", "0.04 0.575", "0.96 0.635");
+var y = 0.46;
 foreach (var permName in permPage)
 {
 var hasPerm = currentPerms.Contains(permName);
@@ -2398,6 +2715,10 @@ y -= 0.078;
 }
 MiniPager(container, $"{UiRoot}.Body.Perms.Side.Pager", $"{UiRoot}.Body.Perms.Side", state.PermissionPluginPage, pluginsForPerms.Count, pluginPageSize, "permissionplugins", "0.08 0.02", "0.92 0.09");
 MiniPager(container, $"{UiRoot}.Body.Perms.Detail.Pager", $"{UiRoot}.Body.Perms.Detail", state.PermissionPage, allPermissions.Count, permPageSize, "permissions", "0.04 0.02", "0.50 0.09");
+}
+private void DrawRolePresetButton(CuiElementContainer container, BasePlayer player, string group, string preset, double x, double y)
+{
+Button(container, $"{UiRoot}.Body.Perms.Detail.Preset.{preset}", $"{UiRoot}.Body.Perms.Detail", preset, Can(player, PermPermissionsManage) ? $"liveadmin.ui act applypreset {group} {preset}" : string.Empty, "0.12 0.13 0.14 1", $"{x} {y}", $"{x + 0.145} {y + 0.055}", 8);
 }
 private void DrawLogs(CuiElementContainer container, BasePlayer player, PanelState state)
 {
@@ -2481,37 +2802,76 @@ private void DrawAutoWipePanel(CuiElementContainer container, BasePlayer player)
 {
 var canEdit = CanManageWipe(player);
 var canForce = CanForceWipe(player);
-Panel(container, $"{UiRoot}.Body.Wipe", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.08", "0.96 0.86");
-Label(container, $"{UiRoot}.Body.Wipe.Title", $"{UiRoot}.Body.Wipe", "Auto Wipe Setup", 16, "0.035 0.91", "0.35 0.99", TextAnchor.MiddleLeft);
-Label(container, $"{UiRoot}.Body.Wipe.Next", $"{UiRoot}.Body.Wipe", $"Next scheduled wipe: {storedData.NextAutoWipeUtc}   Dry-run: {(config.ForceWipeDryRunDefault ? "ON" : "OFF")}", 10, "0.45 0.91", "0.96 0.99", TextAnchor.MiddleRight);
-Button(container, $"{UiRoot}.Body.Wipe.Enabled", $"{UiRoot}.Body.Wipe", config.AutoWipeEnabled ? "Auto Enabled" : "Auto Disabled", canEdit ? "liveadmin.ui act wipetoggle" : string.Empty, config.AutoWipeEnabled ? config.SuccessColor : "0.18 0.19 0.20 1", "0.035 0.80", "0.18 0.88", 9);
-Button(container, $"{UiRoot}.Body.Wipe.Map", $"{UiRoot}.Body.Wipe", config.AutoWipeMap ? "Map Wipe" : "No Map", canEdit ? "liveadmin.ui act wipemap" : string.Empty, config.AutoWipeMap ? config.AccentColor : "0.18 0.19 0.20 1", "0.20 0.80", "0.32 0.88", 9);
-Button(container, $"{UiRoot}.Body.Wipe.Bp", $"{UiRoot}.Body.Wipe", config.AutoWipeBlueprints ? "BP Wipe" : "No BPs", canEdit ? "liveadmin.ui act wipebp" : string.Empty, config.AutoWipeBlueprints ? config.WarningColor : "0.18 0.19 0.20 1", "0.34 0.80", "0.46 0.88", 9);
-Button(container, $"{UiRoot}.Body.Wipe.Delete", $"{UiRoot}.Body.Wipe", config.ForceWipeDeletesFiles ? "Force Deletes Files" : "Force Keeps Files", canForce ? "liveadmin.ui act wipedelete" : string.Empty, config.ForceWipeDeletesFiles ? config.DangerColor : "0.18 0.19 0.20 1", "0.48 0.80", "0.66 0.88", 9);
-Button(container, $"{UiRoot}.Body.Wipe.Reset", $"{UiRoot}.Body.Wipe", "Reset Next", canEdit ? "liveadmin.ui act wipereset" : string.Empty, "0.18 0.19 0.20 1", "0.68 0.80", "0.80 0.88", 9);
-Button(container, $"{UiRoot}.Body.Wipe.Force", $"{UiRoot}.Body.Wipe", "Force Wipe", canForce ? "liveadmin.ui act forcewipe" : string.Empty, config.DangerColor, "0.82 0.80", "0.96 0.88", 9);
-Button(container, $"{UiRoot}.Body.Wipe.PreviewForce", $"{UiRoot}.Body.Wipe", "Preview Force", canForce ? "liveadmin.ui act wipepreview force" : string.Empty, config.WarningColor, "0.035 0.69", "0.18 0.77", 8);
-Button(container, $"{UiRoot}.Body.Wipe.PreviewAuto", $"{UiRoot}.Body.Wipe", "Preview Auto", canEdit ? "liveadmin.ui act wipepreview auto" : string.Empty, config.AccentColor, "0.20 0.69", "0.32 0.77", 8);
-Button(container, $"{UiRoot}.Body.Wipe.PreviewForceCommands", $"{UiRoot}.Body.Wipe", "Force Cmds", canForce ? "liveadmin.ui act wipepreview forcecommands" : string.Empty, config.WarningColor, "0.34 0.69", "0.46 0.77", 8);
-Button(container, $"{UiRoot}.Body.Wipe.PreviewFiles", $"{UiRoot}.Body.Wipe", "Files", canForce ? "liveadmin.ui act wipepreview files" : string.Empty, config.DangerColor, "0.48 0.69", "0.58 0.77", 8);
-DrawWipeField(container, "Every Days", "interval", config.AutoWipeIntervalDays.ToString(), 0.66, 0.035, 0.18);
-DrawWipeField(container, "UTC Time", "time", config.AutoWipeTimeUtc, 0.66, 0.20, 0.35);
-DrawWipeField(container, "Seed", "seed", config.AutoWipeSeed, 0.66, 0.37, 0.52);
-DrawWipeField(container, "Map Size", "size", config.AutoWipeMapSize.ToString(), 0.66, 0.54, 0.69);
-DrawWipeField(container, "Custom Map URL", "mapurl", config.AutoWipeCustomMapUrl, 0.66, 0.71, 0.96);
-DrawWipeField(container, "Discord Auto Setup Commands", "autodiscord", config.AutoWipeDiscordCommandText, 0.50, 0.035, 0.96);
-DrawWipeField(container, "Discord Force Setup Commands", "forcediscord", config.ForceWipeDiscordCommandText, 0.38, 0.035, 0.96);
-DrawWipeField(container, "Auto Commands", "autocommands", config.AutoWipeCommandText, 0.26, 0.035, 0.48);
-DrawWipeField(container, "Force Commands", "forcecommands", config.ForceWipeCommandText, 0.26, 0.52, 0.96);
-DrawWipeField(container, "Force Map Delete Paths", "mappaths", config.MapWipeDeletePathText, 0.14, 0.035, 0.48);
-DrawWipeField(container, "Force BP Delete Paths", "bppaths", config.BlueprintWipeDeletePathText, 0.14, 0.52, 0.96);
-Label(container, $"{UiRoot}.Body.Wipe.Placeholders", $"{UiRoot}.Body.Wipe", "Use || between commands/paths. Placeholders: {seed}, {worldsize}, {levelurl}, {identity}, {map}, {bp}", 8, "0.035 0.035", "0.96 0.10", TextAnchor.MiddleLeft);
-}
-private void DrawWipeField(CuiElementContainer container, string label, string key, string value, double y, double x1, double x2)
+var nextText = string.IsNullOrEmpty(storedData.NextAutoWipeUtc) ? "Not calculated" : storedData.NextAutoWipeUtc;
+var scheduleText = config.AutoWipeUseWeeklySchedule ? $"Weekly {GetConfiguredWipeWeekday()} at {config.AutoWipeTimeUtc} UTC" : $"Every {config.AutoWipeIntervalDays} days at {config.AutoWipeTimeUtc} UTC";
+Panel(container, $"{UiRoot}.Body.Wipe", $"{UiRoot}.Body", "0.055 0.058 0.052 0.94", "0.04 0.055", "0.96 0.875");
+Label(container, $"{UiRoot}.Body.Wipe.Title", $"{UiRoot}.Body.Wipe", "Wipe Scheduler", 17, "0.035 0.92", "0.35 0.99", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Wipe.Next", $"{UiRoot}.Body.Wipe", $"Next: {nextText}   Dry-run: {(config.ForceWipeDryRunDefault ? "ON" : "OFF")}", 10, "0.42 0.925", "0.96 0.985", TextAnchor.MiddleRight);
+
+Panel(container, $"{UiRoot}.Body.Wipe.Plan", $"{UiRoot}.Body.Wipe", "0.075 0.080 0.072 0.94", "0.035 0.735", "0.49 0.90");
+Label(container, $"{UiRoot}.Body.Wipe.Plan.Title", $"{UiRoot}.Body.Wipe.Plan", "Schedule Plan", 13, "0.04 0.70", "0.50 0.96", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Wipe.Plan.Body", $"{UiRoot}.Body.Wipe.Plan", scheduleText, 10, "0.04 0.42", "0.96 0.68", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Wipe.Plan.Rule", $"{UiRoot}.Body.Wipe.Plan", config.AutoWipeUseWeeklySchedule && config.AutoWipeForceFirstWeekday ? "First scheduled wipe each month: FORCE. Other weeks: MAP." : "All scheduled wipes use the normal auto-wipe command set.", 9, "0.04 0.16", "0.96 0.39", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.Wipe.ScheduleMode", $"{UiRoot}.Body.Wipe.Plan", config.AutoWipeUseWeeklySchedule ? "Weekly Mode" : "Interval Mode", canEdit ? "liveadmin.ui act wipeschedule" : string.Empty, config.AutoWipeUseWeeklySchedule ? config.AccentColor : "0.14 0.15 0.14 1", "0.68 0.68", "0.94 0.92", 8);
+Button(container, $"{UiRoot}.Body.Wipe.FirstForce", $"{UiRoot}.Body.Wipe.Plan", config.AutoWipeForceFirstWeekday ? "First Force" : "No Monthly Force", canForce ? "liveadmin.ui act wipefirstforce" : string.Empty, config.AutoWipeForceFirstWeekday ? config.WarningColor : "0.14 0.15 0.14 1", "0.68 0.38", "0.94 0.62", 8);
+
+Panel(container, $"{UiRoot}.Body.Wipe.Actions", $"{UiRoot}.Body.Wipe", "0.075 0.080 0.072 0.94", "0.515 0.735", "0.965 0.90");
+Label(container, $"{UiRoot}.Body.Wipe.Actions.Title", $"{UiRoot}.Body.Wipe.Actions", "Controls", 13, "0.04 0.70", "0.50 0.96", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.Wipe.Enabled", $"{UiRoot}.Body.Wipe.Actions", config.AutoWipeEnabled ? "Auto Enabled" : "Auto Disabled", canEdit ? "liveadmin.ui act wipetoggle" : string.Empty, config.AutoWipeEnabled ? config.SuccessColor : "0.14 0.15 0.14 1", "0.04 0.40", "0.22 0.66", 8);
+Button(container, $"{UiRoot}.Body.Wipe.Map", $"{UiRoot}.Body.Wipe.Actions", config.AutoWipeMap ? "Map Wipe" : "No Map", canEdit ? "liveadmin.ui act wipemap" : string.Empty, config.AutoWipeMap ? config.AccentColor : "0.14 0.15 0.14 1", "0.24 0.40", "0.40 0.66", 8);
+Button(container, $"{UiRoot}.Body.Wipe.Bp", $"{UiRoot}.Body.Wipe.Actions", config.AutoWipeBlueprints ? "BP Wipe" : "No BPs", canEdit ? "liveadmin.ui act wipebp" : string.Empty, config.AutoWipeBlueprints ? config.WarningColor : "0.14 0.15 0.14 1", "0.42 0.40", "0.58 0.66", 8);
+Button(container, $"{UiRoot}.Body.Wipe.Delete", $"{UiRoot}.Body.Wipe.Actions", config.ForceWipeDeletesFiles ? "Force Deletes" : "Keep Files", canForce ? "liveadmin.ui act wipedelete" : string.Empty, config.ForceWipeDeletesFiles ? config.DangerColor : "0.14 0.15 0.14 1", "0.60 0.40", "0.76 0.66", 8);
+Button(container, $"{UiRoot}.Body.Wipe.Reset", $"{UiRoot}.Body.Wipe.Actions", "Reset Next", canEdit ? "liveadmin.ui act wipereset" : string.Empty, "0.14 0.15 0.14 1", "0.78 0.40", "0.94 0.66", 8);
+Button(container, $"{UiRoot}.Body.Wipe.PreviewAuto", $"{UiRoot}.Body.Wipe.Actions", "Preview Auto", canEdit ? "liveadmin.ui act wipepreview auto" : string.Empty, config.AccentColor, "0.04 0.10", "0.22 0.34", 8);
+Button(container, $"{UiRoot}.Body.Wipe.PreviewForce", $"{UiRoot}.Body.Wipe.Actions", "Preview Force", canForce ? "liveadmin.ui act wipepreview force" : string.Empty, config.WarningColor, "0.24 0.10", "0.42 0.34", 8);
+Button(container, $"{UiRoot}.Body.Wipe.PreviewFiles", $"{UiRoot}.Body.Wipe.Actions", "Files", canForce ? "liveadmin.ui act wipepreview files" : string.Empty, config.DangerColor, "0.44 0.10", "0.58 0.34", 8);
+Button(container, $"{UiRoot}.Body.Wipe.DryRun", $"{UiRoot}.Body.Wipe.Actions", config.ForceWipeDryRunDefault ? "Dry-run ON" : "Dry-run OFF", canForce ? "liveadmin.ui act wipedryrun" : string.Empty, config.ForceWipeDryRunDefault ? config.WarningColor : config.SuccessColor, "0.60 0.10", "0.74 0.34", 8);
+Button(container, $"{UiRoot}.Body.Wipe.Force", $"{UiRoot}.Body.Wipe.Actions", "Force Wipe Now", canForce ? "liveadmin.ui act forcewipe" : string.Empty, config.DangerColor, "0.76 0.10", "0.94 0.34", 8);
+
+Panel(container, $"{UiRoot}.Body.Wipe.Month", $"{UiRoot}.Body.Wipe", "0.075 0.080 0.072 0.94", "0.035 0.445", "0.49 0.715");
+Label(container, $"{UiRoot}.Body.Wipe.Month.Title", $"{UiRoot}.Body.Wipe.Month", "Upcoming Wipes", 13, "0.04 0.84", "0.96 0.98", TextAnchor.MiddleLeft);
+var previews = PreviewScheduledWipes(5);
+var y = 0.66;
+for (var i = 0; i < previews.Count; i++)
 {
-Label(container, $"{UiRoot}.Body.Wipe.{key}.Label", $"{UiRoot}.Body.Wipe", label, 7, $"{x1} {y + 0.09}", $"{x2} {y + 0.16}", TextAnchor.MiddleLeft);
-Panel(container, $"{UiRoot}.Body.Wipe.{key}.Box", $"{UiRoot}.Body.Wipe", "0.02 0.025 0.03 0.98", $"{x1} {y}", $"{x2} {y + 0.085}");
-Input(container, $"{UiRoot}.Body.Wipe.{key}.Input", $"{UiRoot}.Body.Wipe.{key}.Box", value, $"liveadmin.wipefield {key}", 8, "0.03 0", "0.97 1");
+DrawWipeScheduleRow(container, previews[i], i, y);
+y -= 0.16;
+}
+
+Panel(container, $"{UiRoot}.Body.Wipe.World", $"{UiRoot}.Body.Wipe", "0.075 0.080 0.072 0.94", "0.515 0.445", "0.965 0.715");
+Label(container, $"{UiRoot}.Body.Wipe.World.Title", $"{UiRoot}.Body.Wipe.World", "World Setup", 13, "0.04 0.84", "0.96 0.98", TextAnchor.MiddleLeft);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.World", "Day", "weekday", GetConfiguredWipeWeekday().ToString(), 0.55, 0.05, 0.28);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.World", "UTC Time", "time", config.AutoWipeTimeUtc, 0.55, 0.34, 0.56);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.World", "Every Days", "interval", config.AutoWipeIntervalDays.ToString(), 0.55, 0.64, 0.94);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.World", "Seed", "seed", config.AutoWipeSeed, 0.15, 0.05, 0.32);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.World", "Map Size", "size", config.AutoWipeMapSize.ToString(), 0.15, 0.38, 0.60);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.World", "Custom Map URL", "mapurl", config.AutoWipeCustomMapUrl, 0.15, 0.66, 0.94);
+
+Panel(container, $"{UiRoot}.Body.Wipe.Advanced", $"{UiRoot}.Body.Wipe", "0.075 0.080 0.072 0.94", "0.035 0.08", "0.965 0.425");
+Label(container, $"{UiRoot}.Body.Wipe.Advanced.Title", $"{UiRoot}.Body.Wipe.Advanced", "Advanced Commands", 13, "0.02 0.87", "0.96 0.99", TextAnchor.MiddleLeft);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.Advanced", "Discord Auto Setup Commands", "autodiscord", config.AutoWipeDiscordCommandText, 0.63, 0.03, 0.48);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.Advanced", "Discord Force Setup Commands", "forcediscord", config.ForceWipeDiscordCommandText, 0.63, 0.52, 0.97);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.Advanced", "Auto Commands", "autocommands", config.AutoWipeCommandText, 0.38, 0.03, 0.48);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.Advanced", "Force Commands", "forcecommands", config.ForceWipeCommandText, 0.38, 0.52, 0.97);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.Advanced", "Force Map Delete Paths", "mappaths", config.MapWipeDeletePathText, 0.13, 0.03, 0.48);
+DrawWipeField(container, $"{UiRoot}.Body.Wipe.Advanced", "Force BP Delete Paths", "bppaths", config.BlueprintWipeDeletePathText, 0.13, 0.52, 0.97);
+Label(container, $"{UiRoot}.Body.Wipe.Placeholders", $"{UiRoot}.Body.Wipe", "Use || between commands/paths. Placeholders: {seed}, {worldsize}, {levelurl}, {identity}, {map}, {bp}", 8, "0.04 0.025", "0.96 0.065", TextAnchor.MiddleLeft);
+}
+private void DrawWipeScheduleRow(CuiElementContainer container, DateTime wipeUtc, int index, double y)
+{
+var mode = ScheduledWipeMode(wipeUtc);
+var force = mode == "ForceWipe";
+var name = $"{UiRoot}.Body.Wipe.Month.Row.{index}";
+Panel(container, name, $"{UiRoot}.Body.Wipe.Month", force ? "0.22 0.12 0.09 0.88" : "0.08 0.10 0.09 0.88", $"0.04 {y}", $"0.96 {y + 0.11}");
+Label(container, $"{name}.Date", name, wipeUtc.ToString("yyyy-MM-dd HH:mm"), 9, "0.03 0.12", "0.45 0.88", TextAnchor.MiddleLeft);
+Label(container, $"{name}.Mode", name, force ? "FORCE WIPE" : "MAP WIPE", 9, "0.48 0.12", "0.74 0.88", TextAnchor.MiddleCenter);
+Label(container, $"{name}.Details", name, force ? "Map + BP/files if enabled" : "Normal scheduled map wipe", 8, "0.75 0.12", "0.98 0.88", TextAnchor.MiddleRight);
+}
+private void DrawWipeField(CuiElementContainer container, string parent, string label, string key, string value, double y, double x1, double x2)
+{
+Label(container, $"{parent}.{key}.Label", parent, label, 7, $"{x1} {y + 0.10}", $"{x2} {y + 0.18}", TextAnchor.MiddleLeft);
+Panel(container, $"{parent}.{key}.Box", parent, "0.02 0.025 0.03 0.98", $"{x1} {y}", $"{x2} {y + 0.09}");
+Input(container, $"{parent}.{key}.Input", $"{parent}.{key}.Box", value, $"liveadmin.wipefield {key}", 8, "0.03 0", "0.97 1");
 }
 private void DrawServerField(CuiElementContainer container, string label, string key, string value, double y)
 {
@@ -2764,6 +3124,8 @@ private bool CanViewInventory(BasePlayer player) => CanAny(player, PermOwner, Pe
 private bool CanModifyInventory(BasePlayer player) => CanAny(player, PermOwner, PermPlayersInventoryModify);
 private bool CanManageStaffGroups(BasePlayer player) => CanAny(player, PermOwner, PermGroupsManage, PermStaffToolsGroups);
 private bool CanManageTickets(BasePlayer player) => CanAny(player, PermOwner, PermReportsManage, PermStaffToolsTickets);
+private bool CanViewChat(BasePlayer player) => CanAny(player, PermOwner, PermChatView, PermChatManage);
+private bool CanManageChat(BasePlayer player) => CanAny(player, PermOwner, PermChatManage);
 private bool IsRateLimited(BasePlayer player, string actionKey, double seconds = 0.75)
 {
 if (player == null || string.IsNullOrEmpty(actionKey)) return false;
@@ -2811,6 +3173,7 @@ private bool CanSeeTab(BasePlayer player, string tab)
 {
 if (tab == "players") return Can(player, PermPlayersView);
 if (tab == "staff") return CanAny(player, PermStaffToolsView, PermStaffToolsModerate, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups, PermStaffToolsTickets, PermStaffToolsFun, PermStaffToolsDangerous, PermPlayersInventoryView, PermPlayersNotes);
+if (tab == "chat") return CanViewChat(player);
 if (tab == "reports") return Can(player, PermReportsView);
 if (tab == "manage") return Can(player, PermPluginsView) || Can(player, PermGroupsView) || Can(player, PermPermissionsView);
 if (tab == "wipe") return CanViewWipe(player);
@@ -2832,6 +3195,7 @@ if (target == "player") target = "players";
 if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
+if (target == "chatmessage" || target == "chats") target = "chat";
 if (target == "plugin") target = "plugins";
 if (target == "permplugin" || target == "permissionplugins") target = "permplugins";
 if (target == "group") target = "groups";
@@ -2863,6 +3227,13 @@ if (target == "reports")
 state.ReportFilter = value;
 state.TicketPage = 0;
 state.Tab = "reports";
+return true;
+}
+if (target == "chat")
+{
+state.ChatFilter = value;
+state.ChatPage = 0;
+state.Tab = "chat";
 return true;
 }
 if (target == "plugins")
@@ -2906,6 +3277,7 @@ if (target == "player") target = "players";
 if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
+if (target == "chatmessage" || target == "chats") target = "chat";
 if (target == "plugin") target = "plugins";
 if (target == "permplugin" || target == "permissionplugins") target = "permplugins";
 if (target == "group") target = "groups";
@@ -2914,6 +3286,7 @@ if (target == "all")
 {
 state.PlayerFilter = string.Empty;
 state.ReportFilter = string.Empty;
+state.ChatFilter = string.Empty;
 state.PluginFilter = string.Empty;
 state.GroupFilter = string.Empty;
 state.GroupDropdownFilter = string.Empty;
@@ -2946,6 +3319,11 @@ else if (target == "reports" || (target == "current" && state.Tab == "reports"))
 state.ReportFilter = string.Empty;
 state.TicketPage = 0;
 }
+else if (target == "chat" || (target == "current" && state.Tab == "chat"))
+{
+state.ChatFilter = string.Empty;
+state.ChatPage = 0;
+}
 else if (target == "groups" || (target == "current" && state.Tab == "manage" && state.SubTab == "groups"))
 {
 state.GroupFilter = string.Empty;
@@ -2968,12 +3346,14 @@ state.PermissionPluginPage = 0;
 state.PermissionPage = 0;
 state.GroupDropdownPage = 0;
 state.TicketPage = 0;
+state.ChatPage = 0;
 }
 private void ChangePage(PanelState state, string pageKey, int delta)
 {
 if (pageKey == "players") state.PlayerPage = Math.Max(0, state.PlayerPage + delta);
 else if (pageKey == "staffgroups") state.GroupPage = Math.Max(0, state.GroupPage + delta);
 else if (pageKey == "tickets") state.TicketPage = Math.Max(0, state.TicketPage + delta);
+else if (pageKey == "chat") state.ChatPage = Math.Max(0, state.ChatPage + delta);
 else if (pageKey == "plugins") state.PluginPage = Math.Max(0, state.PluginPage + delta);
 else if (pageKey == "config") state.ConfigPage = Math.Max(0, state.ConfigPage + delta);
 else if (pageKey == "groups") state.GroupPage = Math.Max(0, state.GroupPage + delta);
@@ -2981,6 +3361,7 @@ else if (pageKey == "permissiongroups") state.PermissionGroupPage = Math.Max(0, 
 else if (pageKey == "permissionplugins") state.PermissionPluginPage = Math.Max(0, state.PermissionPluginPage + delta);
 else if (pageKey == "permissions") state.PermissionPage = Math.Max(0, state.PermissionPage + delta);
 else if (state.Tab == "players") state.PlayerPage = Math.Max(0, state.PlayerPage + delta);
+else if (state.Tab == "chat") state.ChatPage = Math.Max(0, state.ChatPage + delta);
 else if (state.Tab == "manage" && state.SubTab == "plugins") state.PluginPage = Math.Max(0, state.PluginPage + delta);
 else if (state.Tab == "manage" && state.SubTab == "groups") state.GroupPage = Math.Max(0, state.GroupPage + delta);
 else if (state.Tab == "manage" && state.SubTab == "permissions") state.PermissionPage = Math.Max(0, state.PermissionPage + delta);
@@ -3080,6 +3461,7 @@ LogBlocked(actor, "Security", "CommandSafety", command, string.Empty, "Newline o
 return false;
 }
 var lower = command.ToLowerInvariant();
+if (IsAuthLevel2(actor) && IsGroupPermissionCommand(lower)) return true;
 var ownerBypass = actor != null && Can(actor, PermOwner) && config.AllowOwnerCommandSafetyBypass;
 foreach (var prefix in config.BlockedCommandPrefixes ?? new List<string>())
 {
@@ -3105,6 +3487,182 @@ LogBlocked(actor, "Security", "CommandSafety", command, string.Empty, "Owner-onl
 return false;
 }
 return true;
+}
+private bool IsAuthLevel2(BasePlayer player)
+{
+return player != null && player.net?.connection != null && player.net.connection.authLevel >= 2;
+}
+private bool IsGroupPermissionCommand(string lowerCommand)
+{
+if (string.IsNullOrEmpty(lowerCommand)) return false;
+return lowerCommand.StartsWith("oxide.grant group ") || lowerCommand.StartsWith("oxide.revoke group ");
+}
+private void AddChatEntry(BasePlayer player, string message, string channel, bool blocked, string matchedWord)
+{
+EnsureDataDefaults();
+storedData.Chat.Add(new ChatEntry
+{
+Id = DateTime.UtcNow.Ticks + ":" + player.UserIDString,
+Time = Now(),
+PlayerId = player.UserIDString,
+PlayerName = player.displayName,
+Message = message,
+Channel = channel,
+Blocked = blocked,
+MatchedWord = matchedWord
+});
+var max = Math.Max(20, config.ChatMessagesStored);
+if (storedData.Chat.Count > max)
+{
+storedData.Chat.RemoveRange(0, storedData.Chat.Count - max);
+}
+SaveData();
+}
+private string MatchBlacklistedWord(string message)
+{
+if (string.IsNullOrEmpty(message) || config.ChatWordBlacklist == null) return string.Empty;
+var lower = message.ToLowerInvariant();
+return config.ChatWordBlacklist.FirstOrDefault(word => !string.IsNullOrEmpty(word) && lower.Contains(word.ToLowerInvariant())) ?? string.Empty;
+}
+private void RefreshOpenPanels(string tab)
+{
+foreach (var player in BasePlayer.activePlayerList.ToArray())
+{
+if (player == null || !openPanels.Contains(player.userID)) continue;
+var state = GetState(player);
+if (state.Tab == tab) Draw(player);
+}
+}
+private ChatEntry FindChatEntry(string id)
+{
+return storedData.Chat?.FirstOrDefault(c => c != null && c.Id == id);
+}
+private BasePlayer FindChatPlayer(ChatEntry entry)
+{
+return entry == null ? null : BasePlayer.FindByID(ToUlong(entry.PlayerId)) ?? BasePlayer.FindSleeping(ToUlong(entry.PlayerId));
+}
+private void DeleteChatEntry(BasePlayer actor, string id)
+{
+var entry = FindChatEntry(id);
+if (entry == null) return;
+entry.Deleted = true;
+entry.DeletedBy = actor?.displayName ?? "server";
+entry.DeletedAt = Now();
+RunChatDeleteCommand(actor, entry);
+Log(actor, "ChatDelete", entry.PlayerId, entry.Message);
+SaveData();
+RefreshOpenPanels("chat");
+}
+private void RunChatDeleteCommand(BasePlayer actor, ChatEntry entry)
+{
+if (entry == null || string.IsNullOrEmpty(config.ChatDeleteCommand)) return;
+var command = FormatChatCommand(config.ChatDeleteCommand, entry);
+if (string.IsNullOrEmpty(command) || !IsCommandAllowed(actor, command, "Chat")) return;
+ConsoleSystem.Run(ConsoleSystem.Option.Server, command);
+}
+private string FormatChatCommand(string template, ChatEntry entry)
+{
+if (entry == null) return CleanCommandText(template ?? string.Empty);
+var message = entry.Message ?? string.Empty;
+var name = entry.PlayerName ?? entry.PlayerId;
+return CleanCommandText(template ?? string.Empty)
+.Replace("{id}", entry.PlayerId ?? string.Empty)
+.Replace("{steamid}", entry.PlayerId ?? string.Empty)
+.Replace("{userid}", entry.PlayerId ?? string.Empty)
+.Replace("{name:q}", ConsoleArg(name))
+.Replace("{name}", name)
+.Replace("{message:q}", ConsoleArg(message))
+.Replace("{message}", message)
+.Replace("{chatid:q}", ConsoleArg(entry.Id ?? string.Empty))
+.Replace("{chatid}", entry.Id ?? string.Empty)
+.Replace("{time:q}", ConsoleArg(entry.Time ?? string.Empty))
+.Replace("{time}", entry.Time ?? string.Empty);
+}
+private void WarnChatPlayer(BasePlayer actor, string id, string message)
+{
+var entry = FindChatEntry(id);
+var target = FindChatPlayer(entry);
+if (entry == null || target == null) return;
+var warning = string.IsNullOrEmpty(message) ? "Please keep chat respectful." : message;
+target.ChatMessage($"<color=#d14a3c>Staff warning:</color> {warning}");
+Log(actor, "ChatWarn", entry.PlayerId, warning);
+}
+private void TimeoutChatPlayer(BasePlayer actor, string id)
+{
+var entry = FindChatEntry(id);
+if (entry == null) return;
+var target = FindChatPlayer(entry);
+if (target != null && !CanTargetPlayer(actor, target.UserIDString, "chattimeout")) return;
+var state = GetState(actor);
+var oldDuration = state.MuteDuration;
+var oldReason = state.MuteReason;
+var duration = string.IsNullOrEmpty(state.ChatTimeoutText) ? config.ChatTimeoutDuration : state.ChatTimeoutText;
+if (!IsValidDuration(duration))
+{
+Reply(actor, "Timeout duration must look like 30s, 10m, 2h, or 1d.");
+LogFailed(actor, "Chat", "ChatTimeout", entry.PlayerId, entry.PlayerName, duration);
+return;
+}
+state.MuteDuration = duration;
+state.MuteReason = config.ChatTimeoutReason;
+RunMuteAction(actor, entry.PlayerId);
+state.MuteDuration = oldDuration;
+state.MuteReason = oldReason;
+Log(actor, "ChatTimeout", entry.PlayerId, $"{duration} {config.ChatTimeoutReason}");
+}
+private void ReplyToChatPlayer(BasePlayer actor, string id, string message)
+{
+var entry = FindChatEntry(id);
+var target = FindChatPlayer(entry);
+if (entry == null || target == null) return;
+var reply = string.IsNullOrEmpty(message) ? GetState(actor).ChatReplyText : message;
+if (string.IsNullOrEmpty(reply)) return;
+target.ChatMessage($"<color=#1faaa4>Staff reply:</color> {reply}");
+Log(actor, "ChatReply", entry.PlayerId, reply);
+}
+private void AddChatBlacklistWord(BasePlayer actor, string word)
+{
+word = CleanCommandText(word ?? string.Empty).Trim();
+if (string.IsNullOrEmpty(word) || word.Length > 40) return;
+if (config.ChatWordBlacklist == null) config.ChatWordBlacklist = new List<string>();
+if (!config.ChatWordBlacklist.Any(w => w.Equals(word, StringComparison.OrdinalIgnoreCase)))
+{
+config.ChatWordBlacklist.Add(word);
+config.ChatWordBlacklist = UniqueList(config.ChatWordBlacklist);
+SaveConfig();
+Log(actor, "ChatBlacklistAdd", word, string.Empty);
+}
+}
+private void RemoveChatBlacklistWord(BasePlayer actor, string word)
+{
+if (string.IsNullOrEmpty(word) || config.ChatWordBlacklist == null) return;
+config.ChatWordBlacklist.RemoveAll(w => w.Equals(word, StringComparison.OrdinalIgnoreCase));
+SaveConfig();
+Log(actor, "ChatBlacklistRemove", word, string.Empty);
+}
+private void ApplyRolePresetToGroup(BasePlayer actor, string group, string presetName)
+{
+if (!IsValidGroupName(group))
+{
+Reply(actor, "Invalid group name.");
+return;
+}
+var preset = (config.RolePresets ?? new List<RolePreset>()).FirstOrDefault(p => p != null && p.Name.Equals(presetName ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+if (preset == null)
+{
+Reply(actor, "Preset not found.");
+return;
+}
+var granted = 0;
+foreach (var perm in UniqueList(preset.Permissions ?? new List<string>()))
+{
+if (!IsValidPermissionName(perm)) continue;
+if (IsDangerousPermission(perm) && !Can(actor, PermOwner) && !IsAuthLevel2(actor)) continue;
+RunServerCommand(actor, $"oxide.grant group {ConsoleArg(group)} {ConsoleArg(perm)}", $"grant preset {preset.Name}");
+granted++;
+}
+Reply(actor, $"Applied {granted} permissions from {preset.Name} to {group}.");
+Log(actor, "ApplyRolePreset", group, $"{preset.Name} {granted}");
 }
 private void ToggleVanish(BasePlayer actor)
 {
@@ -3313,12 +3871,64 @@ SaveData();
 private DateTime CalculateNextAutoWipe(DateTime fromUtc)
 {
 var time = ParseTimeOfDay(config.AutoWipeTimeUtc);
-var next = new DateTime(fromUtc.Year, fromUtc.Month, fromUtc.Day, time.Hours, time.Minutes, 0, DateTimeKind.Utc);
-while (next <= fromUtc)
+if (config.AutoWipeUseWeeklySchedule)
 {
-next = next.AddDays(Math.Max(1, config.AutoWipeIntervalDays));
+var weekday = GetConfiguredWipeWeekday();
+var weeklyNext = new DateTime(fromUtc.Year, fromUtc.Month, fromUtc.Day, time.Hours, time.Minutes, 0, DateTimeKind.Utc);
+while (weeklyNext <= fromUtc || weeklyNext.DayOfWeek != weekday)
+{
+weeklyNext = weeklyNext.AddDays(1);
 }
-return next;
+return weeklyNext;
+}
+var intervalNext = new DateTime(fromUtc.Year, fromUtc.Month, fromUtc.Day, time.Hours, time.Minutes, 0, DateTimeKind.Utc);
+while (intervalNext <= fromUtc)
+{
+intervalNext = intervalNext.AddDays(Math.Max(1, config.AutoWipeIntervalDays));
+}
+return intervalNext;
+}
+private DayOfWeek GetConfiguredWipeWeekday()
+{
+return TryParseWeekday(config.AutoWipeWeekday, out var weekday) ? weekday : DayOfWeek.Thursday;
+}
+private bool TryParseWeekday(string value, out DayOfWeek weekday)
+{
+if (Enum.TryParse(value ?? string.Empty, true, out weekday)) return true;
+var clean = (value ?? string.Empty).Trim().ToLowerInvariant();
+if (clean == "mon") { weekday = DayOfWeek.Monday; return true; }
+if (clean == "tue" || clean == "tues") { weekday = DayOfWeek.Tuesday; return true; }
+if (clean == "wed") { weekday = DayOfWeek.Wednesday; return true; }
+if (clean == "thu" || clean == "thur" || clean == "thurs") { weekday = DayOfWeek.Thursday; return true; }
+if (clean == "fri") { weekday = DayOfWeek.Friday; return true; }
+if (clean == "sat") { weekday = DayOfWeek.Saturday; return true; }
+if (clean == "sun") { weekday = DayOfWeek.Sunday; return true; }
+weekday = DayOfWeek.Thursday;
+return false;
+}
+private bool IsFirstConfiguredWeekdayOfMonth(DateTime wipeUtc)
+{
+var weekday = GetConfiguredWipeWeekday();
+if (wipeUtc.DayOfWeek != weekday) return false;
+var first = new DateTime(wipeUtc.Year, wipeUtc.Month, 1, wipeUtc.Hour, wipeUtc.Minute, 0, DateTimeKind.Utc);
+while (first.DayOfWeek != weekday) first = first.AddDays(1);
+return wipeUtc.Date == first.Date;
+}
+private string ScheduledWipeMode(DateTime wipeUtc)
+{
+return config.AutoWipeUseWeeklySchedule && config.AutoWipeForceFirstWeekday && IsFirstConfiguredWeekdayOfMonth(wipeUtc) ? "ForceWipe" : "AutoWipe";
+}
+private List<DateTime> PreviewScheduledWipes(int count)
+{
+var wipes = new List<DateTime>();
+var cursor = DateTime.UtcNow;
+for (var i = 0; i < Math.Max(1, count); i++)
+{
+var next = CalculateNextAutoWipe(cursor);
+wipes.Add(next);
+cursor = next.AddSeconds(1);
+}
+return wipes;
 }
 private void ProcessAutoWipe()
 {
@@ -3326,7 +3936,8 @@ if (!config.AutoWipeEnabled) return;
 EnsureNextAutoWipe();
 if (!DateTime.TryParse(storedData.NextAutoWipeUtc, out var next)) return;
 if (DateTime.UtcNow < next) return;
-RunWipeCommands(null, "AutoWipe", config.AutoWipeCommands);
+var mode = ScheduledWipeMode(next);
+RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : config.AutoWipeCommands);
 storedData.LastWipeUtc = Now();
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
@@ -3790,12 +4401,12 @@ var parts = action.Split(':');
 if (parts.Length < 4) return;
 var itemContainer = GetInventoryContainer(target, parts[1]);
 var index = ToInt(parts[2], -1);
-if (itemContainer == null || index < 0 || index >= itemContainer.itemList.Count)
+var item = GetInventoryItemAt(itemContainer, index);
+if (itemContainer == null || index < 0 || item == null)
 {
 Reply(actor, "That inventory item is no longer available.");
 return;
 }
-var item = itemContainer.itemList[index];
 var amount = parts[3] == "stack" ? item.amount : Math.Max(1, ToInt(parts[3], 1));
 var removed = Math.Min(amount, item.amount);
 if (removed >= item.amount)
@@ -4514,6 +5125,7 @@ names.Add(pluginName);
 }
 }
 AddLoadedPluginNames(names);
+AddInstalledPluginFileNames(names);
 AddPermissionPluginNames(names);
 return names.Where(n => !string.IsNullOrEmpty(n)).ToList();
 }
@@ -4539,6 +5151,61 @@ catch
 {
 // Some Oxide builds do not expose plugin enumeration. Permission-prefix detection still fills the list.
 }
+}
+private void AddInstalledPluginFileNames(HashSet<string> names)
+{
+try
+{
+foreach (var directory in PluginSearchDirectories())
+{
+if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory)) continue;
+foreach (var file in Directory.GetFiles(directory, "*.cs", SearchOption.TopDirectoryOnly))
+{
+var pluginName = Path.GetFileNameWithoutExtension(file);
+if (!string.IsNullOrEmpty(pluginName))
+{
+names.Add(pluginName);
+}
+}
+}
+}
+catch
+{
+// Installed plugin files are best-effort; loaded and configured plugin names remain available.
+}
+}
+private IEnumerable<string> PluginSearchDirectories()
+{
+var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+try
+{
+var root = Interface.Oxide.RootDirectory;
+if (!string.IsNullOrEmpty(root))
+{
+directories.Add(Path.Combine(root, "plugins"));
+directories.Add(Path.Combine(root, "oxide", "plugins"));
+directories.Add(Path.Combine(root, "umod", "plugins"));
+}
+}
+catch
+{
+}
+try
+{
+var configDir = Interface.Oxide.ConfigDirectory;
+if (!string.IsNullOrEmpty(configDir))
+{
+var oxideDir = Directory.GetParent(configDir)?.FullName;
+if (!string.IsNullOrEmpty(oxideDir))
+{
+directories.Add(Path.Combine(oxideDir, "plugins"));
+}
+}
+}
+catch
+{
+}
+return directories;
 }
 private void AddPermissionPluginNames(HashSet<string> names)
 {

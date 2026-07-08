@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Plugins;
@@ -19,6 +20,13 @@ namespace Oxide.Plugins
         private const string LegacyBypassPermission = "raidlands.vehicletokens.bypass";
         private const string LegacyVehicleHp125Permission = "raidlands.vehicle.hp.125";
         private const string LegacyVehicleHp150Permission = "raidlands.vehicle.hp.150";
+        private const string DefaultLegacyTokenShortname = "wrappedgift";
+        private const string DefaultParentTokenShortname = "scrap";
+        private const string CustomTokenShortnamePrefix = "raidlands.vehicle.token.";
+        private const string DefaultTokenIconDataFolder = "RaidlandsVehicleTokens";
+        private const int DefaultTokenMaxStackSize = 100;
+        private const int MaximumTokenMaxStackSize = 65535;
+        private const float DefaultDroppedTokenOwnerSearchRadius = 8f;
 
         [PluginReference]
         private Plugin SpawnHeli;
@@ -26,9 +34,16 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin VehicleLicence;
 
+        [PluginReference]
+        private Plugin CustomItemDefinitions;
+
         private Configuration config;
         private StoredData storedData;
         private readonly HashSet<string> pendingVehicleLicenceSpawns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ItemDefinition> customTokenDefinitions = new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, uint> tokenIconFileIds = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> warnedMissingIconPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool warnedCIDUnavailable;
 
         private class Configuration
         {
@@ -37,6 +52,21 @@ namespace Oxide.Plugins
 
             [JsonProperty("Use Actions")]
             public string[] UseActions = { "unwrap", "open", "use" };
+
+            [JsonProperty("Redeem On Item Drop")]
+            public bool RedeemOnItemDrop = true;
+
+            [JsonProperty("Item Drop Redeem Delay Seconds")]
+            public float ItemDropRedeemDelaySeconds = 0.1f;
+
+            [JsonProperty("Dropped Spawn Vertical Offset")]
+            public float DroppedSpawnVerticalOffset = 1f;
+
+            [JsonProperty("Dropped Token Owner Search Radius")]
+            public float DroppedTokenOwnerSearchRadius = DefaultDroppedTokenOwnerSearchRadius;
+
+            [JsonProperty("Refresh Custom Item Definitions On Load")]
+            public bool RefreshCustomItemDefinitionsOnLoad = true;
 
             [JsonProperty("Block Direct VehicleLicence Spawns For Token Vehicles")]
             public bool BlockDirectVehicleLicenceSpawns = true;
@@ -75,7 +105,7 @@ namespace Oxide.Plugins
             public string VehicleLicenceType;
 
             [JsonProperty("Token Shortname")]
-            public string TokenShortname = "wrappedgift";
+            public string TokenShortname = DefaultLegacyTokenShortname;
 
             [JsonProperty("Token Display Name")]
             public string TokenDisplayName;
@@ -85,6 +115,36 @@ namespace Oxide.Plugins
 
             [JsonProperty("Require Display Name Match")]
             public bool RequireDisplayNameMatch = true;
+
+            [JsonProperty("Use Custom Item Definition")]
+            public bool UseCustomItemDefinition = true;
+
+            [JsonProperty("Allow Legacy Fallback If CID Missing")]
+            public bool AllowLegacyFallbackIfCIDMissing;
+
+            [JsonProperty("Custom Shortname")]
+            public string CustomShortname;
+
+            [JsonProperty("Custom Item ID")]
+            public int CustomItemId;
+
+            [JsonProperty("Parent Shortname")]
+            public string ParentShortname = DefaultParentTokenShortname;
+
+            [JsonProperty("Icon File ID")]
+            public uint IconFileId;
+
+            [JsonProperty("Icon PNG Data Path")]
+            public string IconPngDataPath;
+
+            [JsonProperty("Default Description")]
+            public string DefaultDescription;
+
+            [JsonProperty("Import Parent Item Mods")]
+            public bool ImportParentItemMods;
+
+            [JsonProperty("Max Stack Size")]
+            public int MaxStackSize = 100;
 
             [JsonProperty("Aliases")]
             public string[] Aliases = new string[0];
@@ -121,11 +181,16 @@ namespace Oxide.Plugins
                 config.UseActions = new Configuration().UseActions;
             }
 
+            config.ItemDropRedeemDelaySeconds = Mathf.Clamp(config.ItemDropRedeemDelaySeconds <= 0f ? 0.1f : config.ItemDropRedeemDelaySeconds, 0.01f, 2f);
+            config.DroppedSpawnVerticalOffset = Mathf.Clamp(config.DroppedSpawnVerticalOffset, 0f, 10f);
+            config.DroppedTokenOwnerSearchRadius = Mathf.Clamp(config.DroppedTokenOwnerSearchRadius <= 0f ? DefaultDroppedTokenOwnerSearchRadius : config.DroppedTokenOwnerSearchRadius, 1f, 30f);
+
             if (config.VehicleTokens == null || config.VehicleTokens.Count == 0)
             {
                 config.VehicleTokens = DefaultVehicleTokens();
             }
 
+            config.VehicleTokens = DeduplicateVehicleTokens(config.VehicleTokens);
             foreach (var definition in config.VehicleTokens)
             {
                 NormalizeDefinition(definition);
@@ -166,6 +231,45 @@ namespace Oxide.Plugins
         private void OnNewSave(string filename)
         {
             ClearTemporaryVehicleLicences();
+        }
+
+        private void OnServerInitialized()
+        {
+            RefreshCustomTokenDefinitions();
+            TryRegisterCustomTokenDefinitions();
+        }
+
+        private void OnPluginLoaded(Plugin plugin)
+        {
+            if (plugin == null)
+            {
+                return;
+            }
+
+            if (string.Equals(plugin.Name, "CustomItemDefinitions", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomItemDefinitions = plugin;
+                warnedCIDUnavailable = false;
+                RefreshCustomTokenDefinitions();
+                TryRegisterCustomTokenDefinitions();
+            }
+        }
+
+        private void OnPluginUnloaded(Plugin plugin)
+        {
+            if (plugin == null)
+            {
+                return;
+            }
+
+            if (string.Equals(plugin.Name, "CustomItemDefinitions", StringComparison.OrdinalIgnoreCase) && CustomItemDefinitions == plugin)
+            {
+                CustomItemDefinitions = null;
+                customTokenDefinitions.Clear();
+                tokenIconFileIds.Clear();
+                warnedCIDUnavailable = false;
+                PrintWarning("CustomItemDefinitions unloaded. Vehicle tokens will use legacy fallback item creation when configured.");
+            }
         }
 
         [ChatCommand("raidvehicle")]
@@ -321,6 +425,40 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private object OnRaidlandsCreateKitItem(string shortname, int amount, ulong skin, string displayName)
+        {
+            VehicleTokenDefinition definition;
+            if (!TryGetDefinitionByKitItem(shortname, skin, displayName, out definition))
+            {
+                return null;
+            }
+
+            return CreateToken(definition, Math.Max(1, amount));
+        }
+
+        private void OnItemDropped(Item item, BaseEntity entity)
+        {
+            HandleItemDropped(item, entity, null);
+        }
+
+        private void OnItemDropped(Item item, BaseEntity entity, BasePlayer player)
+        {
+            HandleItemDropped(item, entity, player);
+        }
+
+        private void HandleItemDropped(Item item, BaseEntity entity, BasePlayer explicitPlayer)
+        {
+            VehicleTokenDefinition definition;
+            if (!config.RedeemOnItemDrop || item == null || entity == null || !TryGetDefinitionByToken(item, out definition))
+            {
+                return;
+            }
+
+            var playerId = ResolveDroppedTokenOwnerId(item, entity, explicitPlayer);
+            var definitionKey = definition.Key;
+            timer.Once(config.ItemDropRedeemDelaySeconds, () => TryRedeemDroppedToken(playerId, item, entity, definitionKey));
+        }
+
         private object CanLicensedVehicleSpawn(BasePlayer player, string vehicleType, Vector3 position, Quaternion rotation)
         {
             if (!config.BlockDirectVehicleLicenceSpawns || player == null || string.IsNullOrWhiteSpace(vehicleType))
@@ -424,6 +562,103 @@ namespace Oxide.Plugins
 
         private bool TryRedeemToken(BasePlayer player, Item item, VehicleTokenDefinition definition)
         {
+            if (!TrySpawnVehicle(player, definition, null, null))
+            {
+                return false;
+            }
+
+            ConsumeOneInventoryItem(item);
+            Reply(player, $"{definition.DisplayName} spawned. One {definition.TokenDisplayName} was consumed.");
+            return true;
+        }
+
+        private bool TryRedeemDroppedToken(ulong playerId, Item item, BaseEntity entity, string definitionKey)
+        {
+            if (item == null || entity == null || entity.IsDestroyed)
+            {
+                return false;
+            }
+
+            var player = playerId == 0UL
+                ? FindNearestPlayer(entity.transform.position, config.DroppedTokenOwnerSearchRadius)
+                : BasePlayer.FindAwakeOrSleeping(playerId.ToString());
+            if (player == null)
+            {
+                return false;
+            }
+
+            VehicleTokenDefinition definition;
+            if (!TryGetDefinitionByToken(item, out definition) || !string.Equals(definition.Key, definitionKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var droppedPosition = entity.transform.position;
+            var spawnPosition = string.Equals(definition.Backend, "SpawnHeli", StringComparison.OrdinalIgnoreCase)
+                ? droppedPosition + Vector3.up * config.DroppedSpawnVerticalOffset
+                : droppedPosition;
+            var forward = player.eyes != null ? player.eyes.HeadForward() : player.transform.forward;
+            forward.y = 0f;
+            var spawnRotation = forward.sqrMagnitude > 0.001f ? Quaternion.LookRotation(forward.normalized) : player.transform.rotation;
+
+            if (!TrySpawnVehicle(player, definition, spawnPosition, spawnRotation))
+            {
+                RefundDroppedToken(player, item, entity, definition);
+                return false;
+            }
+
+            ConsumeOneDroppedItem(item, entity);
+            Reply(player, $"{definition.DisplayName} spawned from dropped token. One {definition.TokenDisplayName} was consumed.");
+            return true;
+        }
+
+        private ulong ResolveDroppedTokenOwnerId(Item item, BaseEntity entity, BasePlayer explicitPlayer)
+        {
+            if (explicitPlayer != null)
+            {
+                return explicitPlayer.userID.Get();
+            }
+
+            var owner = item.GetOwnerPlayer() ?? item.parent?.playerOwner;
+            if (owner != null)
+            {
+                return owner.userID.Get();
+            }
+
+            if (entity != null && entity.OwnerID != 0UL)
+            {
+                return entity.OwnerID;
+            }
+
+            return 0UL;
+        }
+
+        private BasePlayer FindNearestPlayer(Vector3 position, float radius)
+        {
+            BasePlayer closest = null;
+            var closestDistance = radius * radius;
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (player == null || !player.IsConnected || player.IsSleeping())
+                {
+                    continue;
+                }
+
+                var distance = (player.transform.position - position).sqrMagnitude;
+                if (distance > closestDistance)
+                {
+                    continue;
+                }
+
+                closest = player;
+                closestDistance = distance;
+            }
+
+            return closest;
+        }
+
+        private bool TrySpawnVehicle(BasePlayer player, VehicleTokenDefinition definition, Vector3? position, Quaternion? rotation)
+        {
             if (definition == null || !definition.Enabled)
             {
                 Reply(player, "That vehicle token is not enabled.");
@@ -431,20 +666,13 @@ namespace Oxide.Plugins
             }
 
             var spawned = string.Equals(definition.Backend, "SpawnHeli", StringComparison.OrdinalIgnoreCase)
-                ? TrySpawnHeliVehicle(player, definition)
-                : TrySpawnVehicleLicenceVehicle(player, definition);
+                ? TrySpawnHeliVehicle(player, definition, position, rotation)
+                : TrySpawnVehicleLicenceVehicle(player, definition, position, rotation);
 
-            if (!spawned)
-            {
-                return false;
-            }
-
-            ConsumeOne(item);
-            Reply(player, $"{definition.DisplayName} spawned. One {definition.TokenDisplayName} was consumed.");
-            return true;
+            return spawned;
         }
 
-        private bool TrySpawnHeliVehicle(BasePlayer player, VehicleTokenDefinition definition)
+        private bool TrySpawnHeliVehicle(BasePlayer player, VehicleTokenDefinition definition, Vector3? position, Quaternion? rotation)
         {
             if (SpawnHeli == null || !SpawnHeli.IsLoaded)
             {
@@ -458,7 +686,18 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            var spawned = SpawnHeli.Call(definition.SpawnHeliApiHook, player, null) as BaseEntity;
+            Dictionary<string, object> options = null;
+            if (position.HasValue)
+            {
+                options = new Dictionary<string, object>
+                {
+                    ["Position"] = position.Value,
+                    ["Rotation"] = rotation ?? player.transform.rotation,
+                    ["AutoMount"] = false
+                };
+            }
+
+            var spawned = SpawnHeli.Call(definition.SpawnHeliApiHook, player, options) as BaseEntity;
             if (spawned == null || spawned.IsDestroyed)
             {
                 Reply(player, $"{definition.DisplayName} could not be spawned. Your token was not consumed.");
@@ -469,7 +708,7 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private bool TrySpawnVehicleLicenceVehicle(BasePlayer player, VehicleTokenDefinition definition)
+        private bool TrySpawnVehicleLicenceVehicle(BasePlayer player, VehicleTokenDefinition definition, Vector3? position, Quaternion? rotation)
         {
             if (VehicleLicence == null || !VehicleLicence.IsLoaded)
             {
@@ -511,7 +750,9 @@ namespace Oxide.Plugins
             bool spawned;
             try
             {
-                var result = VehicleLicence.Call("SpawnLicensedVehicle", player, definition.VehicleLicenceType, "raidlands.vehicle.token", false);
+                var result = position.HasValue
+                    ? VehicleLicence.Call("SpawnLicensedVehicleAt", player, definition.VehicleLicenceType, position.Value, rotation ?? player.transform.rotation, "raidlands.vehicle.token", false)
+                    : VehicleLicence.Call("SpawnLicensedVehicle", player, definition.VehicleLicenceType, "raidlands.vehicle.token", false);
                 spawned = result is bool && (bool)result;
             }
             finally
@@ -549,16 +790,23 @@ namespace Oxide.Plugins
             }
 
             var given = 0;
-            for (var i = 0; i < amount; i++)
+            var remaining = Math.Max(1, amount);
+            while (remaining > 0)
             {
-                var item = CreateToken(definition);
+                var stackAmount = Math.Min(remaining, GetTokenMaxStackSize(definition));
+                var item = CreateToken(definition, stackAmount);
                 if (item == null)
                 {
                     return given;
                 }
 
-                player.GiveItem(item);
-                given++;
+                if (!player.inventory.GiveItem(item))
+                {
+                    item.Drop(player.GetDropPosition(), player.GetDropVelocity());
+                }
+
+                given += stackAmount;
+                remaining -= stackAmount;
             }
 
             return given;
@@ -580,10 +828,23 @@ namespace Oxide.Plugins
 
         private Item CreateToken(VehicleTokenDefinition definition)
         {
-            var item = ItemManager.CreateByName(definition.TokenShortname, 1, definition.TokenSkin);
+            return CreateToken(definition, 1);
+        }
+
+        private Item CreateToken(VehicleTokenDefinition definition, int amount)
+        {
+            TryRegisterCustomTokenDefinition(definition);
+
+            var shortname = GetTokenCreateShortname(definition);
+            var item = ItemManager.CreateByName(shortname, Math.Max(1, amount), GetTokenCreateSkin(definition));
+            if (item == null && definition.AllowLegacyFallbackIfCIDMissing && !string.Equals(shortname, definition.TokenShortname, StringComparison.OrdinalIgnoreCase))
+            {
+                item = ItemManager.CreateByName(definition.TokenShortname, Math.Max(1, amount), definition.TokenSkin);
+            }
+
             if (item == null)
             {
-                PrintWarning($"Could not create vehicle token item '{definition.TokenShortname}' for {definition.Key}.");
+                PrintWarning($"Could not create vehicle token item '{shortname}' for {definition.Key}.");
                 return null;
             }
 
@@ -611,17 +872,49 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                if (!string.Equals(item.info.shortname, candidate.TokenShortname, StringComparison.OrdinalIgnoreCase))
+                if (IsCustomTokenItem(item, candidate) || IsLegacyTokenItem(item, candidate))
+                {
+                    definition = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool TryGetDefinitionByKitItem(string shortname, ulong skin, string displayName, out VehicleTokenDefinition definition)
+        {
+            definition = null;
+            if (string.IsNullOrWhiteSpace(shortname))
+            {
+                return false;
+            }
+
+            foreach (var candidate in config.VehicleTokens)
+            {
+                if (!candidate.Enabled)
                 {
                     continue;
                 }
 
-                if (candidate.TokenSkin != 0 && item.skin != candidate.TokenSkin)
+                if (WantsCustomTokenDefinition(candidate)
+                    && string.Equals(shortname, candidate.CustomShortname, StringComparison.OrdinalIgnoreCase))
+                {
+                    definition = candidate;
+                    return true;
+                }
+
+                if (!string.Equals(shortname, candidate.TokenShortname, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                if (candidate.RequireDisplayNameMatch && !string.Equals(item.name ?? "", candidate.TokenDisplayName ?? "", StringComparison.OrdinalIgnoreCase))
+                if (candidate.TokenSkin != 0 && skin != candidate.TokenSkin)
+                {
+                    continue;
+                }
+
+                if (candidate.RequireDisplayNameMatch && !string.Equals(displayName ?? "", candidate.TokenDisplayName ?? "", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -631,6 +924,364 @@ namespace Oxide.Plugins
             }
 
             return false;
+        }
+
+        private bool IsCustomTokenItem(Item item, VehicleTokenDefinition definition)
+        {
+            if (item?.info == null || !WantsCustomTokenDefinition(definition))
+            {
+                return false;
+            }
+
+            TryRegisterCustomTokenDefinition(definition);
+            ItemDefinition customDefinition;
+            if (customTokenDefinitions.TryGetValue(definition.Key, out customDefinition) && ReferenceEquals(item.info, customDefinition))
+            {
+                return true;
+            }
+
+            return string.Equals(item.info.shortname, definition.CustomShortname, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsLegacyTokenItem(Item item, VehicleTokenDefinition definition)
+        {
+            if (item?.info == null || definition == null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(item.info.shortname, definition.TokenShortname, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (definition.TokenSkin != 0 && item.skin != definition.TokenSkin)
+            {
+                return false;
+            }
+
+            return !definition.RequireDisplayNameMatch
+                || string.Equals(item.name ?? "", definition.TokenDisplayName ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool WantsCustomTokenDefinition(VehicleTokenDefinition definition)
+        {
+            return definition != null
+                && definition.Enabled
+                && definition.UseCustomItemDefinition
+                && !string.IsNullOrWhiteSpace(definition.CustomShortname)
+                && definition.CustomItemId != 0;
+        }
+
+        private bool IsCustomTokenDefinitionActive(VehicleTokenDefinition definition)
+        {
+            return WantsCustomTokenDefinition(definition)
+                && customTokenDefinitions.ContainsKey(definition.Key ?? "");
+        }
+
+        private string GetTokenCreateShortname(VehicleTokenDefinition definition)
+        {
+            if (IsCustomTokenDefinitionActive(definition))
+            {
+                return definition.CustomShortname;
+            }
+
+            if (WantsCustomTokenDefinition(definition) && !definition.AllowLegacyFallbackIfCIDMissing)
+            {
+                return definition.CustomShortname;
+            }
+
+            return string.IsNullOrWhiteSpace(definition.TokenShortname) ? DefaultLegacyTokenShortname : definition.TokenShortname;
+        }
+
+        private ulong GetTokenCreateSkin(VehicleTokenDefinition definition)
+        {
+            return string.Equals(GetTokenCreateShortname(definition), definition.CustomShortname, StringComparison.OrdinalIgnoreCase)
+                ? 0UL
+                : definition.TokenSkin;
+        }
+
+        private int GetTokenMaxStackSize(VehicleTokenDefinition definition)
+        {
+            var configured = definition == null ? DefaultTokenMaxStackSize : definition.MaxStackSize;
+            return Math.Max(1, Math.Min(configured > 0 ? configured : DefaultTokenMaxStackSize, MaximumTokenMaxStackSize));
+        }
+
+        private bool TryRegisterCustomTokenDefinitions()
+        {
+            var registeredAny = false;
+            if (config?.VehicleTokens == null)
+            {
+                return false;
+            }
+
+            foreach (var definition in config.VehicleTokens)
+            {
+                registeredAny |= TryRegisterCustomTokenDefinition(definition);
+            }
+
+            return registeredAny;
+        }
+
+        private void RefreshCustomTokenDefinitions()
+        {
+            customTokenDefinitions.Clear();
+            tokenIconFileIds.Clear();
+
+            if (config?.VehicleTokens == null || !config.RefreshCustomItemDefinitionsOnLoad)
+            {
+                return;
+            }
+
+            if (CustomItemDefinitions == null || !CustomItemDefinitions.IsLoaded)
+            {
+                return;
+            }
+
+            foreach (var definition in config.VehicleTokens)
+            {
+                if (!WantsCustomTokenDefinition(definition))
+                {
+                    continue;
+                }
+
+                var existing = ItemManager.FindItemDefinition(definition.CustomShortname);
+                if (existing == null)
+                {
+                    continue;
+                }
+
+                if (!(CustomItemDefinitions.Call("IsCustomDefinition", existing) is bool isCustomDefinition) || !isCustomDefinition)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (CustomItemDefinitions.Call("Unregister", existing, this) is bool unregistered && unregistered)
+                    {
+                        Puts("Refreshed stale CID vehicle token definition '" + definition.CustomShortname + "'.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning("Could not refresh CID vehicle token definition '" + definition.CustomShortname + "': " + ex.Message);
+                }
+            }
+        }
+
+        private bool TryRegisterCustomTokenDefinition(VehicleTokenDefinition definition)
+        {
+            if (!WantsCustomTokenDefinition(definition))
+            {
+                return false;
+            }
+
+            var key = definition.Key ?? "";
+            ItemDefinition registeredDefinition;
+            if (customTokenDefinitions.TryGetValue(key, out registeredDefinition) && registeredDefinition != null)
+            {
+                return true;
+            }
+
+            if (CustomItemDefinitions == null || !CustomItemDefinitions.IsLoaded)
+            {
+                WarnCIDUnavailableOnce();
+                return false;
+            }
+
+            var customShortname = definition.CustomShortname.Trim();
+            var existing = ItemManager.FindItemDefinition(customShortname);
+            if (existing != null)
+            {
+                if (CustomItemDefinitions.Call("IsCustomDefinition", existing) is bool isCustomDefinition && isCustomDefinition)
+                {
+                    customTokenDefinitions[key] = existing;
+                    ApplyCustomTokenRuntimeFields(definition, existing);
+                    Puts("Using existing CID vehicle token '" + existing.shortname + "' itemId=" + existing.itemid + " maxStackSize=" + existing.stackable + ".");
+                    return true;
+                }
+
+                PrintWarning("CID vehicle token registration skipped: item shortname '" + customShortname + "' already exists but is not a CustomItemDefinitions item.");
+                return false;
+            }
+
+            var parentShortname = string.IsNullOrWhiteSpace(definition.ParentShortname) ? DefaultParentTokenShortname : definition.ParentShortname.Trim();
+            var parent = ItemManager.FindItemDefinition(parentShortname);
+            if (parent == null)
+            {
+                PrintWarning("CID vehicle token registration failed for '" + definition.Key + "': parent item definition '" + parentShortname + "' was not found.");
+                return false;
+            }
+
+            var description = string.IsNullOrWhiteSpace(definition.DefaultDescription)
+                ? "Drop this token to spawn a " + definition.DisplayName + "."
+                : definition.DefaultDescription.Trim();
+
+            try
+            {
+                var dto = new
+                {
+                    parentItemId = parent.itemid,
+                    shortname = customShortname,
+                    itemId = definition.CustomItemId,
+                    iconFileId = ResolveTokenIconFileId(definition),
+                    defaultName = definition.TokenDisplayName,
+                    defaultDescription = description,
+                    defaultSkinId = definition.TokenSkin,
+                    maxStackSize = GetTokenMaxStackSize(definition),
+                    category = parent.category,
+                    itemMods = definition.ImportParentItemMods ? parent.itemMods : null,
+                    repairable = false,
+                    craftable = false,
+                    defaultBlueprintUnlocked = false
+                };
+
+                var registered = CustomItemDefinitions.Call("Register", dto, this) as ItemDefinition;
+                if (registered == null)
+                {
+                    PrintWarning("CID vehicle token registration failed for '" + definition.Key + "': CustomItemDefinitions.Register returned no ItemDefinition.");
+                    return false;
+                }
+
+                registered.stackable = GetTokenMaxStackSize(definition);
+                ApplyCustomTokenRuntimeFields(definition, registered);
+                customTokenDefinitions[key] = registered;
+                warnedCIDUnavailable = false;
+                Puts("Registered CID vehicle token '" + registered.shortname + "' itemId=" + registered.itemid + " parent=" + parent.shortname + " maxStackSize=" + registered.stackable + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PrintWarning("CID vehicle token registration failed for '" + definition.Key + "': " + ex.Message);
+                return false;
+            }
+        }
+
+        private void ApplyCustomTokenRuntimeFields(VehicleTokenDefinition definition, ItemDefinition itemDefinition)
+        {
+            if (definition == null || itemDefinition == null)
+            {
+                return;
+            }
+
+            itemDefinition.stackable = GetTokenMaxStackSize(definition);
+            itemDefinition.displayName = new Translate.Phrase(definition.CustomShortname, definition.TokenDisplayName);
+            itemDefinition.displayDescription = new Translate.Phrase(definition.CustomShortname + ".desc", GetTokenDescription(definition));
+
+            if (!definition.ImportParentItemMods)
+            {
+                itemDefinition.itemMods = null;
+                foreach (var mod in itemDefinition.GetComponentsInChildren<ItemMod>(true))
+                {
+                    UnityEngine.Object.DestroyImmediate(mod);
+                }
+
+                itemDefinition.Initialize(ItemManager.itemList);
+            }
+        }
+
+        private string GetTokenDescription(VehicleTokenDefinition definition)
+        {
+            return string.IsNullOrWhiteSpace(definition?.DefaultDescription)
+                ? "Drop this token to spawn a " + (definition?.DisplayName ?? "vehicle") + "."
+                : definition.DefaultDescription.Trim();
+        }
+
+        private uint ResolveTokenIconFileId(VehicleTokenDefinition definition)
+        {
+            if (definition == null)
+            {
+                return 0;
+            }
+
+            if (definition.IconFileId != 0)
+            {
+                tokenIconFileIds[definition.Key ?? ""] = definition.IconFileId;
+                return definition.IconFileId;
+            }
+
+            uint cachedFileId;
+            if (tokenIconFileIds.TryGetValue(definition.Key ?? "", out cachedFileId) && cachedFileId != 0)
+            {
+                return cachedFileId;
+            }
+
+            var iconPath = ResolveTokenIconPath(definition);
+            if (string.IsNullOrWhiteSpace(iconPath))
+            {
+                return 0;
+            }
+
+            if (!File.Exists(iconPath))
+            {
+                WarnIconMissingOnce(iconPath);
+                return 0;
+            }
+
+            if (FileStorage.server == null)
+            {
+                PrintWarning("CID vehicle token icon FileStorage is unavailable; '" + definition.Key + "' will register without a custom icon.");
+                return 0;
+            }
+
+            try
+            {
+                var bytes = File.ReadAllBytes(iconPath);
+                if (bytes == null || bytes.Length == 0)
+                {
+                    PrintWarning("CID vehicle token icon file is empty: " + iconPath);
+                    return 0;
+                }
+
+                var fileId = FileStorage.server.Store(bytes, FileStorage.Type.png, default);
+                tokenIconFileIds[definition.Key ?? ""] = fileId;
+                return fileId;
+            }
+            catch (Exception ex)
+            {
+                PrintWarning("Could not load CID vehicle token icon from '" + iconPath + "': " + ex.Message);
+                return 0;
+            }
+        }
+
+        private string ResolveTokenIconPath(VehicleTokenDefinition definition)
+        {
+            var path = definition?.IconPngDataPath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return "";
+            }
+
+            path = path.Trim();
+            if (Path.IsPathRooted(path))
+            {
+                return path;
+            }
+
+            path = path.TrimStart('/', '\\').Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            return Path.Combine(Interface.Oxide.DataDirectory, path);
+        }
+
+        private void WarnCIDUnavailableOnce()
+        {
+            if (warnedCIDUnavailable)
+            {
+                return;
+            }
+
+            warnedCIDUnavailable = true;
+            PrintWarning("CustomItemDefinitions is not loaded. Raidlands vehicle tokens will use legacy wrappedgift fallback where configured.");
+        }
+
+        private void WarnIconMissingOnce(string iconPath)
+        {
+            if (!warnedMissingIconPaths.Add(iconPath))
+            {
+                return;
+            }
+
+            PrintWarning("CID vehicle token icon file was not found at '" + iconPath + "'. The custom token will register without that PNG icon unless Icon File ID is configured.");
         }
 
         private Item FindAnyToken(BasePlayer player, out VehicleTokenDefinition definition)
@@ -898,8 +1549,13 @@ namespace Oxide.Plugins
             return !string.IsNullOrWhiteSpace(vehicleType);
         }
 
-        private void ConsumeOne(Item item)
+        private void ConsumeOneInventoryItem(Item item)
         {
+            if (item == null)
+            {
+                return;
+            }
+
             if (item.amount > 1)
             {
                 item.amount -= 1;
@@ -909,6 +1565,61 @@ namespace Oxide.Plugins
 
             item.RemoveFromContainer();
             item.Remove();
+        }
+
+        private void ConsumeOneDroppedItem(Item item, BaseEntity entity)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            if (item.amount > 1)
+            {
+                item.amount -= 1;
+                item.MarkDirty();
+                if (entity != null && !entity.IsDestroyed)
+                {
+                    entity.SendNetworkUpdate();
+                }
+                return;
+            }
+
+            item.RemoveFromWorld();
+            item.RemoveFromContainer();
+            item.Remove();
+
+            if (entity != null && !entity.IsDestroyed)
+            {
+                entity.Kill();
+            }
+        }
+
+        private void RefundDroppedToken(BasePlayer player, Item item, BaseEntity entity, VehicleTokenDefinition definition)
+        {
+            if (player == null || item == null || definition == null)
+            {
+                return;
+            }
+
+            var refund = CreateToken(definition, 1);
+            if (refund == null)
+            {
+                Reply(player, $"Could not return your {definition.TokenDisplayName}. Pick up the dropped token if it is still there.");
+                return;
+            }
+
+            if (!player.inventory.GiveItem(refund))
+            {
+                refund.Drop(player.GetDropPosition(), player.GetDropVelocity());
+                Reply(player, $"{definition.DisplayName} could not be spawned. Your {definition.TokenDisplayName} was returned at your feet.");
+            }
+            else
+            {
+                Reply(player, $"{definition.DisplayName} could not be spawned. Your {definition.TokenDisplayName} was returned.");
+            }
+
+            ConsumeOneDroppedItem(item, entity);
         }
 
         private bool CanUseAdminCommand(ConsoleSystem.Arg arg)
@@ -986,6 +1697,111 @@ namespace Oxide.Plugins
             player.ChatMessage($"{config.ChatPrefix} {message}");
         }
 
+        private List<VehicleTokenDefinition> DeduplicateVehicleTokens(List<VehicleTokenDefinition> definitions)
+        {
+            var result = new List<VehicleTokenDefinition>();
+            if (definitions == null || definitions.Count == 0)
+            {
+                return result;
+            }
+
+            var byKey = new Dictionary<string, VehicleTokenDefinition>(StringComparer.OrdinalIgnoreCase);
+            var removed = 0;
+            var conflictKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var definition in definitions)
+            {
+                if (definition == null)
+                {
+                    continue;
+                }
+
+                var key = (definition.Key ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    result.Add(definition);
+                    continue;
+                }
+
+                definition.Key = key;
+
+                VehicleTokenDefinition existing;
+                if (!byKey.TryGetValue(key, out existing))
+                {
+                    byKey[key] = definition;
+                    result.Add(definition);
+                    continue;
+                }
+
+                removed++;
+                if (DefinitionsConflict(existing, definition) && conflictKeys.Add(key))
+                {
+                    PrintWarning("Duplicate vehicle token config for key '" + key + "' differs from the first definition. Preserving the first definition and dropping later duplicates.");
+                }
+            }
+
+            if (removed > 0)
+            {
+                Puts("Normalized RaidlandsVehicleTokens config by removing " + removed + " duplicate vehicle token definition(s); preserved the first definition per key.");
+            }
+
+            return result;
+        }
+
+        private static bool DefinitionsConflict(VehicleTokenDefinition first, VehicleTokenDefinition second)
+        {
+            if (first == null || second == null)
+            {
+                return first != second;
+            }
+
+            return first.Enabled != second.Enabled
+                || !StringEquals(first.DisplayName, second.DisplayName)
+                || !StringEquals(first.Backend, second.Backend)
+                || !StringEquals(first.SpawnHeliApiHook, second.SpawnHeliApiHook)
+                || !StringEquals(first.VehicleLicenceType, second.VehicleLicenceType)
+                || !StringEquals(first.TokenShortname, second.TokenShortname)
+                || !StringEquals(first.TokenDisplayName, second.TokenDisplayName)
+                || first.TokenSkin != second.TokenSkin
+                || first.RequireDisplayNameMatch != second.RequireDisplayNameMatch
+                || first.UseCustomItemDefinition != second.UseCustomItemDefinition
+                || first.AllowLegacyFallbackIfCIDMissing != second.AllowLegacyFallbackIfCIDMissing
+                || !StringEquals(first.CustomShortname, second.CustomShortname)
+                || first.CustomItemId != second.CustomItemId
+                || !StringEquals(first.ParentShortname, second.ParentShortname)
+                || first.IconFileId != second.IconFileId
+                || !StringEquals(first.IconPngDataPath, second.IconPngDataPath)
+                || !StringEquals(first.DefaultDescription, second.DefaultDescription)
+                || first.ImportParentItemMods != second.ImportParentItemMods
+                || first.MaxStackSize != second.MaxStackSize
+                || !StringArrayEquals(first.Aliases, second.Aliases);
+        }
+
+        private static bool StringEquals(string first, string second)
+        {
+            return string.Equals(first ?? "", second ?? "", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool StringArrayEquals(string[] first, string[] second)
+        {
+            first = first ?? new string[0];
+            second = second ?? new string[0];
+            if (first.Length != second.Length)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < first.Length; i++)
+            {
+                if (!StringEquals(first[i], second[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private static void NormalizeDefinition(VehicleTokenDefinition definition)
         {
             if (definition == null)
@@ -993,15 +1809,45 @@ namespace Oxide.Plugins
                 return;
             }
 
+            definition.Key = (definition.Key ?? "").Trim();
+            definition.DisplayName = string.IsNullOrWhiteSpace(definition.DisplayName) ? definition.Key : definition.DisplayName.Trim();
+
             if (string.IsNullOrWhiteSpace(definition.TokenShortname))
             {
-                definition.TokenShortname = "wrappedgift";
+                definition.TokenShortname = DefaultLegacyTokenShortname;
             }
 
             if (string.IsNullOrWhiteSpace(definition.TokenDisplayName))
             {
                 definition.TokenDisplayName = $"{definition.DisplayName} Token";
             }
+
+            if (string.IsNullOrWhiteSpace(definition.CustomShortname))
+            {
+                definition.CustomShortname = CustomTokenShortnamePrefix + definition.Key;
+            }
+
+            if (definition.CustomItemId == 0)
+            {
+                definition.CustomItemId = DefaultCustomItemId(definition.Key);
+            }
+
+            if (string.IsNullOrWhiteSpace(definition.ParentShortname))
+            {
+                definition.ParentShortname = DefaultParentTokenShortname;
+            }
+
+            if (string.IsNullOrWhiteSpace(definition.IconPngDataPath))
+            {
+                definition.IconPngDataPath = DefaultTokenIconDataFolder + "/" + definition.Key + ".png";
+            }
+
+            if (string.IsNullOrWhiteSpace(definition.DefaultDescription))
+            {
+                definition.DefaultDescription = "Drop this token to spawn a " + definition.DisplayName + ".";
+            }
+
+            definition.MaxStackSize = Math.Max(1, Math.Min(definition.MaxStackSize <= 0 ? DefaultTokenMaxStackSize : definition.MaxStackSize, MaximumTokenMaxStackSize));
 
             if (definition.Aliases == null)
             {
@@ -1029,21 +1875,21 @@ namespace Oxide.Plugins
         {
             return new List<VehicleTokenDefinition>
             {
-                SpawnHeliToken("minicopter", "Minicopter", "API_SpawnMinicopter", new[] { "mini", "minicopter" }),
-                SpawnHeliToken("scrap_transport_helicopter", "Scrap Transport Helicopter", "API_SpawnScrapTransportHelicopter", new[] { "scrapheli", "scrap", "scraptransport" }),
-                SpawnHeliToken("attack_helicopter", "Attack Helicopter", "API_SpawnAttackHelicopter", new[] { "attackheli", "attack" }),
-                VehicleLicenceToken("rhib", "RHIB", "RHIB", new[] { "rhib" }),
-                VehicleLicenceToken("tugboat", "Tugboat", "Tugboat", new[] { "tug", "tugboat" }),
-                VehicleLicenceToken("solo_submarine", "Solo Submarine", "SubmarineSolo", new[] { "subsolo", "solo", "solosub" }),
-                VehicleLicenceToken("duo_submarine", "Duo Submarine", "SubmarineDuo", new[] { "subduo", "duo", "duosub" }),
-                VehicleLicenceToken("snowmobile", "Snowmobile", "Snowmobile", new[] { "snow", "snowmobile" }),
-                VehicleLicenceToken("hot_air_balloon", "Hot Air Balloon", "HotAirBalloon", new[] { "hab", "hotairballoon", "balloon" })
+                SpawnHeliToken("minicopter", "Minicopter", "API_SpawnMinicopter", -395118501, new[] { "mini", "minicopter" }),
+                SpawnHeliToken("scrap_transport_helicopter", "Scrap Transport Helicopter", "API_SpawnScrapTransportHelicopter", -395118502, new[] { "scrapheli", "scrap", "scraptransport" }),
+                SpawnHeliToken("attack_helicopter", "Attack Helicopter", "API_SpawnAttackHelicopter", -395118503, new[] { "attackheli", "attack" }),
+                VehicleLicenceToken("rhib", "RHIB", "RHIB", -395118504, new[] { "rhib" }),
+                VehicleLicenceToken("tugboat", "Tugboat", "Tugboat", -395118505, new[] { "tug", "tugboat" }),
+                VehicleLicenceToken("solo_submarine", "Solo Submarine", "SubmarineSolo", -395118506, new[] { "subsolo", "solo", "solosub" }),
+                VehicleLicenceToken("duo_submarine", "Duo Submarine", "SubmarineDuo", -395118507, new[] { "subduo", "duo", "duosub" }),
+                VehicleLicenceToken("snowmobile", "Snowmobile", "Snowmobile", -395118508, new[] { "snow", "snowmobile" }),
+                VehicleLicenceToken("hot_air_balloon", "Hot Air Balloon", "HotAirBalloon", -395118509, new[] { "hab", "hotairballoon", "balloon" })
             };
         }
 
-        private static VehicleTokenDefinition SpawnHeliToken(string key, string displayName, string hook, string[] aliases)
+        private static VehicleTokenDefinition SpawnHeliToken(string key, string displayName, string hook, int customItemId, string[] aliases)
         {
-            return new VehicleTokenDefinition
+            var definition = new VehicleTokenDefinition
             {
                 Key = key,
                 DisplayName = displayName,
@@ -1052,11 +1898,14 @@ namespace Oxide.Plugins
                 TokenDisplayName = $"{displayName} Token",
                 Aliases = aliases
             };
+
+            ApplyCustomDefaults(definition, customItemId);
+            return definition;
         }
 
-        private static VehicleTokenDefinition VehicleLicenceToken(string key, string displayName, string vehicleLicenceType, string[] aliases)
+        private static VehicleTokenDefinition VehicleLicenceToken(string key, string displayName, string vehicleLicenceType, int customItemId, string[] aliases)
         {
-            return new VehicleTokenDefinition
+            var definition = new VehicleTokenDefinition
             {
                 Key = key,
                 DisplayName = displayName,
@@ -1065,6 +1914,39 @@ namespace Oxide.Plugins
                 TokenDisplayName = $"{displayName} Token",
                 Aliases = aliases
             };
+
+            ApplyCustomDefaults(definition, customItemId);
+            return definition;
+        }
+
+        private static void ApplyCustomDefaults(VehicleTokenDefinition definition, int customItemId)
+        {
+            definition.UseCustomItemDefinition = true;
+            definition.AllowLegacyFallbackIfCIDMissing = false;
+            definition.CustomShortname = CustomTokenShortnamePrefix + definition.Key;
+            definition.CustomItemId = customItemId;
+            definition.ParentShortname = DefaultParentTokenShortname;
+            definition.IconPngDataPath = DefaultTokenIconDataFolder + "/" + definition.Key + ".png";
+            definition.DefaultDescription = "Drop this token to spawn a " + definition.DisplayName + ".";
+            definition.ImportParentItemMods = false;
+            definition.MaxStackSize = DefaultTokenMaxStackSize;
+        }
+
+        private static int DefaultCustomItemId(string key)
+        {
+            switch (key ?? "")
+            {
+                case "minicopter": return -395118501;
+                case "scrap_transport_helicopter": return -395118502;
+                case "attack_helicopter": return -395118503;
+                case "rhib": return -395118504;
+                case "tugboat": return -395118505;
+                case "solo_submarine": return -395118506;
+                case "duo_submarine": return -395118507;
+                case "snowmobile": return -395118508;
+                case "hot_air_balloon": return -395118509;
+                default: return 0;
+            }
         }
     }
 }

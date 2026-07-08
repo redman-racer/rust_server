@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsEvents", "Raidlands", "0.1.5")]
+    [Info("RaidlandsEvents", "Raidlands", "0.1.20")]
     [Description("Raidlands public event manager MVP for random CopyPaste raid bases.")]
     public class RaidlandsEvents : RustPlugin
     {
@@ -20,6 +20,7 @@ namespace Oxide.Plugins
         private const string LayoutPermission = "raidlandsevents.admin.layouts";
         private const string StartPermission = "raidlandsevents.admin.start";
         private const string StopPermission = "raidlandsevents.admin.stop";
+        private const string PurchasePermission = "raidlandsevents.player.purchase";
         private const string DataFileName = "RaidlandsEvents";
         private const string CopyPasteDirectory = "copypaste/";
         private const string GenericRadiusMapMarkerPrefab = "assets/prefabs/tools/map/genericradiusmarker.prefab";
@@ -33,7 +34,7 @@ namespace Oxide.Plugins
         private static readonly int OverlapLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Deployed", "Vehicle Large");
 
         [PluginReference]
-        private Plugin CopyPaste;
+        private Plugin CopyPaste, RaidlandsSentryTurrets;
 
         [PluginReference]
         private Plugin ServerRewards;
@@ -44,6 +45,7 @@ namespace Oxide.Plugins
         private Timer expiryTimer;
         private readonly Dictionary<string, MapMarkerGenericRadius> markers = new Dictionary<string, MapMarkerGenericRadius>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<ulong, string> entityToInstance = new Dictionary<ulong, string>();
+        private readonly Dictionary<ulong, ulong> explosiveOwnerIds = new Dictionary<ulong, ulong>();
         private readonly HashSet<string> pendingPasteInstances = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<MonumentZone> monumentZones = new List<MonumentZone>();
         private bool monumentZonesLoaded;
@@ -71,6 +73,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Rewards")]
             public RewardsConfig Rewards = new RewardsConfig();
+
+            [JsonProperty("Purchase")]
+            public PurchaseConfig Purchase = new PurchaseConfig();
 
             [JsonProperty("Cleanup")]
             public CleanupConfig Cleanup = new CleanupConfig();
@@ -102,10 +107,10 @@ namespace Oxide.Plugins
 
         private class LayoutRotationConfig
         {
-            [JsonProperty("EnabledLayouts")]
+            [JsonProperty("EnabledLayouts", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> EnabledLayouts = new List<string>();
 
-            [JsonProperty("IgnoredLayouts")]
+            [JsonProperty("IgnoredLayouts", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> IgnoredLayouts = new List<string>
             {
                 "raidlands_portafort",
@@ -230,6 +235,9 @@ namespace Oxide.Plugins
             [JsonProperty("Score Radius Meters")]
             public float ScoreRadiusMeters = 120f;
 
+            [JsonProperty("Use Layout Center For Score Radius")]
+            public bool UseLayoutCenterForScoreRadius = true;
+
             [JsonProperty("Require Attacker And Victim Inside Radius")]
             public bool RequireAttackerAndVictimInsideRadius = true;
 
@@ -272,7 +280,7 @@ namespace Oxide.Plugins
             [JsonProperty("Queue Rewards If ServerRewards Missing")]
             public bool QueueRewardsIfServerRewardsMissing = true;
 
-            [JsonProperty("Placement RP Rewards")]
+            [JsonProperty("Placement RP Rewards", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<PlacementRewardConfig> PlacementRpRewards = new List<PlacementRewardConfig>
             {
                 new PlacementRewardConfig { Place = 1, ServerRewardsRp = 10000 },
@@ -288,6 +296,67 @@ namespace Oxide.Plugins
 
             [JsonProperty("ServerRewards RP")]
             public int ServerRewardsRp;
+        }
+
+        private class PurchaseConfig
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = false;
+
+            [JsonProperty("Permission")]
+            public string Permission = PurchasePermission;
+
+            [JsonProperty("Default Layout Id")]
+            public string DefaultLayoutId = "random";
+
+            [JsonProperty("Allowed Layout Ids", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public List<string> AllowedLayoutIds = new List<string>();
+
+            [JsonProperty("Allow Random Layout")]
+            public bool AllowRandomLayout = true;
+
+            [JsonProperty("Require Random Location")]
+            public bool RequireRandomLocation = true;
+
+            [JsonProperty("Min Online Players")]
+            public int MinOnlinePlayers = 0;
+
+            [JsonProperty("Cooldown Minutes Per Player")]
+            public float CooldownMinutesPerPlayer = 180f;
+
+            [JsonProperty("Cooldown Minutes Global")]
+            public float CooldownMinutesGlobal = 45f;
+
+            [JsonProperty("Refund On Start Failure")]
+            public bool RefundOnStartFailure = true;
+
+            [JsonProperty("Announce Purchaser")]
+            public bool AnnouncePurchaser = true;
+
+            [JsonProperty("Purchaser Does Not Own Event")]
+            public bool PurchaserDoesNotOwnEvent = true;
+
+            [JsonProperty("Costs", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public List<PurchaseCostConfig> Costs = new List<PurchaseCostConfig>
+            {
+                new PurchaseCostConfig { Type = "RP", Amount = 12000, DisplayName = "12,000 RP" },
+                new PurchaseCostConfig { Type = "Item", ShortName = "scrap", Amount = 50000, DisplayName = "50,000 scrap" }
+            };
+        }
+
+        private class PurchaseCostConfig
+        {
+            [JsonProperty("Type")]
+            public string Type = "RP";
+
+            [JsonProperty("ShortName")]
+            public string ShortName;
+
+            [JsonProperty("Amount")]
+            public int Amount;
+
+            [JsonProperty("DisplayName")]
+            public string DisplayName;
         }
 
         private class CleanupConfig
@@ -324,6 +393,15 @@ namespace Oxide.Plugins
 
             [JsonProperty("PendingRewards")]
             public Dictionary<string, PendingRewardRecord> PendingRewards = new Dictionary<string, PendingRewardRecord>(StringComparer.OrdinalIgnoreCase);
+
+            [JsonProperty("LastPurchaseUnix")]
+            public double LastPurchaseUnix;
+
+            [JsonProperty("LastPurchaseByPlayer")]
+            public Dictionary<string, double> LastPurchaseByPlayer = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
+            [JsonProperty("PendingPurchaseRefunds")]
+            public Dictionary<string, PendingPurchaseRefundRecord> PendingPurchaseRefunds = new Dictionary<string, PendingPurchaseRefundRecord>(StringComparer.OrdinalIgnoreCase);
         }
 
         private class LayoutScanEntry
@@ -414,6 +492,27 @@ namespace Oxide.Plugins
 
             [JsonProperty("PaidRewards")]
             public List<PaidRaidBaseReward> PaidRewards = new List<PaidRaidBaseReward>();
+
+            [JsonProperty("TriggerType")]
+            public string TriggerType = "admin";
+
+            [JsonProperty("PurchaserUserId")]
+            public string PurchaserUserId;
+
+            [JsonProperty("PurchaserDisplayName")]
+            public string PurchaserDisplayName;
+
+            [JsonProperty("PurchaseCostSummary")]
+            public string PurchaseCostSummary;
+
+            [JsonProperty("PurchaseCostsPaid")]
+            public List<PurchaseCostRecord> PurchaseCostsPaid = new List<PurchaseCostRecord>();
+
+            [JsonProperty("PurchaseRefunded")]
+            public bool PurchaseRefunded;
+
+            [JsonProperty("PurchaseRefundError")]
+            public string PurchaseRefundError;
         }
 
         private class RaidBaseScoreEntry
@@ -506,6 +605,62 @@ namespace Oxide.Plugins
             public string LastError;
         }
 
+        private class PurchaseCostRecord
+        {
+            [JsonProperty("Type")]
+            public string Type;
+
+            [JsonProperty("ShortName")]
+            public string ShortName;
+
+            [JsonProperty("Amount")]
+            public int Amount;
+
+            [JsonProperty("DisplayName")]
+            public string DisplayName;
+        }
+
+        private class PendingPurchaseRefundRecord
+        {
+            [JsonProperty("RefundId")]
+            public string RefundId;
+
+            [JsonProperty("InstanceId")]
+            public string InstanceId;
+
+            [JsonProperty("UserId")]
+            public string UserId;
+
+            [JsonProperty("DisplayName")]
+            public string DisplayName;
+
+            [JsonProperty("Costs")]
+            public List<PurchaseCostRecord> Costs = new List<PurchaseCostRecord>();
+
+            [JsonProperty("Reason")]
+            public string Reason;
+
+            [JsonProperty("CreatedUnix")]
+            public double CreatedUnix;
+
+            [JsonProperty("LastAttemptUnix")]
+            public double LastAttemptUnix;
+
+            [JsonProperty("AttemptCount")]
+            public int AttemptCount;
+
+            [JsonProperty("LastError")]
+            public string LastError;
+        }
+
+        private class PurchaseStartContext
+        {
+            public BasePlayer Purchaser;
+            public string UserId;
+            public string DisplayName;
+            public List<PurchaseCostRecord> CostsPaid = new List<PurchaseCostRecord>();
+        }
+
         private class StoredVector3
         {
             [JsonProperty("x")]
@@ -575,6 +730,7 @@ namespace Oxide.Plugins
             if (config.MapMarker == null) config.MapMarker = defaults.MapMarker;
             if (config.Scoring == null) config.Scoring = defaults.Scoring;
             if (config.Rewards == null) config.Rewards = defaults.Rewards;
+            if (config.Purchase == null) config.Purchase = defaults.Purchase;
             if (config.Cleanup == null) config.Cleanup = defaults.Cleanup;
             if (string.IsNullOrWhiteSpace(config.ChatPrefix)) config.ChatPrefix = defaults.ChatPrefix;
 
@@ -641,6 +797,35 @@ namespace Oxide.Plugins
                 .OrderBy(reward => reward.Place)
                 .ToList();
 
+            if (string.IsNullOrWhiteSpace(config.Purchase.Permission))
+                config.Purchase.Permission = PurchasePermission;
+            if (string.IsNullOrWhiteSpace(config.Purchase.DefaultLayoutId))
+                config.Purchase.DefaultLayoutId = defaults.Purchase.DefaultLayoutId;
+            if (config.Purchase.AllowedLayoutIds == null)
+                config.Purchase.AllowedLayoutIds = new List<string>();
+            config.Purchase.AllowedLayoutIds = config.Purchase.AllowedLayoutIds
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value)
+                .ToList();
+            config.Purchase.MinOnlinePlayers = Math.Max(0, config.Purchase.MinOnlinePlayers);
+            config.Purchase.CooldownMinutesPerPlayer = Mathf.Max(0f, config.Purchase.CooldownMinutesPerPlayer);
+            config.Purchase.CooldownMinutesGlobal = Mathf.Max(0f, config.Purchase.CooldownMinutesGlobal);
+            if (config.Purchase.Costs == null)
+                config.Purchase.Costs = defaults.Purchase.Costs;
+            config.Purchase.Costs = config.Purchase.Costs
+                .Where(cost => cost != null && cost.Amount > 0 && !string.IsNullOrWhiteSpace(cost.Type))
+                .Select(cost => new PurchaseCostConfig
+                {
+                    Type = NormalizeCostType(cost.Type),
+                    ShortName = string.IsNullOrWhiteSpace(cost.ShortName) ? null : cost.ShortName.Trim(),
+                    Amount = Math.Max(0, cost.Amount),
+                    DisplayName = string.IsNullOrWhiteSpace(cost.DisplayName) ? null : cost.DisplayName.Trim()
+                })
+                .Where(cost => cost.Amount > 0 && IsSupportedPurchaseCost(cost))
+                .ToList();
+
             config.Cleanup.CompletionCleanupDelaySeconds = Mathf.Max(0f, config.Cleanup.CompletionCleanupDelaySeconds);
             config.Cleanup.ForcedCleanupTimeoutSeconds = Mathf.Max(60f, config.Cleanup.ForcedCleanupTimeoutSeconds);
         }
@@ -651,25 +836,38 @@ namespace Oxide.Plugins
             permission.RegisterPermission(LayoutPermission, this);
             permission.RegisterPermission(StartPermission, this);
             permission.RegisterPermission(StopPermission, this);
+            permission.RegisterPermission(PurchasePermission, this);
+            if (config?.Purchase != null && !string.Equals(config.Purchase.Permission, PurchasePermission, StringComparison.OrdinalIgnoreCase))
+                permission.RegisterPermission(config.Purchase.Permission, this);
             LoadData();
         }
 
         private void OnServerInitialized()
         {
             RebuildEntityIndex();
+            ManageActiveEventSentries();
             ScanLayouts(true);
             RestoreMarkers();
             ScheduleAutoSpawn();
             StartExpiryTimer();
             timer.Once(5f, () => RetryPendingRewards());
+            timer.Once(7f, () => RetryPendingPurchaseRefunds());
         }
 
         private void OnPluginLoaded(Plugin plugin)
         {
-            if (plugin == null || !string.Equals(plugin.Name, "ServerRewards", StringComparison.OrdinalIgnoreCase))
+            if (plugin == null)
                 return;
 
-            timer.Once(2f, () => RetryPendingRewards());
+            if (string.Equals(plugin.Name, "ServerRewards", StringComparison.OrdinalIgnoreCase))
+            {
+                timer.Once(2f, () => RetryPendingRewards());
+                timer.Once(3f, () => RetryPendingPurchaseRefunds());
+                return;
+            }
+
+            if (string.Equals(plugin.Name, "RaidlandsSentryTurrets", StringComparison.OrdinalIgnoreCase))
+                timer.Once(0.5f, () => ManageActiveEventSentries());
         }
 
         private void Unload()
@@ -712,6 +910,10 @@ namespace Oxide.Plugins
                 data.ActiveRaidBases = new Dictionary<string, ActiveRaidBase>(StringComparer.OrdinalIgnoreCase);
             if (data.PendingRewards == null)
                 data.PendingRewards = new Dictionary<string, PendingRewardRecord>(StringComparer.OrdinalIgnoreCase);
+            if (data.LastPurchaseByPlayer == null)
+                data.LastPurchaseByPlayer = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            if (data.PendingPurchaseRefunds == null)
+                data.PendingPurchaseRefunds = new Dictionary<string, PendingPurchaseRefundRecord>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var active in data.ActiveRaidBases.Values)
                 NormalizeActiveRaidBase(active);
@@ -733,6 +935,10 @@ namespace Oxide.Plugins
                 active.Scores = new Dictionary<string, RaidBaseScoreEntry>(StringComparer.OrdinalIgnoreCase);
             if (active.PaidRewards == null)
                 active.PaidRewards = new List<PaidRaidBaseReward>();
+            if (active.PurchaseCostsPaid == null)
+                active.PurchaseCostsPaid = new List<PurchaseCostRecord>();
+            if (string.IsNullOrWhiteSpace(active.TriggerType))
+                active.TriggerType = string.IsNullOrWhiteSpace(active.PurchaserUserId) ? "admin" : "purchase";
             if (active.ScoreRadiusMeters <= 0f)
                 active.ScoreRadiusMeters = config?.Scoring?.ScoreRadiusMeters > 0f ? config.Scoring.ScoreRadiusMeters : 120f;
         }
@@ -942,6 +1148,62 @@ namespace Oxide.Plugins
             }
         }
 
+        [ConsoleCommand("revents.purchase")]
+        private void CommandPurchase(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null)
+            {
+                Reply(arg, "Player purchases must be run by an in-game player. Use revents.start for server/admin starts.");
+                return;
+            }
+
+            if (!HasPurchaseAccess(player))
+            {
+                Reply(arg, "You do not have permission to purchase RaidlandsEvents.");
+                return;
+            }
+
+            var args = GetArgs(arg);
+            var layoutId = args.Length > 0 ? args[0] : config.Purchase.DefaultLayoutId;
+            string message;
+            TryPurchaseRaidBase(player, layoutId, out message);
+            Reply(arg, message);
+        }
+
+        [ConsoleCommand("revents.purchases")]
+        private void CommandPurchases(ConsoleSystem.Arg arg)
+        {
+            if (!HasAccess(arg, AdminPermission))
+                return;
+
+            var args = GetArgs(arg);
+            var subcommand = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
+            switch (subcommand)
+            {
+                case "status":
+                    Reply(arg, BuildPurchaseStatusMessage());
+                    break;
+
+                case "refunds":
+                    Reply(arg, BuildPendingPurchaseRefundsMessage());
+                    break;
+
+                case "retry":
+                    var refunded = RetryPendingPurchaseRefunds();
+                    Reply(arg, $"Retried pending RaidlandsEvents purchase refunds: refunded={refunded}, remaining={data.PendingPurchaseRefunds.Count}.");
+                    break;
+
+                case "balance":
+                    Reply(arg, BuildPurchaseBalanceMessage(arg, args.Length > 1 ? args[1] : null));
+                    break;
+
+                default:
+                    Reply(arg, "Usage: revents.purchases status|refunds|retry|balance [playerNameOrSteamId]");
+                    break;
+            }
+        }
+
         [ChatCommand("revents")]
         private void ChatCommandRaidlandsEvents(BasePlayer player, string command, string[] args)
         {
@@ -953,11 +1215,55 @@ namespace Oxide.Plugins
 
             if (args == null || args.Length == 0)
             {
-                SendReply(player, $"{config.ChatPrefix} {BuildStatusMessage(false)}\nCommands: revents.status, revents.layouts scan|list|enable|disable, revents.start <layoutId|random> here|random, revents.score <instanceId|all>, revents.rewards list|retry, revents.auto on|off, revents.stop <instanceId|all>, revents.cleanup.");
+                SendReply(player, $"{config.ChatPrefix} {BuildStatusMessage(false)}\nCommands: revents.status, revents.layouts scan|list|enable|disable, revents.start <layoutId|random> here|random, revents.score <instanceId|all>, revents.rewards list|retry, revents.purchases status|refunds|retry|balance, revents.auto on|off, revents.stop <instanceId|all>, revents.cleanup.");
                 return;
             }
 
-            SendReply(player, $"{config.ChatPrefix} Use console commands for this MVP: revents.status, revents.layouts, revents.start, revents.score, revents.rewards, revents.auto, revents.stop, revents.cleanup.");
+            SendReply(player, $"{config.ChatPrefix} Use console commands for this MVP: revents.status, revents.layouts, revents.start, revents.score, revents.rewards, revents.purchases, revents.auto, revents.stop, revents.cleanup.");
+        }
+
+        [ChatCommand("raidme")]
+        private void ChatCommandRaidMe(BasePlayer player, string command, string[] args)
+        {
+            if (player == null)
+                return;
+
+            SendReply(player, $"{config.ChatPrefix} /raidme is reserved for the future player-base defense raid mode. It will target your own base for bot/player raids once that mode is implemented. For the current public CopyPaste raid-base event, use /eventbuy [layoutId|random] or /raidbase [layoutId|random]. No RP or items were charged.");
+        }
+
+        [ChatCommand("eventbuy")]
+        private void ChatCommandEventBuy(BasePlayer player, string command, string[] args)
+        {
+            ChatCommandPurchaseRaidBase(player, command, args);
+        }
+
+        [ChatCommand("raidbase")]
+        private void ChatCommandRaidBase(BasePlayer player, string command, string[] args)
+        {
+            ChatCommandPurchaseRaidBase(player, command, args);
+        }
+
+        private void ChatCommandPurchaseRaidBase(BasePlayer player, string command, string[] args)
+        {
+            if (player == null)
+                return;
+
+            if (!HasPurchaseAccess(player))
+            {
+                SendReply(player, $"{config.ChatPrefix} You do not have permission to purchase public raid-base events.");
+                return;
+            }
+
+            if (args != null && args.Length > 0 && args[0].Equals("balance", StringComparison.OrdinalIgnoreCase))
+            {
+                SendReply(player, $"{config.ChatPrefix} {BuildPlayerPurchaseBalanceMessage(player)}");
+                return;
+            }
+
+            var layoutId = args != null && args.Length > 0 ? args[0] : config.Purchase.DefaultLayoutId;
+            string message;
+            TryPurchaseRaidBase(player, layoutId, out message);
+            SendReply(player, $"{config.ChatPrefix} {message}");
         }
 
         [ChatCommand("eventsmanager")]
@@ -1130,6 +1436,435 @@ namespace Oxide.Plugins
 
             var result = StartRaidBase(layoutId, randomLocation, position, out failure);
             SendReply(player, $"{config.ChatPrefix} {(result ? failure : $"Start failed: {failure}")}");
+        }
+
+        private bool TryPurchaseRaidBase(BasePlayer player, string requestedLayoutId, out string message)
+        {
+            message = null;
+
+            if (player == null)
+            {
+                message = "Player was not found.";
+                return false;
+            }
+
+            if (config?.Purchase?.Enabled != true)
+            {
+                message = "Player-purchased raid-base events are disabled.";
+                return false;
+            }
+
+            if (!HasPurchaseAccess(player))
+            {
+                message = "You do not have permission to purchase public raid-base events.";
+                return false;
+            }
+
+            if (player.IsDead() || player.IsWounded())
+            {
+                message = "You cannot purchase an event while dead or wounded.";
+                return false;
+            }
+
+            if (BasePlayer.activePlayerList.Count < config.Purchase.MinOnlinePlayers)
+            {
+                message = $"At least {config.Purchase.MinOnlinePlayers} online player(s) are required to purchase an event.";
+                return false;
+            }
+
+            var now = NowUnix();
+            var globalRemaining = PurchaseCooldownRemaining(data.LastPurchaseUnix, config.Purchase.CooldownMinutesGlobal, now);
+            if (globalRemaining > 0)
+            {
+                message = $"Public raid-base purchases are on global cooldown for {FormatDuration(globalRemaining)}.";
+                return false;
+            }
+
+            double playerLastPurchase;
+            if (data.LastPurchaseByPlayer.TryGetValue(player.UserIDString, out playerLastPurchase))
+            {
+                var playerRemaining = PurchaseCooldownRemaining(playerLastPurchase, config.Purchase.CooldownMinutesPerPlayer, now);
+                if (playerRemaining > 0)
+                {
+                    message = $"Your public raid-base purchase cooldown has {FormatDuration(playerRemaining)} remaining.";
+                    return false;
+                }
+            }
+
+            LayoutScanEntry layout;
+            if (!TrySelectPurchasableLayout(requestedLayoutId, out layout, out message))
+                return false;
+
+            List<PurchaseCostRecord> paidCosts;
+            if (!TryChargePurchaseCosts(player, out paidCosts, out message))
+                return false;
+
+            var purchase = new PurchaseStartContext
+            {
+                Purchaser = player,
+                UserId = player.UserIDString,
+                DisplayName = player.displayName ?? player.UserIDString,
+                CostsPaid = paidCosts
+            };
+
+            string startMessage;
+            if (!StartRaidBase(layout.LayoutId, true, Vector3.zero, out startMessage, purchase))
+            {
+                var refundMessage = config.Purchase.RefundOnStartFailure
+                    ? RefundPurchaseCostsOrQueue(null, player.UserIDString, player.displayName, player, paidCosts, $"start failed: {startMessage}")
+                    : "Purchase costs were not refunded because Refund On Start Failure is disabled.";
+                message = $"Purchase failed: {startMessage} {refundMessage}";
+                return false;
+            }
+
+            data.LastPurchaseUnix = now;
+            data.LastPurchaseByPlayer[player.UserIDString] = now;
+            SaveData();
+
+            var costSummary = BuildCostSummary(paidCosts);
+            message = $"{startMessage} Cost: {costSummary}. This is public and counterable; the purchaser does not reserve loot or rewards.";
+            return true;
+        }
+
+        private bool TrySelectPurchasableLayout(string requestedLayoutId, out LayoutScanEntry layout, out string reason)
+        {
+            layout = null;
+            reason = null;
+
+            var layoutId = string.IsNullOrWhiteSpace(requestedLayoutId) ? config.Purchase.DefaultLayoutId : requestedLayoutId.Trim();
+            if (string.IsNullOrWhiteSpace(layoutId))
+                layoutId = "random";
+
+            if (layoutId.Equals("random", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!config.Purchase.AllowRandomLayout)
+                {
+                    reason = "Random purchased layouts are disabled.";
+                    return false;
+                }
+
+                var candidates = PurchasableLayouts();
+                if (candidates.Count == 0)
+                {
+                    reason = "No enabled purchasable layouts are available.";
+                    return false;
+                }
+
+                layout = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+                return true;
+            }
+
+            string selectionReason;
+            if (!TrySelectLayout(layoutId, out layout, out selectionReason))
+            {
+                reason = selectionReason;
+                return false;
+            }
+
+            if (!IsPurchasableLayout(layout.LayoutId))
+            {
+                reason = $"Layout '{layout.LayoutId}' is not allowed for player purchases.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private List<LayoutScanEntry> PurchasableLayouts()
+        {
+            return EnabledValidLayouts()
+                .Where(layout => layout != null && IsPurchasableLayout(layout.LayoutId))
+                .ToList();
+        }
+
+        private bool IsPurchasableLayout(string layoutId)
+        {
+            if (string.IsNullOrWhiteSpace(layoutId))
+                return false;
+
+            var allowed = config?.Purchase?.AllowedLayoutIds;
+            return allowed == null || allowed.Count == 0 || allowed.Any(value => value.Equals(layoutId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool TryChargePurchaseCosts(BasePlayer player, out List<PurchaseCostRecord> paidCosts, out string message)
+        {
+            paidCosts = new List<PurchaseCostRecord>();
+            message = null;
+
+            if (player == null)
+            {
+                message = "Player was not found.";
+                return false;
+            }
+
+            var costs = BuildPurchaseCostRecords(config?.Purchase?.Costs);
+            foreach (var cost in costs)
+            {
+                if (!CanPayPurchaseCost(player, cost, out message))
+                    return false;
+            }
+
+            foreach (var cost in costs)
+            {
+                var record = ClonePurchaseCost(cost);
+                if (record == null || record.Amount <= 0)
+                    continue;
+
+                if (record.Type == "RP")
+                {
+                    string error;
+                    if (!TryTakeServerRewardsPoints(player, record.Amount, out error))
+                    {
+                        RefundPurchaseCostsOrQueue(null, player.UserIDString, player.displayName, player, paidCosts, $"partial purchase charge failed: {error}");
+                        message = $"Could not charge RP: {error}";
+                        return false;
+                    }
+
+                    paidCosts.Add(record);
+                    continue;
+                }
+
+                if (record.Type == "Item")
+                {
+                    var definition = ItemManager.FindItemDefinition(record.ShortName);
+                    if (definition == null)
+                    {
+                        RefundPurchaseCostsOrQueue(null, player.UserIDString, player.displayName, player, paidCosts, $"partial purchase charge failed: missing item {record.ShortName}");
+                        message = $"Unknown item cost '{record.ShortName}'.";
+                        return false;
+                    }
+
+                    var taken = player.inventory.Take(null, definition.itemid, record.Amount);
+                    if (taken < record.Amount)
+                    {
+                        if (taken > 0)
+                        {
+                            paidCosts.Add(new PurchaseCostRecord
+                            {
+                                Type = "Item",
+                                ShortName = record.ShortName,
+                                Amount = taken,
+                                DisplayName = $"{taken:n0} {record.ShortName}"
+                            });
+                        }
+
+                        RefundPurchaseCostsOrQueue(null, player.UserIDString, player.displayName, player, paidCosts, "partial item charge failed");
+                        message = $"Could not remove {record.Amount:n0} {record.ShortName} from your inventory.";
+                        return false;
+                    }
+
+                    player.Command("note.inv", definition.itemid, -record.Amount);
+                    paidCosts.Add(record);
+                }
+            }
+
+            message = "Purchase cost charged.";
+            return true;
+        }
+
+        private bool CanPayPurchaseCost(BasePlayer player, PurchaseCostRecord cost, out string message)
+        {
+            message = null;
+            if (cost == null || cost.Amount <= 0)
+                return true;
+
+            var type = NormalizeCostType(cost.Type);
+            if (type == "RP")
+            {
+                if (ServerRewards == null || !ServerRewards.IsLoaded)
+                {
+                    message = "ServerRewards is not loaded, so RP event purchases are unavailable.";
+                    return false;
+                }
+
+                string checkDetails;
+                var points = CheckServerRewardsPoints(player, out checkDetails);
+                if (points < cost.Amount)
+                {
+                    message = $"You need {cost.Amount:n0} RP to purchase this event. Purchaser={PlayerLabel(player)}, current RP={points:n0}. ServerRewards checks: {checkDetails}.";
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (type == "Item")
+            {
+                var definition = ItemManager.FindItemDefinition(cost.ShortName);
+                if (definition == null)
+                {
+                    message = $"Purchase item cost '{cost.ShortName}' is not a valid Rust item shortname.";
+                    return false;
+                }
+
+                var amount = player.inventory.GetAmount(definition.itemid);
+                if (amount < cost.Amount)
+                {
+                    message = $"You need {cost.Amount:n0} {cost.ShortName} to purchase this event. Current amount: {amount:n0}.";
+                    return false;
+                }
+
+                return true;
+            }
+
+            message = $"Unsupported purchase cost type '{cost.Type}'.";
+            return false;
+        }
+
+        private string RefundPurchaseCostsOrQueue(string instanceId, string userId, string displayName, BasePlayer player, List<PurchaseCostRecord> costs, string reason)
+        {
+            if (costs == null || costs.Count == 0)
+                return "No purchase costs were charged.";
+
+            string error;
+            if (TryRefundPurchaseCosts(userId, displayName, player, costs, out error))
+                return "Purchase costs were refunded.";
+
+            QueuePurchaseRefund(instanceId, userId, displayName, costs, reason, error);
+            return $"Purchase refund queued: {error}";
+        }
+
+        private void RefundFailedPurchase(ActiveRaidBase active, string reason)
+        {
+            if (active == null || active.PurchaseRefunded || active.PurchaseCostsPaid == null || active.PurchaseCostsPaid.Count == 0)
+                return;
+
+            var player = PlayerFromStringId(active.PurchaserUserId);
+            string error;
+            if (TryRefundPurchaseCosts(active.PurchaserUserId, active.PurchaserDisplayName, player, active.PurchaseCostsPaid, out error))
+            {
+                active.PurchaseRefunded = true;
+                active.PurchaseRefundError = null;
+                TellPurchasePlayer(active.PurchaserUserId, $"{config.ChatPrefix} Your RaidlandsEvents purchase was refunded because the event failed to start.");
+                Puts($"Refunded failed purchase for {active.PurchaserUserId} on {active.InstanceId}: {BuildCostSummary(active.PurchaseCostsPaid)}.");
+                return;
+            }
+
+            active.PurchaseRefundError = error;
+            QueuePurchaseRefund(active.InstanceId, active.PurchaserUserId, active.PurchaserDisplayName, active.PurchaseCostsPaid, reason, error);
+            PrintWarning($"Queued failed purchase refund for {active.PurchaserUserId} on {active.InstanceId}: {error}");
+        }
+
+        private bool TryRefundPurchaseCosts(string userId, string displayName, BasePlayer player, List<PurchaseCostRecord> costs, out string error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                error = "Refund user id is missing.";
+                return false;
+            }
+
+            foreach (var cost in costs ?? new List<PurchaseCostRecord>())
+            {
+                if (cost == null || cost.Amount <= 0)
+                    continue;
+
+                if (cost.Type == "RP")
+                {
+                    if (ServerRewards == null || !ServerRewards.IsLoaded)
+                    {
+                        error = "ServerRewards is not loaded.";
+                        return false;
+                    }
+                }
+                else if (cost.Type == "Item")
+                {
+                    if (player == null)
+                    {
+                        error = "Player must be online for item refund.";
+                        return false;
+                    }
+
+                    if (ItemManager.FindItemDefinition(cost.ShortName) == null)
+                    {
+                        error = $"Refund item '{cost.ShortName}' is not valid.";
+                        return false;
+                    }
+                }
+            }
+
+            foreach (var cost in costs ?? new List<PurchaseCostRecord>())
+            {
+                if (cost == null || cost.Amount <= 0)
+                    continue;
+
+                if (cost.Type == "RP")
+                {
+                    if (!TryAddServerRewardsPoints(userId, cost.Amount, out error))
+                        return false;
+                    continue;
+                }
+
+                if (cost.Type == "Item")
+                {
+                    var item = ItemManager.CreateByName(cost.ShortName, cost.Amount);
+                    if (item == null)
+                    {
+                        error = $"Could not create refund item '{cost.ShortName}'.";
+                        return false;
+                    }
+
+                    player.GiveItem(item, BaseEntity.GiveItemReason.PickedUp);
+                    player.Command("note.inv", item.info.itemid, cost.Amount);
+                }
+            }
+
+            return true;
+        }
+
+        private void QueuePurchaseRefund(string instanceId, string userId, string displayName, List<PurchaseCostRecord> costs, string reason, string error)
+        {
+            if (data.PendingPurchaseRefunds == null)
+                data.PendingPurchaseRefunds = new Dictionary<string, PendingPurchaseRefundRecord>(StringComparer.OrdinalIgnoreCase);
+
+            var refundId = string.IsNullOrWhiteSpace(instanceId)
+                ? $"purchase-refund-{DateTimeOffset.UtcNow.ToUnixTimeSeconds():x}-{userId}"
+                : $"{instanceId}:{userId}:purchase-refund";
+
+            data.PendingPurchaseRefunds[refundId] = new PendingPurchaseRefundRecord
+            {
+                RefundId = refundId,
+                InstanceId = instanceId,
+                UserId = userId,
+                DisplayName = displayName,
+                Costs = costs?.Select(ClonePurchaseCost).ToList() ?? new List<PurchaseCostRecord>(),
+                Reason = reason,
+                CreatedUnix = NowUnix(),
+                LastAttemptUnix = NowUnix(),
+                AttemptCount = 1,
+                LastError = error
+            };
+            SaveData();
+        }
+
+        private int RetryPendingPurchaseRefunds()
+        {
+            if (data?.PendingPurchaseRefunds == null || data.PendingPurchaseRefunds.Count == 0)
+                return 0;
+
+            var refunded = 0;
+            foreach (var refund in data.PendingPurchaseRefunds.Values.ToList())
+            {
+                if (refund == null || string.IsNullOrWhiteSpace(refund.UserId))
+                    continue;
+
+                refund.AttemptCount++;
+                refund.LastAttemptUnix = NowUnix();
+                var player = PlayerFromStringId(refund.UserId);
+                string error;
+                if (!TryRefundPurchaseCosts(refund.UserId, refund.DisplayName, player, refund.Costs, out error))
+                {
+                    refund.LastError = error;
+                    continue;
+                }
+
+                data.PendingPurchaseRefunds.Remove(refund.RefundId);
+                TellPurchasePlayer(refund.UserId, $"{config.ChatPrefix} Your queued RaidlandsEvents purchase refund was paid: {BuildCostSummary(refund.Costs)}.");
+                refunded++;
+            }
+
+            SaveData();
+            return refunded;
         }
 
         private bool TryTeleportToRaidBase(BasePlayer player, string instanceId, out string message)
@@ -1484,7 +2219,7 @@ namespace Oxide.Plugins
 
         private string UiHeaderStatus()
         {
-            return $"auto={(config.AutoSpawn.Enabled ? "on" : "off")} | scoring={(config.Scoring.Enabled ? "on" : "off")} | rewards={(config.Rewards.Enabled ? "on" : "off")} | active={ActiveEventCount()}/{config.AutoSpawn.MaxActiveRaidBases}";
+            return $"auto={(config.AutoSpawn.Enabled ? "on" : "off")} | buy={(config.Purchase.Enabled ? "on" : "off")} | scoring={(config.Scoring.Enabled ? "on" : "off")} | rewards={(config.Rewards.Enabled ? "on" : "off")} | active={ActiveEventCount()}/{config.AutoSpawn.MaxActiveRaidBases}";
         }
 
         private string LayoutUiState(LayoutScanEntry layout)
@@ -1641,7 +2376,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool StartRaidBase(string requestedLayoutId, bool randomLocation, Vector3 requestedPosition, out string message)
+        private bool StartRaidBase(string requestedLayoutId, bool randomLocation, Vector3 requestedPosition, out string message, PurchaseStartContext purchase = null)
         {
             message = null;
 
@@ -1690,7 +2425,12 @@ namespace Oxide.Plugins
                 ExpiresUnix = now + config.Cleanup.ForcedCleanupTimeoutSeconds,
                 Status = "pasting",
                 HadToolCupboardInLayout = layout.HasToolCupboard,
-                ScoreRadiusMeters = config.Scoring.ScoreRadiusMeters
+                ScoreRadiusMeters = config.Scoring.ScoreRadiusMeters,
+                TriggerType = purchase == null ? "admin" : "purchase",
+                PurchaserUserId = purchase?.UserId,
+                PurchaserDisplayName = purchase?.DisplayName,
+                PurchaseCostsPaid = purchase?.CostsPaid?.Select(ClonePurchaseCost).ToList() ?? new List<PurchaseCostRecord>(),
+                PurchaseCostSummary = purchase?.CostsPaid == null || purchase.CostsPaid.Count == 0 ? null : BuildCostSummary(purchase.CostsPaid)
             };
 
             data.ActiveRaidBases[instanceId] = active;
@@ -1732,19 +2472,57 @@ namespace Oxide.Plugins
             active.ToolCupboardId = FindToolCupboardId(active.EntityIds);
             active.Position = new StoredVector3(startPos);
             var normalizedTurrets = NormalizePastedTurretsAttackAll(active.EntityIds);
+            var managedSentries = ManageEventSentries(active.EntityIds);
             SchedulePastedTurretAttackAllReapply(active.EntityIds);
             RebuildEntityIndex();
             CreateOrUpdateMarker(active);
             SaveData();
 
-            Server.Broadcast($"{config.ChatPrefix} {active.PublicName} has appeared on the map. Bring boom and fight for it.");
-            Puts($"Raid base event {active.InstanceId} active: layout={active.LayoutId}, entities={active.EntityIds.Count}, tc={active.ToolCupboardId}, turretsAttackAll={normalizedTurrets}.");
+            var startMessage = $"{config.ChatPrefix} {active.PublicName} has appeared on the map. Bring boom and fight for it.";
+            if (string.Equals(active.TriggerType, "purchase", StringComparison.OrdinalIgnoreCase) && config.Purchase.AnnouncePurchaser && !string.IsNullOrWhiteSpace(active.PurchaserDisplayName))
+                startMessage = $"{config.ChatPrefix} {active.PurchaserDisplayName} started a public {active.PublicName}. It is counterable and the reward is not reserved.";
+
+            Server.Broadcast(startMessage);
+            Puts($"Raid base event {active.InstanceId} active: layout={active.LayoutId}, entities={active.EntityIds.Count}, tc={active.ToolCupboardId}, turretsAttackAll={normalizedTurrets}, managedSentries={managedSentries}.");
+        }
+
+        private int ManageActiveEventSentries()
+        {
+            if (RaidlandsSentryTurrets == null || !RaidlandsSentryTurrets.IsLoaded || data?.ActiveRaidBases == null)
+                return 0;
+
+            var entityIds = data.ActiveRaidBases.Values
+                .Where(active => active != null && active.Status != "cleaning" && active.EntityIds != null)
+                .SelectMany(active => active.EntityIds)
+                .Where(id => id != 0)
+                .Distinct()
+                .ToList();
+
+            return ManageEventSentries(entityIds);
+        }
+
+        private int ManageEventSentries(List<ulong> entityIds)
+        {
+            if (RaidlandsSentryTurrets == null || !RaidlandsSentryTurrets.IsLoaded || entityIds == null || entityIds.Count == 0)
+                return 0;
+
+            var result = RaidlandsSentryTurrets.Call("API_RaidlandsManageEventSentries", entityIds);
+            int count;
+            if (result != null && int.TryParse(result.ToString(), out count))
+                return count;
+
+            return 0;
         }
 
         private void OnRaidlandsTrackedPasteFailed(string trackingId, string filename, object result, Vector3 startPos)
         {
             if (string.IsNullOrWhiteSpace(trackingId))
                 return;
+
+            ActiveRaidBase active;
+            data.ActiveRaidBases.TryGetValue(trackingId, out active);
+            if (active != null && string.Equals(active.TriggerType, "purchase", StringComparison.OrdinalIgnoreCase) && config?.Purchase?.RefundOnStartFailure == true)
+                RefundFailedPurchase(active, $"tracked paste failed: {result}");
 
             pendingPasteInstances.Remove(trackingId);
             data.ActiveRaidBases.Remove(trackingId);
@@ -1850,7 +2628,7 @@ namespace Oxide.Plugins
             if (config?.Scoring?.Enabled != true || entity == null || info == null)
                 return;
 
-            var attacker = info.InitiatorPlayer;
+            var attacker = ResolveScoringPlayer(info, entity);
             if (!IsScorablePlayer(attacker))
                 return;
 
@@ -1869,7 +2647,7 @@ namespace Oxide.Plugins
             if (config?.Scoring?.Enabled != true || !IsScorablePlayer(player))
                 return;
 
-            var attacker = info?.InitiatorPlayer;
+            var attacker = ResolveScoringPlayer(info, player);
             if (!IsScorablePlayer(attacker) || attacker.userID == player.userID)
                 return;
 
@@ -1895,7 +2673,25 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(BaseNetworkable networkable)
         {
+            if (networkable?.net != null)
+                explosiveOwnerIds.Remove(networkable.net.ID.Value);
+
             CheckObjectiveEntity(networkable as BaseCombatEntity, "tool cupboard removed", null);
+        }
+
+        private void OnExplosiveThrown(BasePlayer player, BaseEntity entity)
+        {
+            TrackExplosiveOwner(player, entity);
+        }
+
+        private void OnExplosiveDropped(BasePlayer player, BaseEntity entity, ThrownWeapon thrown)
+        {
+            TrackExplosiveOwner(player, entity);
+        }
+
+        private void OnRocketLaunched(BasePlayer player, BaseEntity entity)
+        {
+            TrackExplosiveOwner(player, entity);
         }
 
         private void CheckObjectiveEntity(BaseCombatEntity entity, string reason, HitInfo info)
@@ -1975,7 +2771,7 @@ namespace Oxide.Plugins
             if (config?.Scoring?.Enabled != true || active == null || !IsScoringActive(active))
                 return;
 
-            var attacker = info?.InitiatorPlayer;
+            var attacker = ResolveScoringPlayer(info, null);
             if (!IsScorablePlayer(attacker))
                 return;
 
@@ -2025,15 +2821,138 @@ namespace Oxide.Plugins
             if (active == null)
                 return false;
 
-            var center = active.Position.ToVector3();
+            var center = EventCenter(active);
             center.y = position.y;
             var radius = active.ScoreRadiusMeters > 0f ? active.ScoreRadiusMeters : config.Scoring.ScoreRadiusMeters;
             return Vector3.Distance(center, position) <= radius;
         }
 
+        private Vector3 EventCenter(ActiveRaidBase active)
+        {
+            if (active == null)
+                return Vector3.zero;
+
+            var origin = active.Position.ToVector3();
+            if (config?.Scoring?.UseLayoutCenterForScoreRadius != true)
+                return origin;
+
+            LayoutScanEntry layout;
+            if (!data.Layouts.TryGetValue(active.LayoutId, out layout) || layout == null)
+                return origin;
+
+            var min = layout.BoundsMin.ToVector3();
+            var max = layout.BoundsMax.ToVector3();
+            var localCenter = new Vector3((min.x + max.x) * 0.5f, 0f, (min.z + max.z) * 0.5f);
+            var rotation = Quaternion.Euler(0f, active.RotationDegrees, 0f);
+            return origin + rotation * localCenter;
+        }
+
         private bool IsScorablePlayer(BasePlayer player)
         {
             return player != null && !player.IsNpc && player.userID != 0;
+        }
+
+        private void TrackExplosiveOwner(BasePlayer player, BaseEntity entity)
+        {
+            if (!IsScorablePlayer(player) || entity?.net == null)
+                return;
+
+            var entityId = entity.net.ID.Value;
+            explosiveOwnerIds[entityId] = player.userID;
+            timer.Once(300f, () => explosiveOwnerIds.Remove(entityId));
+        }
+
+        private BasePlayer ResolveScoringPlayer(HitInfo info, BaseCombatEntity victim)
+        {
+            return ScorableOrNull(info?.InitiatorPlayer)
+                   ?? ScorableOrNull(info?.Initiator as BasePlayer)
+                   ?? OwnerPlayerFromEntity(info?.Weapon)
+                   ?? OwnerPlayerFromEntity(info?.Initiator)
+                   ?? OwnerPlayerFromEntity(info?.WeaponPrefab)
+                   ?? ScorableOrNull(victim?.lastAttacker as BasePlayer);
+        }
+
+        private BasePlayer OwnerPlayerFromEntity(BaseEntity entity)
+        {
+            if (entity == null)
+                return null;
+
+            var player = ScorableOrNull(entity as BasePlayer);
+            if (player != null)
+                return player;
+
+            try
+            {
+                player = ScorableOrNull(entity.ToPlayer());
+                if (player != null)
+                    return player;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                player = ScorableOrNull(entity.GetParentEntity() as BasePlayer);
+                if (player != null)
+                    return player;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                player = ScorableOrNull(entity.GetRootParentEntity() as BasePlayer);
+                if (player != null)
+                    return player;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                player = ScorableOrNull(entity.creatorEntity as BasePlayer);
+                if (player != null)
+                    return player;
+            }
+            catch
+            {
+            }
+
+            if (entity.net != null)
+            {
+                ulong ownerId;
+                if (explosiveOwnerIds.TryGetValue(entity.net.ID.Value, out ownerId))
+                {
+                    player = ScorableOrNull(PlayerFromId(ownerId));
+                    if (player != null)
+                        return player;
+                }
+            }
+
+            try
+            {
+                player = ScorableOrNull(PlayerFromId(entity.OwnerID));
+                if (player != null)
+                    return player;
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private BasePlayer PlayerFromId(ulong userId)
+        {
+            return userId == 0 ? null : BasePlayer.FindByID(userId) ?? BasePlayer.FindSleeping(userId);
+        }
+
+        private BasePlayer ScorableOrNull(BasePlayer player)
+        {
+            return IsScorablePlayer(player) ? player : null;
         }
 
         private float ScorableDamage(HitInfo info, BaseCombatEntity victim)
@@ -2340,22 +3259,76 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            try
+            ulong parsedUserId;
+            if (!ulong.TryParse(userId, out parsedUserId))
             {
-                var result = ServerRewards.Call("AddPoints", userId, amount);
-                if (result is bool && !(bool)result)
-                {
-                    error = "ServerRewards rejected the RP credit.";
-                    return false;
-                }
-
-                return true;
-            }
-            catch (Exception exception)
-            {
-                error = $"ServerRewards AddPoints failed: {exception.Message}";
+                error = "Invalid SteamID for ServerRewards credit.";
                 return false;
             }
+
+            string beforeDetails;
+            var balanceBefore = CheckServerRewardsPoints(userId, out beforeDetails);
+            var attempts = new List<string>();
+            var player = PlayerFromStringId(userId);
+
+            if (player != null && TryCallServerRewardsBool("BasePlayer", () => ServerRewards.Call("AddPoints", player, amount), attempts))
+                return VerifyServerRewardsCredit(userId, amount, balanceBefore, "BasePlayer", attempts, out error);
+
+            if (TryCallServerRewardsBool("parsed ulong", () => ServerRewards.Call("AddPoints", parsedUserId, amount), attempts))
+                return VerifyServerRewardsCredit(userId, amount, balanceBefore, "parsed ulong", attempts, out error);
+
+            if (TryCallServerRewardsBool("UserIDString", () => ServerRewards.Call("AddPoints", userId, amount), attempts))
+                return VerifyServerRewardsCredit(userId, amount, balanceBefore, "UserIDString", attempts, out error);
+
+            if (TryAddServerRewardsPointsViaCommand(userId, amount, balanceBefore, attempts))
+                return true;
+
+            string afterDetails;
+            var balanceAfter = CheckServerRewardsPoints(userId, out afterDetails);
+            error = $"ServerRewards credit did not increase balance for {userId}. Amount={amount:n0}, balanceBefore={balanceBefore:n0}, balanceAfter={balanceAfter:n0}. Checks before: {beforeDetails}. Checks after: {afterDetails}. Attempts: {string.Join("; ", attempts)}.";
+            return false;
+        }
+
+        private bool VerifyServerRewardsCredit(string userId, int amount, int balanceBefore, string label, List<string> attempts, out string error)
+        {
+            string afterDetails;
+            var balanceAfter = CheckServerRewardsPoints(userId, out afterDetails);
+            var minimumExpected = balanceBefore + amount;
+            attempts.Add($"{label} verify before={balanceBefore:n0}, after={balanceAfter:n0}, minimumExpected={minimumExpected:n0}, checks={afterDetails}");
+
+            if (balanceAfter >= minimumExpected)
+            {
+                error = null;
+                return true;
+            }
+
+            error = $"ServerRewards {label} credit returned true but balance did not increase enough. Amount={amount:n0}, balanceBefore={balanceBefore:n0}, balanceAfter={balanceAfter:n0}, minimumExpected={minimumExpected:n0}. Checks: {afterDetails}.";
+            return false;
+        }
+
+        private bool TryAddServerRewardsPointsViaCommand(string userId, int amount, int balanceBefore, List<string> attempts)
+        {
+            foreach (var rpCommand in ServerRewardsAdminCommands())
+            {
+                try
+                {
+                    var command = $"{rpCommand} add {userId} {amount}";
+                    var result = ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), command);
+                    string afterDetails;
+                    var balanceAfter = CheckServerRewardsPoints(userId, out afterDetails);
+                    var minimumExpected = balanceBefore + amount;
+
+                    attempts.Add($"{rpCommand} add command result={FormatServerRewardsResult(result)}, before={balanceBefore:n0}, after={balanceAfter:n0}, minimumExpected={minimumExpected:n0}, checks={afterDetails}");
+                    if (balanceAfter >= minimumExpected)
+                        return true;
+                }
+                catch (Exception exception)
+                {
+                    attempts.Add($"{rpCommand} add command error({exception.Message})");
+                }
+            }
+
+            return false;
         }
 
         private void TellRewardPlayer(string userId, string message)
@@ -2612,7 +3585,7 @@ namespace Oxide.Plugins
             color1.a = config.MapMarker.Alpha;
             color2.a = config.MapMarker.Alpha;
 
-            marker.transform.position = active.Position.ToVector3();
+            marker.transform.position = EventCenter(active);
             marker.radius = NativeMarkerRadius();
             marker.alpha = config.MapMarker.Alpha;
             marker.color1 = color1;
@@ -3218,7 +4191,7 @@ namespace Oxide.Plugins
         {
             var enabledLayouts = EnabledValidLayouts();
             var activeCount = ActiveEventCount();
-            var message = $"RaidlandsEvents: auto={(config.AutoSpawn.Enabled ? "on" : "off")}, scoring={(config.Scoring.Enabled ? "on" : "off")}, rewards={(config.Rewards.Enabled && config.Rewards.AwardServerRewardsRp ? "rp" : "off")}, enabledLayouts={enabledLayouts.Count}, discovered={data.Layouts.Count}, active={activeCount}/{config.AutoSpawn.MaxActiveRaidBases}, pendingPastes={pendingPasteInstances.Count}, pendingRewards={data.PendingRewards.Count}.";
+            var message = $"RaidlandsEvents: auto={(config.AutoSpawn.Enabled ? "on" : "off")}, purchases={(config.Purchase.Enabled ? "on" : "off")}, scoring={(config.Scoring.Enabled ? "on" : "off")}, rewards={(config.Rewards.Enabled && config.Rewards.AwardServerRewardsRp ? "rp" : "off")}, enabledLayouts={enabledLayouts.Count}, discovered={data.Layouts.Count}, active={activeCount}/{config.AutoSpawn.MaxActiveRaidBases}, pendingPastes={pendingPasteInstances.Count}, pendingRewards={data.PendingRewards.Count}, pendingPurchaseRefunds={data.PendingPurchaseRefunds.Count}.";
 
             if (!includeDetails || data.ActiveRaidBases.Count == 0)
                 return message;
@@ -3246,6 +4219,96 @@ namespace Oxide.Plugins
             }
 
             return string.Join("\n", lines);
+        }
+
+        private string BuildPurchaseStatusMessage()
+        {
+            var now = NowUnix();
+            var purchaseCosts = BuildPurchaseCostRecords(config.Purchase.Costs);
+            var configuredCostRows = config.Purchase.Costs?.Count ?? 0;
+            var lines = new List<string>
+            {
+                $"RaidlandsEvents purchases: {(config.Purchase.Enabled ? "enabled" : "disabled")}, permission={config.Purchase.Permission}, defaultLayout={config.Purchase.DefaultLayoutId}, costs={BuildCostSummary(purchaseCosts)}, configuredCostRows={configuredCostRows}",
+                $"Cooldowns: global={config.Purchase.CooldownMinutesGlobal:0.#}m ({FormatDuration(PurchaseCooldownRemaining(data.LastPurchaseUnix, config.Purchase.CooldownMinutesGlobal, now))} remaining), player={config.Purchase.CooldownMinutesPerPlayer:0.#}m, minOnline={config.Purchase.MinOnlinePlayers}, pendingRefunds={data.PendingPurchaseRefunds.Count}"
+            };
+
+            var purchasable = PurchasableLayouts();
+            lines.Add($"Purchasable enabled layouts: {(purchasable.Count == 0 ? "none" : string.Join(", ", purchasable.Select(layout => layout.LayoutId)))}");
+            lines.Add("Player command: /eventbuy [layoutId|random] or /raidbase [layoutId|random]. /raidme is reserved for future player-base defense raids.");
+            return string.Join("\n", lines);
+        }
+
+        private string BuildPendingPurchaseRefundsMessage()
+        {
+            if (data.PendingPurchaseRefunds.Count == 0)
+                return "No pending RaidlandsEvents purchase refunds.";
+
+            var lines = new List<string> { $"Pending RaidlandsEvents purchase refunds: {data.PendingPurchaseRefunds.Count}" };
+            foreach (var refund in data.PendingPurchaseRefunds.Values.OrderBy(record => record.CreatedUnix).Take(10))
+            {
+                lines.Add($"{refund.RefundId}: {refund.DisplayName ?? refund.UserId}, costs={BuildCostSummary(refund.Costs)}, attempts={refund.AttemptCount}, error={refund.LastError}");
+            }
+
+            if (data.PendingPurchaseRefunds.Count > 10)
+                lines.Add($"...and {data.PendingPurchaseRefunds.Count - 10} more.");
+
+            return string.Join("\n", lines);
+        }
+
+        private string BuildPurchaseBalanceMessage(ConsoleSystem.Arg arg, string targetText)
+        {
+            var player = ResolveBalanceTarget(arg, targetText);
+            var label = player != null ? $"{player.displayName} ({player.UserIDString})" : targetText;
+            string details;
+            int balance;
+
+            if (player != null)
+            {
+                balance = CheckServerRewardsPoints(player, out details);
+            }
+            else if (!string.IsNullOrWhiteSpace(targetText))
+            {
+                balance = CheckServerRewardsPoints(targetText, out details);
+            }
+            else
+            {
+                return "Usage: revents.purchases balance <playerNameOrSteamId>";
+            }
+
+            return $"RaidlandsEvents ServerRewards balance for {label}: {balance:n0}. Checks: {details}. Admin command candidates: {string.Join(", ", ServerRewardsAdminCommands())}.";
+        }
+
+        private string BuildPlayerPurchaseBalanceMessage(BasePlayer player)
+        {
+            if (player == null)
+                return "Player was not found.";
+
+            string details;
+            var balance = CheckServerRewardsPoints(player, out details);
+            return $"RaidlandsEvents sees purchaser={PlayerLabel(player)}, ServerRewards balance={balance:n0}. Checks: {details}.";
+        }
+
+        private string PlayerLabel(BasePlayer player)
+        {
+            if (player == null)
+                return "unknown";
+
+            return $"{player.displayName ?? "unknown"} ({player.UserIDString})";
+        }
+
+        private BasePlayer ResolveBalanceTarget(ConsoleSystem.Arg arg, string targetText)
+        {
+            if (string.IsNullOrWhiteSpace(targetText))
+                return arg?.Player();
+
+            ulong parsed;
+            if (ulong.TryParse(targetText, out parsed))
+                return BasePlayer.FindByID(parsed) ?? BasePlayer.FindSleeping(parsed);
+
+            var lowered = targetText.ToLowerInvariant();
+            return BasePlayer.activePlayerList.FirstOrDefault(player =>
+                player != null &&
+                (player.displayName ?? string.Empty).ToLowerInvariant().Contains(lowered));
         }
 
         private int ActiveEventCount()
@@ -3361,6 +4424,400 @@ namespace Oxide.Plugins
             return result is bool && (bool)result;
         }
 
+        private string NormalizeCostType(string type)
+        {
+            if (string.IsNullOrWhiteSpace(type))
+                return string.Empty;
+
+            var normalized = type.Trim();
+            if (normalized.Equals("ServerRewards", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("ServerRewards RP", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("Rewards", StringComparison.OrdinalIgnoreCase))
+                return "RP";
+
+            if (normalized.Equals("Item", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("RustItem", StringComparison.OrdinalIgnoreCase))
+                return "Item";
+
+            if (normalized.Equals("RP", StringComparison.OrdinalIgnoreCase))
+                return "RP";
+
+            return normalized;
+        }
+
+        private bool IsSupportedPurchaseCost(PurchaseCostConfig cost)
+        {
+            if (cost == null || cost.Amount <= 0)
+                return false;
+
+            var type = NormalizeCostType(cost.Type);
+            if (type == "RP")
+                return true;
+
+            return type == "Item" && !string.IsNullOrWhiteSpace(cost.ShortName);
+        }
+
+        private PurchaseCostRecord ToPurchaseCostRecord(PurchaseCostConfig cost)
+        {
+            if (cost == null || cost.Amount <= 0)
+                return null;
+
+            var type = NormalizeCostType(cost.Type);
+            if (type == "RP")
+            {
+                return new PurchaseCostRecord
+                {
+                    Type = "RP",
+                    Amount = cost.Amount,
+                    DisplayName = string.IsNullOrWhiteSpace(cost.DisplayName) ? $"{cost.Amount:n0} RP" : cost.DisplayName
+                };
+            }
+
+            if (type == "Item" && !string.IsNullOrWhiteSpace(cost.ShortName))
+            {
+                return new PurchaseCostRecord
+                {
+                    Type = "Item",
+                    ShortName = cost.ShortName.Trim(),
+                    Amount = cost.Amount,
+                    DisplayName = string.IsNullOrWhiteSpace(cost.DisplayName) ? $"{cost.Amount:n0} {cost.ShortName.Trim()}" : cost.DisplayName
+                };
+            }
+
+            return null;
+        }
+
+        private List<PurchaseCostRecord> BuildPurchaseCostRecords(IEnumerable<PurchaseCostConfig> costs)
+        {
+            var source = (costs ?? Enumerable.Empty<PurchaseCostConfig>())
+                .Select(ToPurchaseCostRecord)
+                .Where(cost => cost != null && cost.Amount > 0)
+                .ToList();
+
+            var result = new List<PurchaseCostRecord>();
+            var rpTotal = source
+                .Where(cost => cost.Type == "RP")
+                .Sum(cost => cost.Amount);
+
+            if (rpTotal > 0)
+            {
+                result.Add(new PurchaseCostRecord
+                {
+                    Type = "RP",
+                    Amount = rpTotal,
+                    DisplayName = $"{rpTotal:n0} RP"
+                });
+            }
+
+            foreach (var group in source
+                         .Where(cost => cost.Type == "Item" && !string.IsNullOrWhiteSpace(cost.ShortName))
+                         .GroupBy(cost => cost.ShortName.Trim(), StringComparer.OrdinalIgnoreCase))
+            {
+                var shortName = group.Key;
+                var total = group.Sum(cost => cost.Amount);
+                if (total <= 0)
+                    continue;
+
+                result.Add(new PurchaseCostRecord
+                {
+                    Type = "Item",
+                    ShortName = shortName,
+                    Amount = total,
+                    DisplayName = $"{total:n0} {shortName}"
+                });
+            }
+
+            return result;
+        }
+
+        private PurchaseCostRecord ClonePurchaseCost(PurchaseCostRecord cost)
+        {
+            if (cost == null)
+                return null;
+
+            return new PurchaseCostRecord
+            {
+                Type = NormalizeCostType(cost.Type),
+                ShortName = cost.ShortName,
+                Amount = Math.Max(0, cost.Amount),
+                DisplayName = cost.DisplayName
+            };
+        }
+
+        private string BuildCostSummary(IEnumerable<PurchaseCostRecord> costs)
+        {
+            var parts = (costs ?? Enumerable.Empty<PurchaseCostRecord>())
+                .Where(cost => cost != null && cost.Amount > 0)
+                .Select(cost => string.IsNullOrWhiteSpace(cost.DisplayName)
+                    ? cost.Type == "RP" ? $"{cost.Amount:n0} RP" : $"{cost.Amount:n0} {cost.ShortName}"
+                    : cost.DisplayName)
+                .ToList();
+
+            return parts.Count == 0 ? "free" : string.Join(" + ", parts);
+        }
+
+        private int CheckServerRewardsPoints(BasePlayer player, out string details)
+        {
+            details = "unavailable";
+
+            if (ServerRewards == null || !ServerRewards.IsLoaded || player == null)
+                return 0;
+
+            ulong parsedUserId;
+            var hasParsedUserId = ulong.TryParse(player.UserIDString, out parsedUserId);
+            var values = new List<int>();
+            var attempts = new List<string>();
+
+            TryReadServerRewardsPoints("BasePlayer", () => ServerRewards.Call("CheckPoints", player), values, attempts);
+            TryReadServerRewardsPoints("player.userID", () => ServerRewards.Call("CheckPoints", player.userID), values, attempts);
+
+            if (hasParsedUserId)
+                TryReadServerRewardsPoints("parsed ulong", () => ServerRewards.Call("CheckPoints", parsedUserId), values, attempts);
+
+            TryReadServerRewardsPoints("UserIDString", () => ServerRewards.Call("CheckPoints", player.UserIDString), values, attempts);
+
+            details = attempts.Count == 0 ? "none" : string.Join("; ", attempts);
+            return values.Count == 0 ? 0 : values.Max();
+        }
+
+        private int CheckServerRewardsPoints(string userId, out string details)
+        {
+            details = "unavailable";
+
+            if (ServerRewards == null || !ServerRewards.IsLoaded || string.IsNullOrWhiteSpace(userId))
+                return 0;
+
+            ulong parsedUserId;
+            var hasParsedUserId = ulong.TryParse(userId, out parsedUserId);
+            var values = new List<int>();
+            var attempts = new List<string>();
+
+            if (hasParsedUserId)
+                TryReadServerRewardsPoints("parsed ulong", () => ServerRewards.Call("CheckPoints", parsedUserId), values, attempts);
+
+            TryReadServerRewardsPoints("UserIDString", () => ServerRewards.Call("CheckPoints", userId), values, attempts);
+
+            details = attempts.Count == 0 ? "none" : string.Join("; ", attempts);
+            return values.Count == 0 ? 0 : values.Max();
+        }
+
+        private bool TryTakeServerRewardsPoints(BasePlayer player, int amount, out string error)
+        {
+            error = null;
+            if (amount <= 0)
+                return true;
+
+            if (player == null)
+            {
+                error = "Player was not found for ServerRewards debit.";
+                return false;
+            }
+
+            if (ServerRewards == null || !ServerRewards.IsLoaded)
+            {
+                error = "ServerRewards plugin is not loaded.";
+                return false;
+            }
+
+            ulong parsedUserId;
+            var hasParsedUserId = ulong.TryParse(player.UserIDString, out parsedUserId);
+            var attempts = new List<string>();
+            string beforeDetails;
+            var balanceBefore = CheckServerRewardsPoints(player, out beforeDetails);
+
+            if (balanceBefore < amount)
+            {
+                error = $"Insufficient RP for {PlayerLabel(player)}: required {amount:n0}, ServerRewards balance {balanceBefore:n0}. Checks: {beforeDetails}.";
+                return false;
+            }
+
+            if (TryCallServerRewardsBool("BasePlayer", () => ServerRewards.Call("TakePoints", player, amount), attempts))
+                return true;
+
+            if (TryCallServerRewardsBool("player.userID", () => ServerRewards.Call("TakePoints", player.userID, amount), attempts))
+                return true;
+
+            if (hasParsedUserId && TryCallServerRewardsBool("parsed ulong", () => ServerRewards.Call("TakePoints", parsedUserId, amount), attempts))
+                return true;
+
+            if (TryCallServerRewardsBool("UserIDString", () => ServerRewards.Call("TakePoints", player.UserIDString, amount), attempts))
+                return true;
+
+            if (TryTakeServerRewardsPointsViaCommand(player, amount, balanceBefore, attempts))
+                return true;
+
+            string afterDetails;
+            var balanceAfter = CheckServerRewardsPoints(player, out afterDetails);
+            error = $"ServerRewards rejected the RP debit for {PlayerLabel(player)}. Amount={amount:n0}, balanceBefore={balanceBefore:n0}, balanceAfter={balanceAfter:n0}. Checks before: {beforeDetails}. Checks after: {afterDetails}. Attempts: {string.Join("; ", attempts)}.";
+            return false;
+        }
+
+        private bool TryTakeServerRewardsPointsViaCommand(BasePlayer player, int amount, int balanceBefore, List<string> attempts)
+        {
+            foreach (var rpCommand in ServerRewardsAdminCommands())
+            {
+                try
+                {
+                    var command = $"{rpCommand} take {player.UserIDString} {amount}";
+                    var result = ConsoleSystem.Run(ConsoleSystem.Option.Server.Quiet(), command);
+                    string afterDetails;
+                    var balanceAfter = CheckServerRewardsPoints(player, out afterDetails);
+                    var expectedAfter = balanceBefore - amount;
+
+                    attempts.Add($"{rpCommand} command result={FormatServerRewardsResult(result)}, before={balanceBefore:n0}, after={balanceAfter:n0}, expectedAfter={expectedAfter:n0}, checks={afterDetails}");
+                    if (balanceAfter == expectedAfter)
+                        return true;
+                }
+                catch (Exception exception)
+                {
+                    attempts.Add($"{rpCommand} command error({exception.Message})");
+                }
+            }
+
+            return false;
+        }
+
+        private IEnumerable<string> ServerRewardsAdminCommands()
+        {
+            var commands = new List<string>();
+            AddServerRewardsAdminCommand(commands, ReadServerRewardsAdminCommandFromConfig());
+            AddServerRewardsAdminCommand(commands, "xp");
+            AddServerRewardsAdminCommand(commands, "rp");
+            return commands;
+        }
+
+        private void AddServerRewardsAdminCommand(List<string> commands, string commandName)
+        {
+            if (commands == null || string.IsNullOrWhiteSpace(commandName))
+                return;
+
+            commandName = commandName.Trim().TrimStart('/');
+            if (commandName.Length == 0 || commands.Any(command => command.Equals(commandName, StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            commands.Add(commandName);
+        }
+
+        private string ReadServerRewardsAdminCommandFromConfig()
+        {
+            try
+            {
+                var path = System.IO.Path.Combine(Interface.Oxide.ConfigDirectory, "ServerRewards.json");
+                if (!System.IO.File.Exists(path))
+                    return null;
+
+                var root = JsonConvert.DeserializeObject<Newtonsoft.Json.Linq.JObject>(System.IO.File.ReadAllText(path));
+                return root?["Options"]?["Admin RP Command"]?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void TryReadServerRewardsPoints(string label, Func<object> call, List<int> values, List<string> attempts)
+        {
+            try
+            {
+                var result = call();
+                int value;
+                if (!TryConvertServerRewardsInt(result, out value))
+                {
+                    attempts.Add($"{label}=unreadable({FormatServerRewardsResult(result)})");
+                    return;
+                }
+
+                values.Add(value);
+                attempts.Add($"{label}={value:n0}");
+            }
+            catch (Exception exception)
+            {
+                attempts.Add($"{label}=error({exception.Message})");
+            }
+        }
+
+        private bool TryCallServerRewardsBool(string label, Func<object> call, List<string> attempts)
+        {
+            try
+            {
+                var result = call();
+                if (result is bool)
+                {
+                    var accepted = (bool)result;
+                    attempts.Add($"{label}={accepted}");
+                    return accepted;
+                }
+
+                attempts.Add($"{label}=unreadable({FormatServerRewardsResult(result)})");
+                return false;
+            }
+            catch (Exception exception)
+            {
+                attempts.Add($"{label}=error({exception.Message})");
+                return false;
+            }
+        }
+
+        private bool TryConvertServerRewardsInt(object result, out int value)
+        {
+            value = 0;
+            if (result == null)
+                return false;
+
+            try
+            {
+                value = Convert.ToInt32(result, CultureInfo.InvariantCulture);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string FormatServerRewardsResult(object result)
+        {
+            return result == null ? "null" : result.ToString();
+        }
+
+        private double PurchaseCooldownRemaining(double lastRunUnix, float cooldownMinutes, double now)
+        {
+            if (lastRunUnix <= 0 || cooldownMinutes <= 0f)
+                return 0;
+
+            return Math.Max(0, lastRunUnix + cooldownMinutes * 60f - now);
+        }
+
+        private string FormatDuration(double seconds)
+        {
+            if (seconds <= 0)
+                return "0s";
+
+            var rounded = Mathf.CeilToInt((float)seconds);
+            var minutes = rounded / 60;
+            var remainder = rounded % 60;
+            if (minutes <= 0)
+                return $"{remainder}s";
+
+            return remainder <= 0 ? $"{minutes}m" : $"{minutes}m {remainder}s";
+        }
+
+        private BasePlayer PlayerFromStringId(string userId)
+        {
+            ulong parsed;
+            return ulong.TryParse(userId, out parsed) ? PlayerFromId(parsed) : null;
+        }
+
+        private void TellPurchasePlayer(string userId, string message)
+        {
+            if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(message))
+                return;
+
+            var player = PlayerFromStringId(userId);
+            if (player != null)
+                SendReply(player, message);
+        }
+
         private bool HasAccess(ConsoleSystem.Arg arg, string requiredPermission)
         {
             if (arg == null)
@@ -3385,6 +4842,17 @@ namespace Oxide.Plugins
             return player.IsAdmin
                    || permission.UserHasPermission(player.UserIDString, AdminPermission)
                    || permission.UserHasPermission(player.UserIDString, requiredPermission);
+        }
+
+        private bool HasPurchaseAccess(BasePlayer player)
+        {
+            if (player == null)
+                return false;
+
+            return player.IsAdmin
+                   || permission.UserHasPermission(player.UserIDString, AdminPermission)
+                   || permission.UserHasPermission(player.UserIDString, PurchasePermission)
+                   || permission.UserHasPermission(player.UserIDString, config.Purchase.Permission);
         }
 
         private string[] GetArgs(ConsoleSystem.Arg arg)

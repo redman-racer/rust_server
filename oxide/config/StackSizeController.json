@@ -494,6 +494,7 @@
     "propanetank": 5,
     "pumpkin": 20,
     "pumpkinbasket": 1,
+    "raidlands.airstrike.designator": 65535,
     "radiationremovetea": 10,
     "radiationremovetea.advanced": 10,
     "radiationremovetea.pure": 10,
@@ -1271,7 +1272,16 @@
     "apartment.master_key": 1,
     "charity.plushy.03": 1,
     "charity.plushy.04": 1,
-    "charity.plushie.05": 1
+    "charity.plushie.05": 1,
+    "raidlands.vehicle.token.minicopter": 100,
+    "raidlands.vehicle.token.scrap_transport_helicopter": 100,
+    "raidlands.vehicle.token.attack_helicopter": 100,
+    "raidlands.vehicle.token.rhib": 100,
+    "raidlands.vehicle.token.tugboat": 100,
+    "raidlands.vehicle.token.solo_submarine": 100,
+    "raidlands.vehicle.token.duo_submarine": 100,
+    "raidlands.vehicle.token.snowmobile": 100,
+    "raidlands.vehicle.token.hot_air_balloon": 100
   },
   "VersionNumber": {
     "Major": 4,

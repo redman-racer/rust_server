@@ -1,11 +1,19 @@
 {
   "AutoSpawn": {
+    "CooldownMinutesAfterRun": 60.0,
     "Enabled": false,
     "IntervalMinutes": 120.0,
     "JitterMinutes": 30.0,
-    "MinOnlinePlayers": 4,
     "MaxActiveRaidBases": 1,
-    "CooldownMinutesAfterRun": 60.0
+    "MinOnlinePlayers": 4
+  },
+  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
+  "Cleanup": {
+    "Cleanup On Unload": true,
+    "Completion Cleanup Delay Seconds": 60.0,
+    "Despawn Pasted Entities": true,
+    "Forced Cleanup Timeout Seconds": 10800.0,
+    "Remove Markers": true
   },
   "LayoutRotation": {
     "EnabledLayouts": [],
@@ -16,25 +24,32 @@
     "PublicDisplayName": "Public Raid Base"
   },
   "LocationRules": {
-    "RandomSearchAttempts": 80,
-    "MinDistanceFromMapEdge": 350.0,
-    "BlockWater": true,
-    "WaterClearance": 1.5,
-    "BlockSafeZones": true,
-    "SafeZoneRadius": 120.0,
     "BlockMonuments": true,
-    "MonumentRadiusPadding": 85.0,
-    "DefaultMonumentRadius": 80.0,
-    "BlockRoads": true,
-    "RoadCheckHeight": 10.0,
-    "RoadCheckDepth": 40.0,
     "BlockPlayerBases": true,
-    "PlayerBaseRadius": 95.0,
-    "MinimumDistanceBetweenEvents": 350.0,
-    "MaxSlope": 0.45,
+    "BlockRoads": true,
+    "BlockSafeZones": true,
+    "BlockWater": true,
+    "DefaultMonumentRadius": 80.0,
     "FlatnessSampleRadius": 18.0,
     "MaxFlatnessDelta": 5.0,
-    "OverlapPadding": 4.0
+    "MaxSlope": 0.45,
+    "MinDistanceFromMapEdge": 350.0,
+    "MinimumDistanceBetweenEvents": 350.0,
+    "MonumentRadiusPadding": 85.0,
+    "OverlapPadding": 4.0,
+    "PlayerBaseRadius": 95.0,
+    "RandomSearchAttempts": 80,
+    "RoadCheckDepth": 40.0,
+    "RoadCheckHeight": 10.0,
+    "SafeZoneRadius": 120.0,
+    "WaterClearance": 1.5
+  },
+  "MapMarker": {
+    "Alpha": 0.65,
+    "Color1": "#ce422b",
+    "Color2": "#f5c542",
+    "Enabled": true,
+    "RadiusMeters": 90.0
   },
   "Paste": {
     "CopyPaste Arguments": [
@@ -55,41 +70,47 @@
       "enablesaving",
       "false"
     ],
-    "RandomRotationDegreesStep": 90.0,
-    "GroundClearance": 0.25,
     "Force Pasted Turrets Attack All": true,
+    "GroundClearance": 0.25,
     "Pasted Turret Attack All Reapply Delays Seconds": [
       0.1,
       0.5,
       1.5,
       3.0
-    ]
+    ],
+    "RandomRotationDegreesStep": 90.0
   },
-  "MapMarker": {
+  "Purchase": {
+    "Allow Random Layout": true,
+    "Allowed Layout Ids": [],
+    "Announce Purchaser": true,
+    "Cooldown Minutes Global": 45.0,
+    "Cooldown Minutes Per Player": 180.0,
+    "Costs": [
+      {
+        "Amount": 12000,
+        "DisplayName": "12,000 RP",
+        "ShortName": null,
+        "Type": "RP"
+      },
+      {
+        "Amount": 50000,
+        "DisplayName": "50,000 scrap",
+        "ShortName": "scrap",
+        "Type": "Item"
+      }
+    ],
+    "Default Layout Id": "random",
     "Enabled": true,
-    "RadiusMeters": 90.0,
-    "Alpha": 0.65,
-    "Color1": "#ce422b",
-    "Color2": "#f5c542"
-  },
-  "Scoring": {
-    "Enabled": true,
-    "Score Radius Meters": 120.0,
-    "Require Attacker And Victim Inside Radius": true,
-    "Player Kill Points": 100,
-    "Player Damage Points Per 100 Damage": 5.0,
-    "Event Entity Damage Points Per 100 Damage": 1.0,
-    "Explosive Event Entity Damage Bonus Points Per 100 Damage": 4.0,
-    "Tool Cupboard Destroyed Points": 1000,
-    "Minimum Score To Qualify": 250,
-    "Max Leaderboard Entries": 5,
-    "Announce Leaderboard On Completion": true
+    "Min Online Players": 0,
+    "Permission": "raidlandsevents.player.purchase",
+    "Purchaser Does Not Own Event": true,
+    "Refund On Start Failure": true,
+    "Require Random Location": true
   },
   "Rewards": {
-    "Enabled": false,
     "Award ServerRewards RP": false,
-    "Tell Players About RP Rewards": true,
-    "Queue Rewards If ServerRewards Missing": true,
+    "Enabled": false,
     "Placement RP Rewards": [
       {
         "Place": 1,
@@ -103,14 +124,22 @@
         "Place": 3,
         "ServerRewards RP": 2500
       }
-    ]
+    ],
+    "Queue Rewards If ServerRewards Missing": true,
+    "Tell Players About RP Rewards": true
   },
-  "Cleanup": {
-    "Remove Markers": true,
-    "Despawn Pasted Entities": true,
-    "Cleanup On Unload": true,
-    "Completion Cleanup Delay Seconds": 60.0,
-    "Forced Cleanup Timeout Seconds": 10800.0
-  },
-  "Chat Prefix": "<color=#ce422b>[Raidlands]</color>"
+  "Scoring": {
+    "Announce Leaderboard On Completion": true,
+    "Enabled": true,
+    "Event Entity Damage Points Per 100 Damage": 1.0,
+    "Explosive Event Entity Damage Bonus Points Per 100 Damage": 4.0,
+    "Max Leaderboard Entries": 5,
+    "Minimum Score To Qualify": 250,
+    "Player Damage Points Per 100 Damage": 5.0,
+    "Player Kill Points": 100,
+    "Require Attacker And Victim Inside Radius": true,
+    "Score Radius Meters": 120.0,
+    "Tool Cupboard Destroyed Points": 1000,
+    "Use Layout Center For Score Radius": true
+  }
 }

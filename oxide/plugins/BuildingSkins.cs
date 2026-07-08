@@ -113,14 +113,19 @@ namespace Oxide.Plugins
 
         private void OnPlayerConnected(BasePlayer player)
         {
-            if (player == null || !player.IsConnected) return;
-            if (player.IsReceivingSnapshot)
+            if (player == null || !player.IsConnected || config == null) return;
+
+            if (storedData == null)
             {
-                timer.Once(1f, () => OnPlayerConnected(player));
-                return;
+                storedData = new StoredData();
             }
-            StartCoroutine(player, PreloadImages(player));
-            if (!storedData.PlayerData.TryGetValue(player.userID.Get(), out var data))
+
+            if (storedData.PlayerData == null)
+            {
+                storedData.PlayerData = new Dictionary<ulong, Data>();
+            }
+
+            if (!storedData.PlayerData.TryGetValue(player.userID.Get(), out var data) || data == null)
             {
                 data = new Data
                 {
@@ -130,8 +135,20 @@ namespace Oxide.Plugins
                     RandomColor = false,
                     Color = 9
                 };
-                storedData.PlayerData[player.userID] = data;
+                storedData.PlayerData[player.userID.Get()] = data;
             }
+
+            if (player.IsReceivingSnapshot)
+            {
+                timer.Once(1f, () =>
+                {
+                    if (this == null || config == null || player == null || !player.IsConnected) return;
+                    OnPlayerConnected(player);
+                });
+                return;
+            }
+
+            StartCoroutine(player, PreloadImages(player));
             player.SetInfo("client.SelectedShippingContainerBlockColour", data.RandomColor ? data.Color.ToString() : player.GetInfoString("client.SelectedShippingContainerBlockColour", "0"));
         }
 
@@ -509,6 +526,7 @@ namespace Oxide.Plugins
 
         private void StartCoroutine(BasePlayer player, IEnumerator routine)
         {
+            if (player == null || routine == null || !player.IsConnected) return;
             if (runningCoroutines.ContainsKey(player.userID.Get())) return;
             var coroutine = ServerMgr.Instance?.StartCoroutine(routine);
             if (coroutine != null) runningCoroutines[player.userID.Get()] = coroutine;
@@ -516,12 +534,13 @@ namespace Oxide.Plugins
 
         private void StopCoroutine(BasePlayer player)
         {
+            if (player == null) return;
             if (!runningCoroutines.ContainsKey(player.userID.Get())) return;
             var coroutine = runningCoroutines[player.userID.Get()];
             if (coroutine != null) ServerMgr.Instance?.StopCoroutine(coroutine);
             runningCoroutines.Remove(player.userID.Get());
             var entity = player?.inventory?.loot?.entitySource;
-            if (entity == null || !permission.UserHasPermission(player.UserIDString, permissionTc)) return;
+            if (entity == null || config == null || !permission.UserHasPermission(player.UserIDString, permissionTc)) return;
             if (entity is BuildingPrivlidge)
             {
                 if (config.ChangeSkinTC && entity.OwnerID != player.userID.Get()) return;
@@ -571,8 +590,13 @@ namespace Oxide.Plugins
 
         private ulong GetPlayerSkinID(BasePlayer player, BuildingGrade.Enum grade)
         {
-            var playerData = storedData.PlayerData.TryGetValue(player.userID.Get(), out var data) ? data : null;
-            return (ulong)(playerData?.GetType().GetField(grade.ToString()).GetValue(playerData) ?? 0);
+            if (player == null || storedData?.PlayerData == null) return 0;
+            if (!storedData.PlayerData.TryGetValue(player.userID.Get(), out var playerData) || playerData == null) return 0;
+
+            var field = playerData.GetType().GetField(grade.ToString());
+            if (field == null) return 0;
+
+            return (ulong)(field.GetValue(playerData) ?? 0);
         }
 
         private BuildingBlock GetLookEntity(BasePlayer player)
@@ -984,7 +1008,7 @@ namespace Oxide.Plugins
 
         private IEnumerator PreloadImages(BasePlayer player)
         {
-            if (player == null || !player.IsConnected) yield break;
+            if (player == null || !player.IsConnected || config?.BuildingImages == null || ImageLibrary == null) yield break;
             for (var i = 0; i < config.BuildingImages.Count; i++)
             {
                 CuiElementContainer temp = new CuiElementContainer();
@@ -1138,6 +1162,12 @@ namespace Oxide.Plugins
             if (storedData == null)
             {
                 storedData = new StoredData();
+                SaveData();
+            }
+
+            if (storedData.PlayerData == null)
+            {
+                storedData.PlayerData = new Dictionary<ulong, Data>();
                 SaveData();
             }
 

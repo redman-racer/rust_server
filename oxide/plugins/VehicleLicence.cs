@@ -4007,6 +4007,12 @@ namespace Oxide.Plugins
             return true;
         }
 
+        [HookMethod(nameof(SpawnLicensedVehicleAt))]
+        public bool SpawnLicensedVehicleAt(BasePlayer player, string vehicleType, Vector3 position, Quaternion rotation, string command, bool bypassCooldown = false)
+        {
+            return SpawnVehicleAt(player, vehicleType, position, rotation, bypassCooldown, command);
+        }
+
         [HookMethod(nameof(RecallLicensedVehicle))] // added hooks
         public bool RecallLicensedVehicle(BasePlayer player, string vehicleType, string command, bool bypassCooldown = false)
         {
@@ -4532,6 +4538,57 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private bool SpawnVehicleAt(BasePlayer player, string vehicleType, Vector3 position, Quaternion rotation, bool bypassCooldown, string command)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(vehicleType))
+            {
+                return false;
+            }
+
+            var settings = GetBaseVehicleSettings(vehicleType);
+            if (settings == null)
+            {
+                return false;
+            }
+
+            Vehicle vehicle;
+            if (!storedData.IsVehiclePurchased(player.userID, vehicleType, out vehicle))
+            {
+                if (!permission.UserHasPermission(player.UserIDString, PERMISSION_BYPASS_COST))
+                {
+                    Print(player, Lang("VehicleNotYetPurchased", player.UserIDString, settings.DisplayName, configData.chat.buyCommand));
+                    return false;
+                }
+
+                BuyVehicle(player, vehicleType);
+                vehicle = storedData.GetVehicleLicense(player.userID, vehicleType);
+            }
+
+            if (vehicle == null)
+            {
+                return false;
+            }
+
+            if (vehicle.Entity != null && !vehicle.Entity.IsDestroyed)
+            {
+                Print(player, Lang("AlreadyVehicleOut", player.UserIDString, settings.DisplayName, configData.chat.recallCommand));
+                return false;
+            }
+
+            string reason;
+            var spawnPosition = position;
+            var spawnRotation = rotation;
+            if (!CanSpawnAtPosition(player, vehicle, bypassCooldown, command, out reason, ref spawnPosition, ref spawnRotation))
+            {
+                Print(player, reason);
+                return false;
+            }
+
+            SpawnVehicle(player, vehicle, spawnPosition, spawnRotation);
+            var entity = GetLicensedVehicle(player.userID.Get(), vehicleType);
+            return entity != null && !entity.IsDestroyed;
+        }
+
         private bool CanSpawn(BasePlayer player, Vehicle vehicle, bool bypassCooldown, string command, out string reason, ref Vector3 position, ref Quaternion rotation)
         {
 
@@ -4607,6 +4664,81 @@ namespace Oxide.Plugins
             {
                 randomVehicle.Kill(BaseNetworkable.DestroyMode.Gib);
             }
+            reason = null;
+            return true;
+        }
+
+        private bool CanSpawnAtPosition(BasePlayer player, Vehicle vehicle, bool bypassCooldown, string command, out string reason, ref Vector3 position, ref Quaternion rotation)
+        {
+            var settings = GetBaseVehicleSettings(vehicle.VehicleType);
+            BaseEntity randomVehicle = null;
+            if (configData.global.limitVehicles > 0)
+            {
+                var activeVehicles = storedData.ActiveVehicles(player.userID);
+                var count = activeVehicles.Count();
+                if (count >= configData.global.limitVehicles)
+                {
+                    if (configData.global.killVehicleLimited)
+                    {
+                        randomVehicle = activeVehicles.ElementAt(Random.Range(0, count));
+                    }
+                    else
+                    {
+                        reason = Lang("VehiclesLimit", player.UserIDString, configData.global.limitVehicles);
+                        return false;
+                    }
+                }
+            }
+
+            if (!CanPlayerActionAtPosition(player, vehicle, settings, out reason, ref position, ref rotation))
+            {
+                return false;
+            }
+
+            var obj = Interface.CallHook("CanLicensedVehicleSpawn", player, vehicle.VehicleType, position, rotation);
+            if (obj != null)
+            {
+                var s = obj as string;
+                reason = s ?? Lang("SpawnWasBlocked", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+#if DEBUG
+            if (player.IsAdmin)
+            {
+                reason = null;
+                return true;
+            }
+#endif
+            if (!CheckCooldown(player, vehicle, settings, bypassCooldown, true, command, out reason))
+            {
+                return false;
+            }
+
+            string resources;
+            if (settings.SpawnPrices.Count > 0 && !TryPay(player, settings, settings.SpawnPrices, out resources))
+            {
+                reason = Lang("NoResourcesToSpawnVehicle", player.UserIDString, settings.DisplayName, resources);
+                return false;
+            }
+
+            if (!configData.CanSpawnInZones && InZone(player))
+            {
+                reason = Lang("NoSpawnInZone", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+            if (player.IsInsideDeepSea() && !configData.CanSpawnInDeepSea)
+            {
+                reason = Lang("NoSpawnInDeepSea", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+            if (randomVehicle != null)
+            {
+                randomVehicle.Kill(BaseNetworkable.DestroyMode.Gib);
+            }
+
             reason = null;
             return true;
         }
@@ -5004,6 +5136,63 @@ namespace Oxide.Plugins
             {
                 return false;
             }
+            reason = null;
+            return true;
+        }
+
+        private bool CanPlayerActionAtPosition(BasePlayer player, Vehicle vehicle, BaseVehicleSettings settings, out string reason, ref Vector3 position, ref Quaternion rotation)
+        {
+            if (configData.global.preventBuildingBlocked && player.IsBuildingBlocked())
+            {
+                reason = Lang("BuildingBlocked", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+            if (configData.global.preventSafeZone && player.InSafeZone())
+            {
+                reason = Lang("PlayerInSafeZone", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+            if (configData.global.preventMountedOrParented && HasMountedOrParented(player, settings))
+            {
+                reason = Lang("MountedOrParented", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+            var original = position;
+            if (settings.MinDistanceForPlayers > 0)
+            {
+                var nearbyPlayers = Pool.Get<List<BasePlayer>>();
+                Vis.Entities(original, settings.MinDistanceForPlayers, nearbyPlayers, Layers.Mask.Player_Server);
+                var flag = nearbyPlayers.Any(x => x.userID.IsSteamId() && x != player);
+                Pool.FreeUnmanaged(ref nearbyPlayers);
+                if (flag)
+                {
+                    reason = Lang("PlayersOnNearby", player.UserIDString, settings.DisplayName);
+                    return false;
+                }
+            }
+
+            if (settings.IsWaterVehicle && !IsInWater(original))
+            {
+                reason = Lang("NotLookingAtWater", player.UserIDString, settings.DisplayName);
+                return false;
+            }
+
+            position = GetGroundPosition(original, settings.IsWaterVehicle);
+            if (settings.IsWaterVehicle)
+            {
+                var waterHeight = WaterLevel.GetWaterSurface(position, true, true, null);
+                position.y = waterHeight + (vehicle.VehicleType == "Tugboat" ? 1.5f : 1f);
+            }
+
+            if (rotation == Quaternion.identity)
+            {
+                var forward = player.eyes != null ? player.eyes.HeadForward().WithY(0) : player.transform.forward.WithY(0);
+                rotation = forward != Vector3.zero ? Quaternion.LookRotation(forward) : player.transform.rotation;
+            }
+
             reason = null;
             return true;
         }

@@ -502,9 +502,9 @@ Dynamic events should consider online player count.
 }
 ```
 
-### 9.4 Player purchase trigger
+### 9.4 Public event purchase trigger
 
-Player-purchased events are public.
+Player-purchased public events are public. This trigger starts a server-owned event objective such as a CopyPaste raid base, KOTH, convoy, or meteor. It is not the `/raidme` player-base defense flow.
 
 ```json
 {
@@ -539,6 +539,32 @@ Player-purchased events are public.
 ```
 
 Important rule: `PurchaserDoesNotOwnEvent = true` means buying the event starts it, but does not reserve the reward.
+
+Current command naming rule:
+
+- `/eventbuy` and `/raidbase` are valid player-facing commands for this public purchased raid-base MVP.
+- `/raidme` is reserved for player-owned base defense/bounty events and should not charge or start public CopyPaste raid-base events.
+
+### 9.5 Player-owned base RaidMe defense trigger
+
+`/raidme` should mean "target my actual base." This is a separate event family from public purchased CopyPaste raid bases.
+
+Expected future flow:
+
+1. Player runs `/raidme` while inside or near a base where they have building privilege.
+2. RaidlandsEvents resolves the target base from the nearby authorized tool cupboard/building privilege area.
+3. The event records defender SteamID/display name, target TC/base center/radius, defender clan/team snapshot when available, reward pool/escrow, raid window, and success/fail conditions.
+4. When RaidlandsRoamBots can raid bases, RaidlandsEvents asks the bot adapter to create an attacker group with the base center/TC as objective.
+5. If the defender survives the configured defense objective, the defender receives the defense reward.
+6. If a real player or clan raids the target first, that raider can steal the reward the defender would have earned.
+
+Important design rules:
+
+- Do not paste a new base for `/raidme`.
+- Do not auto-authorize the defender onto server-owned event turrets; the target is the defender's real base and their existing auth applies.
+- Real-player raid success should be detected through objective destruction, TC destruction, and event scoring, not by trusting who typed a command.
+- Bot raiding is delegated to RaidlandsRoamBot; RaidlandsEvents only registers the target, reward rules, scoring, and cleanup.
+- Anti-abuse checks should block rewards for self-damage, same-clan/allied-clan farming, recently transferred ownership, and obvious defender/raider collusion.
 
 ---
 
@@ -935,7 +961,8 @@ Recommended defaults:
 - Solo events: `Player`.
 - Clan KOTH: `ClanContributionSplit`.
 - Casual clan events: `ClanEvenSplit`.
-- Purchased raid events: reward based on actual event score, not purchaser identity.
+- Public purchased raid-base events: reward based on actual event score, not purchaser identity.
+- Player-owned `/raidme` defense events: defender gets the reward for successful defense; a real raider/clan that completes the raid objective before defense success can steal that defender reward.
 
 ### 14.2 Reward item types
 
@@ -1186,6 +1213,26 @@ RaidlandsEvents should not track:
 - medical behavior
 - flank logic
 - formation logic
+
+### 16.6 Future player-base raid objective
+
+For `/raidme` player-base defense events, RaidlandsEvents should pass RaidlandsRoamBot a raid objective instead of spawn-only guard behavior:
+
+```json
+{
+  "EventInstanceId": "raidme_home_defense_8f92",
+  "ObjectiveType": "RaidPlayerBase",
+  "TargetBaseCenter": { "X": 100.0, "Y": 20.0, "Z": -300.0 },
+  "TargetRadius": 75,
+  "TargetToolCupboardEntityId": 123456,
+  "DefenderUserId": "7656119...",
+  "AvoidFoundationWipe": true,
+  "PreferDoorsAndExternalWalls": true,
+  "RaidWindowSeconds": 1800
+}
+```
+
+RaidlandsRoamBot owns how bots path, breach, pick targets, retreat, and escalate. RaidlandsEvents owns the timer, reward escrow, real-player scoring, objective completion, and cleanup.
 
 ---
 

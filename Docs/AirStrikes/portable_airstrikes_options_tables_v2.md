@@ -13,7 +13,7 @@ Use this file to understand:
 - Payload scaling
 - A-10 / Bradley longbarrel behavior
 - Homing missile behavior
-- Single-token + RP selection model
+- Single airstrike binocular item + RP selection model
 
 Implementation sequencing belongs in:
 
@@ -27,7 +27,7 @@ portable_airstrikes_codex_implementation_plan.md
 
 ```text
 The player uses binoculars to create a fresh target ping.
-The player uses one generic Airstrike Authorization item to access the strike system.
+The player carries one configured Airstrike Targeting Binoculars item to access the strike system.
 The player chooses the strike type from a menu or direct command.
 The plugin charges RP based on the selected strike type.
 The selected strike definition determines delivery platform, payload, spread, delay, damage, and cooldown.
@@ -38,7 +38,7 @@ Important design decision:
 ```text
 Do not create one item per airstrike type.
 
-Use one common airstrike item/token.
+Use one common airstrike binocular item.
 Use config, permissions, RP costs, and cooldowns to control which airstrikes can be called.
 ```
 
@@ -48,9 +48,9 @@ Use config, permissions, RP costs, and cooldowns to control which airstrikes can
 
 | Concept | Recommended Value | Notes |
 |---|---|---|
-| Generic item name | `Airstrike Authorization Key` or `Airstrike Beacon` | Display name can be changed in config |
-| Default item shortname | `targeting.computer` | Good thematic default; configurable |
-| Skin ID | Configurable | Use a custom skin if desired |
+| Generic item name | `Airstrike Targeting Binoculars` | Display name can be changed in config |
+| Default item shortname | `tool.binoculars` | Holdable/usable binoculars; configurable |
+| Skin ID | Configurable | `tool.binoculars` currently reports `HasSkins=false`, so this is mainly for alternate item shortnames that support skins |
 | Consumed on call | Configurable, recommended `true` | Keeps loot-table item meaningful |
 | Strike type stored on item? | No | Strike type is chosen at call time |
 | RP cost required? | Yes | Higher-tier strikes cost more RP |
@@ -62,7 +62,7 @@ Recommended default behavior:
 ```text
 Player needs:
 1. A valid recent binocular ping
-2. At least 1 Airstrike Authorization item
+2. At least 1 Airstrike Targeting Binoculars item
 3. Enough RP for the chosen strike
 4. Permission for the chosen strike
 5. No active cooldown blocking the strike
@@ -75,12 +75,12 @@ Player needs:
 | Step | Player Action | Plugin Behavior |
 |---:|---|---|
 | 1 | Player pings target with binoculars | Plugin stores latest valid ground or vehicle ping |
-| 2 | Player uses `/strike` or the configured item/menu trigger | Plugin opens strike selection UI |
+| 2 | Player uses `/strike` or pings while holding the configured binocular item | Plugin opens strike selection UI if no default exists, or attempts the saved default |
 | 3 | Plugin detects target type | Ground ping shows ground strikes; vehicle ping shows vehicle-target strikes |
-| 4 | Player views strike options | UI shows RP cost, cooldown, permission lock, token requirement, and target compatibility |
-| 5 | Player chooses strike | Plugin revalidates ping, token, RP, cooldown, permissions, and safe-zone rules |
+| 4 | Player views strike options | UI shows RP cost, cooldown, permission lock, item requirement, default state, and target compatibility |
+| 5 | Player chooses strike | Plugin revalidates ping, item, RP, cooldown, permissions, and safe-zone rules |
 | 6 | Plugin confirms or immediately calls strike | Configurable confirmation step |
-| 7 | Plugin consumes token and RP | Recommended only after all validation passes |
+| 7 | Plugin consumes item and RP | Recommended only after all validation passes |
 | 8 | Warning delay starts | Audio/effects/map marker/chat warning |
 | 9 | Strike executes | Delivery platform and payload behavior come from selected strike definition |
 
@@ -92,7 +92,8 @@ Direct command fallback:
 | `/strike <strikeId>` | Attempts to call a specific strike |
 | `/strike last` | Attempts to repeat the player's last selected strike |
 | `/strike cancel` | Cancels a pending strike, if config allows |
-| `/strike balance` | Shows player RP and strike-token status |
+| `/strike balance` | Shows player RP, item count, discount, and saved default status |
+| `/strike default <strikeId>` | Saves a persistent default used by future airstrike-binocular pings |
 
 ---
 
@@ -163,13 +164,13 @@ Do not blindly multiply these payloads without caps.
 
 These are relative bands. Final values should be tuned to the server's RP economy.
 
-| Tier | Strike Class | Suggested RP Cost Band | Token Requirement |
+| Tier | Strike Class | Suggested RP Cost Band | Item Requirement |
 |---:|---|---:|---|
-| 1 | Utility / harassment | 25–100 RP | 1 token |
-| 2 | Anti-player / medium support | 100–300 RP | 1 token |
-| 3 | Raid pressure / rockets / A-10 | 300–900 RP | 1 token |
-| 4 | Heavy homing / mini MLRS | 900–2000 RP | 1 token |
-| 5 | Full MLRS / event-level strike | 2000+ RP | 1 token or admin/event only |
+| 1 | Utility / harassment | 25–100 RP | 1 binocular item |
+| 2 | Anti-player / medium support | 100–300 RP | 1 binocular item |
+| 3 | Raid pressure / rockets / A-10 | 300–900 RP | 1 binocular item |
+| 4 | Heavy homing / mini MLRS | 900–2000 RP | 1 binocular item |
+| 5 | Full MLRS / event-level strike | 2000+ RP | 1 binocular item or admin/event only |
 
 ---
 
@@ -347,7 +348,7 @@ Homing missile strikes should use vehicle pings, not normal ground pings.
 | Check | If Passing | If Failing |
 |---|---|---|
 | Player has valid ping | Show target-compatible strikes | Show targeting instructions |
-| Player has token item | Enable strike selection | Show locked reason: `Requires Airstrike Authorization Key` |
+| Player has airstrike binocular item | Enable strike selection | Show locked reason: `Requires Airstrike Targeting Binoculars` |
 | Player has enough RP | Enable affordable strike | Show locked reason: `Need X RP` |
 | Player has permission | Show/use strike | Hide or show locked, configurable |
 | Player cooldown ready | Enable strike | Show remaining cooldown |
@@ -387,13 +388,19 @@ Homing missile strikes should use vehicle pings, not normal ground pings.
 {
   "AirstrikeItem": {
     "Enabled": true,
-    "DisplayName": "Airstrike Authorization Key",
-    "Shortname": "targeting.computer",
+    "DisplayName": "Airstrike Targeting Binoculars",
+    "Shortname": "tool.binoculars",
     "SkinId": 0,
     "RequireCustomNameOrSkin": true,
     "RequiredAmount": 1,
     "ConsumeOnSuccessfulCall": true,
-    "AllowAdminsWithoutItem": true
+    "AllowAdminsWithoutItem": true,
+    "TreatAsTargetingTool": true,
+    "ShowEquipInstructions": true,
+    "ToolTargetMarkerEnabled": true,
+    "ToolTargetMarkerDurationSeconds": 18.0,
+    "ToolTargetMarkerSize": 10.0,
+    "ToolTargetMarkerAlpha": 0.55
   },
   "Currency": {
     "Enabled": true,
@@ -429,11 +436,11 @@ Homing missile strikes should use vehicle pings, not normal ground pings.
 | Distribution Source | Uses Same Airstrike Item? | Suggested Implementation |
 |---|---:|---|
 | Kits | Yes | Add the configured item shortname, display name, and skin to kit definitions |
-| VIP keys | Yes | VIP keys can grant the item, extra tokens, RP discounts, or permissions |
-| Loot tables | Yes | Add the same token item to selected container rules |
-| Events | Yes | Reward tokens through event plugins or admin commands |
+| VIP keys | Yes | VIP keys can grant the item, extra binocular items, RP discounts, or permissions |
+| Loot tables | Yes | Add the same binocular item to selected container rules |
+| Events | Yes | Reward binocular items through event plugins or admin commands |
 | Admin grants | Yes | `/strike giveitem <player> <amount>` |
-| Shops | Yes | Sell the single token item, while RP still pays for selected strike |
+| Shops | Yes | Sell the single binocular item, while RP still pays for selected strike |
 
 ---
 
@@ -451,7 +458,7 @@ Homing missile strikes should use vehicle pings, not normal ground pings.
 | `CooldownPerPlayer` | All strikes | Prevents spam |
 | `CooldownPerClan` | Heavy strikes | Prevents clan stacking |
 | `GlobalCooldown` | MLRS, A-10, full barrages | Prevents server-wide chaos |
-| `CostItemShortname` | All player strikes | Generic token item gate |
+| `CostItemShortname` | All player strikes | Generic binocular item gate |
 | `RPCost` | All player strikes | Tier pricing |
 | `PermissionRequired` | Premium/admin strikes | Controls access |
 | `DamageScalePlayers` | All damaging strikes | PvP balance |
@@ -469,7 +476,7 @@ Homing missile strikes should use vehicle pings, not normal ground pings.
 |---|---|---|---|
 | Ping ground with binoculars | Ground position | Ground strike catalog | Drone drop, mortar, rocket run, A-10, MLRS |
 | Ping vehicle with binoculars | Vehicle entity ID | Vehicle strike catalog | Homing missile strike |
-| Open `/strike` menu | Token, RP, cooldowns, permissions, ping type | Available strike list | Player chooses strike |
+| Open `/strike` menu | Item, RP, cooldowns, permissions, ping type, saved default | Available strike list | Player chooses strike |
 | Select drone-tier strike | Ping position | `X` payload | Small drop |
 | Select heli-tier strike | Ping position or vehicle | `XX` payload / rocket pass | Medium strike |
 | Select plane-tier strike | Ping position or vehicle | `XXX` payload / barrage | Heavy strike |

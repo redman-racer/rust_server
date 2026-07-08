@@ -69,6 +69,16 @@ namespace Oxide.Plugins
             }
         }
 
+        private void OnItemDefinitionRegistered(ItemDefinition itemDefinition)
+        {
+            if (itemDefinition == null || _config == null || _vanillaDefaults == null)
+            {
+                return;
+            }
+
+            ApplyStackSize(itemDefinition);
+        }
+
         #region Configuration
 
         private class Configuration
@@ -582,20 +592,29 @@ namespace Oxide.Plugins
         {
             foreach (ItemDefinition itemDefinition in ItemManager.GetItemDefinitions())
             {
-                if (itemDefinition.condition.enabled && !_config.AllowStackingItemsWithDurability)
-                {
-                    itemDefinition.stackable = Mathf.Clamp(GetVanillaStackSize(itemDefinition), 1, int.MaxValue);
-
-                    continue;
-                }
-
-                if (_ignoreList.Contains(itemDefinition.shortname))
-                {
-                    continue;
-                }
-
-                itemDefinition.stackable = Mathf.Clamp(GetStackSize(itemDefinition), 1, int.MaxValue);
+                ApplyStackSize(itemDefinition);
             }
+        }
+
+        private void ApplyStackSize(ItemDefinition itemDefinition)
+        {
+            if (itemDefinition == null)
+            {
+                return;
+            }
+
+            if (itemDefinition.condition.enabled && !_config.AllowStackingItemsWithDurability)
+            {
+                itemDefinition.stackable = Mathf.Clamp(GetVanillaStackSize(itemDefinition), 1, int.MaxValue);
+                return;
+            }
+
+            if (_ignoreList.Contains(itemDefinition.shortname))
+            {
+                return;
+            }
+
+            itemDefinition.stackable = Mathf.Clamp(GetStackSize(itemDefinition), 1, int.MaxValue);
         }
 
         private void RevertStackSizes()

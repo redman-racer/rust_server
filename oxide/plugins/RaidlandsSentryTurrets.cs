@@ -3,26 +3,32 @@ using System.Collections.Generic;
 using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Oxide.Core;
 using Oxide.Core.Plugins;
 using Rust;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.8")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.11")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
         private const string AdminPermission = "raidlands.sentryturrets.admin";
+        private const string RaidlandsEventsDataFileName = "RaidlandsEvents";
         private const string RemoverToolRefundKey = "raidlands.sentryturret";
         private const string VanillaAutoTurretPrefab = "assets/prefabs/npc/autoturret/autoturret_deployed.prefab";
         private const string VanillaAutoTurretShortPrefab = "autoturret_deployed";
+        private const string SimpleSwitchPrefab = "assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab";
+        private const string SimpleSwitchShortPrefab = "simpleswitch";
+        private const string OwnerlessManageConfirmation = "confirm";
 
         [PluginReference]
         private Plugin Clans, Friends, RemoverTool, TurretSwitches;
 
         private Configuration config;
         private readonly HashSet<ulong> handledTurretIds = new HashSet<ulong>();
+        private readonly HashSet<ulong> eventManagedSentryIds = new HashSet<ulong>();
         private string resolvedSentryPrefab;
 
         private class Configuration
@@ -56,6 +62,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("Clear Authorized Players On Spawned NPC Sentries")]
             public bool ClearAuthorizedPlayersOnSpawnedNpcSentries = false;
+
+            [JsonProperty("Allow Automatic Ownerless CopyPaste Sentry Fallback")]
+            public bool AllowAutomaticOwnerlessCopyPasteSentryFallback = false;
+
+            [JsonProperty("Repair Unmanaged Ownerless Sentries On Load")]
+            public bool RepairUnmanagedOwnerlessSentriesOnLoad = true;
 
             [JsonProperty("Post Spawn Attack All Reapply Delays Seconds")]
             public float[] AttackAllReapplyDelaysSeconds = { 0.05f, 0.25f, 1f, 3f };
@@ -247,7 +259,7 @@ namespace Oxide.Plugins
             foreach (var serverEntity in BaseNetworkable.serverEntities)
             {
                 var entity = serverEntity as BaseEntity;
-                if (!IsManagedNpcSentry(entity))
+                if (!IsPlayerOwnedManagedNpcSentry(entity))
                 {
                     continue;
                 }
@@ -256,6 +268,30 @@ namespace Oxide.Plugins
                 ApplySentryRuntimeState(entity, authIds);
                 ScheduleSentryRuntimeStateReapply(entity, authIds);
                 ConfigurePickup(entity);
+            }
+
+            var restoredEventSentries = ManagePersistedRaidlandsEventSentries();
+            if (restoredEventSentries > 0)
+            {
+                Puts($"Restored durability tuning for {restoredEventSentries} active RaidlandsEvents sentry turret(s).");
+            }
+
+            if (config.AllowAutomaticOwnerlessCopyPasteSentryFallback)
+            {
+                var restoredCopyPasteSentries = ManageUntrackedCopyPasteSentries();
+                if (restoredCopyPasteSentries > 0)
+                {
+                    Puts($"Restored durability tuning for {restoredCopyPasteSentries} ownerless CopyPaste sentry turret(s).");
+                }
+            }
+
+            if (config.RepairUnmanagedOwnerlessSentriesOnLoad)
+            {
+                var repairedOwnerlessSentries = RepairUnmanagedOwnerlessSentries();
+                if (repairedOwnerlessSentries > 0)
+                {
+                    Puts($"Repaired {repairedOwnerlessSentries} unmanaged ownerless sentry turret(s) back to native peacekeeper behavior.");
+                }
             }
         }
 
@@ -330,6 +366,157 @@ namespace Oxide.Plugins
             arg.ReplyWith($"Required short prefab name: {config.RequiredSpawnedShortPrefabName}\nSentry prefab candidates:\n" + string.Join("\n", lines));
         }
 
+        [ConsoleCommand("raidlands.sentry.scan")]
+        private void CCmdScanSentries(ConsoleSystem.Arg arg)
+        {
+            if (!CanUseAdminCommand(arg))
+            {
+                arg.ReplyWith("You do not have permission to use this command.");
+                return;
+            }
+
+            var includeAll = arg.Args != null && arg.Args.Length > 0 && string.Equals(arg.GetString(0), "all", StringComparison.OrdinalIgnoreCase);
+            var lines = new List<string>
+            {
+                $"RaidlandsSentryTurrets scan v1.0.11 hp={config.SentryTuning?.EffectiveMaxHealth:0.##} rangeMultiplier={config.SentryTuning?.RangeMultiplier:0.##} autoOwnerlessFallback={config.AllowAutomaticOwnerlessCopyPasteSentryFallback}"
+            };
+
+            var total = 0;
+            var managed = 0;
+            var copied = 0;
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                var entity = serverEntity as BaseEntity;
+                if (!LooksLikeConfiguredSentryPrefab(entity))
+                {
+                    continue;
+                }
+
+                total++;
+                if (IsManagedNpcSentry(entity))
+                {
+                    managed++;
+                }
+
+                if (ShouldManageUntrackedCopyPasteSentry(entity))
+                {
+                    copied++;
+                }
+
+                if (includeAll || lines.Count < 30)
+                {
+                    lines.Add(DescribeSentryForScan(entity));
+                }
+            }
+
+            lines.Insert(1, $"total={total} managed={managed} ownerlessSwitchCandidatesManualOnly={copied}");
+            arg.ReplyWith(string.Join("\n", lines));
+        }
+
+        [ConsoleCommand("raidlands.sentry.manage")]
+        private void CCmdManageSentry(ConsoleSystem.Arg arg)
+        {
+            if (!CanUseAdminCommand(arg))
+            {
+                arg.ReplyWith("You do not have permission to use this command.");
+                return;
+            }
+
+            if (arg.Args == null || arg.Args.Length < 1)
+            {
+                arg.ReplyWith("Usage: raidlands.sentry.manage <entityId|ownerless-switch|ownerless-all> [confirm]");
+                return;
+            }
+
+            var mode = arg.GetString(0);
+            if (string.Equals(mode, "ownerless-switch", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!HasOwnerlessManageConfirmation(arg))
+                {
+                    ReplyOwnerlessConfirmationRequired(arg, "ownerless-switch");
+                    return;
+                }
+
+                arg.ReplyWith($"Managed {ManageUntrackedCopyPasteSentries()} ownerless CopyPaste sentry turret(s).");
+                return;
+            }
+
+            if (string.Equals(mode, "ownerless-all", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!HasOwnerlessManageConfirmation(arg))
+                {
+                    ReplyOwnerlessConfirmationRequired(arg, "ownerless-all");
+                    return;
+                }
+
+                arg.ReplyWith($"Managed {ManageOwnerlessSentries()} ownerless configured sentry turret(s).");
+                return;
+            }
+
+            ulong entityId;
+            if (!ulong.TryParse(mode, out entityId))
+            {
+                arg.ReplyWith("Usage: raidlands.sentry.manage <entityId|ownerless-switch|ownerless-all> [confirm]");
+                return;
+            }
+
+            var allowOwnerless = HasOwnerlessManageConfirmation(arg);
+            if (ManageEventSentry(entityId, allowOwnerless))
+            {
+                arg.ReplyWith($"Managed sentry entity {entityId}.");
+                return;
+            }
+
+            var entity = FindServerEntity(entityId);
+            arg.ReplyWith(!allowOwnerless && IsOwnerlessConfiguredSentry(entity)
+                ? $"Sentry entity {entityId} is ownerless. Native Outpost sentries are ownerless too, so only RaidlandsEvents tracked IDs are managed automatically. If this is a verified pasted event sentry, run: raidlands.sentry.manage {entityId} confirm"
+                : $"Could not manage sentry entity {entityId}. Run raidlands.sentry.scan all and verify the entity id/prefab.");
+        }
+
+        [ConsoleCommand("raidlands.sentry.repairnative")]
+        private void CCmdRepairNativeSentries(ConsoleSystem.Arg arg)
+        {
+            if (!CanUseAdminCommand(arg))
+            {
+                arg.ReplyWith("You do not have permission to use this command.");
+                return;
+            }
+
+            arg.ReplyWith($"Repaired {RepairUnmanagedOwnerlessSentries()} unmanaged ownerless sentry turret(s) back to native peacekeeper behavior.");
+        }
+
+        private bool HasOwnerlessManageConfirmation(ConsoleSystem.Arg arg)
+        {
+            return arg?.Args != null
+                && arg.Args.Length > 1
+                && string.Equals(arg.GetString(1), OwnerlessManageConfirmation, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ReplyOwnerlessConfirmationRequired(ConsoleSystem.Arg arg, string mode)
+        {
+            arg.ReplyWith($"Refusing broad ownerless sentry management without '{OwnerlessManageConfirmation}'. Native Outpost sentries are ownerless too. If you verified these are pasted event sentries, run: raidlands.sentry.manage {mode} {OwnerlessManageConfirmation}");
+        }
+
+        [HookMethod(nameof(API_RaidlandsManageEventSentries))]
+        public int API_RaidlandsManageEventSentries(object rawEntityIds)
+        {
+            if (config == null || !config.Enabled)
+            {
+                return 0;
+            }
+
+            var managed = 0;
+            foreach (var entityId in NormalizeEntityIds(rawEntityIds))
+            {
+                if (ManageEventSentry(entityId, true))
+                {
+                    managed++;
+                }
+            }
+
+            return managed;
+        }
+
         public int GiveSentryTurrets(ulong playerId, int amount)
         {
             var player = BasePlayer.FindAwakeOrSleeping(playerId.ToString());
@@ -386,7 +573,7 @@ namespace Oxide.Plugins
 
         private object OnRemovableEntityInfo(BaseEntity entity, BasePlayer player)
         {
-            if (!config.EnableRemoverToolIntegration || !IsManagedNpcSentry(entity))
+            if (!config.EnableRemoverToolIntegration || !IsPlayerOwnedManagedNpcSentry(entity))
             {
                 return null;
             }
@@ -408,7 +595,7 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, BaseEntity entity)
         {
-            if (!config.EnableHammerPickup || !IsManagedNpcSentry(entity))
+            if (!config.EnableHammerPickup || !IsPlayerOwnedManagedNpcSentry(entity))
             {
                 return null;
             }
@@ -425,7 +612,7 @@ namespace Oxide.Plugins
             }
 
             var entity = info.HitEntity as BaseEntity;
-            if (!IsManagedNpcSentry(entity) || !IsHammer(player.GetActiveItem()) || IsRemoverToolActive(player))
+            if (!IsPlayerOwnedManagedNpcSentry(entity) || !IsHammer(player.GetActiveItem()) || IsRemoverToolActive(player))
             {
                 return null;
             }
@@ -488,7 +675,7 @@ namespace Oxide.Plugins
 
         private object OnRemovableEntityGiveRefund(BaseEntity targetEntity, BasePlayer player, string itemName, int amount, long skinId)
         {
-            if (!string.Equals(itemName, RemoverToolRefundKey, StringComparison.OrdinalIgnoreCase) || !IsManagedNpcSentry(targetEntity) || player == null)
+            if (!string.Equals(itemName, RemoverToolRefundKey, StringComparison.OrdinalIgnoreCase) || !IsPlayerOwnedManagedNpcSentry(targetEntity) || player == null)
             {
                 return null;
             }
@@ -585,6 +772,296 @@ namespace Oxide.Plugins
             }
 
             handledTurretIds.Remove(entity.net.ID.Value);
+            eventManagedSentryIds.Remove(entity.net.ID.Value);
+        }
+
+        private void OnRaidlandsTrackedPasteFinished(string trackingId, string filename, List<ulong> pastedEntityIds, object player, Vector3 startPos)
+        {
+            API_RaidlandsManageEventSentries(pastedEntityIds);
+        }
+
+        private void OnEntitySpawned(BaseNetworkable networkable)
+        {
+            if (!config.Enabled || !config.AllowAutomaticOwnerlessCopyPasteSentryFallback)
+            {
+                return;
+            }
+
+            var entity = networkable as BaseEntity;
+            if (!LooksLikeConfiguredSentryPrefab(entity))
+            {
+                return;
+            }
+
+            timer.Once(0.25f, () => TryManageUntrackedCopyPasteSentry(entity));
+            timer.Once(1.5f, () => TryManageUntrackedCopyPasteSentry(entity));
+            timer.Once(3f, () => TryManageUntrackedCopyPasteSentry(entity));
+        }
+
+        private bool ManageEventSentry(ulong entityId, bool allowOwnerlessSentry)
+        {
+            if (entityId == 0)
+            {
+                return false;
+            }
+
+            var entity = FindServerEntity(entityId);
+            if (!IsNpcSentryPrefab(entity))
+            {
+                return false;
+            }
+
+            if (!entity.OwnerID.IsSteamId() && !allowOwnerlessSentry)
+            {
+                return false;
+            }
+
+            eventManagedSentryIds.Add(entityId);
+            var authIds = BuildAuthorizationSet(entity as AutoTurret, entity.OwnerID);
+            ApplySentryRuntimeState(entity, authIds);
+            ScheduleSentryRuntimeStateReapply(entity, authIds);
+            return true;
+        }
+
+        private int ManagePersistedRaidlandsEventSentries()
+        {
+            try
+            {
+                var storedData = Interface.Oxide.DataFileSystem.ReadObject<JObject>(RaidlandsEventsDataFileName);
+                var activeRaidBases = storedData?["ActiveRaidBases"] as JObject;
+                if (activeRaidBases == null)
+                {
+                    return 0;
+                }
+
+                var ids = new List<ulong>();
+                var seen = new HashSet<ulong>();
+                foreach (var activeProperty in activeRaidBases.Properties())
+                {
+                    var active = activeProperty.Value as JObject;
+                    if (active == null)
+                    {
+                        continue;
+                    }
+
+                    var status = active["Status"]?.ToString();
+                    if (string.Equals(status, "cleaning", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var entityIds = active["EntityIds"] as JArray;
+                    if (entityIds == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var token in entityIds)
+                    {
+                        TryAddEntityId(ids, seen, token?.ToString());
+                    }
+                }
+
+                return API_RaidlandsManageEventSentries(ids);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private int ManageUntrackedCopyPasteSentries()
+        {
+            var managed = 0;
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                if (TryManageUntrackedCopyPasteSentry(serverEntity as BaseEntity))
+                {
+                    managed++;
+                }
+            }
+
+            return managed;
+        }
+
+        private int ManageOwnerlessSentries()
+        {
+            var managed = 0;
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                var entity = serverEntity as BaseEntity;
+                if (entity?.net == null || !IsNpcSentryPrefab(entity) || entity.OwnerID.IsSteamId())
+                {
+                    continue;
+                }
+
+                if (ManageEventSentry(entity.net.ID.Value, true))
+                {
+                    managed++;
+                }
+            }
+
+            return managed;
+        }
+
+        private bool TryManageUntrackedCopyPasteSentry(BaseEntity entity)
+        {
+            if (!ShouldManageUntrackedCopyPasteSentry(entity) || entity.net == null)
+            {
+                return false;
+            }
+
+            return ManageEventSentry(entity.net.ID.Value, true);
+        }
+
+        private bool ShouldManageUntrackedCopyPasteSentry(BaseEntity entity)
+        {
+            return IsOwnerlessConfiguredSentry(entity)
+                && !IsEventManagedSentry(entity)
+                && HasSimpleSwitchChild(entity);
+        }
+
+        private int RepairUnmanagedOwnerlessSentries()
+        {
+            var repaired = 0;
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                var entity = serverEntity as BaseEntity;
+                if (!ShouldRepairUnmanagedOwnerlessSentry(entity))
+                {
+                    continue;
+                }
+
+                if (RepairUnmanagedOwnerlessSentry(entity))
+                {
+                    repaired++;
+                }
+            }
+
+            return repaired;
+        }
+
+        private bool ShouldRepairUnmanagedOwnerlessSentry(BaseEntity entity)
+        {
+            return IsOwnerlessConfiguredSentry(entity) && !IsEventManagedSentry(entity);
+        }
+
+        private bool RepairUnmanagedOwnerlessSentry(BaseEntity entity)
+        {
+            var turret = entity as AutoTurret;
+            var combat = entity as BaseCombatEntity;
+            if (turret == null && combat == null)
+            {
+                return false;
+            }
+
+            if (turret != null)
+            {
+                EnablePeacekeeperMode(turret);
+                turret.target = null;
+                RestoreSentryRangeFromPrefab(entity, turret);
+            }
+
+            if (combat != null)
+            {
+                RestoreSentryDurabilityFromPrefab(entity, combat);
+            }
+
+            entity.SendNetworkUpdate();
+            return true;
+        }
+
+        private List<ulong> NormalizeEntityIds(object rawEntityIds)
+        {
+            var ids = new List<ulong>();
+            var seen = new HashSet<ulong>();
+            if (rawEntityIds == null)
+            {
+                return ids;
+            }
+
+            var ulongIds = rawEntityIds as IEnumerable<ulong>;
+            if (ulongIds != null)
+            {
+                foreach (var entityId in ulongIds)
+                {
+                    AddEntityId(ids, seen, entityId);
+                }
+
+                return ids;
+            }
+
+            var objectIds = rawEntityIds as IEnumerable<object>;
+            if (objectIds != null)
+            {
+                foreach (var value in objectIds)
+                {
+                    TryAddEntityId(ids, seen, value);
+                }
+
+                return ids;
+            }
+
+            TryAddEntityId(ids, seen, rawEntityIds);
+            return ids;
+        }
+
+        private bool TryAddEntityId(List<ulong> ids, HashSet<ulong> seen, object value)
+        {
+            ulong entityId;
+            if (!TryGetEntityId(value, out entityId))
+            {
+                return false;
+            }
+
+            return AddEntityId(ids, seen, entityId);
+        }
+
+        private bool AddEntityId(List<ulong> ids, HashSet<ulong> seen, ulong entityId)
+        {
+            if (entityId == 0 || !seen.Add(entityId))
+            {
+                return false;
+            }
+
+            ids.Add(entityId);
+            return true;
+        }
+
+        private bool TryGetEntityId(object value, out ulong entityId)
+        {
+            entityId = 0;
+            if (value == null)
+            {
+                return false;
+            }
+
+            if (value is ulong)
+            {
+                entityId = (ulong)value;
+                return entityId != 0;
+            }
+
+            if (value is NetworkableId)
+            {
+                entityId = ((NetworkableId)value).Value;
+                return entityId != 0;
+            }
+
+            try
+            {
+                entityId = Convert.ToUInt64(value);
+                return entityId != 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private BaseEntity FindServerEntity(ulong entityId)
+        {
+            return entityId == 0 ? null : BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as BaseEntity;
         }
 
         private string ResolvePrefab()
@@ -794,7 +1271,37 @@ namespace Oxide.Plugins
 
         private bool IsManagedNpcSentry(BaseEntity entity)
         {
-            if (entity == null || entity.IsDestroyed || !(entity is NPCAutoTurret) || !entity.OwnerID.IsSteamId())
+            if (!IsNpcSentryPrefab(entity))
+            {
+                return false;
+            }
+
+            return entity.OwnerID.IsSteamId() || IsEventManagedSentry(entity);
+        }
+
+        private bool IsPlayerOwnedManagedNpcSentry(BaseEntity entity)
+        {
+            return IsNpcSentryPrefab(entity) && entity.OwnerID.IsSteamId();
+        }
+
+        private bool IsOwnerlessConfiguredSentry(BaseEntity entity)
+        {
+            return IsNpcSentryPrefab(entity) && entity.net != null && !entity.OwnerID.IsSteamId();
+        }
+
+        private bool IsNpcSentryPrefab(BaseEntity entity)
+        {
+            if (entity == null || entity.IsDestroyed || !(entity is BaseCombatEntity))
+            {
+                return false;
+            }
+
+            return LooksLikeConfiguredSentryPrefab(entity);
+        }
+
+        private bool LooksLikeConfiguredSentryPrefab(BaseEntity entity)
+        {
+            if (entity == null || entity.IsDestroyed)
             {
                 return false;
             }
@@ -802,6 +1309,56 @@ namespace Oxide.Plugins
             var requiredShortName = NormalizeShortPrefabName(config.RequiredSpawnedShortPrefabName);
             return string.IsNullOrWhiteSpace(requiredShortName)
                 || string.Equals(NormalizeShortPrefabName(entity.ShortPrefabName), requiredShortName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsEventManagedSentry(BaseEntity entity)
+        {
+            return entity?.net != null && eventManagedSentryIds.Contains(entity.net.ID.Value);
+        }
+
+        private bool HasSimpleSwitchChild(BaseEntity entity)
+        {
+            if (entity?.children == null || entity.children.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (var child in entity.children)
+            {
+                if (IsSimpleSwitch(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsSimpleSwitch(BaseEntity entity)
+        {
+            if (entity == null || entity.IsDestroyed)
+            {
+                return false;
+            }
+
+            return string.Equals(entity.ShortPrefabName, SimpleSwitchShortPrefab, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entity.PrefabName, SimpleSwitchPrefab, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string DescribeSentryForScan(BaseEntity entity)
+        {
+            if (entity == null)
+            {
+                return "null sentry";
+            }
+
+            var combat = entity as BaseCombatEntity;
+            var turret = entity as AutoTurret;
+            var entityId = entity.net == null ? 0UL : entity.net.ID.Value;
+            var health = combat == null ? "n/a" : $"{combat.Health():0.##}/{combat.MaxHealth():0.##}";
+            var range = turret == null ? "n/a" : turret.sightRange.ToString("0.##");
+            var pos = entity.transform == null ? "n/a" : $"{entity.transform.position.x:0.#},{entity.transform.position.y:0.#},{entity.transform.position.z:0.#}";
+            return $"id={entityId} type={entity.GetType().Name} short={entity.ShortPrefabName} owner={entity.OwnerID} managed={IsManagedNpcSentry(entity)} event={IsEventManagedSentry(entity)} copySwitch={HasSimpleSwitchChild(entity)} hp={health} range={range} pos={pos} prefab={entity.PrefabName}";
         }
 
         private bool IsSentryItem(Item item)
@@ -895,7 +1452,7 @@ namespace Oxide.Plugins
 
         private bool TryPickupSentry(BasePlayer player, BaseEntity entity, bool sendMessages)
         {
-            if (player == null || !IsManagedNpcSentry(entity))
+            if (player == null || !IsPlayerOwnedManagedNpcSentry(entity))
             {
                 return false;
             }
@@ -1145,6 +1702,73 @@ namespace Oxide.Plugins
             {
                 collider.radius = range;
             }
+        }
+
+        private void RestoreSentryRangeFromPrefab(BaseEntity entity, AutoTurret turret)
+        {
+            var prefab = FindPrefabForEntity(entity);
+            var prefabTurret = prefab == null ? null : prefab.GetComponent<AutoTurret>();
+            if (turret == null || prefabTurret == null || prefabTurret.sightRange <= 0f)
+            {
+                return;
+            }
+
+            turret.sightRange = prefabTurret.sightRange;
+
+            var collider = turret.targetTrigger == null ? null : turret.targetTrigger.GetComponent<SphereCollider>();
+            if (collider != null)
+            {
+                collider.radius = prefabTurret.sightRange;
+            }
+        }
+
+        private void RestoreSentryDurabilityFromPrefab(BaseEntity entity, BaseCombatEntity combat)
+        {
+            var prefab = FindPrefabForEntity(entity);
+            var prefabCombat = prefab == null ? null : prefab.GetComponent<BaseCombatEntity>();
+            if (combat == null || prefabCombat == null)
+            {
+                return;
+            }
+
+            combat.baseProtection = prefabCombat.baseProtection;
+
+            var maxHealth = prefabCombat.MaxHealth();
+            if (maxHealth <= 0f)
+            {
+                return;
+            }
+
+            combat.SetMaxHealth(maxHealth);
+            combat.SetHealth(maxHealth);
+        }
+
+        private GameObject FindPrefabForEntity(BaseEntity entity)
+        {
+            if (!string.IsNullOrWhiteSpace(entity?.PrefabName))
+            {
+                var prefab = GameManager.server.FindPrefab(entity.PrefabName);
+                if (prefab != null)
+                {
+                    return prefab;
+                }
+            }
+
+            foreach (var prefabPath in config.OutpostSentryPrefabCandidates ?? new string[0])
+            {
+                if (string.IsNullOrWhiteSpace(prefabPath))
+                {
+                    continue;
+                }
+
+                var prefab = GameManager.server.FindPrefab(prefabPath);
+                if (prefab != null && PrefabMatchesRequiredShortName(prefab, prefabPath))
+                {
+                    return prefab;
+                }
+            }
+
+            return null;
         }
 
         private float GetConfiguredSentryRange()
@@ -1408,6 +2032,16 @@ namespace Oxide.Plugins
             SetBooleanMember(turret, "peacekeeperMode", false);
             SetBooleanMember(turret, "Peacekeepermode", false);
             SetBooleanMember(turret, "PeacekeeperMode", false);
+        }
+
+        private void EnablePeacekeeperMode(AutoTurret turret)
+        {
+            InvokeBooleanMethod(turret, "SetPeacekeepermode", true);
+            InvokeBooleanMethod(turret, "SetPeacekeeperMode", true);
+            SetBooleanMember(turret, "peacekeepermode", true);
+            SetBooleanMember(turret, "peacekeeperMode", true);
+            SetBooleanMember(turret, "Peacekeepermode", true);
+            SetBooleanMember(turret, "PeacekeeperMode", true);
         }
 
         private void InvokeBooleanMethod(object instance, string methodName, bool value)

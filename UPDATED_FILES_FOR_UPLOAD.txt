@@ -1,352 +1,995 @@
-Raidlands sentry/scientist turret range + durability tuning - 2026-07-07
+Portable Airstrikes stackable CID binoculars - 2026-07-08
 
 What changed:
-- RaidlandsSentryTurrets is now v1.0.8.
-- Player-deployed scientist/static sentries now get config-backed runtime tuning on spawn, server init, and delayed reapply.
-- Range is capped to `Range Multiplier` x normal auto-turret range. Defaults use the live vanilla auto-turret prefab range as the base, fallback `30m`, multiplier `1.3`.
-- Durability now uses manual damage handling for managed NPC sentries so native NPC sentry protection cannot make them indestructible.
-- Default durability is `Effective Max Health=500` and `Incoming Damage Multiplier=1`, intended as the first-pass 5-HV-ish balance while preserving relative damage from bullets, rockets, C4, 40mm, etc.
-- `Log Damage Events=false` can be enabled temporarily to capture live weapon/ammo damage totals and tune `Effective Max Health` or `Incoming Damage Multiplier`.
-- `oxide/config/RaidlandsSentryTurrets.json` is now checked in so the new knobs can be uploaded directly instead of waiting for Oxide to generate them.
+- PortableAirstrikes is now v0.1.30.
+- Added `ConfigVersion=27`.
+- Airstrike binocular counts are physical Rust stack amounts again, so inventory shows the real stack count overlay.
+- Old charge-backed `instanceData.dataInt` counts migrate into the physical item stack amount during inventory normalization.
+- `AirstrikeItem.MaxStackSize=65535` and `MaxChargesPerItem=65535`.
+- StackSizeController config now sets `raidlands.airstrike.designator=65535` while leaving vanilla `tool.binoculars=1`.
+- StackSizeController now applies configured stack sizes when CID registers custom item definitions after StackSizeController has already initialized.
+- Existing targeting, icon, warnings, RP/cooldowns, webhooks, and strike payload behavior were left unchanged.
 
-Rust server plugin/config files to upload for this latest update:
-- oxide/plugins/RaidlandsSentryTurrets.cs
-- oxide/config/RaidlandsSentryTurrets.json
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/plugins/StackSizeController.cs
+- oxide/config/PortableAirstrikes.json
+- oxide/config/StackSizeController.json
+
+Runtime dependencies to keep uploaded:
+- oxide/plugins/CustomItemDefinitions.cs
+- oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_STACKABLE_CID_2026-07-08.md
 
 Reload after upload:
-- oxide.reload RaidlandsSentryTurrets
+- oxide.reload CustomItemDefinitions
+- oxide.reload StackSizeController
+- oxide.reload PortableAirstrikes
 
-Sentry smoke:
-- Run `oxide.reload RaidlandsSentryTurrets`.
-- Existing managed sentries should be normalized on reload; newly placed Outpost Sentry Turrets should normalize immediately after conversion.
-- Place a test Outpost Sentry Turret in a safe spot and verify its target range is much shorter than the previous scientist sentry behavior, about 1.3x a normal auto turret.
-- Damage it with HV rockets and other raid ammo. Expected first-pass balance: about 5 HV rockets to kill, with other damage types staying proportional to their Rust damage events.
-- If live HV totals are not close enough, set `Log Damage Events=true`, reload, hit one test sentry, then tune `Effective Max Health` or `Incoming Damage Multiplier` from the logged `incoming`/`applied` values.
+Quick live smoke:
+- Confirm the PortableAirstrikes reload banner reports v0.1.30.
+- Run `/strike debug item`; expected `actualStack=65535`, `maxCharges=65535`, and PNG-backed icon source.
+- Run `portableairstrikes.giveitem <playerNameOrSteamId> 25`; expected one inventory slot with the custom airstrike binocular icon and Rust stack count `x25`.
+- Move the stack between inventory slots/containers; expected no disconnect and no stuck held viewmodel.
+- Use one valid strike; expected the physical stack count decrements by one.
 
-Local verification:
-- oxide/config/RaidlandsSentryTurrets.json parses successfully.
-- Roslyn compile check passed for oxide/plugins/RaidlandsSentryTurrets.cs v1.0.8 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Remaining warnings are expected Oxide plugin-reference warnings and existing obsolete SetFlag warnings.
-- Live Oxide reload and in-game range/HV smoke are still required to prove runtime balance.
+Previous upload note follows.
 
 ---
 
-Raidlands Super Serum loot-table identity + drink effect - 2026-07-07
+Portable Airstrikes binocular stack/icon and rotor-wash client error fix - 2026-07-08
 
 What changed:
-- RaidlandsConsumables is now v1.0.13.
-- Super Serum consumption now plays Rust's native tea drink gesture effect: `assets/bundled/prefabs/fx/gestures/drink_tea.prefab`.
-- The drink effect is configurable under `Consumption Effect` in `oxide/config/RaidlandsConsumables.json`.
-- Super Serum buffs now come from the native `ItemModConsumable` modifier definitions on the configured pure tea and pie source items, so Rust's own modifier limits decide what stacks.
-- Super Serum max health is explicitly polished to `120 HP` with `Force Target Max Health=true` / `Target Max Health=120`; native max-health tea entries are skipped so this does not double-stack.
-- The unsafe old manual `Modifier Values` list has been cleared in native mode; this prevents the 1900 HP / extreme yield display from the prior generic modifier values.
-- RaidlandsConsumables now exposes `OnRaidlandsCreateLootItem` so loot-table systems can ask the consumables plugin to create real Super Serum items.
-- BetterLoot now routes `supertea` and legacy `maxhealthtea.pure` loot entries through that Raidlands hook across ungrouped loot, loot groups, guaranteed items, and bonus items.
-- `oxide/data/BetterLoot/LootTables.json` now names the live `supertea` row `Super Serum` as a fallback marker for the consumables plugin.
-- RaidlandsConsumables also now uses the current Rust `ModifierDefintion` list API when refreshing tea modifiers, so a reload compiles against the current server build.
+- PortableAirstrikes is now v0.1.29.
+- Added `ConfigVersion=26`.
+- Restored charge-backed binocular behavior: `MaxChargesPerItem` defaults/clamps to `65535`.
+- Old physical binocular stacks such as inventory `x25` normalize into one physical item with stored charges in `instanceData.dataInt`.
+- If the repaired stacked binocular was actively held, PortableAirstrikes clears the active held item so the client viewmodel can refresh.
+- Existing CID airstrike definitions are refreshed on reload so the current PNG icon and stack metadata are rebuilt.
+- Removed direct rotor-wash effect sends because `rotorwashparticles_small` and `rotorwashparticles_large` live in non-autoloaded `AssetScene-props.other`.
+- Existing payloads, RP/cooldowns, warnings, webhooks, and strike damage were left unchanged.
 
-Rust server plugin/config/data files to upload for this latest update:
-- oxide/plugins/RaidlandsConsumables.cs
-- oxide/plugins/BetterLoot.cs
-- oxide/config/RaidlandsConsumables.json
-- oxide/data/BetterLoot/LootTables.json
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
 
-Do not upload for this update:
-- oxide/config/BetterLoot.json (local copy was refreshed from the attached live-before config and matches it byte-for-byte, but this update does not require BetterLoot config changes)
+Runtime dependencies to keep uploaded:
+- oxide/plugins/CustomItemDefinitions.cs
+- oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png
+- oxide/config/StackSizeController.json
+
+Local source hash:
+- SHA256: 4F9ECC49167F4FCCA54FFC6EFC376D6ACB5C9BB330E1C02ABA34BA3565A45C78
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_BINOCULAR_STACK_ICON_ROTOR_2026-07-08.md
 
 Reload after upload:
-- oxide.reload RaidlandsConsumables
-- oxide.reload BetterLoot
+- oxide.reload CustomItemDefinitions
+- oxide.reload PortableAirstrikes
 
-Super Serum loot smoke:
-- Run `oxide.reload RaidlandsConsumables` first, then `oxide.reload BetterLoot`.
-- Players who already had the broken 1900 HP serum should be refreshed by the RaidlandsConsumables reload because the plugin removes existing tea-source modifiers before reapplying native source modifiers. If a player still shows the broken panel, force a fresh player state by death/respawn and retest.
-- Open or refresh a BetterLoot-supported container that can roll `supertea`.
-- Expected: the item is named `Super Serum` and consuming/drinking it activates the Raidlands serum path.
-- Expected on consume: nearby players hear the tea drink/slurp effect, chat says `Super Serum active. Buffs will persist until death.`, max health lands at `120 HP` rather than 1900 HP, and the buff panel shows normal pure tea/pie-scale values instead of extreme generic multipliers.
-- Also test the admin grant path with `raidlands.serum.give <playerNameOrSteamId> 1`; expected: consuming the granted item plays the same drink effect and activates the same serum state.
+Quick live smoke:
+- Confirm the reload banner reports v0.1.29.
+- Run `/strike debug item`; expected `actualStack=1`, `maxCharges=65535`, and `icon=<fileId> from ...airstrike-targeting-binoculars.png`.
+- Existing inventory `x25` airstrike binocular stacks should become one physical item named like `Airstrike Targeting Binoculars x25`, without a Rust stack count overlay.
+- Run `portableairstrikes.giveitem <playerNameOrSteamId> 25`; expected one physical item with 25 stored charges.
+- Run a drone/aircraft visual strike; expected no new client overlay entries for `rotorwashparticles_small.prefab` or `rotorwashparticles_large.prefab`.
 
-Local verification:
-- oxide/config/RaidlandsConsumables.json parses successfully.
-- oxide/data/BetterLoot/LootTables.json parses successfully.
-- Local `oxide/config/BetterLoot.json` was refreshed from the attached live-before file and matches it byte-for-byte.
-- Attached live-before `oxide/data/BetterLoot/LootTables.json` matches the repo data after JSON parsing when ignoring the one intended `supertea` display-name change to `Super Serum`.
-- Roslyn compile check passed for oxide/plugins/RaidlandsConsumables.cs v1.0.13 and oxide/plugins/BetterLoot.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Remaining compile warnings are expected BetterLoot nullable-context/unused-field warnings plus the expected RaidlandsConsumables config-field warning for Skin.
-- Live Oxide reload and in-game smoke are still required to prove audio and loot-container runtime behavior.
+Previous upload note follows.
 
 ---
 
-RaidlandsEvents raid-base scoring modal + optional RP rewards - 2026-07-07
+Portable Airstrikes client-safe visual prefab fix - 2026-07-08
 
 What changed:
-- RaidlandsEvents is now v0.1.5.
-- Active public raid-base events now track player contribution scores inside the event radius:
-  - player kills/deaths
-  - player damage
-  - pasted event-entity damage
-  - explosive pasted event-entity damage bonus
-  - tool cupboard destruction credit
-- `revents.score <instanceId|all>` prints active raid-base leaderboards.
-- `/eventsmanager` active rows now include Score buttons that open an in-panel scoreboard modal/table.
-- The scoreboard modal includes rank, player, score, kills, deaths, PvP damage, base damage, explosive damage, TC credit, reward state, Refresh, Close, and Retry RP controls.
-- Completion chat announces the winner and top leaderboard.
-- Optional ServerRewards RP placement payouts are implemented but disabled by default.
-- Failed/missing ServerRewards payouts queue in RaidlandsEvents data and can be retried with `revents.rewards retry`.
-- `revents.rewards list|retry` manages pending RP rewards.
+- PortableAirstrikes is now v0.1.28.
+- Replaced the flyover air-movement cue `projectile-flight-large.prefab` with autoloaded `projectile-flight.prefab`.
+- Stopped sending direct MLRS `pfx_mlrs_rocket_thrust.prefab` effects.
+- This targets the client overlay errors requiring `AssetScene-props.other` while airstrike payloads are falling.
+- No config upload or migration is required; `ConfigVersion` remains 25.
 
-Rust server plugin/config files to upload for this latest update:
-- oxide/plugins/RaidlandsEvents.cs
-- oxide/config/RaidlandsEvents.json
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
 
-Docs/reference files updated:
-- Docs/events-manager/RaidlandsEvents_RaidBase_MVP_Implementation_Status.md
-- UPDATED_FILES_FOR_UPLOAD.txt
+Local source hash:
+- SHA256: BD32EA2D20B32799191ED6076B24AB45121F1E4DC9176B1F22F9FE1F37082884
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_VISUAL_PREFAB_SAFE_2026-07-08.md
 
 Reload after upload:
-- oxide.reload RaidlandsEvents
+- oxide.reload PortableAirstrikes
 
-Scoring smoke:
-- Run `oxide.reload RaidlandsEvents`.
-- Enable/start a known layout, for example `revents.layouts enable justintoactive-1` then `revents.start justintoactive-1 here`.
-- Have two non-admin test players fight inside the event radius and damage the pasted base.
-- Run `revents.score all`.
-- Expected: score rows show player damage, kills/deaths, event entity damage, explosive damage, and total score movement.
-- Open `/eventsmanager` and click Score on the active raid base.
-- Expected: an in-panel leaderboard modal/table opens and can refresh or close cleanly.
-- Destroy the tracked TC.
-- Expected: completion chat announces the winner/top leaderboard and cleanup still runs after the configured delay.
-
-Optional RP payout smoke:
-- Keep `Rewards.Enabled=false` and `Award ServerRewards RP=false` until scoring is proven live.
-- To payout-test intentionally, set both to true in `oxide/config/RaidlandsEvents.json`, reload RaidlandsEvents, complete a small scored event, then run `revents.rewards list`.
-- Expected: qualified placement winners receive RP through ServerRewards.
-- If ServerRewards is missing/rejects a payout, expected: `revents.rewards list` shows a queued reward; after fixing ServerRewards, run `revents.rewards retry`.
+Quick live smoke:
+- Confirm the reload banner reports v0.1.28.
+- Run `/strike propane_bomb_drop`.
+- Expected: payloads still deliver, with no new client overlay entries for `projectile-flight-large.prefab`.
+- If `mini_mlrs` or `full_mlrs` is deliberately enabled, run one MLRS strike in a safe area.
+- Expected: rockets still launch, with no new client overlay entries for `pfx_mlrs_rocket_thrust.prefab`.
 
 Local verification:
-- oxide/config/RaidlandsEvents.json parses successfully.
-- Roslyn compile check passed for oxide/plugins/RaidlandsEvents.cs v0.1.5 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Remaining warnings are expected Oxide plugin-reference warnings for CopyPaste and ServerRewards.
-- Live Oxide reload and the smoke steps above are still required to prove in-game runtime behavior.
+- Confirmed the two removed noisy prefabs are in non-autoloaded `AssetScene-props.other` in `Bundles/AssetSceneManifest.json`.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.28 against RustDedicated_Data/Managed.
+
+Previous upload note follows.
 
 ---
 
-Raidlands sentry/scientist turret kits + event paste attack-all - 2026-07-07
+Raidlands RoamBots native scientist audio mute - 2026-07-08
 
 What changed:
-- RaidlandsSentryTurrets is now v1.0.7.
-- Kits can now create Outpost Sentry Turret items through the same `OnRaidlandsCreateKitItem` seam used by Super Serum.
-- The hook only catches intentional sentry kit rows: `Shortname=autoturret` plus display name `Outpost Sentry Turret` by default, so ordinary auto-turret kit rows stay ordinary.
-- Existing local Kits data already contains:
-  - `sentry` -> `kits.sentry.small` -> 1 Outpost Sentry Turret.
-  - `sentry_large` -> `kits.sentry.large` -> 5 Outpost Sentry Turrets.
-- RaidlandsEvents is now v0.1.3.
-- Events Manager tracked CopyPaste completions now force pasted auto/scientist turrets to attack all by clearing authorization, disabling peacekeeper/friendly mode, clearing the current target, and reapplying that state after paste completion.
-- `oxide/config/RaidlandsEvents.json` now exposes `Force Pasted Turrets Attack All` and the reapply delay list under `Paste`.
+- RaidlandsRoamBots is now v0.3.71.
+- Native legacy-scientist radio chatter and death chatter are muted during RoamBots body preparation.
+- The fix clears `ScientistNPC.RadioChatterEffects` and `DeathEffects`, cancels any queued `PlayRadioChatter`, and leaves RoamBots hearing, bot chat, weapon fire, tactical AI, killfeed, stats, and loot unchanged.
+- No `oxide/config/RaidlandsRoamBots.json` upload is required for this specific fix unless you also want to deploy other staged config changes already present in the working tree.
 
-Rust server plugin/config files to upload for this latest update:
-- oxide/plugins/RaidlandsSentryTurrets.cs
-- oxide/plugins/RaidlandsEvents.cs
-- oxide/config/RaidlandsEvents.json
-
-Relevant data file to verify/upload if live does not already have the sentry kit rows:
-- oxide/data/Kits/kits_data.json
-
-Docs/reference files updated:
-- Docs/events-manager/RaidlandsEvents_RaidBase_MVP_Implementation_Status.md
-- UPDATED_FILES_FOR_UPLOAD.txt
-
-Reload after upload:
-- oxide.reload RaidlandsSentryTurrets
-- oxide.reload RaidlandsEvents
-- oxide.reload Kits (only needed if you upload/update oxide/data/Kits/kits_data.json)
-
-Sentry kit smoke:
-- Run `oxide.reload RaidlandsSentryTurrets`.
-- Give a test player the small sentry kit: `kit give <playerNameOrSteamId> sentry`.
-- Expected: the received item is an Auto Turret named `Outpost Sentry Turret`.
-- Place it in a safe test spot.
-- Expected: it converts into the scientist/static sentry prefab and logs/chats `Outpost Sentry Turret deployed.`
-- Repeat with `kit give <playerNameOrSteamId> sentry_large` and confirm the large kit grants the configured amount.
-
-Events Manager turret smoke:
-- Run `oxide.reload RaidlandsEvents`.
-- Start Justin's base through Events Manager, for example `revents.layouts enable justintoactive-1` then `revents.start justintoactive-1 here`.
-- Expected server log includes `turretsAttackAll=<number>`.
-- Approach the pasted event base as a non-authorized test player.
-- Expected: pasted turrets are hostile/attack-all, not friendly.
-- Stop the event with `revents.stop all` after the test.
-
-Local verification:
-- oxide/config/RaidlandsEvents.json parses successfully.
-- oxide/data/Kits/kits_data.json parses successfully.
-- oxide/data/ServerRewards/products.json parses successfully.
-- Roslyn compile check passed for oxide/plugins/RaidlandsEvents.cs v0.1.3 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Roslyn compile check passed for oxide/plugins/RaidlandsSentryTurrets.cs v1.0.7 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Remaining compile warnings are expected Oxide plugin-reference/obsolete-API warnings.
-- Live Oxide reload and the smoke steps above are still required to prove in-game runtime behavior.
-
----
-
-Raidlands RoamBots player-like corpse loot - 2026-07-07
-
-Latest RoamBots update:
-- RaidlandsRoamBots is now v0.3.70.
-- Bot deaths now snapshot the bot's actual live inventory after `Kits.GiveKit` and medical-item grants, then copy that live belt/wear/main inventory into the corpse. The drop no longer depends only on a planned kit name.
-- Live inventory snapshots preserve item condition, skin, display name, weapon ammo/ammo type, blueprints, and nested contents/attachments.
-- RoamBot corpses are forced into a player-corpse style panel (`player_corpse`) with the bot display name instead of the generic `Scientist` title.
-- NPC corpses expose one visible grid in this path, so RoamBots flattens the live inventory into that grid as belt/hotbar first, worn armor/clothes second, and main inventory last.
-- Corpse loot can also roll default-access utility kits (`build`, `scuba`) and a low-tier bonus kit (`mp5`, `m16`) through `Kit Selection -> Corpse Loot`.
-- Low-tier bonus loot is capped to 1-3 bots per team via `Maximum Low Tier Bonus Bots Per Team` and defaults to a max of 3.
-- RoamBots now handles `OnCorpsePopulate` for recent bot deaths and returns a `ShouldBLPopulate_NPC` guard so BetterLoot does not replace RoamBot corpse inventories with generic NPC loot.
-
-Rust server plugin/config files to upload for this latest update:
+Rust server plugin file to upload:
 - oxide/plugins/RaidlandsRoamBots.cs
-- oxide/config/RaidlandsRoamBots.json
 
-Docs/reference files updated:
-- Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
-- UPDATED_FILES_FOR_UPLOAD.txt
+Detailed RoamBots handoff:
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_SCIENTIST_AUDIO_2026-07-08.md
 
 Reload after upload:
 - oxide.reload RaidlandsRoamBots
-- raidbots.status
 
-Corpse loot smoke:
-- Run `oxide.reload RaidlandsRoamBots`.
-- Spawn a small group, for example `raidbots.spawn 3`, and kill each bot.
-- Expected: each corpse title shows the bot name instead of `Scientist`, and the corpse contains the actual kit the bot was roaming with. The visible grid should start with the bot's hotbar weapon/meds, then armor/clothes, then ammo/mods/resources.
-- Check a weapon from the corpse; expected: attachments, condition, ammo, and ammo type match the configured kit data.
-- Repeat across several kills; expected: some corpses include extra default-access utility loot such as `build` or `scuba`.
-- Repeat across small groups; expected: only up to three bots in a team can roll an extra low-tier kit such as `mp5` or `m16`.
-- If BetterLoot is loaded, expected: RoamBot corpses keep this player-like loot instead of being replaced by BetterLoot NPC contents.
-
-Admin UI smoke:
-- In game, run `/raidbots admin`.
-- Confirm the panel opens on Home with readable runtime, ambient, managed, and anchor status.
-- Open Chat and confirm the master/AI/banter toggles, quota, contexts, pending requests, endpoint status, and stats line render.
-- Open each primary tab and click the `?` button; confirm the help popup opens and closes.
-- On Home or Population, click Disable and confirm it opens a confirmation dialog instead of immediately disabling runtime; cancel it.
-- On Safety, click Kill Active, Nuke Active, Nuke All, and Reload Config/Data; confirm each opens a matching confirmation dialog and can be cancelled.
-- Open Learning -> Observe/Train/Profiles/Mix and confirm each subpage renders.
-- Click several `?` buttons and close the popups.
-- In Learning -> Mix, confirm `ababmxking` and `sudol` each show 50% and Default shows 0%.
-- Change a profile by `+1`, `-1`, `0`, and exact input; expected: values save and redraw, with Default showing the remaining percent.
-- In Learning -> Train, type a player query/profile key and confirm the draft fields display.
-- In Rewards, edit one text field only if you are ready to save that template.
-
-Bot bullet smoke:
-- oxide.reload RaidlandsRoamBots
-- Enable a small population, for example raidbots.enable 4.
-- Let two different-clan bots fight with rifles/M16s in clear LOS.
-- Expected: bullet hits now reduce HP and can produce a bot kill.
-- For the native-missing path shown in live screenshots, `Dmg:` should show `sim applied <damage>` on landed resolver shots, or `sim miss` / `sim blocked` when the resolver intentionally does not hit.
-- If native damage handles it, `Dmg:` shows `hook in/out:enemy_bot` or `enemy_bot_floor`.
-- If the bridge handles it, `Dmg:` shows `atk enemy_bot_hit` and `br applied <damage>`.
-- If `Dmg:` shows `fire 0s#... atk none hook none`, the bot is firing but the server is not reporting projectile hits on the enemy bot.
-- If grenades still work but bullets do not, capture the visible `Dmg:` line and `raidbots.list` native combat section for the two bots.
+Quick live smoke:
+- raidbots.diag
+- raidbots.enable 1
+- Stand near the spawned bot, then damage/kill it.
+- Expected: no native scientist radio/alert/death chatter; weapon fire and RoamBots behavior still work.
 
 Local verification:
-- oxide/config/RaidlandsRoamBots.json parses successfully.
-- oxide/data/Kits/kits_data.json parses successfully.
-- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.70 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Remaining compile warnings are expected Oxide plugin-reference/future-field warnings.
+- `oxide/config/RaidlandsRoamBots.json` parsed successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.71 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining warnings are expected Oxide plugin-reference/future-field warnings.
+
+Previous upload note follows.
 
 ---
 
-Raidlands RoamBots bot-vs-bot damage diagnostics - 2026-07-06
+Portable Airstrikes charge-backed binoculars MoveItem fix - 2026-07-08
 
 What changed:
-- RaidlandsRoamBots is now v0.3.59.
-- Different-clan bot hits still keep normal Rust damage when it is working.
-- The bad sustained-fire fallback idea has been removed; RoamBots no longer injects bot-vs-bot HP loss without a real Rust damage hook.
-- The debug side panel now includes `Dmg:` telemetry showing bot weapon-fire hooks and the latest damage-hook classification.
-- `Dmg:` can distinguish enemy_bot, enemy_bot_floor, same_clan_block, untracked_attacker, untracked_victim, player_to_bot, and bot_to_player.
-- `raidbots.list` legacy combat diagnostics now inspect the bot's actual memory target, including enemy bots, instead of the nearest real player.
-- Advisor HTTP submissions now require a current real-player fight, not just a recent real-player engagement signal.
-- After the existing engagement check, RoamBots now verifies the active memory target or candidate target ids resolve to an engageable real player before any OpenAI-compatible request can be submitted.
-- Bot-vs-bot clan-war decisions now stay on deterministic fallback and report advisor_skipped_not_fighting_real_player instead of spending API calls.
-- Bot-vs-bot same-clan friendly hits now clear the invalid target and stop the attacker instead of letting it keep firing into cancelled damage.
-- Different-clan bot hits now keep normal Rust damage when it is working, but legacy scientist hits that arrive with effectively zero damage are raised to a small weapon-class damage floor so clan-war fights can actually end.
-- This directly investigates the live symptom where two roam bots stand about 5m apart, shoot each other, and neither loses HP.
-- Live config had Map markers enabled with Radius=8 and Alpha=0.65, so the missing-marker issue was not a bad toggle.
-- Native debug map markers now use a calibrated visible display-size conversion instead of the too-small literal meter conversion.
-- With "Debug Bot Map Marker Radius" set to 8, RoamBots now publishes a native map radius of about 0.047.
-- RoamBot marker entities now set globalBroadcast=true before spawn so clients can receive them as map-level debug entities.
-- The /raidbots admin Debug tab now labels that control as "Marker size".
-- The checked-in marker alpha default is reduced from 0.85 to 0.65 so clustered bot markers stay easier to read.
-- This fixes both extremes seen in live testing: first map-sized red/yellow/green disks, then invisible markers.
-- RoamBots exposes a managed NPC lending API for RaidlandsEvents:
-  - REBOT_SpawnGroup(requestJsonOrDictionary)
-  - REBOT_SpawnSingle(requestJsonOrDictionary)
-  - REBOT_DespawnGroup(groupId, reason)
-  - REBOT_DespawnForEvent(eventInstanceId, reason)
-  - REBOT_GetBotOwner(entityIdOrEntity)
-  - REBOT_SetGroupObjective(groupId, objectiveJsonOrDictionary)
-  - REBOT_SetGroupLeash(groupId, center, radius)
-  - REBOT_IsBot(entityIdOrEntity)
-- Managed/event-owned bots carry owner, event instance, group, profile, difficulty, leash, and objective metadata.
-- Ambient population maintenance now counts only ambient bots, so event-owned bots are not trimmed by Target Population and do not trigger ambient refills when they die or despawn.
-- Managed spawn requests accept JSON strings or Oxide-friendly dictionaries with EventInstanceId, GroupKey, Profile, Difficulty, Count, HealthMultiplier, TeamKey, SpawnMode, SpawnPoints, Leash, Roam, LootMode, and ReturnEntityIds.
-- Unmapped profile, weapon, armor, behavior, and loot details are accepted as metadata and returned as warnings while RoamBots falls back to configured kits/tactics.
-- Existing BGrade-facing APIs remain available:
-  - API_IsRaidlandsRoamBot(BaseEntity)
-  - API_GetRaidlandsRoamBotCombatKey(BaseEntity)
+- PortableAirstrikes is now v0.1.25.
+- Added `ConfigVersion=25`.
+- Actual airstrike binocular item stack size is back to `1`.
+- Added `AirstrikeItem.MaxChargesPerItem`, default `65535`.
+- Airstrike binocular charge count is now stored on the item in `instanceData.dataInt`.
+- `portableairstrikes.giveitem <playerNameOrSteamId> 25` now creates one physical item named `Airstrike Targeting Binoculars x25` instead of a Rust inventory stack of 25.
+- Successful strikes consume one stored charge; the item is removed when charges reach zero.
+- Existing old airstrike stacks are normalized on plugin reload and player reconnect from `amount > 1` into `amount=1` plus stored charges.
+- StackSizeController fallback sizes for `tool.binoculars` and `raidlands.airstrike.designator` are back to `1`.
+- Existing automatic raycast targeting, scrollable picker, RP/cooldown behavior, warnings, webhooks, and strike executors were left unchanged.
 
 Rust server plugin/config files to upload:
-- oxide/plugins/RaidlandsRoamBots.cs
-- oxide/config/RaidlandsRoamBots.json
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/config/StackSizeController.json
 
-Docs/reference files to upload or keep with the repo handoff:
-- Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
-- Docs/RaidlandsEvents_Event_Manager_Build_Plan.md
+Runtime dependencies to keep from the v0.1.22 CID pass:
+- oxide/plugins/CustomItemDefinitions.cs
+- oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_CHARGE_BACKED_BINOCULARS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload CustomItemDefinitions
+- oxide.reload StackSizeController
+- oxide.reload PortableAirstrikes
+
+Immediate live repair smoke:
+- /strike debug item
+- Expected: `actualStack=1` and `maxCharges=65535`.
+- portableairstrikes.giveitem <playerNameOrSteamId> 25
+- Expected: one physical item appears, named `Airstrike Targeting Binoculars x25`.
+- Move the item between inventory slots and containers.
+- Expected: no disconnect, no `split_Amount <= 0`, and the item remains movable.
+- Confirm one valid strike consumes one charge and updates the item name/count.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- JSON parse check passed for oxide/config/StackSizeController.json; both airstrike stack entries report actual stack size `1`.
+- Direct trailing-whitespace scan passed for changed plugin/config/docs/upload files.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes targeting binoculars and default strike flow - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.21.
+- Added `ConfigVersion=21`.
+- Changed the default configured item to `tool.binoculars` named `Airstrike Targeting Binoculars`.
+- Added persisted player defaults in `PortableAirstrikes_Data.DefaultStrikeByUser`.
+- Added `/strike default show`, `/strike default <strikeId>`, and `/strike default clear`.
+- Pinging while holding the configured item now creates a short-lived cyan/amber airstrike target marker.
+- If the player has no saved default, that tool ping opens `/strike`; the confirmed selection is saved as their default.
+- If the player has a saved default, that tool ping attempts the default strike immediately.
+- Added `OnRaidlandsCreateKitItem(...)` support so Kits can create the configured airstrike item through PortableAirstrikes' own item creator.
+- Generated `Docs/AirStrikes/assets/airstrike-targeting-binoculars.png` as a project reference icon.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Optional website/docs asset:
+- Docs/AirStrikes/assets/airstrike-targeting-binoculars.png
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_BINOCULARS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Binocular/default smoke:
+- portableairstrikes.giveitem <playerNameOrSteamId> 2
+- Equip `Airstrike Targeting Binoculars`.
+- Place a ping while holding the item.
+- Expected with no saved default: a cyan/amber target marker appears and `/strike` opens.
+- Confirm a valid strike; it should be saved as the player's default.
+- Place a second ping while holding the item.
+- Expected with a saved default: the default strike is attempted immediately.
+
+Local verification:
+- Confirmed `tool.binoculars` exists locally, is holdable/usable, and reports `HasSkins=false`.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs, Docs/AirStrikes/portable_airstrikes_development_log.md, Docs/AirStrikes/portable_airstrikes_options_tables_v2.md, and UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_BINOCULARS_2026-07-08.md.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes high-rate visual movement and repeated flyover sound cues - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.20.
+- Added `ConfigVersion=20`.
+- Added `DeliveryVisuals.SpawnRotorWashEffects`, default `true`.
+- Added `DeliveryVisuals.FlyoverSoundIntervalSeconds`, default `0.75`.
+- Changed the default `DeliveryVisuals.VisualMoveIntervalSeconds` from `0.1` to `0.04`; old v0.1.18/v0.1.19 configs still at `0.2` or `0.1` migrate to `0.04` on reload.
+- Scripted flyover movement now uses immediate network updates at the tighter interval instead of queued `0.1`-second updates.
+- Visual vehicle entities set their local `On` flag, and player-helicopter visuals attempt to keep engine/fuel state active for better client-side animation/audio.
+- Drone and aircraft flyovers now play repeated positional sound bursts along the flight path while enabled.
+- Sound bursts now combine vehicle-engine, projectile-flight, large fast-falloff, bullet-flyby, and optional rotor wash effects depending on the visual type.
+- Existing direct/CUI validation, RP/token/cooldown/refund behavior, payload timing/damage, warning fanout, heavy warning markers, audit/webhook behavior, default-disabled homing/MLRS gates, loot behavior, and monument blocking behavior were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: E0B6881A61357AA0A9D5E66FB1B39649B22D977075D6A30BDB11E9CE309567D1
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_VISUAL_HIGH_RATE_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe visual smoke:
+- /strike debugping
+- /strike beancan_drop
+- /strike debugping
+- /strike a10_strafe
+- /strike debugping
+- /strike mortar_he
+- /strike debug history 5
+- /strike debug stats
+
+Expected:
+- Plugin banner reports v0.1.20.
+- Config saves `ConfigVersion=20`.
+- Existing default visual intervals migrate to `DeliveryVisuals.VisualMoveIntervalSeconds=0.04`.
+- Drone and attack-heli/cargo-plane flyovers should look less stepped than v0.1.19.
+- Drone and aircraft flyovers should have repeated positional sound cues while `DeliveryVisuals.SpawnFlyoverSoundEffects=true`.
+- Drone and attack-heli flyovers can play rotor wash effects while `DeliveryVisuals.SpawnRotorWashEffects=true`.
+- Visuals clean up after completion/failure/cancel/unload without killing native payload projectiles early.
+
+Local verification:
+- Confirmed v0.1.20 sound/effect prefabs exist in Bundles/AssetSceneManifest.json for projectile-flight-large, large-sound-fast-falloff, and large/small rotor wash effects.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs, Docs/AirStrikes/portable_airstrikes_development_log.md, UPDATED_FILES_FOR_UPLOAD.txt, and UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_VISUAL_HIGH_RATE_2026-07-08.md.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes visual smoothing, sound cues, and MLRS plane visibility - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.19.
+- Added `ConfigVersion=19`.
+- Added `DeliveryVisuals.SpawnFlyoverSoundEffects`, default `true`.
+- Added `DeliveryVisuals.MlrsAircraftFlyoverHeight`, default `58`.
+- Changed the default `DeliveryVisuals.VisualMoveIntervalSeconds` from `0.2` to `0.1`; old v0.1.18 configs still at `0.2` migrate to `0.1` on reload.
+- Scripted flyover movement now uses queued network updates instead of immediate network updates on every movement tick.
+- Drone and aircraft flyovers now play positional sound cues while enabled.
+- Rocket-run projectiles now trigger a launch effect, and MLRS rockets now trigger MLRS backfire/thrust effects.
+- MLRS aircraft visuals now use the same approach direction as the MLRS rocket salvo and a lower MLRS-specific flyover height.
+- Existing direct/CUI validation, RP/token/cooldown/refund behavior, payload timing/damage, warning fanout, heavy warning markers, audit/webhook behavior, default-disabled homing/MLRS gates, loot behavior, and monument blocking behavior were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: 87B5AFB7E1BC757EAD7D6A315EF29F1E8865535A58957E6C185474B784871D1F
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_VISUAL_SMOOTHING_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe visual smoke:
+- /strike debugping
+- /strike beancan_drop
+- /strike debugping
+- /strike a10_strafe
+- /strike debugping
+- /strike mortar_he
+- /strike debug history 5
+- /strike debug stats
+
+Expected:
+- Plugin banner reports v0.1.19.
+- Drone and attack-heli/cargo-plane flyovers should look smoother than v0.1.18.
+- Drone and aircraft flyovers should have positional sound cues while `DeliveryVisuals.SpawnFlyoverSoundEffects=true`.
+- MLRS should show a lower aircraft pass aligned with the same approach direction as the rocket salvo.
+- Visuals clean up after completion/failure/cancel/unload without killing native payload projectiles early.
+
+Local verification:
+- Confirmed sound/effect prefabs exist in Bundles/AssetSceneManifest.json for drone deploy, dangerous vehicle engine, bullet flyby, rocket launch, MLRS backfire, and MLRS rocket thrust.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs, Docs/AirStrikes/portable_airstrikes_development_log.md, UPDATED_FILES_FOR_UPLOAD.txt, and UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_VISUAL_SMOOTHING_2026-07-08.md.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes warning fanout diagnostics - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.17.
+- Added `ConfigVersion=17`.
+- Added admin diagnostic command:
+  - /strike debug warnings <strikeId>
+- The warning debug command previews who would receive accepted-strike warnings for the caller's current stored target without sending messages.
+- Accepted strike calls now use the same shared recipient-selection path as the preview command.
+- Accepted strike audit messages now include warning fanout counts.
+- Server console now prints a `Warning fanout:` line for each accepted strike with call ID, strike ID, caller, recipient counts, config mode, nearby eligibility, radius, and marker state.
+- Stored stats now include `warning_fanout_calls`, `warning_team_recipients`, `warning_nearby_recipients`, and `warning_no_recipients`.
+- Existing warning message text, direct/CUI validation, RP/token/cooldown/refund behavior, cancel/status, heavy warning markers, local audit history, default-disabled homing/MLRS gates, loot behavior, monument blocking behavior, and Discord webhook behavior were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: 4D193DAE60A6D82F241F2E43B28A4AAD5929CF92AD41F08B70F0174186713D3B
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WARNING_DEBUG_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Solo diagnostic smoke:
+- /strike debugping
+- /strike debug warnings beancan_drop
+- /strike beancan_drop
+- /strike debug history 5
+- /strike debug stats
+
+Expected:
+- The preview reports zero recipients if you are solo, or lists online team recipients if any exist.
+- The accepted strike still works normally.
+- Server console prints a `Warning fanout:` line for the accepted call.
+- `/strike debug history 5` includes warning fanout counts in the started audit row.
+- `/strike debug stats` can show the new warning counters after at least one accepted call.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs, Docs/AirStrikes/portable_airstrikes_development_log.md, UPDATED_FILES_FOR_UPLOAD.txt, and UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WARNING_DEBUG_2026-07-08.md.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes in-game warning fanout - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.16.
+- Added `ConfigVersion=16`.
+- Added in-game warning config:
+  - `General.NotifyCallerTeamOnAcceptedStrike`, default `true`
+  - `General.NotifyNearbyPlayersOnHeavyStrikes`, default `false`
+  - `General.NearbyHeavyStrikeWarningRadius`, default `120`
+- Accepted strikes now notify online Rust teammates other than the caller when team warnings are enabled.
+- Heavy strikes can optionally notify online nearby players inside the configured radius.
+- Team and nearby warning recipients are deduplicated so a nearby teammate should only receive one warning message.
+- Discord webhook behavior was left unchanged and still requires a real private webhook URL for live verification.
+- Existing direct/CUI validation, RP/token/cooldown/refund behavior, cancel/status, heavy warning markers, local audit history, default-disabled homing/MLRS gates, loot behavior, and monument blocking behavior were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: 24AF07B47E4D25F99F76CB221463629870460CDE4331A3999C95E29ED0B84536
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WARNINGS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike debug history 5
+- If two online team members are available, confirm the teammate receives one in-game warning.
+
+Optional nearby heavy-warning smoke:
+- Reload once so the new `General` keys are written to config.
+- Set `General.NotifyNearbyPlayersOnHeavyStrikes=true`.
+- Reload `PortableAirstrikes`, then run a heavy strike with another online player inside `General.NearbyHeavyStrikeWarningRadius`.
+- Expected: the nearby player receives one warning message; nearby teammates should not receive duplicates.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs, Docs/AirStrikes/portable_airstrikes_development_log.md, UPDATED_FILES_FOR_UPLOAD.txt, and UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WARNINGS_2026-07-08.md.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes audit webhook forwarding - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.15.
+- Added `ConfigVersion=15`.
+- Added disabled-by-default `AuditWebhooks` config for Discord webhook audit forwarding.
+- Existing local `Audit:` console lines and `PortableAirstrikes_Data.RecentCalls` history are unchanged.
+- When enabled, selected started/completed/failed/refunded/cancelled audit records can be mirrored to Discord embeds.
+- Validation-failure webhook posts are off by default through `AuditWebhooks.SendValidationFailures=false`.
+- Bad/missing webhook URLs print warnings only and do not block strike validation, RP/token handling, cooldowns, execution, cleanup, or local audit history.
+- Existing direct/CUI validation, RP/token/cooldown/refund behavior, cancel/status, heavy warning markers, default-disabled homing/MLRS gates, loot behavior, and monument blocking behavior were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: 0E6767A63420A5E52E80C41473CBBA50B8FBC168051F6603A8B4A76BC94F430F
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WEBHOOKS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike debug history 5
+
+Optional webhook smoke:
+- Reload once so `AuditWebhooks` is written to config.
+- Set `AuditWebhooks.Enabled=true` and `AuditWebhooks.DiscordWebhookUrl` to the private Discord webhook URL.
+- Reload `PortableAirstrikes`, then run a cheap completed strike.
+- Expected: a Discord embed appears for configured audit result types.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs, Docs/AirStrikes/portable_airstrikes_development_log.md, UPDATED_FILES_FOR_UPLOAD.txt, and UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WEBHOOKS_2026-07-08.md.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes player cancel/status and heavy warning markers - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.14.
+- Added `ConfigVersion=14`.
+- Added player commands:
+  - /strike status
+  - /strike cancel
+- Added pre-impact player cancellation with configured RP/token restoration and cooldown clearing.
+- Added public native heavy-strike warning markers using `MapMarkerGenericRadius` while `General.UseMapMarkersForHeavyStrikes=true`.
+- Added marker tuning config:
+  - `General.HeavyStrikeMapMarkerSize`
+  - `General.HeavyStrikeMapMarkerAlpha`
+- Added cancel config:
+  - `General.AllowPlayerCancelBeforeImpact`
+  - `General.RefundPlayerCancelledCallsBeforeImpact`
+- Existing direct/CUI validation, RP/token/cooldown/refund behavior, audit history, default-disabled homing/MLRS gates, loot behavior, and monument blocking behavior were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: 0BECFA4B88A3ADD37DEB5BCC3C814A9CDEC0C60561DE0160E6B7FB0B110FE891
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_CANCEL_MARKERS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike status
+- /strike debug history 5
+- /strike debug active
+
+Cancel/marker smoke:
+- Start a heavy strike with a warning delay, such as /strike a10_strafe.
+- Run /strike status during the warning countdown.
+- Run /strike cancel before impact starts and confirm a cancelled/refunded audit row.
+- Let a heavy strike complete and confirm the Rust map warning marker disappears afterward.
+
+Local verification:
+- Confirmed generic radius marker prefab exists in Bundles/AssetSceneManifest.json.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Direct trailing-whitespace scan passed for oxide/plugins/PortableAirstrikes.cs.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes audit logging and admin debug - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.13.
+- Added `ConfigVersion=13`.
+- Added `General.RecentCallHistoryLimit`, default `50`, clamped to `0-200`.
+- Added bounded `RecentCalls` audit history in `PortableAirstrikes_Data`.
+- Added server-console `Audit:` lines for validation failures, charge failures, accepted calls, completed calls, failed/refunded calls, and plugin-unload cancellations.
+- Added admin debug commands:
+  - /strike debug history [count]
+  - /strike debug stats
+  - /strike debug active
+- Existing homing/MLRS gates, loot behavior, monument blocking behavior, RP/token/cooldown/refund flow, and strike executors were left unchanged.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: F593363136EC57C1B0D7C94406699B9AFEE1508078A037B3C23B8272B3358298
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_AUDIT_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike debug history 5
+- /strike debug stats
+- /strike debug active
+- /strike debugping
+- /strike a10_strafe
+
+Expected:
+- Existing direct/CUI strike flow still charges RP and consumes one token exactly once.
+- Default-disabled homing/MLRS entries stay gated unless deliberately enabled.
+- Server console prints clear `Audit:` lines for accepted/completed/failed/validation-failed calls.
+- `/strike debug history [count]` shows newest bounded audit records to admins.
+- `/strike debug stats` shows stored stat counters.
+- `/strike debug active` shows currently active calls or reports none.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes default-off homing missile executor - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.12.
+- Added `ConfigVersion=12`.
+- Added a default-disabled homing missile executor for `homing_heli` and `homing_jet`.
+- Added executor routes:
+  - `attack_heli:homing_missile`
+  - `cargo_plane_jet:homing_missile`
+- Homing missiles use HV rocket projectile visuals and bounded tracking using `MissileCount`, `MaxCount`, `MaxTrackingSeconds`, `MaxTrackingDistance`, `VehicleDamageScale`, and `SplashRadius`.
+- Vehicle-only strikes now require a tracked target entity ID during validation, so invalid vehicle targets fail before RP/token/cooldown work.
+- `homing_heli` and `homing_jet` remain disabled by default.
+- Loot injection was left untouched and remains deferred until the end.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: E0F58FA0614A1E1F3698156AB855A905A2111852CD116E83EEDEB9C5F780718F
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_HOMING_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike debugping
+- /strike a10_strafe
+
+Homing opt-in smoke:
+- Reload once first so `ConfigVersion=12` is saved.
+- Set `StrikeDefinitions.homing_heli.Enabled=true` in `oxide/config/PortableAirstrikes.json`.
+- Reload `PortableAirstrikes` again.
+- Grant `portableairstrikes.use.homing.heli`, give test tokens, then aim at a live vehicle and run `/strike debugping`.
+- Expected target debug: vehicle ping with an entity ID.
+- Run `/strike homing_heli` in a safe open area.
+
+Expected:
+- Existing direct/CUI strike flow still charges RP and consumes one token exactly once.
+- Default-disabled homing/MLRS entries do not appear unless deliberately enabled after the config save.
+- Opt-in `homing_heli` launches configured HV-rocket visuals and tracks the live vehicle target within configured time/distance.
+- If the target is gone before the first missile launches, RP/token/cooldowns follow the existing refund/restore path.
+
+Local verification:
+- Confirmed HV rocket prefab exists in `Bundles/AssetSceneManifest.json`.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes opt-in monument blocking - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.11.
+- Added `ConfigVersion=11`.
+- Added opt-in monument blocking under `General`.
+- New config keys:
+  - `BlockMonuments`
+  - `BlockMonumentsForHeavyStrikesOnly`
+  - `MonumentBlockRadiusPadding`
+  - `DefaultMonumentBlockRadius`
+  - `BlockedMonumentNames`
+- `BlockMonuments` defaults to false, so upload/reload does not change current strike behavior.
+- When enabled, blocked monument targets fail validation before RP charge, token consume, or cooldown start.
+- Added `/strike debug monument` and `/strike debug safety`.
+- Loot injection was left untouched and remains deferred until the end.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: C26FC8E307D3617E5EFBEBFD93808C792C67407FE33F4936C009E14570B0D6D7
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_MONUMENTS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike debugping
+- /strike a10_strafe
+
+Monument debug smoke:
+- Aim near a configured monument and run `/strike debugping`.
+- Run `/strike debug monument`.
+- Expected while `General.BlockMonuments=false`: the debug command can report a matched monument zone, but strike validation remains unchanged.
+- Optional enabled test: set `General.BlockMonuments=true`, reload, target a configured monument, and try a heavy strike such as `/strike a10_strafe`.
+- Expected enabled test: the strike is rejected before RP/token/cooldown changes.
+
+Expected:
+- Existing direct/CUI strike flow still charges RP and consumes one token exactly once.
+- Loot behavior is unchanged.
+- Monument blocking remains disabled until deliberately enabled in config.
+- Default-disabled homing/MLRS entries stay gated by config.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes default-off MLRS executor - 2026-07-08
+
+Review result:
+- The Airstrike Authorization item is not a custom prefab; it is a normal Rust `targeting.computer` item with configured display name/skin.
+- Admin grants and loot injection both create the same token through `CreateAirstrikeToken`.
+
+What changed:
+- PortableAirstrikes is now v0.1.10.
+- Added `ConfigVersion=10`.
+- Added a one-time old-config safety reset that disables `homing_heli`, `homing_jet`, `mini_mlrs`, and `full_mlrs` on first v0.1.10 load.
+- Changed default `homing_heli`, `homing_jet`, and `mini_mlrs` definitions to disabled by default.
+- Added a default-disabled MLRS executor for `mini_mlrs` and `full_mlrs`.
+- MLRS uses real Rust prefab `assets/content/vehicles/mlrs/rocket_mlrs.prefab`.
+- Homing missiles remain deferred.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: F683681B993689BDFFD2C355B99DE542E0DB47C00553A15A22FB0B52B7A0AE18
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_MLRS_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Safe default smoke:
+- /strike debugping
+- /strike
+- /strike beancan_drop
+- /strike debugping
+- /strike a10_strafe
+
+MLRS opt-in smoke:
+- Reload once first so `ConfigVersion=10` is saved and experimental entries are disabled.
+- Then set `StrikeDefinitions.mini_mlrs.Enabled=true` in `oxide/config/PortableAirstrikes.json`.
+- Reload `PortableAirstrikes` again.
+- Grant `portableairstrikes.use.mlrs.mini`, give test tokens, then run `/strike debugping` and `/strike mini_mlrs` in a safe open area.
+
+Expected:
+- Existing direct/CUI strike flow still charges RP and consumes one token exactly once.
+- Default-disabled homing/MLRS entries do not appear unless deliberately enabled after the v0.1.10 config save.
+- Opt-in `mini_mlrs` launches configured `rocket_mlrs.prefab` projectiles within configured spread.
+
+Local verification:
+- Confirmed MLRS rocket prefab exists in `Bundles/AssetSceneManifest.json`.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+
+Previous upload note follows.
+
+---
+
+Portable Airstrikes loot token injection - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.9.
+- Added optional additive loot injection for the generic Airstrike Authorization item.
+- Added `OnLootSpawn(LootContainer)` and `OnLootSpawn(LootFill)` support.
+- Loot rules can match short prefab names, full prefab names, object names, and normalized prefab file names.
+- Injection uses the same configured token shortname/display name/skin as `/strike giveitem`.
+- `LootDistribution.Enabled` remains disabled by default, so no config upload is required unless loot injection should go live immediately.
+- Existing CUI and direct-command strike behavior remains supported.
+
+Rust server plugin file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: FEC7A71C9A056EDEBCCB6234648F7B00DB577F53EF12B24DF2FBC25464F1C145
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Upload oxide/plugins/PortableAirstrikes.cs.
+- Run oxide.reload PortableAirstrikes.
+- Leave LootDistribution.Enabled=false first and confirm normal loot behavior is unchanged.
+- Set LootDistribution.Enabled=true for one configured low-risk container rule if you want to test injection live.
+- Spawn/find that container and confirm the Airstrike Authorization item can appear without replacing existing loot.
+- Run /strike debugping, /strike, click A-10 BRRRRT Run, and confirm.
+
+Expected:
+- Loot-generated tokens match the same token validation path as admin-granted tokens.
+- RP/token/cooldowns still follow the existing direct-command pipeline.
+- The picker still opens on a fresh target and the confirmation panel starts the strike after CONFIRM.
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+
+Previous upload note follows.
+
+---
+
+RaidlandsEvents ServerRewards purchase debit hotfix - 2026-07-08
+
+What changed:
+- RaidlandsEvents is now v0.1.20.
+- `/raidme` is now reserved for the future player-owned base defense/bounty mode and no longer charges or starts the public CopyPaste raid-base event.
+- Current public CopyPaste raid-base purchases use `/eventbuy [layoutId|random]` or `/raidbase [layoutId|random]`.
+- Config list loading now replaces default list values instead of appending JSON rows onto defaults; this fixes `Purchase.Costs` loading as four rows even when the JSON file has two.
+- Purchase RP balance checks now probe ServerRewards with `BasePlayer`, `player.userID`, parsed SteamID ulong, and `UserIDString`.
+- Purchase costs are now aggregated before preflight/charge, so duplicate RP/item rows cannot pass independently and then fail after a partial debit.
+- Purchase RP debit now stops with a clear insufficient-RP message when the live ServerRewards balance is below the configured cost.
+- Purchase RP insufficient/rejected messages now include the purchaser display name and SteamID.
+- Purchase RP debit now tries the same ServerRewards argument forms and stops on the first accepted debit.
+- If all ServerRewards API debit calls return false despite enough RP, RaidlandsEvents falls back to ServerRewards' configured admin command path from `oxide/config/ServerRewards.json`, then tries `xp` and `rp`, and verifies the before/after balance.
+- Added `revents.purchases balance [playerNameOrSteamId]` to show the exact ServerRewards balance/check details RaidlandsEvents sees.
+- Added `/eventbuy balance` and `/raidbase balance` to show the same balance identity/check path used by the purchasing player.
+- `revents.purchases status` now shows the effective aggregated cost and raw configured cost row count.
+- Purchase/refund RP credits now also verify the before/after ServerRewards balance and fall back to the configured admin add command if API credit calls do not restore the expected balance.
+- If ServerRewards still rejects the debit, the player-facing error includes the requested amount, before/after balances, balance check details, and each attempted call result.
+- This targets public raid-base purchase debit/refund failures while reserving `/raidme` for the future player-base defense mode.
+
+Rust server plugin file to upload:
+- oxide/plugins/RaidlandsEvents.cs
+
+Docs/reference files updated:
+- Docs/events-manager/RaidlandsEvents_RaidBase_MVP_Implementation_Status.md
 - UPDATED_FILES_FOR_UPLOAD.txt
 
 Reload after upload:
-- oxide.reload RaidlandsRoamBots
+- oxide.reload RaidlandsEvents
 
-Bot clan-war smoke:
-- Enable a small test population with bot clan wars on, for example raidbots.enable 4.
-- Run raidbots.list and pick two different-clan bots that can see each other.
-- Watch their HP, killfeed, and the side-panel `Dmg:` line.
-- If `Dmg:` shows `fire 0s#... hook none`, the bot is firing projectiles but Rust is not producing damage hooks for the target.
-- If `Dmg:` shows `hook in/out:enemy_bot` or `enemy_bot_floor`, the RoamBots damage path is being reached and HP should move.
-- If `Dmg:` shows `same_clan_block`, the target identity/clan assignment is wrong for that duel.
-- If `Dmg:` shows `untracked_attacker` or `untracked_victim`, Rust is producing a damage hook but one side is not resolving to a tracked RoamBot runtime.
-- Run raidbots.list during the duel and check `nav=...combat:target=target_bot/canAttack=.../inRange=.../best=...`; these diagnostics now refer to the actual bot target.
-- If two same-clan bots accidentally target each other, their Fire diagnostic should move to same_clan_bot and they should stop treating each other as the active target.
-- With advisor shadow/canary enabled, run raidbots.advisor stats before and after bot-vs-bot fighting.
-- Expected bot-vs-bot advisor result: submitted does not increase, engagement_skips can increase, and last may show advisor_skipped_not_fighting_real_player.
-- Then fight a bot as a real player and confirm real player combat can still pass the advisor gate when the existing trigger/cooldown/proximity conditions are met.
+Quick live retry:
+- revents.purchases status
+- /eventbuy random
 
-Map marker smoke:
-- In game, run /raidbots admin.
-- In Debug, enable Map markers.
-- Run raidbots.enable 3 if bots are not already active.
-- Run raidbots.diag and confirm mapMarkers is on, the marker count is nonzero, and native=0.047 when size is 8.
-- Open the native Rust map and confirm active bots have visible compact skill-colored markers, not giant biome-sized disks.
-- Move/fight long enough to confirm markers still follow bots within the configured update interval.
-- Disable Map markers or run raidbots.nuke debug and confirm marker entities disappear.
-
-Managed API smoke:
-- Use a temporary provider/RCON helper to call REBOT_SpawnGroup with OwnerPlugin=RaidlandsEvents, a unique EventInstanceId, GroupKey, Count=2, two SpawnPoints, Difficulty=elite, and a Leash center/radius.
-- Expected response: Success=true, GroupId set, EntityIds returned, and only fallback warnings for unmapped metadata.
-- Run raidbots.status and confirm ambient and managed counts are separate.
-- Run raidbots.list and confirm managed bots show owner=RaidlandsEvents:<event>/<group> and leash details.
-- Call REBOT_GetBotOwner and REBOT_IsBot for each returned entity/net ID.
-- Call REBOT_SetGroupLeash and REBOT_SetGroupObjective, then confirm raidbots.list reflects the leash update.
-- Call REBOT_DespawnGroup and confirm the managed bots despawn without unwanted ambient refill.
-- Spawn two groups for the same EventInstanceId, call REBOT_DespawnForEvent, and confirm no event-owned bots remain.
-
-Ambient regression smoke:
-- raidbots.enable 1
-- raidbots.status
-- raidbots.list
-- raidbots.killall
-- Expected: ordinary ambient bots still spawn, list, and despawn normally, and managed API capacity does not change ambient Target Population behavior.
+Expected:
+- If you have at least 12,000 RP and 50,000 scrap, RP debit should succeed.
+- If the event then starts, both RP and scrap are charged and cooldowns update.
+- If start fails after charging, refund behavior follows the existing Purchase refund settings.
 
 Local verification:
-- oxide/config/RaidlandsRoamBots.json parses successfully.
-- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.59 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
-- Remaining compile warnings are expected Oxide plugin-reference/future-field warnings.
-- Live Oxide reload and the smoke steps above are still required to prove in-game runtime behavior.
+- oxide/config/RaidlandsEvents.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsEvents.cs v0.1.20 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining warnings are expected Oxide plugin-reference warnings for CopyPaste, RaidlandsSentryTurrets, and ServerRewards.
+- Live Oxide reload and `/eventbuy random` or `/raidbase random` retry are still required.
+
+Previous upload note follows.
+
+---
+Portable Airstrikes v0.1.3 live-upload reminder - 2026-07-08
+
+The live screenshot that says only `beancan_drop`, `f1_cluster`, and `smoke_screen`
+are supported is from the old v0.1.2 plugin code. Upload/reload the local v0.1.3
+plugin before testing `flash_breach`, `molotov_drop`, or `he_40mm_micro`.
+
+Rust server plugin files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Local source hash:
+- SHA256: 8BD7C56B1B4CA65FA2A54C4FB60A57C64B2841EFF8E546D8A2D8C2E622E6BC2E
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Quick smoke:
+- /strike debugping
+- /strike molotov_drop
+
+Expected v0.1.3 failure-message change if an unsupported strike is tested:
+- It should list `flash_breach`, `molotov_drop`, and `he_40mm_micro` as supported.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_2026-07-08.md
+
+Previous upload note follows.
+
+---
+
+RaidlandsEvents sentry ownerless scope hotfix - 2026-07-07
+
+What changed:
+- RaidlandsSentryTurrets is now v1.0.11.
+- The ownerless CopyPaste sentry fallback is no longer automatic by default.
+- RaidlandsEvents-tracked sentries are still managed through exact pasted entity IDs from `OnRaidlandsTrackedPasteFinished` and active `RaidlandsEvents` saved data.
+- Untracked ownerless `sentry.scientist.static` entities are repaired back to native peacekeeper behavior on plugin load by default.
+- The repair path clears current targets and restores prefab range, health, and native base protection.
+- Broad ownerless management commands now require an explicit `confirm` argument because native Outpost sentries are ownerless too.
+- New emergency command:
+  - raidlands.sentry.repairnative
+
+Rust server plugin files to upload for this hotfix:
+- oxide/plugins/RaidlandsSentryTurrets.cs
+
+No config upload is required:
+- `oxide/config/RaidlandsSentryTurrets.json` parses successfully.
+- Reloading the plugin will save the new default safety keys automatically.
+
+Reload after upload:
+- oxide.reload RaidlandsSentryTurrets
+
+Immediate live checks:
+- raidlands.sentry.scan all
+- If Outpost turrets are still targeting players after reload:
+  - raidlands.sentry.repairnative
+- For event raid bases, confirm the RaidlandsEvents log still reports `managedSentries=<count>` after paste completion.
+
+Local verification:
+- Roslyn compile check passed for `oxide/plugins/RaidlandsSentryTurrets.cs` v1.0.11 against `RustDedicated_Data/Managed`.
+- `oxide/config/RaidlandsSentryTurrets.json` parses successfully.
+- Live reload and in-game Outpost/event smoke are still required.
+
+Previous upload note follows.
+
+---
+
+RaidlandsEvents player purchase trigger - 2026-07-07
+
+What changed:
+- RaidlandsEvents is now v0.1.8.
+- Public player-purchased raid-base events are implemented but disabled by default.
+- Player commands:
+  - /raidme [layoutId|random]
+  - /eventbuy [layoutId|random]
+  - revents.purchase <layoutId|random>
+- Admin purchase/refund commands:
+  - revents.purchases status
+  - revents.purchases refunds
+  - revents.purchases retry
+- New permission:
+  - raidlandsevents.player.purchase
+- Purchase config supports:
+  - ServerRewards RP cost
+  - Rust item cost
+  - allowed layout list
+  - random layout purchases
+  - minimum online player gate
+  - per-player cooldown
+  - global cooldown
+  - purchaser announcements
+  - refund on start failure
+- Active raid-base instances now retain purchase trigger, purchaser, and cost metadata.
+- If CopyPaste accepts a purchase start but later reports paste failure, RaidlandsEvents refunds the cost or queues it in PendingPurchaseRefunds.
+- Item refunds require the player to be online; queued refunds can be retried with revents.purchases retry.
+- Purchase announcements explicitly keep the event public/counterable and do not reserve loot or rewards for the purchaser.
+
+Rust server plugin/config files to upload for this latest update:
+- oxide/plugins/RaidlandsEvents.cs
+- oxide/config/RaidlandsEvents.json
+
+Docs/reference files updated:
+- Docs/events-manager/RaidlandsEvents_RaidBase_MVP_Implementation_Status.md
+- UPDATED_FILES_FOR_UPLOAD.txt
+
+Reload after upload:
+- Prefer stopping/cleaning active events first, because local config still has `Cleanup On Unload=true`.
+- oxide.reload RaidlandsEvents
+
+Admin/status smoke:
+- Run `oxide.reload RaidlandsEvents`.
+- Run `revents.status`.
+- Expected: status includes `purchases=off` and `pendingPurchaseRefunds=0`.
+- Run `revents.purchases status`.
+- Expected: purchases are disabled, permission is `raidlandsevents.player.purchase`, default layout is `random`, and default cost is `12,000 RP + 50,000 scrap`.
+
+Player purchase smoke:
+- Keep at least one valid layout enabled, for example:
+  - revents.layouts scan
+  - revents.layouts enable justintoactive-1
+- Grant a test player:
+  - oxide.grant user <steamId> raidlandsevents.player.purchase
+- Intentionally set `Purchase.Enabled=true` in `oxide/config/RaidlandsEvents.json`.
+- Reload:
+  - oxide.reload RaidlandsEvents
+- Have the test player run:
+  - /raidme random
+
+Expected purchase behavior:
+- If the player lacks RP or scrap, the command explains the missing cost and charges nothing.
+- If the event is accepted, the player is charged the configured RP/item cost.
+- The event starts at a random validated public location.
+- Chat announces the public raid base as counterable and not reserved.
+- `revents.purchases status` shows updated global cooldown.
+- A second purchase during cooldown is rejected without charging.
+
+Failure/refund smoke:
+- To test refunds safely, temporarily create a blocked start condition after charge preflight, or use a staging CopyPaste failure.
+- Expected with `Refund On Start Failure=true`:
+  - Immediate start failure refunds the purchase cost.
+  - Async paste failure refunds the purchase cost if possible.
+  - If refund cannot complete, `revents.purchases refunds` lists the pending refund.
+  - `revents.purchases retry` pays queued refunds after ServerRewards is available and/or the player is online for item return.
+
+Local verification:
+- oxide/config/RaidlandsEvents.json parses successfully.
+- Roslyn compile check passed for oxide/plugins/RaidlandsEvents.cs v0.1.8 against RustDedicated_Data/Managed with Oxide.References.dll and glTFast.Newtonsoft.dll excluded.
+- Remaining warnings are expected Oxide plugin-reference warnings for CopyPaste, RaidlandsSentryTurrets, and ServerRewards.
+- Live Oxide reload and in-game smoke are still required to prove runtime behavior.

@@ -18,7 +18,7 @@
     "Max allowed total bans (server + game + vac)": 30,
     "Ping": {
       "Limit players ONLY to this country ISO code, kick rest": "",
-      "Max Ping Allowed": 250
+      "Max Ping Allowed": 700
     },
     "Steam": {
       "Family share accounts": false,

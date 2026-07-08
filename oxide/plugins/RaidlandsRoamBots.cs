@@ -15,7 +15,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.70")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.71")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -77,6 +77,8 @@ namespace Oxide.Plugins
         private const string BotAvatarImagePrefix = "raidlands_roambot_avatar_";
         private const int AdminPanelMaximumPopulation = 500;
         private const int AdminLearningProfilePageSize = 4;
+        private static readonly GameObjectRef[] NoScientistBodyEffects = new GameObjectRef[0];
+        private static readonly FieldInfo ScientistRadioChatterActionField = typeof(ScientistNPC).GetField("_playRadioChatter", BindingFlags.Instance | BindingFlags.NonPublic);
         private const string LearningSubpageObserve = "observe";
         private const string LearningSubpageTrain = "train";
         private const string LearningSubpageProfiles = "profiles";
@@ -16515,6 +16517,7 @@ namespace Oxide.Plugins
             }
 
             var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
+            SuppressScientistBodyAudio(bot);
 
             if (brain != null)
             {
@@ -16523,6 +16526,41 @@ namespace Oxide.Plugins
                 TryInvoke(brain, "SetEnabled", true);
                 TryInvoke(brain, "SetThinkMode", AIThinkMode.FixedUpdate);
                 SuppressBrainPlayerTargeting(bot, brain);
+            }
+        }
+
+        private void SuppressScientistBodyAudio(BaseCombatEntity bot)
+        {
+            var scientist = bot as ScientistNPC;
+
+            if (scientist == null)
+            {
+                return;
+            }
+
+            try
+            {
+                scientist.RadioChatterEffects = NoScientistBodyEffects;
+                scientist.DeathEffects = NoScientistBodyEffects;
+                scientist.IdleChatterRepeatRange = new Vector2(86400f, 86400f);
+                scientist.lastAlertedTime = Time.time;
+                scientist.SetChatterType(ScientistNPC.RadioChatterType.NONE);
+                scientist.radioChatterType = ScientistNPC.RadioChatterType.NONE;
+
+                var pendingChatter = ScientistRadioChatterActionField?.GetValue(scientist) as Action;
+
+                if (pendingChatter != null)
+                {
+                    scientist.CancelInvoke(pendingChatter);
+                    ScientistRadioChatterActionField.SetValue(scientist, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (config?.Debug?.DebugSpawnDetails == true)
+                {
+                    DebugWarning("scientist-audio", $"Could not suppress scientist body audio for {ShortPrefab(bot?.PrefabName)}: {ex.GetType().Name}: {ex.Message}");
+                }
             }
         }
 
