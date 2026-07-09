@@ -13,7 +13,7 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikesAnimationEditor", "Raidlands", "0.1.3")]
+    [Info("PortableAirstrikesAnimationEditor", "Raidlands", "0.1.4")]
     [Description("Standalone admin CUI editor for PortableAirstrikes delivery visual waypoint profiles.")]
     public class PortableAirstrikesAnimationEditor : RustPlugin
     {
@@ -46,11 +46,26 @@ namespace Oxide.Plugins
         private const float MarkerNativeRadius = 0.035f;
         private const float SelectedMarkerNativeRadius = 0.060f;
         private const float TargetMarkerNativeRadius = 0.080f;
+        private const float MarkerDebugDrawDurationSeconds = 1.20f;
+        private const float MarkerBubbleRadius = 1.75f;
+        private const float SelectedMarkerBubbleRadius = 2.45f;
+        private const float MarkerArrowLength = 2.35f;
+        private const float SelectedMarkerArrowLength = 3.10f;
+        private const float MarkerArrowHeadSize = 0.30f;
+        private const float SelectedMarkerArrowHeadSize = 0.42f;
+        private const float MarkerAttitudeTickScale = 0.42f;
         private const float DefaultDroneClearance = 12f;
         private const float DefaultAircraftClearance = 55f;
         private const int MaxChatRows = 12;
         private const int MaxProfilesInUi = 200;
         private const int MaxWaypointsInUi = 120;
+
+        private static readonly Color WaypointBubbleColor = new Color(0.15f, 0.70f, 1f, 0.82f);
+        private static readonly Color WaypointArrowColor = new Color(0.90f, 0.98f, 1f, 1f);
+        private static readonly Color SelectedWaypointBubbleColor = new Color(1f, 0.55f, 0.12f, 0.95f);
+        private static readonly Color SelectedWaypointArrowColor = new Color(1f, 0.92f, 0.32f, 1f);
+        private static readonly Color WaypointRightAxisColor = new Color(1f, 0.22f, 0.18f, 0.90f);
+        private static readonly Color WaypointUpAxisColor = new Color(0.20f, 1f, 0.36f, 0.90f);
 
         private static readonly string[] VehicleValues =
         {
@@ -1934,6 +1949,7 @@ namespace Oxide.Plugins
             }
 
             StartMarkerTicker(player, session);
+            RunMarkerEffects(player, session);
         }
 
         private MapMarkerGenericRadius CreateMapMarker(Vector3 position, float radius, bool selected, bool target, ulong ownerId)
@@ -2028,23 +2044,141 @@ namespace Oxide.Plugins
                 RunSafeEffect(BulletImpactEffect, session.Target + Vector3.up * 0.25f, "editor target marker pulse");
             }
 
-            for (var i = 0; i < profile.Waypoints.Count; i++)
-            {
-                var waypoint = profile.Waypoints[i];
-                if (waypoint == null)
-                {
-                    continue;
-                }
+            var plan = BuildWorldWaypoints(session, profile);
+            DrawWaypointDebugMarkers(player, session, plan);
 
+            for (var i = 0; i < plan.Count; i++)
+            {
                 var isSelected = i == session.SelectedWaypointIndex;
                 if (!isSelected && i % 2 != 0)
                 {
                     continue;
                 }
 
-                var world = EnsurePositionAboveTerrain(LocalToWorld(session, waypoint), GetProfileClearance(profile));
-                RunSafeEffect(isSelected ? DroneDeployEffect : BulletImpactEffect, world, isSelected ? "selected waypoint pulse" : "waypoint pulse");
+                RunSafeEffect(isSelected ? DroneDeployEffect : BulletImpactEffect, plan[i].Position, isSelected ? "selected waypoint pulse" : "waypoint pulse");
             }
+        }
+
+        private void DrawWaypointDebugMarkers(BasePlayer player, EditorSession session, List<WorldWaypoint> plan)
+        {
+            if (player == null || session == null || plan == null || plan.Count == 0)
+            {
+                return;
+            }
+
+            for (var i = 0; i < plan.Count; i++)
+            {
+                var waypoint = plan[i];
+                var selected = i == session.SelectedWaypointIndex;
+                var direction = GetWaypointMarkerDirection(plan, i, session.Approach);
+                DrawWaypointDebugMarker(player, waypoint.Position, direction, selected);
+            }
+        }
+
+        private void DrawWaypointDebugMarker(BasePlayer player, Vector3 center, Vector3 direction, bool selected)
+        {
+            var forward = NormalizeMarkerDirection(direction, Vector3.forward);
+            var rotation = GetWaypointMarkerRotation(forward);
+            forward = (rotation * Vector3.forward).normalized;
+
+            var radius = selected ? SelectedMarkerBubbleRadius : MarkerBubbleRadius;
+            var arrowLength = selected ? SelectedMarkerArrowLength : MarkerArrowLength;
+            var arrowHead = selected ? SelectedMarkerArrowHeadSize : MarkerArrowHeadSize;
+            var bubbleColor = selected ? SelectedWaypointBubbleColor : WaypointBubbleColor;
+            var arrowColor = selected ? SelectedWaypointArrowColor : WaypointArrowColor;
+            var halfArrow = Mathf.Min(arrowLength * 0.5f, radius * 0.72f);
+            var arrowStart = center - forward * halfArrow;
+            var arrowEnd = center + forward * halfArrow;
+
+            DrawSphere(player, MarkerDebugDrawDurationSeconds, bubbleColor, center, radius);
+            DrawArrow(player, MarkerDebugDrawDurationSeconds, arrowColor, arrowStart, arrowEnd, arrowHead);
+
+            var right = (rotation * Vector3.right).normalized;
+            var up = (rotation * Vector3.up).normalized;
+            var tickCenter = center + forward * (radius * 0.12f);
+            var tickLength = radius * MarkerAttitudeTickScale;
+
+            DrawLine(player, MarkerDebugDrawDurationSeconds, WaypointRightAxisColor, tickCenter - right * tickLength, tickCenter + right * tickLength);
+            DrawLine(player, MarkerDebugDrawDurationSeconds, WaypointUpAxisColor, tickCenter - up * (tickLength * 0.65f), tickCenter + up * (tickLength * 0.65f));
+        }
+
+        private Vector3 GetWaypointMarkerDirection(List<WorldWaypoint> plan, int index, Vector3 fallback)
+        {
+            if (plan == null || plan.Count == 0)
+            {
+                return NormalizeMarkerDirection(Vector3.zero, fallback);
+            }
+
+            if (plan.Count == 1)
+            {
+                return NormalizeMarkerDirection(Vector3.zero, fallback);
+            }
+
+            var last = plan.Count - 1;
+            if (index <= 0)
+            {
+                return NormalizeMarkerDirection(plan[1].Position - plan[0].Position, fallback);
+            }
+
+            if (index >= last)
+            {
+                return NormalizeMarkerDirection(plan[last].Position - plan[last - 1].Position, fallback);
+            }
+
+            var previousDuration = Mathf.Max(0.05f, plan[index].Time - plan[index - 1].Time);
+            var nextDuration = Mathf.Max(0.05f, plan[index + 1].Time - plan[index].Time);
+            var previousVelocity = (plan[index].Position - plan[index - 1].Position) / previousDuration;
+            var nextVelocity = (plan[index + 1].Position - plan[index].Position) / nextDuration;
+            var blended = previousVelocity + nextVelocity;
+
+            if (blended.sqrMagnitude > 0.0001f)
+            {
+                return blended.normalized;
+            }
+
+            return NormalizeMarkerDirection(nextVelocity.sqrMagnitude > previousVelocity.sqrMagnitude ? nextVelocity : previousVelocity, fallback);
+        }
+
+        private Vector3 NormalizeMarkerDirection(Vector3 direction, Vector3 fallback)
+        {
+            if (direction.sqrMagnitude > 0.0001f)
+            {
+                return direction.normalized;
+            }
+
+            if (fallback.sqrMagnitude > 0.0001f)
+            {
+                return fallback.normalized;
+            }
+
+            return Vector3.forward;
+        }
+
+        private Quaternion GetWaypointMarkerRotation(Vector3 forward)
+        {
+            forward = NormalizeMarkerDirection(forward, Vector3.forward);
+            var up = Vector3.up;
+            if (Mathf.Abs(Vector3.Dot(forward, up)) > 0.985f)
+            {
+                up = Vector3.forward;
+            }
+
+            return Quaternion.LookRotation(forward, up);
+        }
+
+        private void DrawSphere(BasePlayer player, float duration, Color color, Vector3 position, float radius)
+        {
+            player.SendConsoleCommand("ddraw.sphere", duration, color, position, radius);
+        }
+
+        private void DrawArrow(BasePlayer player, float duration, Color color, Vector3 start, Vector3 end, float arrowHeadSize)
+        {
+            player.SendConsoleCommand("ddraw.arrow", duration, color, start, end, arrowHeadSize);
+        }
+
+        private void DrawLine(BasePlayer player, float duration, Color color, Vector3 start, Vector3 end)
+        {
+            player.SendConsoleCommand("ddraw.line", duration, color, start, end);
         }
 
         private void DestroyMarkers(EditorSession session)
