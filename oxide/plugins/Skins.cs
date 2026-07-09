@@ -28,19 +28,33 @@ namespace Oxide.Plugins
         private Dictionary<ItemContainerId, ContainerController> _controllersPerContainer =
             new Dictionary<ItemContainerId, ContainerController>();
 
+        private Dictionary<ulong, SkinCraftController> _skinCraftControllers =
+            new Dictionary<ulong, SkinCraftController>();
+
+        private Dictionary<ItemContainerId, SkinCraftController> _skinCraftControllersPerContainer =
+            new Dictionary<ItemContainerId, SkinCraftController>();
+
         private HashSet<ItemContainerId> _itemAttachmentContainers = new HashSet<ItemContainerId>();
 
         [PluginReference]
         private Plugin PlayerDLCAPI;
+        [PluginReference]
+        private Plugin Clans;
 
-        private const string PermissionUse = "skinbox.use";
-        private const string PermissionAdmin = "skinbox.admin";
-        private const string PermissionSkinSets = "skinbox.skinsets";
-        private const string LegacyPermissionUse = "skins.use";
-        private const string LegacyPermissionAdmin = "skins.admin";
+        private const string PermissionUse = "skins.use";
+        private const string PermissionAdmin = "skins.admin";
+        private const string PermissionSkinSets = "skins.skinsets";
+        private const string PermissionAutoSkins = "skins.autoskins";
+        private const string PermissionTeamShare = "skins.teamshare";
 
         private const string CommandDefault = "skins.skin";
         private const string SkinSetCommandDefault = "skins.skinset";
+        private const string SkinCraftCommandDefault = "skins.skincraft";
+        private const string SkinCraftPanelName = "SkinCraft.Editor";
+        private const string SkinAutoCommandDefault = "skins.skinauto";
+        private const string SkinTeamCommandDefault = "skins.skinteam";
+
+        private readonly HashSet<Item> _autoSkinIgnoredItems = new HashSet<Item>();
 
         private enum SkinViewMode
         {
@@ -62,6 +76,15 @@ namespace Oxide.Plugins
 
             [JsonProperty(PropertyName = "Skin Set Commands")]
             public string[] SkinSetCommands = { "skinset", "ss" };
+
+            [JsonProperty(PropertyName = "Skin Craft Commands")]
+            public string[] SkinCraftCommands = { "skincraft", "sc" };
+
+            [JsonProperty(PropertyName = "Auto Skin Commands")]
+            public string[] AutoSkinCommands = { "skinauto", "sauto" };
+
+            [JsonProperty(PropertyName = "Team Skin Commands")]
+            public string[] TeamSkinCommands = { "skinteam", "st" };
 
             [JsonProperty(PropertyName = "Skins", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<SkinItem> Skins = new List<SkinItem> { new SkinItem() };
@@ -305,15 +328,31 @@ namespace Oxide.Plugins
                 { "Skin Does Not Exist", "This skin does not exist." },
                 { "Skin Added", "Skin was successfully added." },
                 { "Skin Removed", "Skin was removed." },
-                { "Skin Set Help", "Use /ss 1-5, /ss save 1-5, /ss load 1-5, /ss delete 1-5, or /ss list." },
-                { "Skin Set Empty", "Skin set slot {0} is empty. Wear skinned items and use /ss save {0}." },
+                { "Skin Set Help", "Use /ss to view sets, /ss 1-5 to apply one, /ss delete 1-5 to delete one, or /sc save 1-5 to build one." },
+                { "Skin Craft Help", "Use /sc save 1-5, /sc apply 1-5, /sc delete 1-5, or /sc list." },
+                { "Skin Set Empty", "Skin set slot {0} is empty. Wear skinned items and use /sc save {0}." },
                 { "Skin Set Saved", "Saved your worn skins to skin set slot {0}." },
                 { "Skin Set No Skins", "You are not wearing any skinned items to save." },
                 { "Skin Set Applied", "Applied skin set slot {0}." },
                 { "Skin Set Applied Partial", "Applied skin set slot {0}. Some skins were skipped because you don't own them." },
+                { "Skin Set Applied None", "Skin set slot {0} did not match any worn items." },
                 { "Skin Set Deleted", "Deleted skin set slot {0}." },
                 { "Skin Set List", "Skin sets: {0}" },
-                { "Skin Set Invalid Slot", "Pick a skin set slot from 1 to 5." }
+                { "Skin Set Selected", "Selected skin set slot {0}." },
+                { "Skin Craft Opened", "Opened skin set slot {0}. Drop skinned worn items into the row." },
+                { "Skin Craft Saved Item", "Saved {0} to skin set slot {1}." },
+                { "Skin Craft No Item Skin", "That item has no skin to save." },
+                { "Skin Craft Not Worn", "Only worn clothing and armor can be saved in skin sets." },
+                { "Skin Craft Not Owned", "That skin was not saved because you don't own it." },
+                { "Skin Set Invalid Slot", "Pick a skin set slot from 1 to 5." },
+                { "Auto Skin Enabled", "Auto skins enabled using skin set slot {0}." },
+                { "Auto Skin Disabled", "Auto skins disabled." },
+                { "Auto Skin Status", "Auto skins are {0}. Selected skin set: {1}." },
+                { "Team Skin Help", "Use /skinteam 1-5 to apply a set to your team/clan, or /skinteam toggle to opt in/out." },
+                { "Team Skin Opt In", "Team skin sharing enabled for you." },
+                { "Team Skin Opt Out", "Team skin sharing disabled for you." },
+                { "Team Skin Applied", "Applied skin set slot {0} to {1} nearby team/clan members." },
+                { "Team Skin No Targets", "No eligible team or clan members were found." }
             }, this);
         }
 
@@ -324,8 +363,8 @@ namespace Oxide.Plugins
             permission.RegisterPermission(PermissionUse, this);
             permission.RegisterPermission(PermissionAdmin, this);
             permission.RegisterPermission(PermissionSkinSets, this);
-            permission.RegisterPermission(LegacyPermissionUse, this);
-            permission.RegisterPermission(LegacyPermissionAdmin, this);
+            permission.RegisterPermission(PermissionAutoSkins, this);
+            permission.RegisterPermission(PermissionTeamShare, this);
 
             LoadSkinSetData();
             GenerateUI();
@@ -521,12 +560,21 @@ namespace Oxide.Plugins
             AddCovalenceCommand(CommandDefault, nameof(CommandSkin));
             AddCovalenceCommand(_config.SkinSetCommands, nameof(CommandSkinSet));
             AddCovalenceCommand(SkinSetCommandDefault, nameof(CommandSkinSet));
+            AddCovalenceCommand(_config.SkinCraftCommands, nameof(CommandSkinCraft));
+            AddCovalenceCommand(SkinCraftCommandDefault, nameof(CommandSkinCraft));
+            AddCovalenceCommand(_config.AutoSkinCommands, nameof(CommandSkinAuto));
+            AddCovalenceCommand(SkinAutoCommandDefault, nameof(CommandSkinAuto));
+            AddCovalenceCommand(_config.TeamSkinCommands, nameof(CommandSkinTeam));
+            AddCovalenceCommand(SkinTeamCommandDefault, nameof(CommandSkinTeam));
         }
 
         private void Unload()
         {
             foreach (var controller in _controllers)
                 controller.Value.Destroy();
+
+            foreach (var controller in _skinCraftControllers.Values)
+                controller.Destroy();
 
             SaveSkinSetData();
             _ins = null;
@@ -542,6 +590,10 @@ namespace Oxide.Plugins
 
         private void OnPlayerDisconnected(BasePlayer player)
         {
+            SkinCraftController skinCraftController;
+            if (_skinCraftControllers.Remove(player.userID, out skinCraftController))
+                skinCraftController.Destroy();
+
             ContainerController container;
             if (!_controllers.Remove(player.userID, out container))
                 return;
@@ -587,9 +639,19 @@ namespace Oxide.Plugins
             if (item.parentItem != null)
                 return;
 
+            SkinCraftController skinCraftController;
+            if (_skinCraftControllersPerContainer.TryGetValue(itemContainer.uid, out skinCraftController))
+            {
+                skinCraftController.OnItemAdded(item);
+                return;
+            }
+
             var player = itemContainer.GetOwnerPlayer();
             if (player != null)
+            {
+                TryAutoSkinItem(player, item);
                 return;
+            }
 
             ContainerController container;
             if (!_controllersPerContainer.TryGetValue(itemContainer.uid, out container))
@@ -648,11 +710,13 @@ namespace Oxide.Plugins
 #endif
 
             CloseSkinContainer(player);
+            CloseSkinCraft(player);
         }
 
         private void OnLootEntityEnd(BasePlayer player, BaseCombatEntity entity)
         {
             CloseSkinContainer(player);
+            CloseSkinCraft(player);
         }
 
         private void CloseSkinContainer(BasePlayer player)
@@ -674,7 +738,14 @@ namespace Oxide.Plugins
 
             ContainerController container;
             if (!_controllers.TryGetValue(looter.userID, out container) || !container.IsOpened)
-                return null;
+            {
+                SkinCraftController skinCraftController;
+                if (!_skinCraftControllers.TryGetValue(looter.userID, out skinCraftController) ||
+                    !skinCraftController.IsOpen)
+                    return null;
+
+                return true;
+            }
 
             return true;
         }
@@ -689,6 +760,14 @@ namespace Oxide.Plugins
 #endif
                 return false;
             }
+
+            SkinCraftController skinCraftFrom = null, skinCraftTo = null;
+            _skinCraftControllersPerContainer.TryGetValue(targetContainerId, out skinCraftTo);
+            if (item.parent != null)
+                _skinCraftControllersPerContainer.TryGetValue(item.parent.uid, out skinCraftFrom);
+
+            if (skinCraftFrom != null || skinCraftTo != null)
+                return CanMoveSkinCraftItem(skinCraftFrom, skinCraftTo, item, slot);
 
             ContainerController containerFrom = null, containerTo = null;
             if (!_controllersPerContainer.TryGetValue(targetContainerId, out containerTo) &&
@@ -713,6 +792,23 @@ namespace Oxide.Plugins
         }
 
         #region Minor helpers
+
+        private object CanMoveSkinCraftItem(SkinCraftController controllerFrom, SkinCraftController controllerTo,
+            Item item, int slot)
+        {
+            if (controllerFrom != null && controllerFrom.IsPreview(item))
+                return false;
+
+            if (controllerTo == null)
+                return null;
+
+            if (!controllerTo.CanAccept(item, slot))
+                return false;
+
+            controllerTo.RememberReturnLocation(item);
+            controllerTo.ClearSlot(slot);
+            return null;
+        }
 
         private object CanMoveItemTo(ContainerController controllerFrom, ContainerController controllerTo, Item item,
             int slot, int amount)
@@ -1038,6 +1134,9 @@ namespace Oxide.Plugins
 
         private class PlayerSkinSetData
         {
+            public int SelectedSet = 1;
+            public bool AutoSkinsEnabled;
+            public bool TeamShareBlocked;
             public Dictionary<int, SkinSet> Sets = new Dictionary<int, SkinSet>();
         }
 
@@ -1090,7 +1189,97 @@ namespace Oxide.Plugins
 
             if (args == null || args.Length == 0)
             {
-                player.Reply(GetMsg("Skin Set Help", player.Id));
+                ReplySkinSetList(player, basePlayer.userID);
+                OpenSkinCraftEditorNextFrame(player, basePlayer, GetSkinSetData(basePlayer.userID).SelectedSet);
+                return;
+            }
+
+            var data = GetSkinSetData(basePlayer.userID);
+            var action = args[0].ToLowerInvariant();
+
+            if (action == "list")
+            {
+                ReplySkinSetList(player, basePlayer.userID);
+                OpenSkinCraftEditorNextFrame(player, basePlayer, data.SelectedSet);
+                return;
+            }
+
+            if (action == "selected" || action == "current")
+            {
+                player.Reply(string.Format(GetMsg("Skin Set Selected", player.Id), data.SelectedSet));
+                return;
+            }
+
+            if (args.Length == 1 && TryParseSkinSetSlot(args[0], out var quickSlot))
+            {
+                SelectSkinSet(player, basePlayer, quickSlot, true);
+                return;
+            }
+
+            var targetSlot = data.SelectedSet;
+            if (args.Length >= 2 && !TryParseSkinSetSlot(args[1], out targetSlot))
+            {
+                player.Reply(GetMsg("Skin Set Invalid Slot", player.Id));
+                return;
+            }
+
+            switch (action)
+            {
+                case "open":
+                case "view":
+                case "edit":
+                    OpenSkinCraftEditorNextFrame(player, basePlayer, targetSlot);
+                    return;
+
+                case "delete":
+                case "remove":
+                case "del":
+                case "r":
+                    DeleteSkinSet(player, basePlayer.userID, targetSlot);
+                    OpenSkinCraftEditorNextFrame(player, basePlayer, targetSlot);
+                    return;
+
+                case "save":
+                case "s":
+                    SaveSkinSet(player, basePlayer, targetSlot);
+                    OpenSkinCraftEditorNextFrame(player, basePlayer, targetSlot);
+                    return;
+
+                case "load":
+                case "use":
+                case "apply":
+                case "l":
+                    SelectSkinSet(player, basePlayer, targetSlot, true);
+                    return;
+            }
+
+            player.Reply(GetMsg("Skin Set Help", player.Id));
+        }
+
+        private void CommandSkinCraft(IPlayer player, string command, string[] args)
+        {
+            if (!CanUseSkinSets(player))
+            {
+                player.Reply(GetMsg("Not Allowed", player.Id));
+                return;
+            }
+
+            var basePlayer = player.Object as BasePlayer;
+            if (basePlayer == null)
+            {
+                player.Reply(GetMsg("Cannot Use", player.Id));
+                return;
+            }
+
+            if (args != null && args.Length > 0 && args[0].Equals("close", StringComparison.OrdinalIgnoreCase))
+            {
+                CloseSkinCraft(basePlayer, true);
+                return;
+            }
+
+            if (args == null || args.Length == 0)
+            {
+                OpenSkinCraftEditor(player, basePlayer, GetSkinSetData(basePlayer.userID).SelectedSet);
                 return;
             }
 
@@ -1102,18 +1291,21 @@ namespace Oxide.Plugins
 
             if (args.Length == 1 && TryParseSkinSetSlot(args[0], out var quickSlot))
             {
-                var data = GetSkinSetData(basePlayer.userID);
-                if (data.Sets.ContainsKey(quickSlot))
-                    ApplySkinSet(player, basePlayer, quickSlot);
-                else
-                    SaveSkinSet(player, basePlayer, quickSlot);
+                OpenSkinCraftEditor(player, basePlayer, quickSlot);
+                return;
+            }
 
+            if ((args[0].Equals("open", StringComparison.OrdinalIgnoreCase) ||
+                 args[0].Equals("edit", StringComparison.OrdinalIgnoreCase)) &&
+                args.Length >= 2 && TryParseSkinSetSlot(args[1], out var editSlot))
+            {
+                OpenSkinCraftEditor(player, basePlayer, editSlot);
                 return;
             }
 
             if (args.Length < 2 || !TryParseSkinSetSlot(args[1], out var slot))
             {
-                player.Reply(GetMsg("Skin Set Help", player.Id));
+                player.Reply(GetMsg("Skin Craft Help", player.Id));
                 return;
             }
 
@@ -1128,7 +1320,7 @@ namespace Oxide.Plugins
                 case "use":
                 case "apply":
                 case "l":
-                    ApplySkinSet(player, basePlayer, slot);
+                    SelectSkinSet(player, basePlayer, slot, true);
                     break;
 
                 case "delete":
@@ -1139,14 +1331,525 @@ namespace Oxide.Plugins
                     break;
 
                 default:
-                    player.Reply(GetMsg("Skin Set Help", player.Id));
+                    player.Reply(GetMsg("Skin Craft Help", player.Id));
                     break;
             }
+        }
+
+        private void CommandSkinAuto(IPlayer player, string command, string[] args)
+        {
+            if (!CanUseAutoSkins(player))
+            {
+                player.Reply(GetMsg("Not Allowed", player.Id));
+                return;
+            }
+
+            var basePlayer = player.Object as BasePlayer;
+            if (basePlayer == null)
+            {
+                player.Reply(GetMsg("Cannot Use", player.Id));
+                return;
+            }
+
+            var data = GetSkinSetData(basePlayer.userID);
+            if (args == null || args.Length == 0 || args[0].Equals("toggle", StringComparison.OrdinalIgnoreCase))
+            {
+                data.AutoSkinsEnabled = !data.AutoSkinsEnabled;
+                SaveSkinSetData();
+                player.Reply(data.AutoSkinsEnabled
+                    ? string.Format(GetMsg("Auto Skin Enabled", player.Id), data.SelectedSet)
+                    : GetMsg("Auto Skin Disabled", player.Id));
+                return;
+            }
+
+            if (args[0].Equals("status", StringComparison.OrdinalIgnoreCase))
+            {
+                player.Reply(string.Format(GetMsg("Auto Skin Status", player.Id),
+                    data.AutoSkinsEnabled ? "enabled" : "disabled", data.SelectedSet));
+                return;
+            }
+
+            if (args[0].Equals("off", StringComparison.OrdinalIgnoreCase) ||
+                args[0].Equals("disable", StringComparison.OrdinalIgnoreCase))
+            {
+                data.AutoSkinsEnabled = false;
+                SaveSkinSetData();
+                player.Reply(GetMsg("Auto Skin Disabled", player.Id));
+                return;
+            }
+
+            if (args[0].Equals("on", StringComparison.OrdinalIgnoreCase) ||
+                args[0].Equals("enable", StringComparison.OrdinalIgnoreCase))
+            {
+                data.AutoSkinsEnabled = true;
+                SaveSkinSetData();
+                player.Reply(string.Format(GetMsg("Auto Skin Enabled", player.Id), data.SelectedSet));
+                return;
+            }
+
+            if (TryParseSkinSetSlot(args[0], out var slot))
+            {
+                data.SelectedSet = slot;
+                data.AutoSkinsEnabled = true;
+                SaveSkinSetData();
+                player.Reply(string.Format(GetMsg("Auto Skin Enabled", player.Id), slot));
+                return;
+            }
+
+            player.Reply(GetMsg("Skin Set Invalid Slot", player.Id));
+        }
+
+        private void CommandSkinTeam(IPlayer player, string command, string[] args)
+        {
+            if (!CanUseTeamShare(player))
+            {
+                player.Reply(GetMsg("Not Allowed", player.Id));
+                return;
+            }
+
+            var basePlayer = player.Object as BasePlayer;
+            if (basePlayer == null)
+            {
+                player.Reply(GetMsg("Cannot Use", player.Id));
+                return;
+            }
+
+            var data = GetSkinSetData(basePlayer.userID);
+            if (args != null && args.Length > 0 && args[0].Equals("toggle", StringComparison.OrdinalIgnoreCase))
+            {
+                data.TeamShareBlocked = !data.TeamShareBlocked;
+                SaveSkinSetData();
+                player.Reply(GetMsg(data.TeamShareBlocked ? "Team Skin Opt Out" : "Team Skin Opt In", player.Id));
+                return;
+            }
+
+            var slot = data.SelectedSet;
+            if (args != null && args.Length > 0 && !TryParseSkinSetSlot(args[0], out slot))
+            {
+                player.Reply(GetMsg("Team Skin Help", player.Id));
+                return;
+            }
+
+            ApplySkinSetToTeam(player, basePlayer, slot);
         }
 
         #endregion
 
         #region Controller
+
+        private class SkinCraftController
+        {
+            private const int EditorCapacity = 7;
+
+            private readonly Skins _plugin;
+            private readonly BasePlayer _owner;
+            private readonly ItemContainer _container;
+            private readonly HashSet<Item> _previewItems = new HashSet<Item>();
+            private readonly Dictionary<Item, ReturnLocation> _returnLocations = new Dictionary<Item, ReturnLocation>();
+            private bool _ignoreItemAdded;
+            private float _ignoreCloseUntil;
+            private int _slot = 1;
+
+            public bool IsOpen;
+
+            private class ReturnLocation
+            {
+                public ItemContainer Container;
+                public int Position;
+            }
+
+            public SkinCraftController(Skins plugin, BasePlayer owner)
+            {
+                _plugin = plugin;
+                _owner = owner;
+                _container = new ItemContainer
+                {
+                    entityOwner = owner,
+                    capacity = EditorCapacity,
+                    isServer = true,
+                    allowedContents = ItemContainer.ContentsType.Generic
+                };
+
+                _container.GiveUID();
+                _plugin._skinCraftControllersPerContainer[_container.uid] = this;
+            }
+
+            public void Open(int slot)
+            {
+                if (!CanOpen())
+                    return;
+
+                _ignoreCloseUntil = Time.realtimeSinceStartup + 0.75f;
+                IsOpen = true;
+                _slot = slot;
+                _container.capacity = EditorCapacity;
+                _container.MarkDirty();
+                ReturnItems();
+                Clear();
+                PopulatePreviews();
+
+                var loot = _owner.inventory.loot;
+                loot.Clear();
+                loot.PositionChecks = false;
+                loot.entitySource = _owner;
+                loot.itemSource = null;
+                loot.AddContainer(_container);
+                loot.SendImmediate();
+
+                DrawUI();
+                _owner.ClientRPC(RpcTarget.Player("RPC_OpenLootPanel", _owner), "generic_resizable");
+                _plugin.NextFrame(() =>
+                {
+                    if (_owner == null || !_owner.IsConnected || !IsOpen)
+                        return;
+
+                    _container.MarkDirty();
+                    _owner.inventory.loot.SendImmediate();
+                });
+            }
+
+            public void Close(bool force = false)
+            {
+                if (!force && ShouldIgnoreClose())
+                    return;
+
+                DestroyUI();
+                ReturnItems();
+                Clear();
+                IsOpen = false;
+            }
+
+            public bool ShouldIgnoreClose()
+            {
+                return Time.realtimeSinceStartup < _ignoreCloseUntil;
+            }
+
+            public void Destroy()
+            {
+                Close(true);
+                _plugin._skinCraftControllersPerContainer.Remove(_container.uid);
+                _container.Kill();
+            }
+
+            public bool IsPreview(Item item)
+            {
+                return item != null && _previewItems.Contains(item);
+            }
+
+            public bool CanAccept(Item item, int position)
+            {
+                return item?.info != null && item.skin != 0 && item.info.category == ItemCategory.Attire &&
+                       position >= 0 && position < EditorCapacity;
+            }
+
+            public void RememberReturnLocation(Item item)
+            {
+                if (item?.parent == null)
+                    return;
+
+                _returnLocations[item] = new ReturnLocation
+                {
+                    Container = item.parent,
+                    Position = item.position
+                };
+            }
+
+            public void ClearSlot(int position)
+            {
+                if (position < 0 || position >= EditorCapacity)
+                    return;
+
+                var existing = _container.GetSlot(position);
+                if (existing != null && _previewItems.Contains(existing))
+                    RemovePreview(existing);
+            }
+
+            public void OnItemAdded(Item item)
+            {
+                if (_ignoreItemAdded)
+                    return;
+
+                if (item == null || item.parent != _container)
+                    return;
+
+                var position = Mathf.Clamp(item.position, 0, EditorCapacity - 1);
+                var saved = _plugin.SaveSkinCraftItem(_owner, item, _slot, position);
+                _plugin.NextFrame(() =>
+                {
+                    var shortname = item.info?.shortname;
+                    var skin = item.skin;
+                    ReturnItem(item);
+
+                    if (saved && !string.IsNullOrEmpty(shortname) && skin != 0)
+                        AddPreview(shortname, skin, position);
+                });
+            }
+
+            private void DrawUI()
+            {
+                DestroyUI();
+
+                var elements = new CuiElementContainer();
+                elements.Add(new CuiPanel
+                {
+                    Image =
+                    {
+                        Color = "0 0 0 0.30"
+                    },
+                    RectTransform =
+                    {
+                        AnchorMin = "0.645 0.455",
+                        AnchorMax = "0.935 0.595"
+                    },
+                    CursorEnabled = false
+                }, "Overlay", SkinCraftPanelName);
+
+                AddHeaderButton(elements, "Set Skins", "0.00 0.55", "0.22 1.00", true, "");
+                AddHeaderButton(elements, "Options", "0.225 0.55", "0.39 1.00", false, "");
+                AddHeaderButton(elements, "Search Skins...", "0.395 0.55", "0.86 1.00", false, "");
+
+                elements.Add(new CuiButton
+                {
+                    Button =
+                    {
+                        Color = "0.58 0.11 0.10 0.72",
+                        Command = $"{SkinCraftCommandDefault} close"
+                    },
+                    Text =
+                    {
+                        Text = "X",
+                        Align = TextAnchor.MiddleCenter,
+                        FontSize = 16,
+                        Color = "1 1 1 0.95"
+                    },
+                    RectTransform =
+                    {
+                        AnchorMin = "0.865 0.55",
+                        AnchorMax = "0.94 1.00"
+                    }
+                }, SkinCraftPanelName);
+
+                AddSetTab(elements, "Loot", "0.00 0.25", "0.15 0.55", 0);
+                for (var set = 1; set <= MaxSkinSetSlots; set++)
+                {
+                    var minX = 0.15f + ((set - 1) * 0.15f);
+                    var maxX = minX + 0.15f;
+                    AddSetTab(elements, $"Set {set}", $"{minX} 0.25", $"{maxX} 0.55", set);
+                }
+
+                for (var i = 0; i < EditorCapacity; i++)
+                {
+                    var minX = 0.025f + (i * 0.128f);
+                    var maxX = minX + 0.110f;
+                    elements.Add(new CuiLabel
+                    {
+                        Text =
+                        {
+                            Text = GetSlotLabel(i),
+                            Align = TextAnchor.MiddleCenter,
+                            FontSize = 11,
+                            Color = "1 1 1 0.84"
+                        },
+                        RectTransform =
+                        {
+                            AnchorMin = $"{minX} 0.00",
+                            AnchorMax = $"{maxX} 0.20"
+                        }
+                    }, SkinCraftPanelName);
+                }
+
+                CuiHelper.AddUi(_owner, elements);
+            }
+
+            private void AddHeaderButton(CuiElementContainer elements, string text, string anchorMin, string anchorMax,
+                bool active, string command)
+            {
+                elements.Add(new CuiButton
+                {
+                    Button =
+                    {
+                        Color = active ? "0.16 0.48 0.20 0.92" : "0.35 0.35 0.35 0.70",
+                        Command = command
+                    },
+                    Text =
+                    {
+                        Text = text,
+                        Align = TextAnchor.MiddleCenter,
+                        FontSize = 14,
+                        Color = active ? "0.72 1 0.72 1" : "0.86 0.86 0.86 0.86"
+                    },
+                    RectTransform =
+                    {
+                        AnchorMin = anchorMin,
+                        AnchorMax = anchorMax
+                    }
+                }, SkinCraftPanelName);
+            }
+
+            private void AddSetTab(CuiElementContainer elements, string text, string anchorMin, string anchorMax, int set)
+            {
+                elements.Add(new CuiButton
+                {
+                    Button =
+                    {
+                        Color = set == _slot ? "0.36 0.68 0.28 0.92" : "0.42 0.42 0.42 0.72",
+                        Command = set > 0 ? $"{SkinCraftCommandDefault} open {set}" : string.Empty
+                    },
+                    Text =
+                    {
+                        Text = text,
+                        Align = TextAnchor.MiddleCenter,
+                        FontSize = 14,
+                        Color = set == _slot ? "0.84 1 0.82 1" : "0.92 0.92 0.92 0.80"
+                    },
+                    RectTransform =
+                    {
+                        AnchorMin = anchorMin,
+                        AnchorMax = anchorMax
+                    }
+                }, SkinCraftPanelName);
+            }
+
+            private void DestroyUI()
+            {
+                CuiHelper.DestroyUi(_owner, SkinCraftPanelName);
+            }
+
+            private void PopulatePreviews()
+            {
+                var data = _plugin.GetSkinSetData(_owner.userID);
+                SkinSet skinSet;
+                if (!data.Sets.TryGetValue(_slot, out skinSet) || skinSet?.Wear == null)
+                    return;
+
+                for (var i = 0; i < skinSet.Wear.Count; i++)
+                {
+                    var entry = skinSet.Wear[i];
+                    if (entry == null)
+                        continue;
+
+                    var position = entry.Position >= 0 && entry.Position < EditorCapacity
+                        ? entry.Position
+                        : _plugin.GetSkinSetEditorPosition(entry.Shortname, i);
+                    AddPreview(entry.Shortname, entry.Skin, position);
+                }
+            }
+
+            private void AddPreview(string shortname, ulong skin, int position)
+            {
+                if (string.IsNullOrEmpty(shortname) || skin == 0 || position < 0 || position >= EditorCapacity)
+                    return;
+
+                var definition = ItemManager.FindItemDefinition(shortname);
+                if (definition == null)
+                    return;
+
+                ClearSlot(position);
+
+                var preview = ItemManager.Create(definition, 1, skin);
+                if (preview == null)
+                    return;
+
+                _previewItems.Add(preview);
+                try
+                {
+                    _ignoreItemAdded = true;
+                    preview.MoveToContainer(_container, position);
+                }
+                finally
+                {
+                    _ignoreItemAdded = false;
+                }
+            }
+
+            private bool CanOpen()
+            {
+                return _owner != null && !_owner.IsDead() && !_owner.IsWounded() && !_owner.IsIncapacitated();
+            }
+
+            private void ReturnItems()
+            {
+                if (_container?.itemList == null)
+                    return;
+
+                for (var i = _container.itemList.Count - 1; i >= 0; i--)
+                {
+                    var item = _container.itemList[i];
+                    if (_previewItems.Contains(item))
+                        RemovePreview(item);
+                    else
+                        ReturnItem(item);
+                }
+            }
+
+            private void ReturnItem(Item item)
+            {
+                if (item == null || item.parent != _container)
+                    return;
+
+                ReturnLocation location;
+                if (_returnLocations.TryGetValue(item, out location))
+                {
+                    _returnLocations.Remove(item);
+                    if (location.Container != null && item.MoveToContainer(location.Container, location.Position))
+                        return;
+                }
+
+                if (!item.MoveToContainer(_owner.inventory.containerMain))
+                    item.Drop(_owner.transform.position, Vector3.up);
+            }
+
+            private void RemovePreview(Item item)
+            {
+                if (item == null)
+                    return;
+
+                _previewItems.Remove(item);
+
+                if (item.uid.IsValid && Net.sv != null)
+                {
+                    Net.sv.ReturnUID(item.uid.Value);
+                    item.uid = default(ItemId);
+                }
+
+                item.RemoveFromWorld();
+                item.parent?.itemList?.Remove(item);
+                item.parent = null;
+
+                var heldEntity = item.GetHeldEntity();
+                if (heldEntity != null && heldEntity.IsValid() && !heldEntity.IsDestroyed)
+                    heldEntity.Kill();
+            }
+
+            private void Clear()
+            {
+                _container.itemList.Clear();
+                _previewItems.Clear();
+                _returnLocations.Clear();
+                _container.MarkDirty();
+            }
+
+            private string GetSlotLabel(int index)
+            {
+                switch (index)
+                {
+                    case 0:
+                        return "Head";
+                    case 1:
+                        return "Chest";
+                    case 2:
+                        return "Shirt";
+                    case 3:
+                        return "Pants";
+                    case 4:
+                        return "Boots";
+                    case 5:
+                        return "Gloves";
+                    default:
+                        return "Extra";
+                }
+            }
+        }
 
         private class ContainerController
         {
@@ -1697,15 +2400,50 @@ namespace Oxide.Plugins
 
         private const int MaxSkinSetSlots = 5;
 
-        private bool CanUse(IPlayer player) => player.HasPermission(PermissionUse) ||
-                                               player.HasPermission(LegacyPermissionUse);
+        private bool CanUse(IPlayer player) => player.HasPermission(PermissionUse);
 
-        private bool CanUseAdmin(IPlayer player) => player.HasPermission(PermissionAdmin) ||
-                                                    player.HasPermission(LegacyPermissionAdmin);
+        private bool CanUseAdmin(IPlayer player) => player.HasPermission(PermissionAdmin);
 
         private bool CanUseSkinSets(IPlayer player) => CanUse(player) || player.HasPermission(PermissionSkinSets);
 
+        private bool CanUseAutoSkins(IPlayer player) => CanUse(player) || player.HasPermission(PermissionAutoSkins);
+
+        private bool CanUseTeamShare(IPlayer player) => CanUse(player) || player.HasPermission(PermissionTeamShare);
+
         private string GetMsg(string key, string userId = null) => lang.GetMessage(key, this, userId);
+
+        private void TryAutoSkinItem(BasePlayer player, Item item)
+        {
+            if (player == null || item?.info == null || item.parentItem != null)
+                return;
+
+            if (_autoSkinIgnoredItems.Remove(item))
+                return;
+
+            var data = GetSkinSetData(player.userID);
+            if (!data.AutoSkinsEnabled)
+                return;
+
+            SkinSet skinSet;
+            if (!data.Sets.TryGetValue(data.SelectedSet, out skinSet) || skinSet?.Wear == null)
+                return;
+
+            var entry = skinSet.Wear.FirstOrDefault(x => x != null && x.Shortname == item.info.shortname);
+            if (entry == null || entry.Skin == 0 || item.skin == entry.Skin)
+                return;
+
+            if (!CanUseSkin(player, entry.Shortname, entry.Skin))
+                return;
+
+            NextFrame(() =>
+            {
+                if (player == null || !player.IsConnected || item == null || item.parent == null ||
+                    item.info == null || item.skin == entry.Skin)
+                    return;
+
+                ApplySkinToInventoryItem(player, item, entry.Skin);
+            });
+        }
 
         private void LoadSkinSetData()
         {
@@ -1748,6 +2486,141 @@ namespace Oxide.Plugins
             return slot >= 1 && slot <= MaxSkinSetSlots;
         }
 
+        private void SelectSkinSet(IPlayer player, BasePlayer basePlayer, int slot, bool applyNow)
+        {
+            var data = GetSkinSetData(basePlayer.userID);
+            data.SelectedSet = slot;
+            SaveSkinSetData();
+
+            if (applyNow)
+            {
+                ApplySkinSet(player, basePlayer, slot);
+                return;
+            }
+
+            player.Reply(string.Format(GetMsg("Skin Set Selected", player.Id), slot));
+        }
+
+        private void OpenSkinCraftEditor(IPlayer player, BasePlayer basePlayer, int slot)
+        {
+            var data = GetSkinSetData(basePlayer.userID);
+            data.SelectedSet = slot;
+            SaveSkinSetData();
+
+            SkinCraftController controller;
+            if (!_skinCraftControllers.TryGetValue(basePlayer.userID, out controller))
+                _skinCraftControllers[basePlayer.userID] = controller = new SkinCraftController(this, basePlayer);
+
+            controller.Open(slot);
+            player.Reply(string.Format(GetMsg("Skin Craft Opened", player.Id), slot));
+        }
+
+        private void OpenSkinCraftEditorNextFrame(IPlayer player, BasePlayer basePlayer, int slot)
+        {
+            NextFrame(() =>
+            {
+                if (basePlayer == null || !basePlayer.IsConnected)
+                    return;
+
+                OpenSkinCraftEditor(player, basePlayer, slot);
+            });
+        }
+
+        private void CloseSkinCraft(BasePlayer player, bool force = false)
+        {
+            if (player == null)
+                return;
+
+            SkinCraftController controller;
+            if (_skinCraftControllers.TryGetValue(player.userID, out controller) && controller.IsOpen &&
+                (force || !controller.ShouldIgnoreClose()))
+                controller.Close(force);
+        }
+
+        private bool SaveSkinCraftItem(BasePlayer player, Item item, int slot, int position)
+        {
+            if (item?.info == null || item.skin == 0)
+            {
+                SendReply(player, GetMsg("Skin Craft No Item Skin", player.UserIDString));
+                return false;
+            }
+
+            if (!IsWornSkinSetItem(item))
+            {
+                SendReply(player, GetMsg("Skin Craft Not Worn", player.UserIDString));
+                return false;
+            }
+
+            if (!CanUseSkin(player, item.info.shortname, item.skin))
+            {
+                SendReply(player, GetMsg("Skin Craft Not Owned", player.UserIDString));
+                return false;
+            }
+
+            var skinSet = GetOrCreateSkinSet(player.userID, slot);
+            var entry = new SkinSetEntry
+            {
+                Shortname = item.info.shortname,
+                Skin = item.skin,
+                Position = Mathf.Clamp(position, 0, 6)
+            };
+
+            skinSet.Wear.RemoveAll(x => x == null || x.Shortname == entry.Shortname || x.Position == entry.Position);
+            skinSet.Wear.Add(entry);
+
+            SaveSkinSetData();
+            SendReply(player, string.Format(GetMsg("Skin Craft Saved Item", player.UserIDString),
+                item.info.displayName.english, slot));
+            return true;
+        }
+
+        private SkinSet GetOrCreateSkinSet(ulong userId, int slot)
+        {
+            var data = GetSkinSetData(userId);
+            SkinSet skinSet;
+            if (!data.Sets.TryGetValue(slot, out skinSet))
+                data.Sets[slot] = skinSet = new SkinSet();
+
+            if (skinSet.Wear == null)
+                skinSet.Wear = new List<SkinSetEntry>();
+
+            return skinSet;
+        }
+
+        private bool IsWornSkinSetItem(Item item)
+        {
+            return item?.info != null && item.info.category == ItemCategory.Attire;
+        }
+
+        private int GetSkinSetEditorPosition(string shortname, int fallback)
+        {
+            if (string.IsNullOrEmpty(shortname))
+                return Mathf.Clamp(fallback, 0, 6);
+
+            var value = shortname.ToLowerInvariant();
+
+            if (value.Contains("helmet") || value.Contains("mask") || value.Contains("hat") ||
+                value.Contains("coffeecan") || value.Contains("facemask") || value.Contains("head"))
+                return 0;
+
+            if (value.Contains("chest") || value.Contains("vest") || value.Contains("jacket"))
+                return 1;
+
+            if (value.Contains("shirt") || value.Contains("hoodie"))
+                return 2;
+
+            if (value.Contains("pants") || value.Contains("kilt") || value.Contains("burlap.trousers"))
+                return 3;
+
+            if (value.Contains("boots") || value.Contains("shoes"))
+                return 4;
+
+            if (value.Contains("gloves"))
+                return 5;
+
+            return 6;
+        }
+
         private void SaveSkinSet(IPlayer player, BasePlayer basePlayer, int slot)
         {
             var skinSet = CaptureWornSkinSet(basePlayer);
@@ -1772,6 +2645,7 @@ namespace Oxide.Plugins
             }
 
             var skipped = 0;
+            var applied = 0;
             foreach (var entry in skinSet.Wear)
             {
                 if (entry == null || string.IsNullOrEmpty(entry.Shortname) || entry.Skin == 0)
@@ -1787,11 +2661,137 @@ namespace Oxide.Plugins
                 if (item == null)
                     continue;
 
-                ApplySkinToWornItem(basePlayer, item, entry.Skin);
+                if (ApplySkinToWornItem(basePlayer, item, entry.Skin))
+                    applied++;
             }
 
-            player.Reply(string.Format(GetMsg(skipped == 0 ? "Skin Set Applied" : "Skin Set Applied Partial",
-                player.Id), slot));
+            RefreshWornSkins(basePlayer);
+
+            var messageKey = applied == 0
+                ? "Skin Set Applied None"
+                : skipped == 0
+                    ? "Skin Set Applied"
+                    : "Skin Set Applied Partial";
+
+            player.Reply(string.Format(GetMsg(messageKey, player.Id), slot));
+        }
+
+        private void ApplySkinSetToTeam(IPlayer player, BasePlayer owner, int slot)
+        {
+            var data = GetSkinSetData(owner.userID);
+            SkinSet skinSet;
+            if (!data.Sets.TryGetValue(slot, out skinSet) || skinSet?.Wear == null || skinSet.Wear.Count == 0)
+            {
+                player.Reply(string.Format(GetMsg("Skin Set Empty", player.Id), slot));
+                return;
+            }
+
+            var count = 0;
+            foreach (var target in GetTeamShareTargets(owner))
+            {
+                if (target == null || target == owner || !target.IsConnected)
+                    continue;
+
+                var targetData = GetSkinSetData(target.userID);
+                if (targetData.TeamShareBlocked)
+                    continue;
+
+                if (ApplySkinSetToPlayer(target, skinSet) > 0)
+                    count++;
+            }
+
+            player.Reply(count == 0
+                ? GetMsg("Team Skin No Targets", player.Id)
+                : string.Format(GetMsg("Team Skin Applied", player.Id), slot, count));
+        }
+
+        private int ApplySkinSetToPlayer(BasePlayer target, SkinSet skinSet)
+        {
+            var applied = 0;
+            foreach (var entry in skinSet.Wear)
+            {
+                if (entry == null || string.IsNullOrEmpty(entry.Shortname) || entry.Skin == 0)
+                    continue;
+
+                if (!CanUseSkin(target, entry.Shortname, entry.Skin))
+                    continue;
+
+                var item = FindWornItem(target, entry.Shortname, entry.Position);
+                if (item == null)
+                    continue;
+
+                if (ApplySkinToWornItem(target, item, entry.Skin))
+                    applied++;
+            }
+
+            if (applied > 0)
+                RefreshWornSkins(target);
+
+            return applied;
+        }
+
+        private IEnumerable<BasePlayer> GetTeamShareTargets(BasePlayer owner)
+        {
+            var ids = new HashSet<ulong>();
+
+            var team = owner != null && owner.currentTeam != 0
+                ? RelationshipManager.ServerInstance.FindTeam(owner.currentTeam)
+                : null;
+            if (team?.members != null)
+            {
+                foreach (var memberId in team.members)
+                    ids.Add(memberId);
+            }
+
+            foreach (var clanMemberId in GetClanMemberIds(owner))
+                ids.Add(clanMemberId);
+
+            foreach (var id in ids)
+            {
+                if (id == owner.userID)
+                    continue;
+
+                var player = BasePlayer.activePlayerList.FirstOrDefault(x => x.userID == id);
+                if (player != null)
+                    yield return player;
+            }
+        }
+
+        private IEnumerable<ulong> GetClanMemberIds(BasePlayer owner)
+        {
+            if (Clans == null || owner == null)
+                yield break;
+
+            var clan = Clans.Call("GetClanOf", owner.UserIDString) as string ??
+                       Clans.Call("GetClanOf", owner.userID) as string;
+            if (string.IsNullOrEmpty(clan))
+                yield break;
+
+            var result = Clans.Call("GetClanMembers", clan);
+            if (result == null)
+                yield break;
+
+            if (result is IEnumerable<string> stringMembers)
+            {
+                foreach (var member in stringMembers)
+                {
+                    ulong id;
+                    if (ulong.TryParse(member, out id))
+                        yield return id;
+                }
+
+                yield break;
+            }
+
+            if (result is System.Collections.IEnumerable enumerable && !(result is string))
+            {
+                foreach (var member in enumerable)
+                {
+                    ulong id;
+                    if (member != null && ulong.TryParse(member.ToString(), out id))
+                        yield return id;
+                }
+            }
         }
 
         private void DeleteSkinSet(IPlayer player, ulong userId, int slot)
@@ -1823,11 +2823,12 @@ namespace Oxide.Plugins
                 if (item?.info == null || item.skin == 0)
                     continue;
 
+                var position = GetSkinSetEditorPosition(item.info.shortname, skinSet.Wear.Count);
                 skinSet.Wear.Add(new SkinSetEntry
                 {
                     Shortname = item.info.shortname,
                     Skin = item.skin,
-                    Position = item.position
+                    Position = position
                 });
             }
 
@@ -1850,16 +2851,25 @@ namespace Oxide.Plugins
             return container.itemList.FirstOrDefault(item => item?.info != null && item.info.shortname == shortname);
         }
 
-        private void ApplySkinToWornItem(BasePlayer player, Item item, ulong skin)
+        private bool ApplySkinToWornItem(BasePlayer player, Item item, ulong skin)
+        {
+            var applied = ApplySkinToInventoryItem(player, item, skin);
+            if (applied)
+                RefreshWornSkins(player);
+
+            return applied;
+        }
+
+        private bool ApplySkinToInventoryItem(BasePlayer player, Item item, ulong skin)
         {
             var container = item.parent;
             var position = item.position;
             if (container == null)
-                return;
+                return false;
 
             var replacement = ItemManager.Create(item.info, item.amount, skin);
             if (replacement == null)
-                return;
+                return false;
 
             if (item.hasCondition)
             {
@@ -1867,13 +2877,69 @@ namespace Oxide.Plugins
                 replacement._condition = item._condition;
             }
 
+            replacement.name = item.name;
+            _autoSkinIgnoredItems.Add(replacement);
+
             item.RemoveFromContainer();
             item.Remove();
 
             if (!replacement.MoveToContainer(container, position))
+            {
                 replacement.Drop(player.transform.position, Vector3.up);
+                return false;
+            }
 
+            replacement.skin = skin;
+            replacement.MarkDirty();
+            RefreshWornItem(replacement);
+            Interface.CallHook("OnItemSkinChanged", player, replacement);
             player.inventory.SendSnapshot();
+            return true;
+        }
+
+        private void RefreshWornItem(Item item)
+        {
+            if (item?.info?.itemMods == null)
+                return;
+
+            for (var i = 0; i < item.info.itemMods.Length; i++)
+                item.info.itemMods[i].OnParentChanged(item);
+
+            var heldEntity = item.GetHeldEntity();
+            if (heldEntity != null && heldEntity.IsValid() && !heldEntity.IsDestroyed)
+                heldEntity.SendNetworkUpdateImmediate();
+        }
+
+        private void RefreshWornSkins(BasePlayer player)
+        {
+            if (player == null)
+                return;
+
+            RefreshWornContainerItems(player);
+            player.inventory.containerWear?.MarkDirty();
+            player.inventory.SendSnapshot();
+            player.SendNetworkUpdateImmediate();
+
+            NextFrame(() =>
+            {
+                if (player == null || !player.IsConnected)
+                    return;
+
+                RefreshWornContainerItems(player);
+                player.inventory.containerWear?.MarkDirty();
+                player.inventory.SendSnapshot();
+                player.SendNetworkUpdateImmediate();
+            });
+        }
+
+        private void RefreshWornContainerItems(BasePlayer player)
+        {
+            var container = player?.inventory?.containerWear;
+            if (container?.itemList == null)
+                return;
+
+            for (var i = 0; i < container.itemList.Count; i++)
+                RefreshWornItem(container.itemList[i]);
         }
 
         private IEnumerable<ulong> GetOwnedItemSkinIds(BasePlayer player, ItemDefinition itemDefinition)

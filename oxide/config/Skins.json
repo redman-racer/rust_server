@@ -9,6 +9,18 @@
     "skinset",
     "ss"
   ],
+  "Skin Craft Commands": [
+    "skincraft",
+    "sc"
+  ],
+  "Auto Skin Commands": [
+    "skinauto",
+    "sauto"
+  ],
+  "Team Skin Commands": [
+    "skinteam",
+    "st"
+  ],
   "Skins": [
     {
       "Item Shortname": "fun.guitar",

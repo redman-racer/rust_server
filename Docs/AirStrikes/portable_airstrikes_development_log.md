@@ -21,24 +21,24 @@ Plugin file:
 
 Current plugin version:
 
-- `PortableAirstrikes` v0.1.30
+- `PortableAirstrikes` v0.1.36
 
 Current upload note:
 
-- `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_STACKABLE_CID_2026-07-08.md`
+- `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_MOVEITEM_KINEMATIC_2026-07-08.md`
 
 Current state:
 
-- The plugin now has the low-tier direct-command drone-drop slice for bee, grenade, utility, fire, and 40mm payloads, the first heavy-drop slice for heavy bee, firebomb, and propane payloads, the off-map mortar slice, the first rocket-run slice for HV, standard, and incendiary rockets, the first A-10 strafe slice, the scrollable CUI picker/confirmation flow, optional loot injection, the first disabled-by-default MLRS rocket slice, opt-in monument blocking for configured monuments, the first disabled-by-default vehicle homing missile slice, player status/cancel commands for pre-impact calls, heavy-strike warning map markers, in-game warning fanout, warning recipient diagnostics, optional audit Discord webhook forwarding, configurable visual delivery flyovers/artillery sources, the airstrike targeting binocular/default-strike flow, the CustomItemDefinitions item-definition layer, the v0.1.23 stacked-binocular/automatic raycast targeting pass, the v0.1.24 inventory-safe stack-cap fix, the v0.1.25 charge-backed binocular fix, the v0.1.28 client-safe visual prefab fix, the v0.1.29 stack/icon/rotor-wash repair, and the v0.1.30 stackable CID item pass.
+- The plugin now has the low-tier direct-command drone-drop slice for bee, grenade, utility, fire, and 40mm payloads, the first heavy-drop slice for heavy bee, firebomb, and propane payloads, the off-map mortar slice, the first rocket-run slice for HV, standard, and incendiary rockets, the first A-10 strafe slice, the scrollable CUI picker/confirmation flow, optional loot injection, the first disabled-by-default MLRS rocket slice, opt-in monument blocking for configured monuments, the first disabled-by-default vehicle homing missile slice, player status/cancel commands for pre-impact calls, heavy-strike warning map markers, in-game warning fanout, warning recipient diagnostics, optional audit Discord webhook forwarding, configurable visual delivery flyovers/artillery sources, the airstrike targeting binocular/default-strike flow, the CustomItemDefinitions item-definition layer, the v0.1.23 stacked-binocular/automatic raycast targeting pass, the v0.1.24 inventory-safe stack-cap fix, the v0.1.25 charge-backed binocular fix, the v0.1.28 client-safe visual prefab fix, the v0.1.29 stack/icon/rotor-wash repair, the v0.1.30 stackable CID item pass, the v0.1.31 destroyable vehicle-delivery timing/spawn reliability pass, the v0.1.32 native delivery-vehicle asset alignment pass, the v0.1.33 native patrol-heli visual path, the v0.1.35 patrol-heli prefab GUID/spawn-order repair, and the v0.1.36 MoveItem/kinematic velocity repair.
 - It can store a target, list strike definitions, validate a selected strike, check item/RP/permission/cooldown constraints, charge RP, consume the configured airstrike binocular item, start cooldowns, and dispatch bounded drone-drop, heavy-drop, rocket-run, off-map mortar, A-10 strafe, MLRS, and homing missile executors.
 - Default live item is now the CID shortname `raidlands.airstrike.designator` named `Airstrike Targeting Binoculars`, parented to `tool.binoculars`; the legacy named `tool.binoculars` fallback still works when CID is unavailable and fallback is enabled.
-- Actual Rust item stack size is now `65535` for the CID shortname `raidlands.airstrike.designator`. Vanilla `tool.binoculars` remains stack size `1`; old charge-backed airstrike items migrate their stored charge count into the physical stack amount.
+- Actual Rust item stack size is `1` for the CID shortname `raidlands.airstrike.designator` and vanilla `tool.binoculars`; airstrike charge counts are stored in `item.instanceData.dataInt`, and old bad physical stacks normalize into one movable item named like `Airstrike Targeting Binoculars x25`.
 - Holding the configured item gives player instructions, and a ping while holding it creates a short-lived cyan/amber targeting marker.
 - Tool pings now first try the same raycast/entity capture that `/strike debugping` used, so vehicle-target pings can carry entity tracking without requiring the admin debug command.
 - If the player has no saved default, the tool ping opens `/strike`; the confirmed selection is saved in `PortableAirstrikes_Data.DefaultStrikeByUser`.
 - If the player has a saved default, the tool ping attempts that strike immediately. Players can view/change it with `/strike default show`, `/strike default <strikeId>`, and `/strike default clear`.
 - `bee_swarm_drone`, `beancan_drop`, `f1_cluster`, `smoke_screen`, `flash_breach`, `molotov_drop`, and `he_40mm_micro` use the configured `BaseCount`, `MaxCount`, and `SpreadRadius`, then spawn payloads above the target with staggered timers.
-- `bee_swarm_heavy`, `firebomb_run`, and `propane_bomb_drop` use the configured delivery multiplier, `BaseCount`, `MaxCount`, and `SpreadRadius`, then spawn catapult-style heavy projectiles above the target with staggered timers.
+- `bee_swarm_heavy`, `firebomb_run`, and `propane_bomb_drop` use the cargo-plane delivery tier, configured delivery multiplier, `BaseCount`, `MaxCount`, and `SpreadRadius`, then spawn catapult-style heavy projectiles above the target with staggered timers.
 - `mortar_he` and `mortar_frag` now use an off-map mortar executor with configured count/spread and staggered mortar shell impacts.
 - `hv_rocket_run`, `rocket_run`, and `incendiary_rocket_run` now use an attack-heli-style rocket-run executor with configured `RocketCount`, `MaxCount`, and `SpreadRadius`, then fire staggered rockets across a narrow target line.
 - `a10_strafe` now uses a simulated Bradley-longbarrel cannon strafe with configured `BurstCount`, `LineLength`, `Width`, `ImpactRadius`, `PulseDelaySeconds`, and per-entity damage scales.
@@ -49,9 +49,9 @@ Current state:
 - Heavy-strike warning markers use native `MapMarkerGenericRadius` entities while `General.UseMapMarkersForHeavyStrikes=true`, clean up on completion/failure/cancel/unload, and are intended as public counterplay markers.
 - Accepted strikes can now notify the caller's online Rust team by default, and heavy strikes can optionally notify nearby online players through config without using Discord.
 - Accepted strikes now print and audit warning fanout recipient counts, and admins can preview warning recipients with `/strike debug warnings <strikeId>` against the current stored target.
-- `DeliveryVisuals` now controls scripted drone/aircraft flyovers, MLRS/A-10 aircraft passes, repeated autoload-safe flyover sound cues, high-rate movement intervals, and mortar artillery source visuals with optional temporary NPC crew. Rotor-wash effect sends are intentionally disabled because the prefabs are not in an autoloaded asset scene.
-- All configured strike IDs now have an executor route, but `homing_heli`, `homing_jet`, `mini_mlrs`, and `full_mlrs` remain disabled by default pending deliberate live smoke/balance tuning.
-- Loot injection live tuning is deferred until the end. MLRS and homing missiles remain disabled by default pending broader balance and safety tuning.
+- `DeliveryVisuals` now controls scripted native drone, cargo-plane, patrol-helicopter, F-15, and mortar/artillery visuals, repeated autoload-safe flyover sound cues, high-rate movement intervals, optional temporary mortar NPC crew, destroyable delivery vehicle health, and per-delivery first-payload approach timing. Rotor-wash effect sends are intentionally disabled because the prefabs are not in an autoloaded asset scene.
+- All configured strike IDs now have an executor route. Homing remains disabled/gated by default; MLRS availability is preserved from the live config and should only be enabled publicly after deliberate smoke/balance tuning.
+- Loot injection live tuning is deferred until the end. Homing missiles remain disabled by default pending broader balance and safety tuning; MLRS should follow the deliberately enabled/disabled choice in the live config.
 
 ## Implemented So Far
 
@@ -658,6 +658,60 @@ Implemented in v0.1.30:
 - `StackSizeController.cs` now applies configured stack sizes in `OnItemDefinitionRegistered`, so CID items registered after StackSizeController initialization receive their configured stack size immediately.
 - Existing targeting, icon, warnings, RP/cooldowns, webhooks, and strike payload behavior were left unchanged.
 
+Implemented in v0.1.31:
+
+- Added root `ConfigVersion=29`, building on the existing dirty `ConfigVersion=28` destroyable-carrier slice.
+- Kept `DeliveryVisuals.DeliveryVehiclesCanBeDestroyed=true`, `PayloadRequiresLiveDeliveryVehicle=true`, and `RefundIfDeliveryVehicleDestroyedBeforePayload=false` in the live config.
+- Added per-delivery first-payload approach timing defaults:
+  - `DroneFirstPayloadDelaySeconds=1.5`
+  - `AttackHeliFirstPayloadDelaySeconds=7`
+  - `CargoPlaneFirstPayloadDelaySeconds=9`
+  - `A10FirstPayloadDelaySeconds=8`
+  - `MlrsFirstPayloadDelaySeconds=12`
+- Kept `DestroyableDeliveryVehicleFirstPayloadDelaySeconds` as the legacy drone/fallback timing instead of using it for every aircraft-delivered payload.
+- Added a delivery flight-plan helper so the visible carrier starts inbound, reaches the release point at first-payload time, and continues outbound after release.
+- Heavy-drop carriers release over the target, rocket-run carriers release from the rocket standoff line, A-10 stand-in carriers begin at the strafe-line start, and MLRS carriers release from the MLRS launch standoff.
+- Cargo-plane visuals now use the native `CargoPlane` route setup pattern (`dropped`, `InitDropPosition`, `startPos`, `endPos`, `secondsToTake`) instead of the generic entity movement setup.
+- Attack-heli and other generic visual spawns no longer call `SetFlagLocal` or `SetCreatorEntity` before `Spawn()`, and visual-spawn warnings now include phase-specific failure text.
+- Intercept semantics remain no-refund by default: destroying a required carrier before first payload cancels the call and keeps caller cost/cooldown; destroying it mid-run cancels unreleased timers while already spawned payloads continue; destroying it after all payloads release only removes the visual carrier.
+- Existing strike enabled/disabled choices, homing gates, CID item behavior, RP/cooldowns, warning markers, audit history, and actual payload damage behavior were left unchanged.
+
+Implemented in v0.1.32:
+
+- Added root `ConfigVersion=30`.
+- Changed the rocket/helicopter delivery visual prefab from the player attack helicopter to the native patrol helicopter prefab.
+- Added the native F-15 prefab as the visual carrier for F-15/jet-style passes, MLRS flyovers, and the A-10 BRRRRT stand-in.
+- Kept native cargo plane routing for heavy-drop profiles, and migrated default `bee_swarm_heavy` and `firebomb_run` deliveries from `attack_heli` to `cargo_plane_jet`.
+- Heavy-drop first-payload timing and carrier health now use cargo-plane delivery settings even if an older config still has an old heavy-drop delivery label before migration.
+- Confirmed the planned non-homing strike catalog is present in the plugin/config: bee, beancan, F1, smoke, flash, 40mm, molotov, firebomb, propane, rocket, mortar, A-10, mini MLRS, and full MLRS. Homing strike definitions remain present but disabled/gated by default.
+- Existing payload execution, RP/token/cooldowns, warning markers, audit history, homing gates, and destroyable-carrier intercept semantics were left unchanged.
+
+Implemented in v0.1.33:
+
+- Kept root `ConfigVersion=30`; this is a code-only patrol-heli visual fix with no config migration.
+- Added a dedicated native `PatrolHelicopter` flyover path for `attack_heli` deliveries instead of sending patrol-heli visuals through the generic aircraft helper.
+- Patrol-heli visuals now clear server gib, fireball, map-marker, and flee-marker prefab references, then disable the native patrol-heli brain/AI after spawn so the visual can follow the scripted rocket-run path.
+- The generic visual movement helper now catches transform/network-update exceptions and reports a debug warning instead of letting a native entity quirk break the scheduled flyover.
+- Existing cargo-plane, F-15, drone, mortar, payload, RP/token/cooldown, warning marker, audit history, homing gate, and destroyable-carrier behavior were left unchanged.
+
+Implemented in v0.1.35:
+
+- Kept root `ConfigVersion=30`; this is a code-only patrol-heli spawn-order fix with no config migration.
+- Left native patrol-heli prefab GUID references intact until after `PatrolHelicopter.Spawn()` so the prefab can initialize without the live `GUIDToPath: guid is empty` lead-in.
+- Moved post-spawn patrol-heli visual cleanup into the spawned-entity phase: disable native brain/AI, clear optional gib/fireball/map-marker references, destroy the flee marker, then prepare the scripted flyover route.
+- Existing cargo-plane, F-15, drone, mortar, payload, RP/token/cooldown, warning marker, audit history, homing gate, and destroyable-carrier behavior were left unchanged.
+
+Implemented in v0.1.36:
+
+- Added root `ConfigVersion=31`.
+- Reverted the airstrike CID binocular item to the inventory-safe charge-backed model after live testing again produced `RPC Error in MoveItem` and `AssertionException: split_Amount <= 0` when moving stacked binocular-derived items.
+- Set `AirstrikeItem.MaxStackSize=1`, kept `MaxChargesPerItem=65535`, and updated `StackSizeController.json` so `raidlands.airstrike.designator` and `tool.binoculars` both resolve to physical stack size `1`.
+- Existing bad physical stacks normalize into one physical item with charge count stored in `item.instanceData.dataInt` and a display name like `Airstrike Targeting Binoculars x25`.
+- Give/API/kit/loot paths create charge-backed single items again, while successful strikes consume one stored charge and remove the item only when charges reach zero.
+- Visual flyover rigidbody handling no longer writes velocity or angular velocity after marking a rigidbody kinematic, reducing repeated `Setting linear/angular velocity of a kinematic body is not supported` console spam.
+- SpawnHeli fetch/teleport now skips velocity clearing when the heli rigidbody is missing or already kinematic.
+- Existing cargo-plane, F-15, drone, mortar, payload, RP/token/cooldown, warning marker, audit history, homing gate, and destroyable-carrier behavior were left unchanged.
+
 ### Central Validation
 
 Implemented:
@@ -807,6 +861,19 @@ Completed:
 - Roslyn compile check passed again after the v0.1.30 stackable CID item pass.
 - Roslyn compile check passed for `StackSizeController.cs` after adding the late CID registration stack-size hook; remaining warnings were expected unassigned plugin-reference/config-field warnings.
 - JSON parse checks passed for `oxide/config/PortableAirstrikes.json` and `oxide/config/StackSizeController.json`; airstrike CID stack is `65535`, vanilla `tool.binoculars` remains `1`.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.31 vehicle-delivery timing defaults were added.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.31 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in the visual vehicle helper.
+- Direct trailing-whitespace scan passed for the plugin, config, development log, global upload note, and v0.1.31 vehicle-delivery upload note after the v0.1.31 pass.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.32 vehicle-asset alignment pass; the config saved as `ConfigVersion=30`.
+- Config audit confirmed `bee_swarm_heavy`, `firebomb_run`, and `propane_bomb_drop` use `cargo_plane_jet`; rocket runs use `attack_heli`; `a10_strafe` uses `a10_gun_run`; `mini_mlrs` and `full_mlrs` use `cargo_plane_jet`; homing remains disabled.
+- Confirmed visual prefabs exist in `Bundles/AssetSceneManifest.json` for drone, cargo plane, patrol helicopter, F-15, mortar, mortar muzzle/deploy effects, and scientist NPC crew.
+- Planned non-homing catalog audit found all 18 expected IDs present and no missing IDs.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.32 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in the visual vehicle helper.
+- Direct trailing-whitespace scan passed for the plugin, config, development log, global upload note, and v0.1.32 vehicle-asset alignment upload note after the v0.1.32 pass.
+- Local Oxide log review found a live `rocket_run visual rocket run could not spawn: Object reference not set to an instance of an object` warning during a patrol-heli rocket-run test, while the payload itself still completed.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.33 against `RustDedicated_Data/Managed`; remaining warnings are Unity `Rigidbody.velocity` deprecation warnings in the visual movement helpers.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.35 patrol-heli spawn-order fix.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.35 against `RustDedicated_Data/Managed`; remaining warnings are Unity `Rigidbody.velocity` deprecation warnings in the visual movement helpers.
 
 Still required:
 
@@ -816,6 +883,8 @@ Still required:
 - In-game smoke for first-use binocular behavior: hold item, place ping, menu opens, confirm strike, `DefaultStrikeByUser` persists, next ping calls that default.
 - Live confirmation that `portableairstrikes.giveitem <player> 25` creates a stack, that one successful strike consumes one item from that stack, and that the scroll wheel moves the strike picker content.
 - In-game smoke for v0.1.20 high-rate visual movement/repeated sound cleanup on drone, attack-heli/aircraft, MLRS if enabled, and mortar strikes.
+- In-game smoke for the v0.1.35 patrol-heli spawn-order fix, especially `hv_rocket_run`, `rocket_run`, and `incendiary_rocket_run`.
+- Continued in-game smoke for the v0.1.32 vehicle-asset alignment pass on cargo-plane heavy drops, F-15 A-10 strafes, and F-15 MLRS flyovers.
 - Live confirmation that optional mortar crew NPC visuals remain non-disruptive with player-target sensing suppressed; set `DeliveryVisuals.SpawnMortarCrewNpc=false` if they behave noisily.
 
 ## v0.1.18 Visual Live Smoke Evidence
@@ -849,86 +918,67 @@ Current boundaries:
 - The configured airstrike item is now a named `tool.binoculars` item; because Rust reports `HasSkins=false` for binoculars, live inventory icon replacement requires a different delivery path than normal item skin ID config.
 - Tool-driven default selection is implemented, but live smoke still needs to confirm the server's current Rust/uMod build raises `OnMapMarkerAdded` for the specific binocular/team ping action players use.
 - Optional loot container injection exists, but is disabled by default until `LootDistribution.Enabled` is turned on in config.
-- `mini_mlrs` and `full_mlrs` are supported by an executor and have passed initial live smoke, but remain disabled by default until balance and safety tuning are complete.
+- `mini_mlrs` and `full_mlrs` are supported by an executor and have passed initial live smoke. The default catalog remains conservative, but current live config choices are preserved and should be smoke-tested before public balance is considered final.
 - `homing_heli` and `homing_jet` are supported by an executor, but remain disabled by default until vehicle-targeting and damage/tracking behavior are smoke-tested live.
 - Monument blocking exists but is disabled by default until `General.BlockMonuments=true` is set in config; default behavior is heavy-strike-only blocking against configured monument names.
 - Heavy warning markers exist and default to `General.UseMapMarkersForHeavyStrikes=true`; because they are globally broadcast native map markers, live smoke should confirm the marker size and visibility are acceptable before treating this as final public balance.
 - In-game caller-team warnings default on through `General.NotifyCallerTeamOnAcceptedStrike=true`; nearby heavy-strike warnings are available but default off through `General.NotifyNearbyPlayersOnHeavyStrikes=false` until live message radius/noise can be tuned.
 - Warning fanout recipient selection can be previewed/admin-audited without a second client through `/strike debug warnings <strikeId>` and the accepted-call `Warning fanout:` console line; actual recipient-side chat visibility still needs at least one other online player to confirm.
-- Drone/aircraft/artillery source visuals now exist with high-rate immediate movement and repeated sound cues, but rotor-wash effect sends are disabled because those prefabs are not autoload-safe. Live smoke still needs to confirm client-side movement, sound audibility, cleanup timing, and acceptable visual scale/noise.
+- Drone/aircraft/artillery source visuals now exist with high-rate immediate movement and repeated sound cues, but rotor-wash effect sends are disabled because those prefabs are not autoload-safe. v0.1.32 aligns the visible carriers to native drone/cargo-plane/patrol-heli/F-15/mortar assets, v0.1.33 gives patrol-heli rocket runs a dedicated native-heli spawn path, and v0.1.35 keeps patrol-heli prefab GUID references intact until after native spawn; live smoke still needs to confirm no visual spawn warning, acceptable approach/reaction windows, sound audibility, cleanup timing, and visual scale/noise.
 - Custom damage scaling is implemented for the simulated A-10 pulse executor and homing missile proximity damage so far; native projectile/grenade/shell strikes still use their Rust-native damage behavior and still need live attribution confirmation.
 - Audit history is stored locally in `PortableAirstrikes_Data`; optional Discord webhook mirroring exists but is disabled until `AuditWebhooks.Enabled=true` and `AuditWebhooks.DiscordWebhookUrl` are configured. Discord delivery remains unverified if no real webhook smoke is available.
 
 ## Recommended Next Implementation Pass
 
-Do not implement the full strike catalog at once.
+Treat the next pass as live smoke and tuning for v0.1.35, not a new feature slice.
 
 Recommended next slice:
 
-1. Upload/reload v0.1.21 and confirm the plugin banner reports v0.1.21:
+1. Upload/reload v0.1.35 and confirm the plugin banner reports v0.1.35:
    - `oxide.reload PortableAirstrikes`
-2. Give the configured binocular item and confirm first-use/default behavior:
-   - `portableairstrikes.giveitem <playerNameOrSteamId> 2`
-   - Equip `Airstrike Targeting Binoculars`.
-   - Place a ping while holding it.
-   - Expected: a cyan/amber airstrike target marker appears and `/strike` opens if no default is saved.
-   - Confirm a strike in the menu.
-   - Place another ping while holding the item.
-   - Expected: the saved default strike is attempted automatically.
-3. Confirm manual default controls:
-   - `/strike default show`
-   - `/strike list`
-   - `/strike default beancan_drop`
-   - `/strike default clear`
-4. Confirm normal direct strikes, visual flyover spawn/cleanup, warning fanout diagnostics, and local audit history still work with webhooks disabled:
+2. Smoke the patrol-heli rocket-run visual:
    - `/strike debugping`
-   - `/strike debug warnings beancan_drop`
-   - `/strike`
-   - `/strike beancan_drop`
-   - `/strike debug history 5`
-   - `/strike debug stats`
-5. Smoke one aircraft visual in a safe area:
+   - `/strike rocket_run`
+   - Expected: no `GUIDToPath: guid is empty` or visual-spawn warning, an audible/visible native patrol-helicopter approach before first rockets release, and cleanup after completion.
+3. Smoke the other patrol-heli rocket-run variants:
+   - `/strike debugping`
+   - `/strike hv_rocket_run`
+   - `/strike debugping`
+   - `/strike incendiary_rocket_run`
+   - Expected: the same native patrol-helicopter approach path and no patrol-heli visual warning.
+4. Smoke a cargo-plane heavy drop:
+   - `/strike debugping`
+   - `/strike bee_swarm_heavy`
+   - `/strike firebomb_run`
+   - `/strike propane_bomb_drop`
+   - Expected: a cargo-plane approach is visible before release, payloads drop near the target, and the visual cleans up.
+5. Smoke the A-10/F-15 stand-in:
    - `/strike debugping`
    - `/strike a10_strafe`
-   - Confirm the cargo-plane/A-10 stand-in crosses the target with less visible stepping, has repeated audible flyover cues, and disappears after completion.
-6. Smoke mortar artillery source visuals in a safe area:
-   - `/strike debugping`
-   - `/strike mortar_he`
-   - Confirm the mortar source, muzzle effects, and optional `Raidlands Artillery` NPC crew appear near the off-map source and clean up after completion.
-7. If MLRS is deliberately enabled for safe testing, smoke one `mini_mlrs` in an open area and confirm the lower MLRS aircraft pass is visible near the rocket approach and has repeated sound cues.
-8. If two online team members are available, confirm the teammate sees an in-game warning when the caller starts a strike, then compare the observed recipient with the `Warning fanout:` console line.
-9. Optional nearby warning preview and smoke without Discord:
-   - Set `General.NotifyNearbyPlayersOnHeavyStrikes=true`.
-   - Reload.
-   - Use `/strike debug warnings a10_strafe` with the current target to preview online nearby recipients.
-   - Run a heavy strike in a safe open area with another online player inside `General.NearbyHeavyStrikeWarningRadius`.
-   - Confirm the nearby player gets one warning message, not duplicates.
-10. Continue the v0.1.14 player-facing smoke if it has not already been finished:
-   - `/strike status`
-   - `/strike cancel`
-   - a heavy strike marker cleanup test such as `/strike a10_strafe` or an enabled MLRS test
-11. Keep loot injection deferred until the end; do not spend the next pass on `LootDistribution.Enabled=true` smoke unless the user explicitly reopens it.
-12. Keep vehicle-target homing smoke on hold until a safe live vehicle test is available.
-13. Skip Discord webhook smoke unless a real private webhook URL is available.
+   - Expected: the native F-15 visual approaches the start of the strafe line before BRRRRT cannon pulses begin, then continues outbound.
+6. If MLRS is deliberately enabled in config, smoke `mini_mlrs` in a safe open area and confirm the native F-15 visual reaches the MLRS standoff line before rockets launch.
+7. Shoot down one inbound carrier before first payload release and confirm the strike is audited as intercepted with no refund/cooldown restore.
+8. Shoot down one carrier mid-run and confirm already spawned payloads continue while unreleased payload timers are cancelled.
+9. Shoot down or let cleanup remove a carrier after all payloads release and confirm only the visual carrier is removed.
+10. Check `/strike debug history 10` and `/strike debug stats` for the intercepted/completed results.
+11. Keep `homing_heli` and `homing_jet` gated until a safe vehicle-target test is explicitly opened.
 
 ## Next Pass Acceptance Criteria
 
-For the v0.1.20 high-rate visual movement/repeated-sound pass:
+For the v0.1.35 patrol-heli spawn-order fix:
 
-- Reloading v0.1.20 saves `ConfigVersion=20` while preserving the existing `General`, warning, marker, audit, homing/MLRS, loot, and strike-definition keys.
-- `DeliveryVisuals` writes `SpawnFlyoverSoundEffects`, `SpawnRotorWashEffects=false`, `MlrsAircraftFlyoverHeight`, `VisualMoveIntervalSeconds=0.04`, and `FlyoverSoundIntervalSeconds=0.75` defaults.
-- Old v0.1.18/v0.1.19 configs still at `DeliveryVisuals.VisualMoveIntervalSeconds=0.2` or `0.1` migrate to `0.04`; custom non-default intervals are preserved within the allowed clamp.
-- Drone-drop strikes spawn a temporary drone visual that moves across the target area with high-rate immediate updates, repeated sound cues, and cleanup after completion/failure/cancel/unload.
-- Aircraft-delivered heavy drops, rocket runs, homing missiles, and A-10 strafes spawn a temporary attack-heli or cargo-plane visual that moves across the target area with high-rate immediate updates, repeated sound cues, and cleanup after completion/failure/cancel/unload.
-- MLRS strikes use the same approach direction for the rocket salvo and the lower aircraft visual, so the plane should cross the watched impact area with repeated sound cues.
-- Mortar strikes spawn a temporary mortar source, mortar muzzle effects, and optional `Raidlands Artillery` NPC crew visual; all mortar visuals clean up after completion/failure/cancel/unload.
-- Visual spawn failures log warnings and increment stats, but do not block strike validation, charging, payload dispatch, refunds, cooldowns, or cleanup.
-- `/strike debug warnings <strikeId>` previews warning recipients for the caller's current stored target without sending messages.
-- Accepted strikes write `Warning fanout:` console lines and started audit records include warning recipient counts.
-- With `General.NotifyCallerTeamOnAcceptedStrike=true`, online Rust teammates other than the caller receive one accepted-strike warning.
-- With `General.NotifyNearbyPlayersOnHeavyStrikes=false`, nearby-player warning behavior stays off by default.
-- With `General.NotifyNearbyPlayersOnHeavyStrikes=true`, online nearby players inside `General.NearbyHeavyStrikeWarningRadius` receive one heavy-strike warning and already-notified teammates are deduplicated.
-- Existing direct/CUI strike behavior, RP charge, token consume, refunds, cooldowns, cancel/status, heavy warning markers, local audit history, webhooks-disabled behavior, and disabled homing/MLRS gating remain unchanged.
+- Reloading v0.1.35 keeps `ConfigVersion=30` while preserving existing enabled/disabled strike definitions, including deliberately enabled MLRS choices in the live config.
+- `hv_rocket_run`, `rocket_run`, and `incendiary_rocket_run` spawn a visible native patrol-helicopter carrier before first rocket release.
+- Patrol-heli rocket-run tests do not print `GUIDToPath: guid is empty` or `visual ... could not spawn` warnings.
+- Existing v0.1.32 vehicle alignment remains intact: heavy drops use cargo-plane visuals, A-10/MLRS use F-15 visuals, drone drops use drone visuals, and mortars use mortar/artillery-source visuals.
+- `DeliveryVehiclesCanBeDestroyed=true`, `PayloadRequiresLiveDeliveryVehicle=true`, and `RefundIfDeliveryVehicleDestroyedBeforePayload=false` remain intact.
+- Heavy drops use native cargo-plane visuals, rocket/helicopter strikes use native patrol-helicopter visuals, A-10 and enabled MLRS use native F-15 visuals, drones use native drones, and mortars use native mortar/artillery source visuals.
+- Aircraft-delivered heavy drops, rocket runs, A-10 strafes, and enabled MLRS strikes show believable inbound time before first payload release.
+- Native patrol-heli and F-15 visuals spawn without the previous generic aircraft visual null-ref warning.
+- Destroying a required carrier before first payload release cancels the call, records an intercepted result, and does not refund/clear cooldowns by default.
+- Destroying a carrier mid-run cancels unreleased payload timers while already spawned payloads continue their native lifecycle.
+- Destroying or cleaning up a carrier after all payloads release removes only the visual carrier.
+- Existing direct/CUI strike behavior, RP charge, token consume, warning markers, audit history, webhooks-disabled behavior, mortar visuals, drone feel, and homing gates remain unchanged.
 
 ## Implementation Notes For The Next Agent
 
@@ -1041,7 +1091,7 @@ Select or confirm a strike from the scrollable picker.
 Ping again after a default is saved.
 ```
 
-Expected after v0.1.30 upload/reload:
+Expected after v0.1.32 upload/reload:
 
 ```text
 The give command creates one movable physical binocular stack named `Airstrike Targeting Binoculars` with Rust stack-count overlay, for example `x25`.
@@ -1062,15 +1112,19 @@ Heavy strikes create a native public warning map marker while configured on.
 `/strike debug warnings beancan_drop` previews the online team recipients that would receive a warning for the current target.
 Accepted calls print a `Warning fanout:` console line and include warning counts in `/strike debug history`.
 Drone, aircraft, and mortar source visuals appear for supported strike families while `DeliveryVisuals.Enabled=true`.
+Destroyable delivery carriers remain enabled, required for payload release, and no-refund on intercept by default.
+Aircraft-delivered strikes use balanced first-release timing: drones about 1.5s, patrol heli about 7s, cargo plane about 9s, A-10 about 8s, and MLRS about 12s.
+Heavy drops release from native cargo-plane visuals over the target, rocket runs release from native patrol-heli visuals at the rocket standoff line, A-10/F-15 stand-in fire begins at the start of the strafe line, and MLRS/F-15 visuals release from the launch standoff.
+Cargo-plane heavy-drop visuals use native cargo-plane route setup and should not log the previous generic aircraft visual null-ref warning.
 Drone/aircraft flyovers have repeated positional sound cues while `DeliveryVisuals.SpawnFlyoverSoundEffects=true`, using autoload-safe cue prefabs.
 Heavy-drop and MLRS strikes no longer spam client overlays requiring `AssetScene-props.other` for `projectile-flight-large` or `pfx_mlrs_rocket_thrust`.
 Rotor-wash effect sends are disabled; drone/attack-heli flyovers should not add `rotorwashparticles_*` client overlay errors.
 Old v0.1.18/v0.1.19 configs with `DeliveryVisuals.VisualMoveIntervalSeconds=0.2` or `0.1` migrate to `0.04`.
-MLRS aircraft flyovers use `DeliveryVisuals.MlrsAircraftFlyoverHeight` and the same approach direction as the MLRS rocket salvo.
+MLRS F-15 flyovers use `DeliveryVisuals.MlrsAircraftFlyoverHeight` and the same approach direction as the MLRS rocket salvo.
 Mortar strikes can show a temporary `Raidlands Artillery` NPC crew visual while `DeliveryVisuals.SpawnMortarCrewNpc=true`.
 All visual entities are removed after completion/failure/cancel/unload without killing native payload projectiles early.
 When `AuditWebhooks.Enabled=true` and a valid Discord webhook URL is configured, selected audit results should send Discord embeds, but this requires separate real-webhook verification.
-Default-disabled `mini_mlrs`, `full_mlrs`, `homing_heli`, and `homing_jet` do not appear unless enabled in config.
+Disabled strike definitions do not appear unless enabled in config; homing stays gated while MLRS follows the current live config choice.
 When `homing_heli` is deliberately enabled, it requires a fresh tracked vehicle target.
 Monument blocking remains off until `General.BlockMonuments=true`.
 ```
@@ -1085,28 +1139,25 @@ Defer these until after one direct-command strike works:
 
 ## Upload And Reload Handoff
 
-Current live-server upload for v0.1.30:
+Current live-server upload for v0.1.35:
 
 - `oxide/plugins/PortableAirstrikes.cs`
-- `oxide/plugins/StackSizeController.cs`
-- `oxide/config/PortableAirstrikes.json`
-- `oxide/config/StackSizeController.json`
+- `oxide/config/PortableAirstrikes.json` only if the v0.1.32+ vehicle-alignment config has not already been uploaded; v0.1.35 itself has no config migration.
 
 Runtime dependencies to keep from earlier passes:
 
 - `oxide/config/StackSizeController.json`
+- `oxide/plugins/StackSizeController.cs`
 - `oxide/plugins/CustomItemDefinitions.cs`
 - `oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png`
 
 Current reload:
 
 ```text
-oxide.reload CustomItemDefinitions
-oxide.reload StackSizeController
 oxide.reload PortableAirstrikes
 ```
 
 Docs-only changes, including this file, do not need to be uploaded to the live Rust server for runtime behavior.
-The v0.1.30 runtime change requires PortableAirstrikes plus StackSizeController plugin/config updates. Keep `CustomItemDefinitions.cs` and the Oxide data PNG from earlier passes on the live server because PortableAirstrikes still registers the CID item and stores that PNG in Rust FileStorage for the item icon.
+The v0.1.32 runtime change requires PortableAirstrikes plugin/config updates. Keep `StackSizeController`, `CustomItemDefinitions.cs`, and the Oxide data PNG from earlier passes on the live server because PortableAirstrikes still registers the CID item and stores that PNG in Rust FileStorage for the item icon.
 
 When the next code pass changes the plugin, create or update a dedicated upload note instead of mixing it into unrelated manifests.

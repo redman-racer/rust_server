@@ -4,11 +4,12 @@ using System.IO;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Core.Plugins;
+using Rust;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsVehicleTokens", "Raidlands", "1.0.4")]
+    [Info("RaidlandsVehicleTokens", "Raidlands", "1.0.6")]
     [Description("Provides Raidlands vehicle token items backed by SpawnHeli and VehicleLicence spawns.")]
     public class RaidlandsVehicleTokens : RustPlugin
     {
@@ -27,6 +28,10 @@ namespace Oxide.Plugins
         private const int DefaultTokenMaxStackSize = 100;
         private const int MaximumTokenMaxStackSize = 65535;
         private const float DefaultDroppedTokenOwnerSearchRadius = 8f;
+        private const float DefaultTokenSpawnMinForwardDistance = 5f;
+        private const float DefaultTokenSpawnMaxForwardDistance = 15f;
+        private const float DefaultTokenSpawnYawOffsetDegrees = -90f;
+        private const int GroundLayerMask = Layers.Solid | Layers.Mask.Water | Layers.Construction;
 
         [PluginReference]
         private Plugin SpawnHeli;
@@ -61,6 +66,15 @@ namespace Oxide.Plugins
 
             [JsonProperty("Dropped Spawn Vertical Offset")]
             public float DroppedSpawnVerticalOffset = 1f;
+
+            [JsonProperty("Token Spawn Min Forward Distance")]
+            public float TokenSpawnMinForwardDistance = DefaultTokenSpawnMinForwardDistance;
+
+            [JsonProperty("Token Spawn Max Forward Distance")]
+            public float TokenSpawnMaxForwardDistance = DefaultTokenSpawnMaxForwardDistance;
+
+            [JsonProperty("Token Spawn Yaw Offset Degrees")]
+            public float TokenSpawnYawOffsetDegrees = DefaultTokenSpawnYawOffsetDegrees;
 
             [JsonProperty("Dropped Token Owner Search Radius")]
             public float DroppedTokenOwnerSearchRadius = DefaultDroppedTokenOwnerSearchRadius;
@@ -183,6 +197,9 @@ namespace Oxide.Plugins
 
             config.ItemDropRedeemDelaySeconds = Mathf.Clamp(config.ItemDropRedeemDelaySeconds <= 0f ? 0.1f : config.ItemDropRedeemDelaySeconds, 0.01f, 2f);
             config.DroppedSpawnVerticalOffset = Mathf.Clamp(config.DroppedSpawnVerticalOffset, 0f, 10f);
+            config.TokenSpawnMinForwardDistance = Mathf.Clamp(config.TokenSpawnMinForwardDistance, 0f, 100f);
+            config.TokenSpawnMaxForwardDistance = Mathf.Clamp(config.TokenSpawnMaxForwardDistance, config.TokenSpawnMinForwardDistance, 150f);
+            config.TokenSpawnYawOffsetDegrees = Mathf.Clamp(config.TokenSpawnYawOffsetDegrees, -360f, 360f);
             config.DroppedTokenOwnerSearchRadius = Mathf.Clamp(config.DroppedTokenOwnerSearchRadius <= 0f ? DefaultDroppedTokenOwnerSearchRadius : config.DroppedTokenOwnerSearchRadius, 1f, 30f);
 
             if (config.VehicleTokens == null || config.VehicleTokens.Count == 0)
@@ -562,7 +579,11 @@ namespace Oxide.Plugins
 
         private bool TryRedeemToken(BasePlayer player, Item item, VehicleTokenDefinition definition)
         {
-            if (!TrySpawnVehicle(player, definition, null, null))
+            Vector3 spawnPosition;
+            Quaternion spawnRotation;
+            GetTokenSpawnTransform(player, definition, out spawnPosition, out spawnRotation);
+
+            if (!TrySpawnVehicle(player, definition, spawnPosition, spawnRotation))
             {
                 return false;
             }
@@ -593,23 +614,67 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            var droppedPosition = entity.transform.position;
-            var spawnPosition = string.Equals(definition.Backend, "SpawnHeli", StringComparison.OrdinalIgnoreCase)
-                ? droppedPosition + Vector3.up * config.DroppedSpawnVerticalOffset
-                : droppedPosition;
-            var forward = player.eyes != null ? player.eyes.HeadForward() : player.transform.forward;
-            forward.y = 0f;
-            var spawnRotation = forward.sqrMagnitude > 0.001f ? Quaternion.LookRotation(forward.normalized) : player.transform.rotation;
+            Vector3 spawnPosition;
+            Quaternion spawnRotation;
+            GetTokenSpawnTransform(player, definition, out spawnPosition, out spawnRotation);
 
             if (!TrySpawnVehicle(player, definition, spawnPosition, spawnRotation))
             {
-                RefundDroppedToken(player, item, entity, definition);
+                Reply(player, $"{definition.DisplayName} could not be spawned. Your dropped {definition.TokenDisplayName} was left where you threw it.");
                 return false;
             }
 
             ConsumeOneDroppedItem(item, entity);
             Reply(player, $"{definition.DisplayName} spawned from dropped token. One {definition.TokenDisplayName} was consumed.");
             return true;
+        }
+
+        private void GetTokenSpawnTransform(BasePlayer player, VehicleTokenDefinition definition, out Vector3 spawnPosition, out Quaternion spawnRotation)
+        {
+            var forward = GetPlayerFlatForward(player);
+            var distance = config.TokenSpawnMaxForwardDistance > config.TokenSpawnMinForwardDistance
+                ? UnityEngine.Random.Range(config.TokenSpawnMinForwardDistance, config.TokenSpawnMaxForwardDistance)
+                : config.TokenSpawnMinForwardDistance;
+
+            spawnPosition = GetGroundPosition(player.transform.position + forward * distance);
+            if (string.Equals(definition.Backend, "SpawnHeli", StringComparison.OrdinalIgnoreCase))
+            {
+                spawnPosition += Vector3.up * config.DroppedSpawnVerticalOffset;
+            }
+
+            var yaw = Quaternion.LookRotation(forward).eulerAngles.y + config.TokenSpawnYawOffsetDegrees;
+            spawnRotation = Quaternion.Euler(0f, yaw, 0f);
+        }
+
+        private Vector3 GetPlayerFlatForward(BasePlayer player)
+        {
+            var forward = player.eyes != null ? player.eyes.HeadForward() : player.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude <= 0.001f)
+            {
+                forward = player.transform.forward;
+                forward.y = 0f;
+            }
+
+            return forward.sqrMagnitude > 0.001f ? forward.normalized : Vector3.forward;
+        }
+
+        private Vector3 GetGroundPosition(Vector3 position)
+        {
+            RaycastHit hitInfo;
+            var rayOrigin = position + Vector3.up * 250f;
+            if (Physics.Raycast(rayOrigin, Vector3.down, out hitInfo, 400f, GroundLayerMask))
+            {
+                position.y = hitInfo.point.y;
+                return position;
+            }
+
+            if (TerrainMeta.HeightMap != null)
+            {
+                position.y = TerrainMeta.HeightMap.GetHeight(position);
+            }
+
+            return position;
         }
 
         private ulong ResolveDroppedTokenOwnerId(Item item, BaseEntity entity, BasePlayer explicitPlayer)
@@ -686,15 +751,18 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            Dictionary<string, object> options = null;
+            Dictionary<string, object> options = new Dictionary<string, object>
+            {
+                ["AllowMultipleForPlayer"] = true,
+                ["AutoFetch"] = false,
+                ["EnforceHelicopterLimit"] = false
+            };
+
             if (position.HasValue)
             {
-                options = new Dictionary<string, object>
-                {
-                    ["Position"] = position.Value,
-                    ["Rotation"] = rotation ?? player.transform.rotation,
-                    ["AutoMount"] = false
-                };
+                options["Position"] = position.Value;
+                options["Rotation"] = rotation ?? player.transform.rotation;
+                options["AutoMount"] = false;
             }
 
             var spawned = SpawnHeli.Call(definition.SpawnHeliApiHook, player, options) as BaseEntity;
@@ -720,6 +788,12 @@ namespace Oxide.Plugins
             {
                 Reply(player, "That vehicle token is missing its VehicleLicence type.");
                 return false;
+            }
+
+            bool tokenApiSpawned;
+            if (TrySpawnRaidlandsTokenVehicle(player, definition, position, rotation, out tokenApiSpawned))
+            {
+                return tokenApiSpawned;
             }
 
             var alreadyLicensed = HasVehicleLicence(player.userID, definition.VehicleLicenceType);
@@ -776,6 +850,38 @@ namespace Oxide.Plugins
             if (entity != null && !entity.IsDestroyed)
             {
                 ApplyVehicleHealthBonus(entity, player);
+            }
+
+            return true;
+        }
+
+        private bool TrySpawnRaidlandsTokenVehicle(BasePlayer player, VehicleTokenDefinition definition, Vector3? position, Quaternion? rotation, out bool spawned)
+        {
+            spawned = false;
+            var spawnIntent = SpawnIntentKey(player.userID, definition.VehicleLicenceType);
+            pendingVehicleLicenceSpawns.Add(spawnIntent);
+
+            object result;
+            try
+            {
+                result = position.HasValue
+                    ? VehicleLicence.Call("SpawnRaidlandsTokenVehicleAt", player, definition.VehicleLicenceType, position.Value, rotation ?? player.transform.rotation, "raidlands.vehicle.token", false)
+                    : VehicleLicence.Call("SpawnRaidlandsTokenVehicle", player, definition.VehicleLicenceType, "raidlands.vehicle.token", false);
+            }
+            finally
+            {
+                pendingVehicleLicenceSpawns.Remove(spawnIntent);
+            }
+
+            if (!(result is bool))
+            {
+                return false;
+            }
+
+            spawned = (bool)result;
+            if (!spawned)
+            {
+                Reply(player, $"{definition.DisplayName} could not be spawned. Your token was not consumed.");
             }
 
             return true;
@@ -1593,33 +1699,6 @@ namespace Oxide.Plugins
             {
                 entity.Kill();
             }
-        }
-
-        private void RefundDroppedToken(BasePlayer player, Item item, BaseEntity entity, VehicleTokenDefinition definition)
-        {
-            if (player == null || item == null || definition == null)
-            {
-                return;
-            }
-
-            var refund = CreateToken(definition, 1);
-            if (refund == null)
-            {
-                Reply(player, $"Could not return your {definition.TokenDisplayName}. Pick up the dropped token if it is still there.");
-                return;
-            }
-
-            if (!player.inventory.GiveItem(refund))
-            {
-                refund.Drop(player.GetDropPosition(), player.GetDropVelocity());
-                Reply(player, $"{definition.DisplayName} could not be spawned. Your {definition.TokenDisplayName} was returned at your feet.");
-            }
-            else
-            {
-                Reply(player, $"{definition.DisplayName} could not be spawned. Your {definition.TokenDisplayName} was returned.");
-            }
-
-            ConsumeOneDroppedItem(item, entity);
         }
 
         private bool CanUseAdminCommand(ConsoleSystem.Arg arg)

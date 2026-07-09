@@ -1,5 +1,5 @@
 {
-  "RevertStackSizesToVanillaOnUnload": true,
+  "RevertStackSizesToVanillaOnUnload": false,
   "AllowStackingItemsWithDurability": true,
   "HidePrefixWithPluginNameInMessages": false,
   "GlobalStackMultiplier": 100000.0,
@@ -494,7 +494,7 @@
     "propanetank": 5,
     "pumpkin": 20,
     "pumpkinbasket": 1,
-    "raidlands.airstrike.designator": 65535,
+    "raidlands.airstrike.designator": 1,
     "radiationremovetea": 10,
     "radiationremovetea.advanced": 10,
     "radiationremovetea.pure": 10,

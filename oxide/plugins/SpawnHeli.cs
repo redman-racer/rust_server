@@ -353,6 +353,7 @@ namespace Oxide.Plugins
             private static readonly string FieldEnforceHelicopterLimit = "EnforceHelicopterLimit";
             private static readonly string FieldAutoDespawnOtherHelicopterTypes = "AutoDespawnOtherHelicopterTypes";
             private static readonly string FieldAllowWhileOccupied = "AllowWhileOccupied";
+            private static readonly string FieldAllowMultipleForPlayer = "AllowMultipleForPlayer";
             private static readonly string FieldMaxFetchDistance = "MaxFetchDistance";
 
             private static readonly HashSet<string> KnownFields = new()
@@ -360,7 +361,7 @@ namespace Oxide.Plugins
                 FieldPosition, FieldRotation, FieldCheckHooks, FieldCheckCooldown,
                 FieldCheckBuildingBlocked, FieldCheckSpace, FieldAutoMount, FieldStartCooldown,
                 FieldAutoRepair, FieldAutoFetch, FieldEnforceHelicopterLimit,
-                FieldAllowWhileOccupied, FieldMaxFetchDistance,
+                FieldAllowWhileOccupied, FieldAllowMultipleForPlayer, FieldMaxFetchDistance,
             };
 
             public static bool TryParseApiOptions(Dictionary<string, object> rawOptions, out SpawnOptions parsedOptions)
@@ -379,6 +380,7 @@ namespace Oxide.Plugins
                     || !TryGetOption(rawOptions, FieldEnforceHelicopterLimit, out parsedOptions.EnforceHelicopterLimit)
                     || !TryGetOption(rawOptions, FieldAutoDespawnOtherHelicopterTypes, out parsedOptions.AutoDespawnOtherHelicopterTypes)
                     || !TryGetOption(rawOptions, FieldAllowWhileOccupied, out parsedOptions.AllowWhileOccupied)
+                    || !TryGetOption(rawOptions, FieldAllowMultipleForPlayer, out parsedOptions.AllowMultipleForPlayer)
                     || !TryGetOption(rawOptions, FieldMaxFetchDistance, out parsedOptions.MaxFetchDistance))
                     return false;
 
@@ -424,6 +426,7 @@ namespace Oxide.Plugins
             public bool? EnforceHelicopterLimit;
             public bool? AutoDespawnOtherHelicopterTypes;
             public bool? AllowWhileOccupied;
+            public bool? AllowMultipleForPlayer;
             public float? MaxFetchDistance;
         }
 
@@ -448,7 +451,8 @@ namespace Oxide.Plugins
 
         private PlayerHelicopter AttemptSpawnOrFetchHeli(VehicleInfo vehicleInfo, IPlayer player, BasePlayer basePlayer, SpawnOptions options = default)
         {
-            var heli = FindPlayerVehicle(vehicleInfo, basePlayer);
+            var allowMultipleForPlayer = options.AllowMultipleForPlayer == true;
+            var heli = allowMultipleForPlayer ? null : FindPlayerVehicle(vehicleInfo, basePlayer);
             if (heli != null)
             {
                 if ((options.AutoFetch ?? vehicleInfo.Config.AutoFetch)
@@ -1110,9 +1114,15 @@ namespace Oxide.Plugins
             // Terminate on client so that it doesn't animate from the previous location, since that can hinder stealth.
             heli.TerminateOnClient(BaseNetworkable.DestroyMode.None);
 
-            heli.rigidBody.velocity = Vector3.zero;
+            if (heli.rigidBody != null && !heli.rigidBody.isKinematic)
+            {
+                heli.rigidBody.velocity = Vector3.zero;
+            }
             heli.transform.SetPositionAndRotation(position, rotation);
-            heli.rigidBody.WakeUp();
+            if (heli.rigidBody != null)
+            {
+                heli.rigidBody.WakeUp();
+            }
             heli.timeSinceLastPush = 0f;
             heli.UpdateNetworkGroup();
             NetworkUtils.SendUpdateImmediateRecursive(heli);

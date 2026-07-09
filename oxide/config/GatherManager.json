@@ -29,7 +29,10 @@
     "ExcavatorResourceModifiers": {},
     "ExcavatorResourceTickRate": 3.0,
     "ExcavatorTimeForFullResources": 120.0,
-    "GatherDispenserModifiers": {},
+    "GatherDispenserModifiers": {
+      "Tree": 1000.0,
+      "Ore": 1000.0
+    },
     "GatherResourceModifiers": {
       "*": 1000.0
     },
@@ -38,9 +41,11 @@
       "*": 1000.0
     },
     "QuarryResourceModifiers": {
-      "*": 10.0
+      "*": 1000.0
     },
-    "SurveyResourceModifiers": {}
+    "SurveyResourceModifiers": {
+      "*": 1000.0
+    }
   },
   "Settings": {
     "ChatPrefix": "Gather Manager",

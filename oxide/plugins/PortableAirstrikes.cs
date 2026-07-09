@@ -15,13 +15,13 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikes", "Raidlands", "0.1.30")]
-    [Description("Configurable single-use CID binocular airstrike selection, automatic targeting pings, persisted manual default strikes, validation, high-rate visual delivery flyovers with autoload-safe repeated sound cues, direct-command execution, audit logging, webhooks, warning markers, in-game warnings, and warning diagnostics.")]
+    [Info("PortableAirstrikes", "Raidlands", "0.1.39")]
+    [Description("Configurable single-use CID binocular airstrike selection, automatic targeting pings, persisted manual default strikes, validation, terrain-aware, more believable multi-phase visual delivery flyovers with autoload-safe repeated sound cues, direct-command execution, audit logging, webhooks, warning markers, in-game warnings, and warning diagnostics.")]
     public class PortableAirstrikes : RustPlugin
     {
-        private const int CurrentConfigVersion = 27;
-        private const int DefaultAirstrikeItemMaxStackSize = 65535;
-        private const int MaximumAirstrikeItemMaxStackSize = 65535;
+        private const int CurrentConfigVersion = 34;
+        private const int DefaultAirstrikeItemMaxStackSize = 1;
+        private const int MaximumAirstrikeItemMaxStackSize = 1;
         private const int DefaultAirstrikeItemMaxChargesPerItem = 65535;
         private const int MaximumAirstrikeItemMaxChargesPerItem = 65535;
         private const int DefaultRecentCallHistoryLimit = 50;
@@ -39,8 +39,9 @@ namespace Oxide.Plugins
         private const string AirstrikeToolPingSource = "airstrike_tool_ping";
         private const string GenericRadiusMapMarkerPrefab = "assets/prefabs/tools/map/genericradiusmarker.prefab";
         private const string DroneVisualPrefab = "assets/prefabs/deployable/drone/drone.deployed.prefab";
-        private const string AttackHelicopterVisualPrefab = "assets/content/vehicles/attackhelicopter/attackhelicopter.entity.prefab";
+        private const string PatrolHelicopterVisualPrefab = "assets/prefabs/npc/patrol helicopter/patrolhelicopter.prefab";
         private const string CargoPlaneVisualPrefab = "assets/prefabs/npc/cargo plane/cargo_plane.prefab";
+        private const string F15VisualPrefab = "assets/scripts/entity/misc/f15/f15e.prefab";
         private const string MortarVisualPrefab = "assets/prefabs/deployable/mortar/mortar.entity.prefab";
         private const string MortarCrewNpcPrefab = "assets/rust.ai/agents/npcplayer/humannpc/scientist/gen2/scientist2.prefab";
         private const string DroneDeployEffect = "assets/prefabs/deployable/drone/effects/drone-deploy.prefab";
@@ -71,12 +72,20 @@ namespace Oxide.Plugins
         private const string BulletImpactEffect = "assets/bundled/prefabs/fx/impacts/bullet/generic/generic1.prefab";
         private const string RocketLaunchEffect = "assets/prefabs/weapons/rocketlauncher/effects/rocket_launch_fx.prefab";
         private const string MlrsBackfireEffect = "assets/content/vehicles/mlrs/effects/pfx_mlrs_backfire.prefab";
-        private const float DroneDropSpawnHeight = 35f;
+        private const float DroneDropSpawnHeight = 14f;
+        private const float DroneDropProjectileSpawnHeight = 18f;
+        private const float DroneDropMinimumSpawnHeight = 7f;
+        private const float DroneDropMaximumTimedSpawnHeight = 16f;
         private const float DroneDropPayloadDelay = 0.35f;
-        private const float HeavyDropSpawnHeight = 60f;
+        private const float DronePathMinimumLoiterSeconds = 0.75f;
+        private const float DronePayloadGroundSettleSeconds = 0.85f;
+        private const float AircraftObservationPassFraction = 0.38f;
+        private const float AircraftReEntryPassFraction = 0.72f;
+        private const float MinimumStrikePassLeadSeconds = 0.65f;
+        private const float HeavyDropSpawnHeight = 85f;
         private const float HeavyDropPayloadDelay = 0.65f;
         private const float HeavyDropDownwardVelocity = 28f;
-        private const float HeavyDropFinishDelaySeconds = 4.0f;
+        private const float HeavyDropFinishDelaySeconds = 5.0f;
         private const float RocketRunSpawnDistance = 95f;
         private const float RocketRunSpawnHeight = 28f;
         private const float RocketRunProjectileDelay = 0.45f;
@@ -124,6 +133,14 @@ namespace Oxide.Plugins
         private const float MinimumVisualMoveIntervalSeconds = 0.025f;
         private const float MaximumVisualMoveIntervalSeconds = 0.25f;
         private const float DefaultFlyoverSoundIntervalSeconds = 0.75f;
+        private const float DefaultVisualRotationSmoothTimeSeconds = 0.18f;
+        private const float MinimumVisualRotationSmoothTimeSeconds = 0.02f;
+        private const float MaximumVisualRotationSmoothTimeSeconds = 0.75f;
+        private const float FlightPlanTangentSampleSeconds = 0.18f;
+        private const float DefaultDroneMinimumTerrainClearance = 10f;
+        private const float DefaultAircraftMinimumTerrainClearance = 42f;
+        private const float DefaultPayloadMinimumTerrainClearance = 8f;
+        private const float FlightPlanTerrainSampleSpacing = 28f;
 
         private static readonly int TargetRaycastLayer = LayerMask.GetMask(
             "Terrain",
@@ -139,6 +156,11 @@ namespace Oxide.Plugins
             "World",
             "Construction",
             "Deployed",
+            "Default");
+
+        private static readonly int FlightTerrainRaycastLayer = LayerMask.GetMask(
+            "Terrain",
+            "World",
             "Default");
 
         [PluginReference]
@@ -179,6 +201,15 @@ namespace Oxide.Plugins
             VehiclePing,
             PlayerPing,
             NpcPing
+        }
+
+        private enum DeliveryVisualProfile
+        {
+            HeavyDrop,
+            RocketRun,
+            HomingMissile,
+            Mlrs,
+            A10
         }
 
         private enum StrikeExecutionState
@@ -480,25 +511,58 @@ namespace Oxide.Plugins
             public bool SpawnRotorWashEffects = false;
 
             [JsonProperty("DroneFlyoverDistance")]
-            public float DroneFlyoverDistance = 45f;
+            public float DroneFlyoverDistance = 70f;
 
             [JsonProperty("DroneFlyoverHeight")]
-            public float DroneFlyoverHeight = 22f;
+            public float DroneFlyoverHeight = 28f;
+
+            [JsonProperty("DroneErraticApproachRadius")]
+            public float DroneErraticApproachRadius = 2.5f;
+
+            [JsonProperty("DroneDropLoiterRadius")]
+            public float DroneDropLoiterRadius = 9.0f;
+
+            [JsonProperty("DronePayloadSpawnHeight")]
+            public float DronePayloadSpawnHeight = 16f;
+
+            [JsonProperty("DroneMinimumTerrainClearance")]
+            public float DroneMinimumTerrainClearance = DefaultDroneMinimumTerrainClearance;
+
+            [JsonProperty("AircraftMinimumTerrainClearance")]
+            public float AircraftMinimumTerrainClearance = DefaultAircraftMinimumTerrainClearance;
+
+            [JsonProperty("PayloadMinimumTerrainClearance")]
+            public float PayloadMinimumTerrainClearance = DefaultPayloadMinimumTerrainClearance;
 
             [JsonProperty("AircraftFlyoverDistance")]
-            public float AircraftFlyoverDistance = 175f;
+            public float AircraftFlyoverDistance = 330f;
 
             [JsonProperty("AttackHeliFlyoverHeight")]
-            public float AttackHeliFlyoverHeight = 48f;
+            public float AttackHeliFlyoverHeight = 78f;
 
             [JsonProperty("CargoPlaneFlyoverHeight")]
-            public float CargoPlaneFlyoverHeight = 92f;
+            public float CargoPlaneFlyoverHeight = 145f;
 
             [JsonProperty("MlrsAircraftFlyoverHeight")]
-            public float MlrsAircraftFlyoverHeight = 58f;
+            public float MlrsAircraftFlyoverHeight = 118f;
 
             [JsonProperty("A10FlyoverHeight")]
-            public float A10FlyoverHeight = 68f;
+            public float A10FlyoverHeight = 125f;
+
+            [JsonProperty("AircraftObservationPassHeightMultiplier")]
+            public float AircraftObservationPassHeightMultiplier = 1.45f;
+
+            [JsonProperty("AircraftStrikePassHeightMultiplier")]
+            public float AircraftStrikePassHeightMultiplier = 0.86f;
+
+            [JsonProperty("AttackDiveStartHeightMultiplier")]
+            public float AttackDiveStartHeightMultiplier = 2.05f;
+
+            [JsonProperty("AttackStrikePassHeightMultiplier")]
+            public float AttackStrikePassHeightMultiplier = 0.88f;
+
+            [JsonProperty("AttackExitHeightMultiplier")]
+            public float AttackExitHeightMultiplier = 1.75f;
 
             [JsonProperty("MortarSourceDistance")]
             public float MortarSourceDistance = 85f;
@@ -509,8 +573,50 @@ namespace Oxide.Plugins
             [JsonProperty("VisualMoveIntervalSeconds")]
             public float VisualMoveIntervalSeconds = DefaultVisualMoveIntervalSeconds;
 
+            [JsonProperty("VisualRotationSmoothTimeSeconds")]
+            public float VisualRotationSmoothTimeSeconds = DefaultVisualRotationSmoothTimeSeconds;
+
             [JsonProperty("FlyoverSoundIntervalSeconds")]
             public float FlyoverSoundIntervalSeconds = DefaultFlyoverSoundIntervalSeconds;
+
+            [JsonProperty("DeliveryVehiclesCanBeDestroyed")]
+            public bool DeliveryVehiclesCanBeDestroyed = true;
+
+            [JsonProperty("PayloadRequiresLiveDeliveryVehicle")]
+            public bool PayloadRequiresLiveDeliveryVehicle = true;
+
+            [JsonProperty("RefundIfDeliveryVehicleDestroyedBeforePayload")]
+            public bool RefundIfDeliveryVehicleDestroyedBeforePayload;
+
+            [JsonProperty("DestroyableDeliveryVehicleFirstPayloadDelaySeconds")]
+            public float DestroyableDeliveryVehicleFirstPayloadDelaySeconds = 1.5f;
+
+            [JsonProperty("DroneFirstPayloadDelaySeconds")]
+            public float DroneFirstPayloadDelaySeconds = 6.0f;
+
+            [JsonProperty("AttackHeliFirstPayloadDelaySeconds")]
+            public float AttackHeliFirstPayloadDelaySeconds = 9.5f;
+
+            [JsonProperty("CargoPlaneFirstPayloadDelaySeconds")]
+            public float CargoPlaneFirstPayloadDelaySeconds = 9.0f;
+
+            [JsonProperty("A10FirstPayloadDelaySeconds")]
+            public float A10FirstPayloadDelaySeconds = 6.8f;
+
+            [JsonProperty("MlrsFirstPayloadDelaySeconds")]
+            public float MlrsFirstPayloadDelaySeconds = 7.5f;
+
+            [JsonProperty("DroneDeliveryVehicleHealth")]
+            public float DroneDeliveryVehicleHealth = 125f;
+
+            [JsonProperty("AttackHeliDeliveryVehicleHealth")]
+            public float AttackHeliDeliveryVehicleHealth = 750f;
+
+            [JsonProperty("CargoPlaneDeliveryVehicleHealth")]
+            public float CargoPlaneDeliveryVehicleHealth = 1200f;
+
+            [JsonProperty("A10DeliveryVehicleHealth")]
+            public float A10DeliveryVehicleHealth = 900f;
         }
 
         private class DamageScaleSettings
@@ -846,6 +952,17 @@ namespace Oxide.Plugins
             public readonly List<Timer> Timers = new List<Timer>();
             public readonly List<BaseEntity> SpawnedEntities = new List<BaseEntity>();
             public readonly List<BaseEntity> VisualEntities = new List<BaseEntity>();
+            public BaseEntity DeliveryCarrier;
+            public bool DeliveryCarrierRequired;
+            public bool DeliveryCarrierDestroyed;
+            public bool FailureForfeitsRefund;
+            public string DeliveryCarrierLabel = "";
+            public float DeliveryCarrierMaxHealth;
+            public float DeliveryCarrierHealthRemaining;
+            public int ExpectedPayloadReleaseCount;
+            public int PayloadReleaseCount;
+            public readonly Dictionary<int, Vector3> PlannedImpactPositions = new Dictionary<int, Vector3>();
+            public Vector3 PlannedDeliveryApproach = Vector3.forward;
             public Vector3 MortarSourcePosition;
             public bool HasMortarSourcePosition;
         }
@@ -951,6 +1068,23 @@ namespace Oxide.Plugins
             public string Id;
             public string DisplayName;
             public float BaseDamage;
+        }
+
+        private class FlightWaypoint
+        {
+            public Vector3 Position;
+            public float Time;
+        }
+
+        private class DeliveryFlightPlan
+        {
+            public Vector3 Start;
+            public Vector3 Release;
+            public Vector3 End;
+            public Vector3 Direction;
+            public float Duration;
+            public float FirstPayloadDelay;
+            public readonly List<FlightWaypoint> Waypoints = new List<FlightWaypoint>();
         }
 
         private interface IStrikeExecutor
@@ -1283,12 +1417,14 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                plugin.StartDroneDeliveryVisual(context, count, DroneDropPayloadDelay, spec.FinishDelaySeconds);
+                plugin.SetExpectedPayloadReleaseCount(context, count);
+                var firstPayloadDelay = plugin.GetDeliveryCarrierFirstPayloadDelay(context);
+                plugin.StartDroneDeliveryVisual(context, count, DroneDropPayloadDelay, spec.FinishDelaySeconds, firstPayloadDelay);
 
                 for (var i = 0; i < count; i++)
                 {
                     var payloadIndex = i + 1;
-                    plugin.ScheduleCallTimer(context, i * DroneDropPayloadDelay, () =>
+                    plugin.ScheduleCallTimer(context, firstPayloadDelay + (i * DroneDropPayloadDelay), () =>
                     {
                         if (!plugin.IsCallActive(context))
                         {
@@ -1303,7 +1439,7 @@ namespace Oxide.Plugins
                     });
                 }
 
-                var finishDelay = Math.Max(0.1f, (count - 1) * DroneDropPayloadDelay + spec.FinishDelaySeconds);
+                var finishDelay = Math.Max(0.1f, firstPayloadDelay + ((count - 1) * DroneDropPayloadDelay) + spec.FinishDelaySeconds);
                 plugin.ScheduleCallTimer(context, finishDelay, () =>
                 {
                     if (plugin.IsCallActive(context))
@@ -1365,12 +1501,15 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                plugin.StartAircraftDeliveryVisual(context, ((count - 1) * HeavyDropPayloadDelay) + spec.FinishDelaySeconds, "heavy drop");
+                plugin.SetExpectedPayloadReleaseCount(context, count);
+                var firstPayloadDelay = plugin.GetDeliveryCarrierFirstPayloadDelay(context);
+                var postReleaseDuration = ((count - 1) * HeavyDropPayloadDelay) + spec.FinishDelaySeconds;
+                plugin.StartAircraftDeliveryVisual(context, DeliveryVisualProfile.HeavyDrop, firstPayloadDelay, postReleaseDuration, "heavy drop");
 
                 for (var i = 0; i < count; i++)
                 {
                     var payloadIndex = i + 1;
-                    plugin.ScheduleCallTimer(context, i * HeavyDropPayloadDelay, () =>
+                    plugin.ScheduleCallTimer(context, firstPayloadDelay + (i * HeavyDropPayloadDelay), () =>
                     {
                         if (!plugin.IsCallActive(context))
                         {
@@ -1385,7 +1524,7 @@ namespace Oxide.Plugins
                     });
                 }
 
-                var finishDelay = Math.Max(0.1f, (count - 1) * HeavyDropPayloadDelay + spec.FinishDelaySeconds);
+                var finishDelay = Math.Max(0.1f, firstPayloadDelay + ((count - 1) * HeavyDropPayloadDelay) + spec.FinishDelaySeconds);
                 plugin.ScheduleCallTimer(context, finishDelay, () =>
                 {
                     if (plugin.IsCallActive(context))
@@ -1448,11 +1587,14 @@ namespace Oxide.Plugins
                 }
 
                 var approach = plugin.GetRocketApproachDirection(context);
-                plugin.StartAircraftDeliveryVisual(context, ((count - 1) * RocketRunProjectileDelay) + spec.FinishDelaySeconds, "rocket run");
+                plugin.SetExpectedPayloadReleaseCount(context, count);
+                var firstPayloadDelay = plugin.GetDeliveryCarrierFirstPayloadDelay(context);
+                var postReleaseDuration = ((count - 1) * RocketRunProjectileDelay) + spec.FinishDelaySeconds;
+                plugin.StartAircraftDeliveryVisual(context, DeliveryVisualProfile.RocketRun, firstPayloadDelay, postReleaseDuration, "rocket run");
                 for (var i = 0; i < count; i++)
                 {
                     var rocketIndex = i + 1;
-                    plugin.ScheduleCallTimer(context, i * RocketRunProjectileDelay, () =>
+                    plugin.ScheduleCallTimer(context, firstPayloadDelay + (i * RocketRunProjectileDelay), () =>
                     {
                         if (!plugin.IsCallActive(context))
                         {
@@ -1467,7 +1609,7 @@ namespace Oxide.Plugins
                     });
                 }
 
-                var finishDelay = Math.Max(0.1f, (count - 1) * RocketRunProjectileDelay + spec.FinishDelaySeconds);
+                var finishDelay = Math.Max(0.1f, firstPayloadDelay + ((count - 1) * RocketRunProjectileDelay) + spec.FinishDelaySeconds);
                 plugin.ScheduleCallTimer(context, finishDelay, () =>
                 {
                     if (plugin.IsCallActive(context))
@@ -1529,11 +1671,15 @@ namespace Oxide.Plugins
                 }
 
                 var approach = plugin.GetRocketApproachDirection(context);
-                plugin.StartMlrsDeliveryVisual(context, approach, ((count - 1) * MlrsRocketDelay) + spec.FinishDelaySeconds);
+                plugin.SetExpectedPayloadReleaseCount(context, count);
+                var firstPayloadDelay = plugin.GetDeliveryCarrierFirstPayloadDelay(context);
+                var payloadWindowDuration = (count - 1) * MlrsRocketDelay;
+                var visualPostReleaseDuration = payloadWindowDuration + 2.35f;
+                plugin.StartMlrsDeliveryVisual(context, approach, firstPayloadDelay, visualPostReleaseDuration);
                 for (var i = 0; i < count; i++)
                 {
                     var rocketIndex = i + 1;
-                    plugin.ScheduleCallTimer(context, i * MlrsRocketDelay, () =>
+                    plugin.ScheduleCallTimer(context, firstPayloadDelay + (i * MlrsRocketDelay), () =>
                     {
                         if (!plugin.IsCallActive(context))
                         {
@@ -1548,7 +1694,7 @@ namespace Oxide.Plugins
                     });
                 }
 
-                var finishDelay = Math.Max(0.1f, (count - 1) * MlrsRocketDelay + spec.FinishDelaySeconds);
+                var finishDelay = Math.Max(0.1f, firstPayloadDelay + ((count - 1) * MlrsRocketDelay) + spec.FinishDelaySeconds);
                 plugin.ScheduleCallTimer(context, finishDelay, () =>
                 {
                     if (plugin.IsCallActive(context))
@@ -1619,12 +1765,15 @@ namespace Oxide.Plugins
                 }
 
                 var approach = plugin.GetRocketApproachDirection(context);
-                plugin.StartAircraftDeliveryVisual(context, ((count - 1) * HomingMissileLaunchDelay) + plugin.GetHomingTrackingSeconds(context.Strike) + spec.FinishDelaySeconds, "homing missile");
+                plugin.SetExpectedPayloadReleaseCount(context, count);
+                var firstPayloadDelay = plugin.GetDeliveryCarrierFirstPayloadDelay(context);
+                var postReleaseDuration = ((count - 1) * HomingMissileLaunchDelay) + plugin.GetHomingTrackingSeconds(context.Strike) + spec.FinishDelaySeconds;
+                plugin.StartAircraftDeliveryVisual(context, DeliveryVisualProfile.HomingMissile, firstPayloadDelay, postReleaseDuration, "homing missile");
                 var targetId = context.Target.EntityId;
                 for (var i = 0; i < count; i++)
                 {
                     var missileIndex = i + 1;
-                    plugin.ScheduleCallTimer(context, i * HomingMissileLaunchDelay, () =>
+                    plugin.ScheduleCallTimer(context, firstPayloadDelay + (i * HomingMissileLaunchDelay), () =>
                     {
                         if (!plugin.IsCallActive(context))
                         {
@@ -1639,7 +1788,7 @@ namespace Oxide.Plugins
                     });
                 }
 
-                var finishDelay = Math.Max(0.1f, ((count - 1) * HomingMissileLaunchDelay) + plugin.GetHomingTrackingSeconds(context.Strike) + spec.FinishDelaySeconds);
+                var finishDelay = Math.Max(0.1f, firstPayloadDelay + ((count - 1) * HomingMissileLaunchDelay) + plugin.GetHomingTrackingSeconds(context.Strike) + spec.FinishDelaySeconds);
                 plugin.ScheduleCallTimer(context, finishDelay, () =>
                 {
                     if (plugin.IsCallActive(context))
@@ -1783,11 +1932,13 @@ namespace Oxide.Plugins
 
                 var direction = plugin.GetA10StrafeDirection(context);
                 var pulseDelay = plugin.GetA10PulseDelaySeconds(context.Strike);
-                plugin.StartA10DeliveryVisual(context, direction, burstCount, pulseDelay);
+                plugin.SetExpectedPayloadReleaseCount(context, burstCount);
+                var firstPayloadDelay = plugin.GetDeliveryCarrierFirstPayloadDelay(context);
+                plugin.StartA10DeliveryVisual(context, direction, burstCount, pulseDelay, firstPayloadDelay);
                 for (var i = 0; i < burstCount; i++)
                 {
                     var pulseIndex = i + 1;
-                    plugin.ScheduleCallTimer(context, i * pulseDelay, () =>
+                    plugin.ScheduleCallTimer(context, firstPayloadDelay + (i * pulseDelay), () =>
                     {
                         if (!plugin.IsCallActive(context))
                         {
@@ -1802,7 +1953,7 @@ namespace Oxide.Plugins
                     });
                 }
 
-                var finishDelay = Math.Max(0.1f, ((burstCount - 1) * pulseDelay) + A10FinishPaddingSeconds);
+                var finishDelay = Math.Max(0.1f, firstPayloadDelay + ((burstCount - 1) * pulseDelay) + A10FinishPaddingSeconds);
                 plugin.ScheduleCallTimer(context, finishDelay, () =>
                 {
                     if (plugin.IsCallActive(context))
@@ -1861,7 +2012,7 @@ namespace Oxide.Plugins
             TryRegisterAirstrikeCustomItemDefinition();
             NormalizeOnlineAirstrikeInventories();
             StartToolPingWatcher();
-            Puts("Loaded " + GetEnabledStrikeCount() + " enabled strike definition(s). Stackable CID targeting binoculars, automatic tool ping targeting, persisted manual player defaults, scrollable CUI selection, high-rate visual delivery flyovers/artillery sources with autoload-safe repeated sound cues, loot item injection, monument blocking, audit logging/webhooks, cancellable warning calls, heavy warning markers, in-game warning fanout diagnostics, and direct-command executors are active in v0.1.30.");
+            Puts("Loaded " + GetEnabledStrikeCount() + " enabled strike definition(s). Charge-backed CID targeting binoculars, automatic tool ping targeting, persisted manual player defaults, scrollable CUI selection, high-rate visual delivery flyovers/artillery sources with autoload-safe repeated sound cues, loot item injection, monument blocking, audit logging/webhooks, cancellable warning calls, heavy warning markers, in-game warning fanout diagnostics, and direct-command executors are active in v0.1.39.");
         }
 
         private void OnPlayerConnected(BasePlayer player)
@@ -1987,6 +2138,17 @@ namespace Oxide.Plugins
             var storage = lootFill.StorageContainer;
             var inventory = storage == null ? null : storage.inventory;
             TryInjectLootToken(inventory, lootFill.name, storage?.ShortPrefabName, storage?.PrefabName, storage?.name);
+        }
+
+        private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            HandleDeliveryCarrierDestroyed(entity, info);
+        }
+
+        private object OnPlayerAttack(BasePlayer attacker, HitInfo info)
+        {
+            TryApplyDeliveryCarrierHit(attacker, info);
+            return null;
         }
 
         private void CmdStrike(BasePlayer player, string command, string[] args)
@@ -3151,7 +3313,7 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        FailStrikeCall(context, message, true);
+                        FailStrikeCall(context, message, !context.FailureForfeitsRefund);
                     }
                 });
             }
@@ -3199,17 +3361,23 @@ namespace Oxide.Plugins
             activeCalls.Remove(context.CallerUserId);
 
             var notes = new List<string>();
-            if (allowRefund && !context.ImpactStarted)
+            if (context.FailureForfeitsRefund && !context.ImpactStarted)
+            {
+                notes.Add("Costs and cooldowns were kept because the delivery vehicle was destroyed before payload release.");
+            }
+            else if (allowRefund && !context.ImpactStarted)
             {
                 RefundCallCosts(context, notes);
                 ClearCooldownsForContext(context);
             }
 
-            IncrementStat("failed_execution");
+            IncrementStat(context.DeliveryCarrierDestroyed ? "intercepted_delivery_vehicle" : "failed_execution");
             IncrementStat("failed_" + context.Strike.Id);
 
             var suffix = notes.Count == 0 ? "" : " " + string.Join(" ", notes.ToArray());
-            var result = context.RefundAttempted ? "failed_refunded" : "failed";
+            var result = context.DeliveryCarrierDestroyed
+                ? (context.RefundAttempted ? "intercepted_refunded" : "intercepted")
+                : context.RefundAttempted ? "failed_refunded" : "failed";
             RecordStrikeAudit(context, result, message + suffix, true);
             SaveData();
             NotifyCaller(context, context.Strike.DisplayName + " failed: " + message + suffix);
@@ -3725,9 +3893,14 @@ namespace Oxide.Plugins
         {
             if (context == null || context.VisualEntities.Count == 0)
             {
+                if (context != null)
+                {
+                    ClearDeliveryCarrier(context);
+                }
                 return;
             }
 
+            ClearDeliveryCarrier(context);
             var entities = new List<BaseEntity>(context.VisualEntities);
             context.VisualEntities.Clear();
             foreach (var entity in entities)
@@ -3956,7 +4129,1179 @@ namespace Oxide.Plugins
             return center + (direction * linePosition) + (right * lateral);
         }
 
-        private void StartDroneDeliveryVisual(AirstrikeCallContext context, int payloadCount, float payloadDelay, float finishDelay)
+        private void SetExpectedPayloadReleaseCount(AirstrikeCallContext context, int expectedCount)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            context.ExpectedPayloadReleaseCount = Math.Max(context.ExpectedPayloadReleaseCount, Math.Max(0, expectedCount));
+        }
+
+        private void MarkPayloadReleased(AirstrikeCallContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            context.PayloadReleaseCount = Math.Min(int.MaxValue, context.PayloadReleaseCount + 1);
+        }
+
+        private float GetDeliveryCarrierFirstPayloadDelay(AirstrikeCallContext context)
+        {
+            if (!ShouldUseDestroyableDeliveryCarrier(context))
+            {
+                return 0f;
+            }
+
+            var visuals = config?.DeliveryVisuals;
+            if (visuals == null)
+            {
+                return 0f;
+            }
+
+            var legacyFallback = visuals.DestroyableDeliveryVehicleFirstPayloadDelaySeconds < 0f
+                ? 1.5f
+                : visuals.DestroyableDeliveryVehicleFirstPayloadDelaySeconds;
+
+            if (string.Equals(context.Strike.Delivery, "drone", StringComparison.OrdinalIgnoreCase))
+            {
+                return ClampDeliveryDelay(visuals.DroneFirstPayloadDelaySeconds, legacyFallback);
+            }
+
+            HeavyDropPayloadSpec heavyDropSpec;
+            if (TryGetHeavyDropPayloadSpec(context.Strike.Payload, out heavyDropSpec))
+            {
+                return ClampDeliveryDelay(visuals.CargoPlaneFirstPayloadDelaySeconds, 9f);
+            }
+
+            MlrsPayloadSpec mlrsSpec;
+            if (TryGetMlrsPayloadSpec(context.Strike.Payload, out mlrsSpec))
+            {
+                return ClampDeliveryDelay(visuals.MlrsFirstPayloadDelaySeconds, 12f);
+            }
+
+            if (string.Equals(context.Strike.Delivery, "a10_gun_run", StringComparison.OrdinalIgnoreCase))
+            {
+                return ClampDeliveryDelay(visuals.A10FirstPayloadDelaySeconds, 8f);
+            }
+
+            if (string.Equals(context.Strike.Delivery, "attack_heli", StringComparison.OrdinalIgnoreCase))
+            {
+                return ClampDeliveryDelay(visuals.AttackHeliFirstPayloadDelaySeconds, 7f);
+            }
+
+            if (string.Equals(context.Strike.Delivery, "cargo_plane_jet", StringComparison.OrdinalIgnoreCase))
+            {
+                return ClampDeliveryDelay(visuals.CargoPlaneFirstPayloadDelaySeconds, 9f);
+            }
+
+            return ClampDeliveryDelay(legacyFallback, 1.5f);
+        }
+
+        private float ClampDeliveryDelay(float configured, float fallback)
+        {
+            return Mathf.Clamp(configured < 0f ? fallback : configured, 0f, 20f);
+        }
+
+        private bool ShouldUseDestroyableDeliveryCarrier(AirstrikeCallContext context)
+        {
+            return context != null
+                && context.Strike != null
+                && config?.DeliveryVisuals != null
+                && config.DeliveryVisuals.Enabled
+                && config.DeliveryVisuals.DeliveryVehiclesCanBeDestroyed
+                && IsDeliveryVisualEnabledForStrike(context.Strike);
+        }
+
+        private bool IsDeliveryVisualEnabledForStrike(StrikeDefinition strike)
+        {
+            if (strike == null || config?.DeliveryVisuals == null)
+            {
+                return false;
+            }
+
+            if (string.Equals(strike.Delivery, "drone", StringComparison.OrdinalIgnoreCase))
+            {
+                return config.DeliveryVisuals.SpawnDroneVisuals;
+            }
+
+            if (string.Equals(strike.Delivery, "attack_heli", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(strike.Delivery, "cargo_plane_jet", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(strike.Delivery, "a10_gun_run", StringComparison.OrdinalIgnoreCase))
+            {
+                return config.DeliveryVisuals.SpawnAircraftVisuals;
+            }
+
+            return false;
+        }
+
+        private bool HasReleasedAllCarrierPayloads(AirstrikeCallContext context)
+        {
+            return context == null
+                || (context.ExpectedPayloadReleaseCount > 0 && context.PayloadReleaseCount >= context.ExpectedPayloadReleaseCount);
+        }
+
+        private bool ShouldRefundDestroyedDeliveryVehicle(AirstrikeCallContext context)
+        {
+            return config?.DeliveryVisuals != null && config.DeliveryVisuals.RefundIfDeliveryVehicleDestroyedBeforePayload;
+        }
+
+        private void RegisterDeliveryCarrier(AirstrikeCallContext context, BaseEntity entity, string label)
+        {
+            if (!ShouldUseDestroyableDeliveryCarrier(context) || entity == null || entity.IsDestroyed)
+            {
+                return;
+            }
+
+            var health = GetDeliveryCarrierHealth(context, entity, label);
+            if (health <= 0f)
+            {
+                return;
+            }
+
+            var combat = entity as BaseCombatEntity;
+            if (combat != null)
+            {
+                try
+                {
+                    combat.InitializeHealth(health, health);
+                }
+                catch (Exception ex)
+                {
+                    if (config.General.DebugMode)
+                    {
+                        Puts("Could not initialize delivery carrier health for " + (entity.ShortPrefabName ?? label ?? "entity") + ": " + ex.Message);
+                    }
+                }
+            }
+            else if (config.General.DebugMode)
+            {
+                Puts((context.Strike == null ? "unknown" : context.Strike.Id) + " visual " + label + " is not a BaseCombatEntity; using manual OnPlayerAttack hit tracking for the delivery carrier.");
+            }
+
+            context.DeliveryCarrier = entity;
+            context.DeliveryCarrierRequired = config.DeliveryVisuals.PayloadRequiresLiveDeliveryVehicle;
+            context.DeliveryCarrierDestroyed = false;
+            context.FailureForfeitsRefund = false;
+            context.DeliveryCarrierLabel = string.IsNullOrWhiteSpace(label) ? "delivery vehicle" : label;
+            context.DeliveryCarrierMaxHealth = health;
+            context.DeliveryCarrierHealthRemaining = health;
+
+            if (config.General.DebugMode)
+            {
+                Puts(context.Strike.Id + " armed destroyable delivery carrier " + context.DeliveryCarrierLabel + " with " + health.ToString("0", CultureInfo.InvariantCulture) + " health.");
+            }
+        }
+
+        private float GetDeliveryCarrierHealth(AirstrikeCallContext context, BaseEntity entity, string label)
+        {
+            if (context?.Strike == null || config?.DeliveryVisuals == null)
+            {
+                return 0f;
+            }
+
+            if (string.Equals(context.Strike.Delivery, "drone", StringComparison.OrdinalIgnoreCase))
+            {
+                return config.DeliveryVisuals.DroneDeliveryVehicleHealth;
+            }
+
+            HeavyDropPayloadSpec heavyDropSpec;
+            if (TryGetHeavyDropPayloadSpec(context.Strike.Payload, out heavyDropSpec))
+            {
+                return config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth;
+            }
+
+            if (string.Equals(context.Strike.Delivery, "attack_heli", StringComparison.OrdinalIgnoreCase))
+            {
+                return config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth;
+            }
+
+            if (string.Equals(context.Strike.Delivery, "a10_gun_run", StringComparison.OrdinalIgnoreCase))
+            {
+                return config.DeliveryVisuals.A10DeliveryVehicleHealth;
+            }
+
+            if (string.Equals(context.Strike.Delivery, "cargo_plane_jet", StringComparison.OrdinalIgnoreCase))
+            {
+                return config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth;
+            }
+
+            return 0f;
+        }
+
+        private bool TryRequireLiveDeliveryCarrier(AirstrikeCallContext context, string releaseLabel, out string error)
+        {
+            error = "";
+            if (context == null || !context.DeliveryCarrierRequired || !config.DeliveryVisuals.PayloadRequiresLiveDeliveryVehicle)
+            {
+                return true;
+            }
+
+            if (HasReleasedAllCarrierPayloads(context))
+            {
+                return true;
+            }
+
+            var carrier = context.DeliveryCarrier;
+            var combat = carrier as BaseCombatEntity;
+            if (carrier != null
+                && !carrier.IsDestroyed
+                && (combat == null || !combat.IsDead())
+                && context.DeliveryCarrierHealthRemaining > 0f)
+            {
+                return true;
+            }
+
+            context.DeliveryCarrierDestroyed = true;
+            context.FailureForfeitsRefund = !ShouldRefundDestroyedDeliveryVehicle(context);
+            error = BuildDeliveryCarrierDestroyedMessage(context, releaseLabel);
+            return false;
+        }
+
+        private string BuildDeliveryCarrierDestroyedMessage(AirstrikeCallContext context, string releaseLabel)
+        {
+            var label = string.IsNullOrWhiteSpace(context?.DeliveryCarrierLabel) ? "delivery vehicle" : context.DeliveryCarrierLabel;
+            var release = string.IsNullOrWhiteSpace(releaseLabel) ? "its payload" : releaseLabel;
+            return label + " was destroyed before releasing " + release + ".";
+        }
+
+        private void HandleDeliveryCarrierDestroyed(BaseCombatEntity entity, HitInfo info)
+        {
+            if (entity == null)
+            {
+                return;
+            }
+
+            foreach (var context in new List<AirstrikeCallContext>(activeCalls.Values))
+            {
+                if (context == null || !IsCallActive(context) || !ReferenceEquals(context.DeliveryCarrier, entity))
+                {
+                    continue;
+                }
+
+                FailOrClearDestroyedDeliveryCarrier(context, info?.Initiator as BasePlayer);
+                return;
+            }
+        }
+
+        private void TryApplyDeliveryCarrierHit(BasePlayer attacker, HitInfo info)
+        {
+            if (info == null)
+            {
+                return;
+            }
+
+            var hitEntity = info.HitEntity as BaseEntity;
+            if (hitEntity == null)
+            {
+                return;
+            }
+
+            foreach (var context in new List<AirstrikeCallContext>(activeCalls.Values))
+            {
+                if (context == null || !IsCallActive(context) || !ReferenceEquals(context.DeliveryCarrier, hitEntity))
+                {
+                    continue;
+                }
+
+                if (context.DeliveryCarrierHealthRemaining <= 0f)
+                {
+                    return;
+                }
+
+                var damage = 0f;
+                try
+                {
+                    damage = info.damageTypes == null ? 0f : info.damageTypes.Total();
+                }
+                catch
+                {
+                    damage = 0f;
+                }
+
+                if (damage <= 0f)
+                {
+                    damage = 1f;
+                }
+
+                context.DeliveryCarrierHealthRemaining = Math.Max(0f, context.DeliveryCarrierHealthRemaining - damage);
+                if (config.General.DebugMode)
+                {
+                    Puts(context.Strike.Id + " delivery carrier " + context.DeliveryCarrierLabel + " took " + damage.ToString("0.0", CultureInfo.InvariantCulture) + " damage; " + context.DeliveryCarrierHealthRemaining.ToString("0.0", CultureInfo.InvariantCulture) + "/" + context.DeliveryCarrierMaxHealth.ToString("0.0", CultureInfo.InvariantCulture) + " health remaining.");
+                }
+
+                if (context.DeliveryCarrierHealthRemaining > 0f)
+                {
+                    return;
+                }
+
+                FailOrClearDestroyedDeliveryCarrier(context, attacker);
+                return;
+            }
+        }
+
+        private void FailOrClearDestroyedDeliveryCarrier(AirstrikeCallContext context, BasePlayer attacker)
+        {
+            if (context == null || !IsCallActive(context))
+            {
+                return;
+            }
+
+            if (!context.DeliveryCarrierRequired || HasReleasedAllCarrierPayloads(context))
+            {
+                KillTrackedVisualEntity(context, context.DeliveryCarrier);
+                ClearDeliveryCarrier(context);
+                return;
+            }
+
+            context.DeliveryCarrierDestroyed = true;
+            context.FailureForfeitsRefund = !ShouldRefundDestroyedDeliveryVehicle(context);
+            IncrementStat("delivery_vehicle_destroyed");
+
+            var attackerText = attacker == null ? "" : " by " + (attacker.displayName ?? attacker.UserIDString);
+            var message = BuildDeliveryCarrierDestroyedMessage(context, "its payload") + attackerText;
+            FailStrikeCall(context, message, ShouldRefundDestroyedDeliveryVehicle(context));
+        }
+
+        private void ClearDeliveryCarrier(AirstrikeCallContext context)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            context.DeliveryCarrier = null;
+            context.DeliveryCarrierRequired = false;
+            context.DeliveryCarrierLabel = "";
+            context.DeliveryCarrierMaxHealth = 0f;
+            context.DeliveryCarrierHealthRemaining = 0f;
+        }
+
+        private DeliveryFlightPlan BuildDeliveryFlightPlan(Vector3 release, Vector3 direction, float inboundDistance, float firstPayloadDelay, float postReleaseDuration, float minimumDuration, float maximumDuration)
+        {
+            direction.y = 0f;
+            if (direction.sqrMagnitude <= 0.01f)
+            {
+                direction = Vector3.forward;
+            }
+            else
+            {
+                direction.Normalize();
+            }
+
+            var safeInboundDistance = Mathf.Clamp(inboundDistance, 10f, 500f);
+            var safeFirstPayloadDelay = Mathf.Max(0f, firstPayloadDelay);
+            var safePostReleaseDuration = Mathf.Max(0.1f, postReleaseDuration);
+            var safeDuration = Mathf.Clamp(safeFirstPayloadDelay + safePostReleaseDuration, minimumDuration, maximumDuration);
+            var speed = safeFirstPayloadDelay > 0.05f
+                ? safeInboundDistance / safeFirstPayloadDelay
+                : (safeInboundDistance * 2f) / Math.Max(0.1f, safeDuration);
+            var start = release - (direction * safeInboundDistance);
+            var end = start + (direction * Math.Max(safeInboundDistance + 20f, speed * safeDuration));
+            var minimumOutboundDistance = Math.Max(25f, safeInboundDistance * 0.5f);
+
+            if (Vector3.Dot(end - release, direction) < minimumOutboundDistance)
+            {
+                end = release + (direction * minimumOutboundDistance);
+            }
+
+            var plan = new DeliveryFlightPlan
+            {
+                Start = start,
+                Release = release,
+                End = end,
+                Direction = direction,
+                Duration = safeDuration,
+                FirstPayloadDelay = safeFirstPayloadDelay
+            };
+
+            AddFlightWaypoint(plan, start, 0f);
+            if (safeFirstPayloadDelay > 0.05f && safeFirstPayloadDelay < safeDuration - 0.05f)
+            {
+                AddFlightWaypoint(plan, release, safeFirstPayloadDelay);
+            }
+            AddFlightWaypoint(plan, end, safeDuration);
+            FinalizeFlightPlan(plan);
+            return plan;
+        }
+
+        private DeliveryFlightPlan CreateEmptyFlightPlan(Vector3 start, Vector3 release, Vector3 end, Vector3 direction, float duration, float firstPayloadDelay)
+        {
+            direction.y = 0f;
+            if (direction.sqrMagnitude <= 0.01f)
+            {
+                direction = (end - start);
+                direction.y = 0f;
+            }
+
+            if (direction.sqrMagnitude <= 0.01f)
+            {
+                direction = Vector3.forward;
+            }
+            else
+            {
+                direction.Normalize();
+            }
+
+            return new DeliveryFlightPlan
+            {
+                Start = start,
+                Release = release,
+                End = end,
+                Direction = direction,
+                Duration = Mathf.Max(0.1f, duration),
+                FirstPayloadDelay = Mathf.Max(0f, firstPayloadDelay)
+            };
+        }
+
+        private void AddFlightWaypoint(DeliveryFlightPlan plan, Vector3 position, float time)
+        {
+            if (plan == null)
+            {
+                return;
+            }
+
+            var safeTime = Mathf.Clamp(time, 0f, Mathf.Max(0.1f, plan.Duration));
+            plan.Waypoints.Add(new FlightWaypoint
+            {
+                Position = position,
+                Time = safeTime
+            });
+        }
+
+        private void FinalizeFlightPlan(DeliveryFlightPlan plan)
+        {
+            if (plan == null)
+            {
+                return;
+            }
+
+            plan.Duration = Mathf.Max(0.1f, plan.Duration);
+            if (plan.Waypoints.Count == 0)
+            {
+                AddFlightWaypoint(plan, plan.Start, 0f);
+                AddFlightWaypoint(plan, plan.End, plan.Duration);
+            }
+
+            plan.Waypoints.Sort((a, b) => a.Time.CompareTo(b.Time));
+
+            for (var i = 1; i < plan.Waypoints.Count; i++)
+            {
+                if (plan.Waypoints[i].Time <= plan.Waypoints[i - 1].Time + 0.01f)
+                {
+                    plan.Waypoints[i].Time = Mathf.Min(plan.Duration, plan.Waypoints[i - 1].Time + 0.05f);
+                }
+            }
+
+            for (var i = plan.Waypoints.Count - 2; i >= 0; i--)
+            {
+                var current = plan.Waypoints[i];
+                var next = plan.Waypoints[i + 1];
+                if (Math.Abs(current.Time - next.Time) <= 0.001f && Vector3.Distance(current.Position, next.Position) <= 0.01f)
+                {
+                    plan.Waypoints.RemoveAt(i + 1);
+                }
+            }
+
+            plan.Start = plan.Waypoints[0].Position;
+            plan.End = plan.Waypoints[plan.Waypoints.Count - 1].Position;
+        }
+
+        private float GetVisualTerrainClearance(StrikeDefinition strike, string label)
+        {
+            var visuals = config == null ? null : config.DeliveryVisuals;
+            if (visuals == null)
+            {
+                return DefaultAircraftMinimumTerrainClearance;
+            }
+
+            if (strike != null && string.Equals(strike.Delivery, "drone", StringComparison.OrdinalIgnoreCase))
+            {
+                var configured = visuals.DroneMinimumTerrainClearance;
+                return Mathf.Clamp(configured <= 0f ? DefaultDroneMinimumTerrainClearance : configured, 4f, 80f);
+            }
+
+            var aircraftClearance = visuals.AircraftMinimumTerrainClearance;
+            return Mathf.Clamp(aircraftClearance <= 0f ? DefaultAircraftMinimumTerrainClearance : aircraftClearance, 12f, 180f);
+        }
+
+        private float GetPayloadTerrainClearance()
+        {
+            var visuals = config == null ? null : config.DeliveryVisuals;
+            if (visuals == null)
+            {
+                return DefaultPayloadMinimumTerrainClearance;
+            }
+
+            var configured = visuals.PayloadMinimumTerrainClearance;
+            return Mathf.Clamp(configured <= 0f ? DefaultPayloadMinimumTerrainClearance : configured, 2f, 60f);
+        }
+
+        private bool TryGetFlightSurfaceHeight(Vector3 position, out float surfaceY)
+        {
+            surfaceY = 0f;
+            var found = false;
+
+            try
+            {
+                if (TerrainMeta.HeightMap != null)
+                {
+                    surfaceY = TerrainMeta.HeightMap.GetHeight(position);
+                    found = true;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                RaycastHit hit;
+                var startY = found ? Mathf.Max(position.y + 320f, surfaceY + 320f) : position.y + 320f;
+                var start = new Vector3(position.x, startY, position.z);
+                if (Physics.Raycast(start, Vector3.down, out hit, 720f, FlightTerrainRaycastLayer, QueryTriggerInteraction.Ignore))
+                {
+                    surfaceY = found ? Mathf.Max(surfaceY, hit.point.y) : hit.point.y;
+                    found = true;
+                }
+            }
+            catch
+            {
+            }
+
+            return found;
+        }
+
+        private Vector3 EnsurePositionAboveTerrain(Vector3 position, float clearance)
+        {
+            float surfaceY;
+            if (!TryGetFlightSurfaceHeight(position, out surfaceY))
+            {
+                return position;
+            }
+
+            var minimumY = surfaceY + Mathf.Max(0f, clearance);
+            if (position.y < minimumY)
+            {
+                position.y = minimumY;
+            }
+
+            return position;
+        }
+
+        private void ApplyTerrainClearanceToFlightPlan(DeliveryFlightPlan plan, float clearance)
+        {
+            if (plan == null || plan.Waypoints == null || plan.Waypoints.Count == 0)
+            {
+                return;
+            }
+
+            var safeClearance = Mathf.Clamp(clearance, 0f, 200f);
+            foreach (var waypoint in plan.Waypoints)
+            {
+                if (waypoint != null)
+                {
+                    waypoint.Position = EnsurePositionAboveTerrain(waypoint.Position, safeClearance);
+                }
+            }
+
+            for (var pass = 0; pass < 3; pass++)
+            {
+                var adjusted = false;
+                for (var i = 0; i < plan.Waypoints.Count - 1; i++)
+                {
+                    var a = plan.Waypoints[i];
+                    var b = plan.Waypoints[i + 1];
+                    if (a == null || b == null)
+                    {
+                        continue;
+                    }
+
+                    var distance = Vector3.Distance(a.Position, b.Position);
+                    var samples = Mathf.Clamp(Mathf.CeilToInt(distance / FlightPlanTerrainSampleSpacing), 2, 18);
+                    var maxDelta = 0f;
+                    for (var sample = 1; sample < samples; sample++)
+                    {
+                        var t = sample / (float)samples;
+                        var samplePosition = Vector3.Lerp(a.Position, b.Position, t);
+                        float surfaceY;
+                        if (!TryGetFlightSurfaceHeight(samplePosition, out surfaceY))
+                        {
+                            continue;
+                        }
+
+                        var requiredY = surfaceY + safeClearance;
+                        if (samplePosition.y < requiredY)
+                        {
+                            maxDelta = Mathf.Max(maxDelta, requiredY - samplePosition.y);
+                        }
+                    }
+
+                    if (maxDelta <= 0.05f)
+                    {
+                        continue;
+                    }
+
+                    var lift = Vector3.up * (maxDelta + 1f);
+                    a.Position += lift;
+                    b.Position += lift;
+                    adjusted = true;
+                }
+
+                if (!adjusted)
+                {
+                    break;
+                }
+            }
+
+            FinalizeFlightPlan(plan);
+
+            if (plan.FirstPayloadDelay > 0f)
+            {
+                Vector3 releasePosition;
+                Vector3 releaseDirection;
+                Vector3 releaseVelocity;
+                EvaluateFlightPlan(plan, plan.FirstPayloadDelay, out releasePosition, out releaseDirection, out releaseVelocity);
+                plan.Release = EnsurePositionAboveTerrain(releasePosition, safeClearance);
+            }
+            else
+            {
+                plan.Release = EnsurePositionAboveTerrain(plan.Release, safeClearance);
+            }
+        }
+
+        private bool IsLinearFlightPlan(DeliveryFlightPlan plan)
+        {
+            return plan == null || plan.Waypoints == null || plan.Waypoints.Count <= 2;
+        }
+
+        private Vector3 GetPlanDirectionAt(DeliveryFlightPlan plan, float elapsed)
+        {
+            Vector3 position;
+            Vector3 direction;
+            Vector3 velocity;
+            EvaluateFlightPlan(plan, elapsed, out position, out direction, out velocity);
+            return direction;
+        }
+
+        private Vector3 GetPlanVelocityAt(DeliveryFlightPlan plan, float elapsed)
+        {
+            Vector3 position;
+            Vector3 direction;
+            Vector3 velocity;
+            EvaluateFlightPlan(plan, elapsed, out position, out direction, out velocity);
+            return velocity;
+        }
+
+        private Vector3 EvaluateFlightPlanPositionOnly(DeliveryFlightPlan plan, float elapsed)
+        {
+            if (plan == null)
+            {
+                return Vector3.zero;
+            }
+
+            var safeDuration = Mathf.Max(0.1f, plan.Duration);
+            var time = Mathf.Clamp(elapsed, 0f, safeDuration);
+            if (plan.Waypoints == null || plan.Waypoints.Count == 0)
+            {
+                return Vector3.Lerp(plan.Start, plan.End, Mathf.Clamp01(time / safeDuration));
+            }
+
+            var lastIndex = plan.Waypoints.Count - 1;
+            if (time <= plan.Waypoints[0].Time)
+            {
+                return plan.Waypoints[0].Position;
+            }
+
+            if (time >= plan.Waypoints[lastIndex].Time)
+            {
+                return plan.Waypoints[lastIndex].Position;
+            }
+
+            for (var i = 0; i < lastIndex; i++)
+            {
+                var a = plan.Waypoints[i];
+                var b = plan.Waypoints[i + 1];
+                if (time < a.Time || time > b.Time)
+                {
+                    continue;
+                }
+
+                var segmentDuration = Mathf.Max(0.05f, b.Time - a.Time);
+                var segmentProgress = Mathf.Clamp01((time - a.Time) / segmentDuration);
+                var eased = Mathf.SmoothStep(0f, 1f, segmentProgress);
+                return Vector3.Lerp(a.Position, b.Position, eased);
+            }
+
+            return plan.Waypoints[lastIndex].Position;
+        }
+
+        private Vector3 GetFlightPlanTangentDirection(DeliveryFlightPlan plan, float elapsed, Vector3 fallbackDirection)
+        {
+            if (plan == null)
+            {
+                return fallbackDirection;
+            }
+
+            var safeDuration = Mathf.Max(0.1f, plan.Duration);
+            var sampleSeconds = Mathf.Clamp(Mathf.Min(FlightPlanTangentSampleSeconds, safeDuration * 0.08f), 0.035f, 0.35f);
+            var before = Mathf.Clamp(elapsed - sampleSeconds, 0f, safeDuration);
+            var after = Mathf.Clamp(elapsed + sampleSeconds, 0f, safeDuration);
+            if (after - before < 0.025f)
+            {
+                before = Mathf.Clamp(elapsed - sampleSeconds * 2f, 0f, safeDuration);
+                after = Mathf.Clamp(elapsed + sampleSeconds * 2f, 0f, safeDuration);
+            }
+
+            var tangent = EvaluateFlightPlanPositionOnly(plan, after) - EvaluateFlightPlanPositionOnly(plan, before);
+            return tangent.sqrMagnitude > 0.01f ? tangent : fallbackDirection;
+        }
+
+        private void EvaluateFlightPlan(DeliveryFlightPlan plan, float elapsed, out Vector3 position, out Vector3 direction, out Vector3 velocity)
+        {
+            position = Vector3.zero;
+            direction = Vector3.forward;
+            velocity = Vector3.zero;
+
+            if (plan == null)
+            {
+                return;
+            }
+
+            var safeDuration = Mathf.Max(0.1f, plan.Duration);
+            var time = Mathf.Clamp(elapsed, 0f, safeDuration);
+            if (plan.Waypoints == null || plan.Waypoints.Count == 0)
+            {
+                var progress = Mathf.Clamp01(time / safeDuration);
+                position = Vector3.Lerp(plan.Start, plan.End, progress);
+                direction = plan.End - plan.Start;
+                if (direction.sqrMagnitude <= 0.01f)
+                {
+                    direction = plan.Direction.sqrMagnitude <= 0.01f ? Vector3.forward : plan.Direction;
+                }
+                direction.Normalize();
+                velocity = direction * (Vector3.Distance(plan.Start, plan.End) / safeDuration);
+                return;
+            }
+
+            if (time <= plan.Waypoints[0].Time)
+            {
+                position = plan.Waypoints[0].Position;
+                if (plan.Waypoints.Count > 1)
+                {
+                    direction = plan.Waypoints[1].Position - plan.Waypoints[0].Position;
+                }
+            }
+            else if (time >= plan.Waypoints[plan.Waypoints.Count - 1].Time)
+            {
+                position = plan.Waypoints[plan.Waypoints.Count - 1].Position;
+                if (plan.Waypoints.Count > 1)
+                {
+                    direction = plan.Waypoints[plan.Waypoints.Count - 1].Position - plan.Waypoints[plan.Waypoints.Count - 2].Position;
+                }
+            }
+            else
+            {
+                for (var i = 0; i < plan.Waypoints.Count - 1; i++)
+                {
+                    var a = plan.Waypoints[i];
+                    var b = plan.Waypoints[i + 1];
+                    if (time < a.Time || time > b.Time)
+                    {
+                        continue;
+                    }
+
+                    var segmentDuration = Mathf.Max(0.05f, b.Time - a.Time);
+                    var segmentProgress = Mathf.Clamp01((time - a.Time) / segmentDuration);
+                    var eased = Mathf.SmoothStep(0f, 1f, segmentProgress);
+                    position = Vector3.Lerp(a.Position, b.Position, eased);
+                    direction = b.Position - a.Position;
+                    if (direction.sqrMagnitude > 0.01f)
+                    {
+                        velocity = direction.normalized * (Vector3.Distance(a.Position, b.Position) / segmentDuration);
+                    }
+                    break;
+                }
+            }
+
+            var tangentDirection = GetFlightPlanTangentDirection(plan, time, direction);
+            if (tangentDirection.sqrMagnitude > 0.01f)
+            {
+                direction = tangentDirection;
+            }
+
+            var speed = velocity.magnitude;
+            if (direction.sqrMagnitude <= 0.01f)
+            {
+                direction = plan.Direction.sqrMagnitude <= 0.01f ? Vector3.forward : plan.Direction;
+            }
+
+            direction.Normalize();
+            if (speed > 0.01f)
+            {
+                velocity = direction * speed;
+            }
+
+            if (velocity.sqrMagnitude <= 0.01f)
+            {
+                velocity = direction * (Vector3.Distance(plan.Start, plan.End) / safeDuration);
+            }
+        }
+
+        private Vector3 GetRightVector(Vector3 forward)
+        {
+            forward.y = 0f;
+            if (forward.sqrMagnitude <= 0.01f)
+            {
+                forward = Vector3.forward;
+            }
+            else
+            {
+                forward.Normalize();
+            }
+
+            var right = new Vector3(-forward.z, 0f, forward.x);
+            if (right.sqrMagnitude <= 0.01f)
+            {
+                right = Vector3.right;
+            }
+            else
+            {
+                right.Normalize();
+            }
+
+            return right;
+        }
+
+        private float GetConfiguredDronePayloadSpawnHeight()
+        {
+            var configured = config?.DeliveryVisuals == null ? DroneDropSpawnHeight : config.DeliveryVisuals.DronePayloadSpawnHeight;
+            return Mathf.Clamp(configured <= 0f ? DroneDropSpawnHeight : configured, DroneDropMinimumSpawnHeight, 25f);
+        }
+
+        private float GetDronePayloadSpawnHeight(DronePayloadSpec spec)
+        {
+            if (spec == null)
+            {
+                return GetConfiguredDronePayloadSpawnHeight();
+            }
+
+            if (!spec.HasTimedFuse)
+            {
+                return spec.Id == "he_40mm" ? DroneDropProjectileSpawnHeight : Mathf.Min(GetConfiguredDronePayloadSpawnHeight(), 10f);
+            }
+
+            var fuseAwareHeight = Math.Max(DroneDropMinimumSpawnHeight, (spec.FuseSeconds - DronePayloadGroundSettleSeconds) * PayloadDownwardVelocity);
+            return Mathf.Clamp(Mathf.Min(GetConfiguredDronePayloadSpawnHeight(), (float)fuseAwareHeight), DroneDropMinimumSpawnHeight, DroneDropMaximumTimedSpawnHeight);
+        }
+
+        private Vector3 GetPlannedImpactPosition(AirstrikeCallContext context, int payloadIndex, int totalPayloads, Vector3 approach, float spreadRadius)
+        {
+            if (context != null)
+            {
+                Vector3 planned;
+                if (context.PlannedImpactPositions.TryGetValue(payloadIndex, out planned))
+                {
+                    return planned;
+                }
+            }
+
+            return GetPassAlignedImpactPosition(context, approach, payloadIndex, totalPayloads, spreadRadius);
+        }
+
+        private Vector3 GetPassAlignedImpactPosition(AirstrikeCallContext context, Vector3 approach, int payloadIndex, int totalPayloads, float spreadRadius)
+        {
+            var center = context == null || context.Target == null ? Vector3.zero : ResolveImpactPosition(context.Target.Position);
+            approach.y = 0f;
+            if (approach.sqrMagnitude <= 0.01f && context != null && context.PlannedDeliveryApproach.sqrMagnitude > 0.01f)
+            {
+                approach = context.PlannedDeliveryApproach;
+            }
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            approach.Normalize();
+
+            var right = GetRightVector(approach);
+            var spread = Mathf.Clamp(spreadRadius, 0f, 100f);
+            var t = totalPayloads <= 1 ? 0.5f : Mathf.Clamp01((payloadIndex - 1f) / (totalPayloads - 1f));
+            var along = (t - 0.5f) * Mathf.Min(spread * 1.35f, 34f);
+            var lateral = UnityEngine.Random.Range(-Mathf.Min(spread * 0.45f, 10f), Mathf.Min(spread * 0.45f, 10f));
+            var forwardJitter = UnityEngine.Random.Range(-Mathf.Min(spread * 0.22f, 6f), Mathf.Min(spread * 0.22f, 6f));
+            return center + (approach * (along + forwardJitter)) + (right * lateral);
+        }
+
+        private void StorePlannedImpactPosition(AirstrikeCallContext context, int payloadIndex, Vector3 position)
+        {
+            if (context == null)
+            {
+                return;
+            }
+
+            context.PlannedImpactPositions[payloadIndex] = ResolveImpactPosition(position);
+        }
+
+        private void BuildDronePayloadImpactPlan(AirstrikeCallContext context, int payloadCount, Vector3 approach, Vector3 target)
+        {
+            if (context == null || context.Strike == null)
+            {
+                return;
+            }
+
+            context.PlannedImpactPositions.Clear();
+            context.PlannedDeliveryApproach = approach.sqrMagnitude <= 0.01f ? Vector3.forward : approach.normalized;
+            var right = GetRightVector(context.PlannedDeliveryApproach);
+            var spread = Mathf.Clamp(context.Strike.SpreadRadius, 0f, 100f);
+            var loiterRadius = config?.DeliveryVisuals == null ? 7f : Mathf.Clamp(config.DeliveryVisuals.DroneDropLoiterRadius, 0f, 30f);
+            var usableRadius = Mathf.Min(spread, Math.Max(1f, loiterRadius));
+            var randomPhase = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+
+            for (var i = 1; i <= payloadCount; i++)
+            {
+                var t = payloadCount <= 1 ? 0.5f : (i - 1f) / (payloadCount - 1f);
+                var weave = Mathf.Sin((t * Mathf.PI * 2f) + randomPhase) * usableRadius * 0.45f;
+                var sweep = (t - 0.5f) * usableRadius * 1.35f;
+                var randomAngle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+                var randomRadius = Mathf.Sqrt(UnityEngine.Random.value) * Mathf.Min(spread, usableRadius) * 0.45f;
+                var jitter = new Vector3(Mathf.Cos(randomAngle) * randomRadius, 0f, Mathf.Sin(randomAngle) * randomRadius);
+                var planned = target + (context.PlannedDeliveryApproach * sweep) + (right * weave) + jitter;
+                StorePlannedImpactPosition(context, i, planned);
+            }
+        }
+
+        private DeliveryFlightPlan BuildDroneErraticFlightPlan(AirstrikeCallContext context, Vector3 target, Vector3 approach, float distance, float height, int payloadCount, float payloadDelay, float firstPayloadDelay, float postReleaseDuration)
+        {
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            else
+            {
+                approach.Normalize();
+            }
+
+            if (firstPayloadDelay < 0.65f)
+            {
+                var directRelease = GetPlannedImpactPosition(context, 1, Math.Max(1, payloadCount), approach, context.Strike == null ? 0f : context.Strike.SpreadRadius) + (Vector3.up * height);
+                return BuildDeliveryFlightPlan(directRelease, approach, distance, firstPayloadDelay, postReleaseDuration, 2f, 18f);
+            }
+
+            var safeFirstPayloadDelay = Mathf.Max(0.1f, firstPayloadDelay);
+            var safePostReleaseDuration = Mathf.Max(DronePathMinimumLoiterSeconds, postReleaseDuration);
+            var safeDuration = Mathf.Clamp(safeFirstPayloadDelay + safePostReleaseDuration, 2.5f, 22f);
+            var right = GetRightVector(approach);
+            var wobble = config?.DeliveryVisuals == null ? 4.5f : Mathf.Clamp(config.DeliveryVisuals.DroneErraticApproachRadius, 0f, 20f);
+            var start = target - (approach * distance) + (right * UnityEngine.Random.Range(-wobble, wobble)) + (Vector3.up * (height + UnityEngine.Random.Range(1.5f, 4f)));
+            var firstImpact = GetPlannedImpactPosition(context, 1, Math.Max(1, payloadCount), approach, context.Strike == null ? 0f : context.Strike.SpreadRadius);
+            var release = firstImpact + (Vector3.up * height);
+            var end = target + (approach * Mathf.Max(25f, distance * 0.8f)) + (right * UnityEngine.Random.Range(-wobble, wobble)) + (Vector3.up * (height + 5f));
+            var plan = CreateEmptyFlightPlan(start, release, end, approach, safeDuration, safeFirstPayloadDelay);
+
+            AddFlightWaypoint(plan, start, 0f);
+            AddFlightWaypoint(plan, target - (approach * distance * 0.55f) + (right * UnityEngine.Random.Range(-wobble, wobble)) + (Vector3.up * (height + UnityEngine.Random.Range(0.5f, 3f))), Mathf.Min(Mathf.Max(0.25f, safeFirstPayloadDelay * 0.38f), safeFirstPayloadDelay - 0.15f));
+            AddFlightWaypoint(plan, target - (approach * distance * 0.18f) + (right * UnityEngine.Random.Range(-wobble, wobble)) + (Vector3.up * height), Mathf.Min(Mathf.Max(0.45f, safeFirstPayloadDelay * 0.72f), safeFirstPayloadDelay - 0.08f));
+
+            for (var i = 1; i <= payloadCount; i++)
+            {
+                var time = safeFirstPayloadDelay + ((i - 1) * payloadDelay);
+                if (time >= safeDuration - 0.15f)
+                {
+                    break;
+                }
+
+                var impact = GetPlannedImpactPosition(context, i, payloadCount, approach, context.Strike == null ? 0f : context.Strike.SpreadRadius);
+                var drift = right * UnityEngine.Random.Range(-Mathf.Max(1f, wobble * 0.45f), Mathf.Max(1f, wobble * 0.45f));
+                AddFlightWaypoint(plan, impact + drift + (Vector3.up * height), time);
+            }
+
+            AddFlightWaypoint(plan, target + (approach * distance * 0.25f) + (right * UnityEngine.Random.Range(-wobble, wobble)) + (Vector3.up * (height + 1.5f)), Mathf.Clamp(safeFirstPayloadDelay + Math.Max(DronePathMinimumLoiterSeconds, payloadCount * payloadDelay), safeFirstPayloadDelay + 0.35f, safeDuration - 0.1f));
+            AddFlightWaypoint(plan, end, safeDuration);
+            FinalizeFlightPlan(plan);
+            return plan;
+        }
+
+        private DeliveryFlightPlan BuildJetObservationStrikeFlightPlan(Vector3 target, Vector3 release, Vector3 approach, float inboundDistance, float firstPayloadDelay, float postReleaseDuration, float configuredHeight, float minimumDuration, float maximumDuration)
+        {
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            else
+            {
+                approach.Normalize();
+            }
+
+            if (firstPayloadDelay < 2f)
+            {
+                return BuildDeliveryFlightPlan(release, approach, inboundDistance, firstPayloadDelay, postReleaseDuration, minimumDuration, maximumDuration);
+            }
+
+            var right = GetRightVector(approach);
+            var safeFirstPayloadDelay = Mathf.Max(0.1f, firstPayloadDelay);
+            var safeDuration = Mathf.Clamp(safeFirstPayloadDelay + Mathf.Max(0.1f, postReleaseDuration), minimumDuration, maximumDuration);
+            var strikeHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AircraftStrikePassHeightMultiplier, 45f, configuredHeight * 1.15f);
+            var highHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AircraftObservationPassHeightMultiplier, configuredHeight + 25f, 320f);
+            var exitHeight = Mathf.Clamp(Mathf.Max(highHeight * 0.92f, configuredHeight + 35f), configuredHeight + 20f, 340f);
+            var lowRelease = new Vector3(release.x, target.y + strikeHeight, release.z);
+            var lateralTrim = right * UnityEngine.Random.Range(-inboundDistance * 0.035f, inboundDistance * 0.035f);
+            var start = lowRelease - (approach * inboundDistance * 1.05f) + lateralTrim + (Vector3.up * highHeight);
+            var descentCommit = lowRelease - (approach * inboundDistance * 0.48f) + (lateralTrim * 0.45f) + (Vector3.up * Mathf.Lerp(highHeight, strikeHeight, 0.45f));
+            var lowExit = target + (approach * Mathf.Max(70f, inboundDistance * 0.42f)) + (Vector3.up * Mathf.Lerp(strikeHeight, exitHeight, 0.34f));
+            var end = target + (approach * Mathf.Max(170f, inboundDistance * 1.05f)) + (Vector3.up * exitHeight);
+            var plan = CreateEmptyFlightPlan(start, lowRelease, end, approach, safeDuration, safeFirstPayloadDelay);
+            var descentCommitTime = Mathf.Clamp(safeFirstPayloadDelay * 0.62f, 1.1f, safeFirstPayloadDelay - MinimumStrikePassLeadSeconds);
+            var lowExitTime = Mathf.Clamp(safeFirstPayloadDelay + Math.Min(Mathf.Max(1.4f, postReleaseDuration * 0.38f), 4.6f), safeFirstPayloadDelay + 0.75f, safeDuration - 0.25f);
+
+            AddFlightWaypoint(plan, start, 0f);
+            AddFlightWaypoint(plan, descentCommit, descentCommitTime);
+            AddFlightWaypoint(plan, lowRelease, safeFirstPayloadDelay);
+            AddFlightWaypoint(plan, lowExit, lowExitTime);
+            AddFlightWaypoint(plan, end, safeDuration);
+            FinalizeFlightPlan(plan);
+            return plan;
+        }
+
+        private DeliveryFlightPlan BuildCargoPlaneDropFlightPlan(Vector3 target, Vector3 approach, float inboundDistance, float firstPayloadDelay, float postReleaseDuration, float configuredHeight, float minimumDuration, float maximumDuration)
+        {
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            else
+            {
+                approach.Normalize();
+            }
+
+            var safeHeight = Mathf.Clamp(configuredHeight, 70f, 320f);
+            var release = target + (Vector3.up * safeHeight);
+            return BuildDeliveryFlightPlan(release, approach, inboundDistance, firstPayloadDelay, postReleaseDuration, minimumDuration, maximumDuration);
+        }
+
+        private DeliveryFlightPlan BuildDivingAttackFlightPlan(Vector3 target, Vector3 release, Vector3 approach, float inboundDistance, float firstPayloadDelay, float postReleaseDuration, float configuredHeight, float minimumDuration, float maximumDuration)
+        {
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            else
+            {
+                approach.Normalize();
+            }
+
+            if (firstPayloadDelay < 2f)
+            {
+                return BuildDeliveryFlightPlan(release, approach, inboundDistance, firstPayloadDelay, postReleaseDuration, minimumDuration, maximumDuration);
+            }
+
+            var right = GetRightVector(approach);
+            var safeFirstPayloadDelay = Mathf.Max(0.1f, firstPayloadDelay);
+            var safeDuration = Mathf.Clamp(safeFirstPayloadDelay + Mathf.Max(0.1f, postReleaseDuration), minimumDuration, maximumDuration);
+            var strikeHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AttackStrikePassHeightMultiplier, 32f, configuredHeight * 1.1f);
+            var startHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AttackDiveStartHeightMultiplier, configuredHeight + 18f, 280f);
+            var exitHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AttackExitHeightMultiplier, configuredHeight + 10f, 300f);
+            var lowRelease = new Vector3(release.x, target.y + strikeHeight, release.z);
+            var start = lowRelease - (approach * inboundDistance) + (right * UnityEngine.Random.Range(-inboundDistance * 0.08f, inboundDistance * 0.08f)) + (Vector3.up * startHeight);
+            var diveCommit = Vector3.Lerp(start, lowRelease, 0.62f) + (right * UnityEngine.Random.Range(-inboundDistance * 0.05f, inboundDistance * 0.05f));
+            var lowExit = target + (approach * Mathf.Max(45f, inboundDistance * 0.38f)) + (Vector3.up * strikeHeight);
+            var end = target + (approach * Mathf.Max(100f, inboundDistance * 0.85f)) + (Vector3.up * exitHeight);
+            var plan = CreateEmptyFlightPlan(start, lowRelease, end, approach, safeDuration, safeFirstPayloadDelay);
+            var diveCommitTime = Mathf.Clamp(safeFirstPayloadDelay * 0.68f, 0.75f, safeFirstPayloadDelay - 0.18f);
+            var lowExitTime = Mathf.Clamp(safeFirstPayloadDelay + Math.Min(Mathf.Max(1.1f, postReleaseDuration * 0.5f), 3.2f), safeFirstPayloadDelay + 0.55f, safeDuration - 0.2f);
+
+            AddFlightWaypoint(plan, start, 0f);
+            AddFlightWaypoint(plan, diveCommit, diveCommitTime);
+            AddFlightWaypoint(plan, lowRelease, safeFirstPayloadDelay);
+            AddFlightWaypoint(plan, lowExit, lowExitTime);
+            AddFlightWaypoint(plan, end, safeDuration);
+            FinalizeFlightPlan(plan);
+            return plan;
+        }
+
+        private DeliveryFlightPlan BuildA10DivingStrafeFlightPlan(Vector3 target, Vector3 release, Vector3 approach, float inboundDistance, float firstPayloadDelay, float postReleaseDuration, float configuredHeight, float lineLength, float minimumDuration, float maximumDuration)
+        {
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            else
+            {
+                approach.Normalize();
+            }
+
+            if (firstPayloadDelay < 2f)
+            {
+                return BuildDeliveryFlightPlan(release, approach, inboundDistance, firstPayloadDelay, postReleaseDuration, minimumDuration, maximumDuration);
+            }
+
+            var right = GetRightVector(approach);
+            var safeFirstPayloadDelay = Mathf.Max(0.1f, firstPayloadDelay);
+            var safeDuration = Mathf.Clamp(safeFirstPayloadDelay + Mathf.Max(0.1f, postReleaseDuration), minimumDuration, maximumDuration);
+            var strikeHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AttackStrikePassHeightMultiplier, 48f, configuredHeight * 1.1f);
+            var startHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AttackDiveStartHeightMultiplier, configuredHeight + 25f, 330f);
+            var exitHeight = Mathf.Clamp(configuredHeight * config.DeliveryVisuals.AttackExitHeightMultiplier, configuredHeight + 20f, 340f);
+            var lowRelease = new Vector3(release.x, target.y + strikeHeight, release.z);
+            var lineEnd = target + (approach * (lineLength * 0.5f)) + (Vector3.up * strikeHeight);
+            var start = lowRelease - (approach * inboundDistance) + (right * UnityEngine.Random.Range(-inboundDistance * 0.06f, inboundDistance * 0.06f)) + (Vector3.up * startHeight);
+            var diveCommit = Vector3.Lerp(start, lowRelease, 0.68f) + (Vector3.up * 8f);
+            var end = lineEnd + (approach * Mathf.Max(120f, inboundDistance * 0.9f)) + (Vector3.up * exitHeight);
+            var plan = CreateEmptyFlightPlan(start, lowRelease, end, approach, safeDuration, safeFirstPayloadDelay);
+            var diveCommitTime = Mathf.Clamp(safeFirstPayloadDelay * 0.70f, 1f, safeFirstPayloadDelay - 0.22f);
+            var lineEndTime = Mathf.Clamp(safeFirstPayloadDelay + Math.Min(Mathf.Max(1.2f, postReleaseDuration * 0.85f), 4.2f), safeFirstPayloadDelay + 0.75f, safeDuration - 0.3f);
+
+            AddFlightWaypoint(plan, start, 0f);
+            AddFlightWaypoint(plan, diveCommit, diveCommitTime);
+            AddFlightWaypoint(plan, lowRelease, safeFirstPayloadDelay);
+            AddFlightWaypoint(plan, lineEnd, lineEndTime);
+            AddFlightWaypoint(plan, end, safeDuration);
+            FinalizeFlightPlan(plan);
+            return plan;
+        }
+
+        private float GetAircraftStrikePassHeight(StrikeDefinition strike, DeliveryVisualProfile profile, float configuredHeight)
+        {
+            var height = Mathf.Max(1f, configuredHeight);
+            if (string.Equals(strike?.Delivery, "attack_heli", StringComparison.OrdinalIgnoreCase))
+            {
+                return Mathf.Clamp(height * config.DeliveryVisuals.AttackStrikePassHeightMultiplier, 32f, height * 1.1f);
+            }
+
+            if (profile == DeliveryVisualProfile.A10 || string.Equals(strike?.Delivery, "a10_gun_run", StringComparison.OrdinalIgnoreCase))
+            {
+                return Mathf.Clamp(height * config.DeliveryVisuals.AttackStrikePassHeightMultiplier, 48f, height * 1.1f);
+            }
+
+            return Mathf.Clamp(height * config.DeliveryVisuals.AircraftStrikePassHeightMultiplier, 45f, height * 1.15f);
+        }
+
+        private Vector3 GetAircraftReleasePoint(DeliveryVisualProfile profile, Vector3 approach, float height, Vector3 target)
+        {
+            if (approach.sqrMagnitude <= 0.01f)
+            {
+                approach = Vector3.forward;
+            }
+            else
+            {
+                approach.Normalize();
+            }
+
+            switch (profile)
+            {
+                case DeliveryVisualProfile.RocketRun:
+                    return target - (approach * RocketRunSpawnDistance) + (Vector3.up * height);
+
+                case DeliveryVisualProfile.HomingMissile:
+                    return target - (approach * HomingMissileLaunchDistance) + (Vector3.up * height);
+
+                default:
+                    return target + (Vector3.up * height);
+            }
+        }
+
+        private void StartDroneDeliveryVisual(AirstrikeCallContext context, int payloadCount, float payloadDelay, float finishDelay, float initialPayloadDelay)
         {
             if (!ShouldSpawnDeliveryVisual(context) || !config.DeliveryVisuals.SpawnDroneVisuals)
             {
@@ -3967,14 +5312,14 @@ namespace Oxide.Plugins
             var target = ResolveImpactPosition(context.Target.Position);
             var distance = Mathf.Clamp(config.DeliveryVisuals.DroneFlyoverDistance, 15f, 150f);
             var height = Mathf.Clamp(config.DeliveryVisuals.DroneFlyoverHeight, 8f, 80f);
-            var duration = Mathf.Clamp(((Math.Max(1, payloadCount) - 1) * payloadDelay) + finishDelay, 2f, 18f);
-            var start = target - (approach * distance) + (Vector3.up * height);
-            var end = target + (approach * distance) + (Vector3.up * height);
+            var postReleaseDuration = ((Math.Max(1, payloadCount) - 1) * payloadDelay) + finishDelay;
+            BuildDronePayloadImpactPlan(context, Math.Max(1, payloadCount), approach, target);
+            var plan = BuildDroneErraticFlightPlan(context, target, approach, distance, height, Math.Max(1, payloadCount), payloadDelay, initialPayloadDelay, postReleaseDuration);
 
-            StartVisualFlyover(context, DroneVisualPrefab, start, end, duration, "drone flyover");
+            StartVisualFlyover(context, DroneVisualPrefab, plan, "drone flyover");
         }
 
-        private void StartAircraftDeliveryVisual(AirstrikeCallContext context, float activeDuration, string label)
+        private void StartAircraftDeliveryVisual(AirstrikeCallContext context, DeliveryVisualProfile profile, float firstPayloadDelay, float postReleaseDuration, string label)
         {
             if (!ShouldSpawnDeliveryVisual(context) || !config.DeliveryVisuals.SpawnAircraftVisuals)
             {
@@ -3983,22 +5328,37 @@ namespace Oxide.Plugins
 
             string prefab;
             float height;
-            if (!TryGetAircraftVisualPrefab(context.Strike, out prefab, out height))
+            if (!TryGetAircraftVisualPrefab(context.Strike, profile, out prefab, out height))
             {
                 return;
             }
 
             var approach = GetRocketApproachDirection(context);
             var target = ResolveImpactPosition(context.Target.Position);
-            var distance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance, 60f, 400f);
-            var duration = Mathf.Clamp(activeDuration, 3f, 28f);
-            var start = target - (approach * distance) + (Vector3.up * height);
-            var end = target + (approach * distance) + (Vector3.up * height);
+            var distance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance, 60f, 500f);
+            var heavyCargoDrop = profile == DeliveryVisualProfile.HeavyDrop
+                && string.Equals(prefab, CargoPlaneVisualPrefab, StringComparison.OrdinalIgnoreCase);
+            var strikeHeight = heavyCargoDrop ? height : GetAircraftStrikePassHeight(context.Strike, profile, height);
+            var release = GetAircraftReleasePoint(profile, approach, strikeHeight, target);
+            context.PlannedDeliveryApproach = approach.sqrMagnitude <= 0.01f ? Vector3.forward : approach.normalized;
+            DeliveryFlightPlan plan;
+            if (heavyCargoDrop)
+            {
+                plan = BuildCargoPlaneDropFlightPlan(target, approach, distance * 1.05f, firstPayloadDelay, postReleaseDuration, height, 6f, 45f);
+            }
+            else if (string.Equals(context.Strike.Delivery, "attack_heli", StringComparison.OrdinalIgnoreCase))
+            {
+                plan = BuildDivingAttackFlightPlan(target, release, approach, distance * 0.9f, firstPayloadDelay, postReleaseDuration, height, 4f, 38f);
+            }
+            else
+            {
+                plan = BuildJetObservationStrikeFlightPlan(target, release, approach, distance, firstPayloadDelay, postReleaseDuration, height, 5f, 42f);
+            }
 
-            StartVisualFlyover(context, prefab, start, end, duration, label);
+            StartVisualFlyover(context, prefab, plan, label);
         }
 
-        private void StartMlrsDeliveryVisual(AirstrikeCallContext context, Vector3 approach, float activeDuration)
+        private void StartMlrsDeliveryVisual(AirstrikeCallContext context, Vector3 approach, float firstPayloadDelay, float postReleaseDuration)
         {
             if (!ShouldSpawnDeliveryVisual(context) || !config.DeliveryVisuals.SpawnAircraftVisuals)
             {
@@ -4016,17 +5376,18 @@ namespace Oxide.Plugins
             }
 
             approach.Normalize();
+            context.PlannedDeliveryApproach = approach;
             var target = ResolveImpactPosition(context.Target.Position);
-            var distance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance * 0.75f, 80f, 320f);
-            var height = Mathf.Clamp(config.DeliveryVisuals.MlrsAircraftFlyoverHeight, 35f, 160f);
-            var duration = Mathf.Clamp(activeDuration, 3f, 22f);
-            var start = target - (approach * distance) + (Vector3.up * height);
-            var end = target + (approach * distance) + (Vector3.up * height);
+            var distance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance * 0.95f, 100f, 420f);
+            var height = Mathf.Clamp(config.DeliveryVisuals.MlrsAircraftFlyoverHeight, 35f, 200f);
+            var strikeHeight = GetAircraftStrikePassHeight(context.Strike, DeliveryVisualProfile.Mlrs, height);
+            var release = target - (approach * MlrsRocketSpawnDistance) + (Vector3.up * strikeHeight);
+            var plan = BuildJetObservationStrikeFlightPlan(target, release, approach, distance, firstPayloadDelay, postReleaseDuration, height, 4f, 40f);
 
-            StartVisualFlyover(context, CargoPlaneVisualPrefab, start, end, duration, "MLRS aircraft flyover");
+            StartVisualFlyover(context, F15VisualPrefab, plan, "F-15 MLRS flyover");
         }
 
-        private void StartA10DeliveryVisual(AirstrikeCallContext context, Vector3 direction, int burstCount, float pulseDelay)
+        private void StartA10DeliveryVisual(AirstrikeCallContext context, Vector3 direction, int burstCount, float pulseDelay, float initialPayloadDelay)
         {
             if (!ShouldSpawnDeliveryVisual(context) || !config.DeliveryVisuals.SpawnAircraftVisuals)
             {
@@ -4039,14 +5400,17 @@ namespace Oxide.Plugins
             }
 
             var target = ResolveImpactPosition(context.Target.Position);
-            var distance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance, 60f, 400f);
-            var height = Mathf.Clamp(config.DeliveryVisuals.A10FlyoverHeight, 25f, 160f);
+            var distance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance * 1.35f, 120f, 500f);
+            var height = Mathf.Clamp(config.DeliveryVisuals.A10FlyoverHeight, 25f, 220f);
             var lineLength = Mathf.Clamp(context.Strike.LineLength <= 0f ? 55f : context.Strike.LineLength, 5f, 200f);
-            var duration = Mathf.Clamp(((Math.Max(1, burstCount) - 1) * pulseDelay) + A10FinishPaddingSeconds, 2.5f, 18f);
-            var start = target - (direction.normalized * (distance + (lineLength * 0.5f))) + (Vector3.up * height);
-            var end = target + (direction.normalized * (distance + (lineLength * 0.5f))) + (Vector3.up * height);
+            direction.Normalize();
+            context.PlannedDeliveryApproach = direction;
+            var postReleaseDuration = ((Math.Max(1, burstCount) - 1) * pulseDelay) + A10FinishPaddingSeconds;
+            var strikeHeight = GetAircraftStrikePassHeight(context.Strike, DeliveryVisualProfile.A10, height);
+            var release = target - (direction * (lineLength * 0.5f)) + (Vector3.up * strikeHeight);
+            var plan = BuildA10DivingStrafeFlightPlan(target, release, direction, distance, initialPayloadDelay, postReleaseDuration, height, lineLength, 3.5f, 32f);
 
-            StartVisualFlyover(context, CargoPlaneVisualPrefab, start, end, duration, "A-10 flyover");
+            StartVisualFlyover(context, F15VisualPrefab, plan, "A-10 F-15 flyover");
         }
 
         private void StartMortarArtilleryVisual(AirstrikeCallContext context, int shellCount)
@@ -4123,7 +5487,7 @@ namespace Oxide.Plugins
                 && config.DeliveryVisuals.Enabled;
         }
 
-        private bool TryGetAircraftVisualPrefab(StrikeDefinition strike, out string prefab, out float height)
+        private bool TryGetAircraftVisualPrefab(StrikeDefinition strike, DeliveryVisualProfile profile, out string prefab, out float height)
         {
             prefab = "";
             height = 0f;
@@ -4132,31 +5496,264 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (profile == DeliveryVisualProfile.HeavyDrop)
+            {
+                // Heavy bee, firebomb, and propane drops are visualized as airdrop-plane passes, not jet strafes.
+                prefab = CargoPlaneVisualPrefab;
+                height = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneFlyoverHeight, 55f, 320f);
+                return true;
+            }
+
+            if (profile == DeliveryVisualProfile.A10
+                || string.Equals(strike.Delivery, "a10_gun_run", StringComparison.OrdinalIgnoreCase))
+            {
+                prefab = F15VisualPrefab;
+                height = Mathf.Clamp(config.DeliveryVisuals.A10FlyoverHeight, 25f, 220f);
+                return true;
+            }
+
+            MlrsPayloadSpec mlrsSpec;
+            if (profile == DeliveryVisualProfile.Mlrs || TryGetMlrsPayloadSpec(strike.Payload, out mlrsSpec))
+            {
+                prefab = F15VisualPrefab;
+                height = Mathf.Clamp(config.DeliveryVisuals.MlrsAircraftFlyoverHeight, 35f, 200f);
+                return true;
+            }
+
             if (string.Equals(strike.Delivery, "attack_heli", StringComparison.OrdinalIgnoreCase))
             {
-                prefab = AttackHelicopterVisualPrefab;
-                height = Mathf.Clamp(config.DeliveryVisuals.AttackHeliFlyoverHeight, 20f, 140f);
+                prefab = PatrolHelicopterVisualPrefab;
+                height = Mathf.Clamp(config.DeliveryVisuals.AttackHeliFlyoverHeight, 20f, 180f);
                 return true;
             }
 
             if (string.Equals(strike.Delivery, "cargo_plane_jet", StringComparison.OrdinalIgnoreCase))
             {
-                prefab = CargoPlaneVisualPrefab;
-                height = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneFlyoverHeight, 35f, 220f);
+                prefab = F15VisualPrefab;
+                height = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneFlyoverHeight, 35f, 260f);
                 return true;
             }
 
             return false;
         }
 
-        private void StartVisualFlyover(AirstrikeCallContext context, string prefab, Vector3 start, Vector3 end, float duration, string label)
+        private void StartVisualFlyover(AirstrikeCallContext context, string prefab, DeliveryFlightPlan plan, string label)
         {
-            if (string.IsNullOrWhiteSpace(prefab))
+            if (plan == null)
             {
                 return;
             }
 
+            ApplyTerrainClearanceToFlightPlan(plan, GetVisualTerrainClearance(context == null ? null : context.Strike, label));
+
+            if (string.Equals(prefab, CargoPlaneVisualPrefab, StringComparison.OrdinalIgnoreCase) && IsLinearFlightPlan(plan))
+            {
+                StartCargoPlaneFlyover(context, plan, label);
+                return;
+            }
+
+            if (string.Equals(prefab, PatrolHelicopterVisualPrefab, StringComparison.OrdinalIgnoreCase))
+            {
+                StartPatrolHelicopterFlyover(context, plan, label);
+                return;
+            }
+
+            StartScriptedVisualFlyover(context, prefab, plan, label);
+        }
+
+        private void StartCargoPlaneFlyover(AirstrikeCallContext context, DeliveryFlightPlan plan, string label)
+        {
+            if (context == null || plan == null)
+            {
+                return;
+            }
+
+            var phase = "create";
+            CargoPlane plane = null;
+
+            try
+            {
+                var direction = plan.End - plan.Start;
+                if (direction.sqrMagnitude <= 0.01f)
+                {
+                    direction = plan.Direction.sqrMagnitude <= 0.01f ? Vector3.forward : plan.Direction;
+                }
+
+                var rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+                var safeDuration = Math.Max(0.1f, plan.Duration);
+
+                phase = "create cargo plane prefab";
+                plane = GameManager.server.CreateEntity(CargoPlaneVisualPrefab, Vector3.zero, Quaternion.identity, true) as CargoPlane;
+                if (plane == null)
+                {
+                    PrintVisualWarning(context, label, "create cargo plane prefab failed: Could not create prefab '" + CargoPlaneVisualPrefab + "'.");
+                    return;
+                }
+
+                phase = "configure cargo plane ownership";
+                plane.OwnerID = context.CallerUserId;
+                plane.EnableSaving(false);
+
+                phase = "configure cargo plane drop state";
+                plane.dropped = true;
+                plane.InitDropPosition(plan.Release);
+                plane.dropped = true;
+
+                phase = "configure cargo plane networking";
+                var networkable = plane as BaseNetworkable;
+                if (networkable.net == null)
+                {
+                    networkable.net = Network.Net.sv.CreateNetworkable();
+                }
+
+                networkable.limitNetworking = true;
+
+                phase = "spawn cargo plane";
+                if ((int)plane.creationFrame == 0)
+                {
+                    plane.Spawn();
+                }
+
+                phase = "configure cargo plane route";
+                plane.transform.position = plan.Start;
+                plane.transform.rotation = rotation;
+                plane.startPos = plan.Start;
+                plane.endPos = plan.End;
+                plane.secondsToTake = safeDuration;
+                plane.secondsTaken = 0f;
+                networkable.limitNetworking = false;
+                plane.SendNetworkUpdateImmediate();
+
+                context.VisualEntities.Add(plane);
+                IncrementStat("visual_spawned");
+                IncrementStat("visual_spawned_" + SanitizeStatKey(label));
+                RegisterDeliveryCarrier(context, plane, label);
+                RunFlyoverSoundCues(context, CargoPlaneVisualPrefab, plan.Start, plan.End, safeDuration, label);
+                ScheduleCallTimer(context, safeDuration + 0.25f, () =>
+                {
+                    if (IsCallActive(context))
+                    {
+                        KillTrackedVisualEntity(context, plane);
+                    }
+                });
+
+                if (config.General.DebugMode)
+                {
+                    Puts(context.Strike.Id + " spawned cargo-plane visual " + label + " from " + FormatPosition(plan.Start) + " to " + FormatPosition(plan.End) + " with release near " + FormatPosition(plan.Release) + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (plane != null && !plane.IsDestroyed)
+                {
+                    plane.Kill(BaseNetworkable.DestroyMode.None);
+                }
+
+                PrintVisualWarning(context, label, phase + " failed: " + ex.Message);
+            }
+        }
+
+        private void StartPatrolHelicopterFlyover(AirstrikeCallContext context, DeliveryFlightPlan plan, string label)
+        {
+            if (context == null || plan == null)
+            {
+                return;
+            }
+
+            var phase = "create";
+            PatrolHelicopter patrolHeli = null;
+
+            try
+            {
+                var direction = GetPlanDirectionAt(plan, 0f);
+                if (direction.sqrMagnitude <= 0.01f)
+                {
+                    direction = plan.Direction.sqrMagnitude <= 0.01f ? Vector3.forward : plan.Direction;
+                }
+
+                var rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+                var safeDuration = Math.Max(0.1f, plan.Duration);
+                var velocity = GetPlanVelocityAt(plan, 0f);
+
+                phase = "create patrol helicopter prefab";
+                patrolHeli = GameManager.server.CreateEntity(PatrolHelicopterVisualPrefab, plan.Start, rotation, true) as PatrolHelicopter;
+                if (patrolHeli == null)
+                {
+                    PrintVisualWarning(context, label, "create patrol helicopter prefab failed: Could not create prefab '" + PatrolHelicopterVisualPrefab + "'.");
+                    return;
+                }
+
+                phase = "configure patrol helicopter visual";
+                patrolHeli.OwnerID = context.CallerUserId;
+                patrolHeli.EnableSaving(false);
+
+                phase = "configure patrol helicopter networking";
+                var networkable = patrolHeli as BaseNetworkable;
+                if (networkable.net == null)
+                {
+                    networkable.net = Network.Net.sv.CreateNetworkable();
+                }
+
+                phase = "spawn patrol helicopter";
+                patrolHeli.Spawn();
+
+                phase = "configure spawned patrol helicopter visual";
+                ConfigurePatrolHelicopterVisual(patrolHeli, true);
+
+                phase = "prepare patrol helicopter route";
+                TrySetCreatorEntity(patrolHeli, GetCallPlayer(context), label);
+                context.VisualEntities.Add(patrolHeli);
+                IncrementStat("visual_spawned");
+                IncrementStat("visual_spawned_" + SanitizeStatKey(label));
+                PreparePatrolHelicopterVisualEntity(patrolHeli, velocity);
+                RegisterDeliveryCarrier(context, patrolHeli, label);
+                MoveVisualEntity(patrolHeli, plan.Start, rotation, velocity, true);
+                RunFlyoverSoundCues(context, PatrolHelicopterVisualPrefab, plan, label);
+                ScheduleVisualFlyoverStep(context, patrolHeli, plan, GetPreciseNow(), GetVisualMoveIntervalSeconds(), label);
+
+                if (config.General.DebugMode)
+                {
+                    var strikeId = context.Strike == null ? "unknown" : context.Strike.Id;
+                    Puts(strikeId + " spawned patrol-helicopter visual " + label + " from " + FormatPosition(plan.Start) + " to " + FormatPosition(plan.End) + " with release near " + FormatPosition(plan.Release) + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (patrolHeli != null && !patrolHeli.IsDestroyed)
+                {
+                    patrolHeli.Kill(BaseNetworkable.DestroyMode.None);
+                }
+
+                PrintVisualWarning(context, label, phase + " failed: " + ex.Message);
+            }
+        }
+
+        private void StartVisualFlyover(AirstrikeCallContext context, string prefab, Vector3 start, Vector3 end, float duration, string label)
+        {
             var direction = end - start;
+            if (direction.sqrMagnitude <= 0.01f)
+            {
+                direction = Vector3.forward;
+            }
+
+            var plan = CreateEmptyFlightPlan(start, start, end, direction, duration, 0f);
+            AddFlightWaypoint(plan, start, 0f);
+            AddFlightWaypoint(plan, end, plan.Duration);
+            FinalizeFlightPlan(plan);
+            StartScriptedVisualFlyover(context, prefab, plan, label);
+        }
+
+        private void StartScriptedVisualFlyover(AirstrikeCallContext context, string prefab, DeliveryFlightPlan plan, string label)
+        {
+            if (string.IsNullOrWhiteSpace(prefab) || plan == null)
+            {
+                return;
+            }
+
+            Vector3 startPosition;
+            Vector3 direction;
+            Vector3 velocity;
+            EvaluateFlightPlan(plan, 0f, out startPosition, out direction, out velocity);
             if (direction.sqrMagnitude <= 0.01f)
             {
                 direction = Vector3.forward;
@@ -4164,45 +5761,44 @@ namespace Oxide.Plugins
 
             var rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
             string error;
-            var visual = SpawnTrackedVisualEntity(context, prefab, start, rotation, label, out error);
+            var visual = SpawnTrackedVisualEntity(context, prefab, startPosition, rotation, label, out error);
             if (visual == null)
             {
                 PrintVisualWarning(context, label, error);
                 return;
             }
 
-            var velocity = direction.normalized * (Vector3.Distance(start, end) / Math.Max(0.1f, duration));
-            MoveVisualEntity(visual, start, rotation, velocity);
             PrepareVisualVehicleEntity(visual, velocity);
-            RunFlyoverSoundCues(context, prefab, start, end, duration, label);
-            ScheduleVisualFlyoverStep(context, visual, start, end, GetNow(), Math.Max(0.1f, duration), GetVisualMoveIntervalSeconds(), label);
+            RegisterDeliveryCarrier(context, visual, label);
+            MoveVisualEntity(visual, startPosition, rotation, velocity, true);
+            RunFlyoverSoundCues(context, prefab, plan, label);
+            ScheduleVisualFlyoverStep(context, visual, plan, GetPreciseNow(), GetVisualMoveIntervalSeconds(), label);
         }
 
         private BaseEntity SpawnTrackedVisualEntity(AirstrikeCallContext context, string prefab, Vector3 position, Quaternion rotation, string label, out string error)
         {
             error = "";
             BaseEntity entity = null;
+            var phase = "create";
 
             try
             {
+                phase = "create prefab";
                 entity = GameManager.server.CreateEntity(prefab, position, rotation, true) as BaseEntity;
                 if (entity == null)
                 {
-                    error = "Could not create prefab '" + prefab + "'.";
+                    error = phase + " failed: Could not create prefab '" + prefab + "'.";
                     return null;
                 }
 
+                phase = "configure ownership";
                 entity.OwnerID = context.CallerUserId;
                 entity.EnableSaving(false);
-                entity.SetFlagLocal(BaseEntity.Flags.On, true);
 
-            var player = GetCallPlayer(context);
-                if (player != null)
-                {
-                    entity.SetCreatorEntity(player);
-                }
-
+                phase = "spawn prefab";
                 entity.Spawn();
+
+                TrySetCreatorEntity(entity, GetCallPlayer(context), label);
                 context.VisualEntities.Add(entity);
                 IncrementStat("visual_spawned");
                 IncrementStat("visual_spawned_" + SanitizeStatKey(label));
@@ -4221,28 +5817,51 @@ namespace Oxide.Plugins
                     entity.Kill(BaseNetworkable.DestroyMode.None);
                 }
 
-                error = ex.Message;
+                error = phase + " failed: " + ex.Message;
                 return null;
             }
         }
 
-        private void ScheduleVisualFlyoverStep(AirstrikeCallContext context, BaseEntity visual, Vector3 start, Vector3 end, double startedAt, float duration, float interval, string label)
+        private void TrySetCreatorEntity(BaseEntity entity, BasePlayer player, string label)
+        {
+            if (entity == null || entity.IsDestroyed || player == null)
+            {
+                return;
+            }
+
+            try
+            {
+                entity.SetCreatorEntity(player);
+            }
+            catch (Exception ex)
+            {
+                if (config.General.DebugMode)
+                {
+                    Puts("Visual creator attribution skipped for " + (string.IsNullOrWhiteSpace(label) ? entity.ShortPrefabName : label) + ": " + ex.Message);
+                }
+            }
+        }
+
+        private void ScheduleVisualFlyoverStep(AirstrikeCallContext context, BaseEntity visual, DeliveryFlightPlan plan, double startedAt, float interval, string label)
         {
             ScheduleCallTimer(context, interval, () =>
             {
-                if (!IsCallActive(context) || visual == null || visual.IsDestroyed)
+                if (!IsCallActive(context) || visual == null || visual.IsDestroyed || plan == null)
                 {
                     return;
                 }
 
-                var elapsed = (float)(GetNow() - startedAt);
-                var progress = Mathf.Clamp01(elapsed / Math.Max(0.1f, duration));
-                var position = Vector3.Lerp(start, end, progress);
-                var direction = end - start;
-                var rotation = direction.sqrMagnitude <= 0.01f ? visual.transform.rotation : Quaternion.LookRotation(direction.normalized, Vector3.up);
-                var velocity = direction.sqrMagnitude <= 0.01f ? Vector3.zero : direction.normalized * (Vector3.Distance(start, end) / Math.Max(0.1f, duration));
+                var elapsed = (float)(GetPreciseNow() - startedAt);
+                var safeDuration = Math.Max(0.1f, plan.Duration);
+                var progress = Mathf.Clamp01(elapsed / safeDuration);
+                Vector3 position;
+                Vector3 direction;
+                Vector3 velocity;
+                EvaluateFlightPlan(plan, elapsed, out position, out direction, out velocity);
+                position = EnsurePositionAboveTerrain(position, GetVisualTerrainClearance(context == null ? null : context.Strike, label));
+                var rotation = GetSmoothedVisualRotation(visual, direction, interval);
 
-                MoveVisualEntity(visual, position, rotation, velocity);
+                MoveVisualEntity(visual, position, rotation, velocity, progress >= 1f);
 
                 if (progress >= 1f)
                 {
@@ -4250,21 +5869,65 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                ScheduleVisualFlyoverStep(context, visual, start, end, startedAt, duration, interval, label);
+                ScheduleVisualFlyoverStep(context, visual, plan, startedAt, interval, label);
             });
         }
 
-        private void MoveVisualEntity(BaseEntity entity, Vector3 position, Quaternion rotation, Vector3 velocity)
+        private void MoveVisualEntity(BaseEntity entity, Vector3 position, Quaternion rotation, Vector3 velocity, bool immediate = false)
         {
             if (entity == null || entity.IsDestroyed)
             {
                 return;
             }
 
-            entity.transform.position = position;
-            entity.transform.rotation = rotation;
-            entity.SetVelocity(velocity);
-            entity.SendNetworkUpdateImmediate();
+            var usesKinematicRigidbody = false;
+            try
+            {
+                var rigidbody = entity.GetComponent<Rigidbody>();
+                if (rigidbody != null)
+                {
+                    rigidbody.useGravity = false;
+                    if (!rigidbody.isKinematic)
+                    {
+                        rigidbody.velocity = velocity;
+                        rigidbody.angularVelocity = Vector3.zero;
+                    }
+
+                    rigidbody.isKinematic = true;
+                    usesKinematicRigidbody = true;
+                }
+            }
+            catch
+            {
+                // Some vehicle prefabs may not expose a usable rigidbody in every server build.
+            }
+
+            try
+            {
+                entity.transform.SetPositionAndRotation(position, rotation);
+                if (!usesKinematicRigidbody)
+                {
+                    entity.SetVelocity(velocity);
+                }
+
+                entity.UpdateNetworkGroup();
+
+                if (immediate)
+                {
+                    entity.SendNetworkUpdateImmediate();
+                }
+                else
+                {
+                    entity.SendNetworkUpdate();
+                }
+            }
+            catch (Exception ex)
+            {
+                if (config.General.DebugMode)
+                {
+                    Puts("Visual movement update failed for " + (entity.ShortPrefabName ?? entity.PrefabName ?? "entity") + ": " + ex.Message);
+                }
+            }
         }
 
         private void PrepareVisualVehicleEntity(BaseEntity entity, Vector3 velocity)
@@ -4277,7 +5940,35 @@ namespace Oxide.Plugins
             try
             {
                 entity.SetFlagLocal(BaseEntity.Flags.On, true);
-                entity.SetVelocity(velocity);
+
+                var rigidbody = entity.GetComponent<Rigidbody>();
+                var canSetVelocity = rigidbody == null || !rigidbody.isKinematic;
+                if (canSetVelocity)
+                {
+                    entity.SetVelocity(velocity);
+                }
+
+                if (rigidbody != null)
+                {
+                    rigidbody.useGravity = false;
+                    if (!rigidbody.isKinematic)
+                    {
+                        rigidbody.velocity = velocity;
+                        rigidbody.angularVelocity = Vector3.zero;
+                    }
+
+                    rigidbody.isKinematic = true;
+                }
+
+                var cargoPlane = entity as CargoPlane;
+                if (cargoPlane != null)
+                {
+                    cargoPlane.dropped = true;
+                    cargoPlane.startPos = entity.transform.position;
+                    cargoPlane.endPos = entity.transform.position;
+                    cargoPlane.secondsToTake = float.MaxValue;
+                    cargoPlane.secondsTaken = 0f;
+                }
 
                 var heli = entity as PlayerHelicopter;
                 if (heli != null)
@@ -4309,11 +6000,88 @@ namespace Oxide.Plugins
             }
         }
 
+        private void ConfigurePatrolHelicopterVisual(PatrolHelicopter patrolHeli, bool disableBrain)
+        {
+            if (patrolHeli == null || patrolHeli.IsDestroyed)
+            {
+                return;
+            }
+
+            try
+            {
+                if (disableBrain)
+                {
+                    patrolHeli.HasBrain = false;
+                    if (patrolHeli.myAI != null)
+                    {
+                        patrolHeli.myAI.enabled = false;
+                    }
+
+                    patrolHeli.servergibs.guid = string.Empty;
+                    patrolHeli.fireBall.guid = string.Empty;
+                    patrolHeli.mapMarkerEntityPrefab.guid = string.Empty;
+                    patrolHeli.fleeMapMarkerEntityPrefab.guid = string.Empty;
+                    patrolHeli.DestroyFleeMarker();
+                }
+            }
+            catch (Exception ex)
+            {
+                if (config.General.DebugMode)
+                {
+                    Puts("Patrol helicopter visual prep skipped one native component: " + ex.Message);
+                }
+            }
+        }
+
+        private void PreparePatrolHelicopterVisualEntity(BaseEntity entity, Vector3 velocity)
+        {
+            if (entity == null || entity.IsDestroyed)
+            {
+                return;
+            }
+
+            try
+            {
+                var rigidbody = entity.GetComponent<Rigidbody>();
+                var canSetVelocity = rigidbody == null || !rigidbody.isKinematic;
+                if (canSetVelocity)
+                {
+                    entity.SetVelocity(velocity);
+                }
+
+                if (rigidbody != null)
+                {
+                    rigidbody.useGravity = false;
+                    if (!rigidbody.isKinematic)
+                    {
+                        rigidbody.velocity = velocity;
+                        rigidbody.angularVelocity = Vector3.zero;
+                    }
+
+                    rigidbody.isKinematic = true;
+                }
+
+                entity.UpdateNetworkGroup();
+                entity.SendNetworkUpdateImmediate();
+            }
+            catch (Exception ex)
+            {
+                if (config.General.DebugMode)
+                {
+                    Puts("Patrol helicopter visual movement prep failed for " + (entity.ShortPrefabName ?? entity.PrefabName ?? "entity") + ": " + ex.Message);
+                }
+            }
+        }
+
         private void KillTrackedVisualEntity(AirstrikeCallContext context, BaseEntity entity)
         {
             if (context != null)
             {
                 context.VisualEntities.Remove(entity);
+                if (ReferenceEquals(context.DeliveryCarrier, entity))
+                {
+                    ClearDeliveryCarrier(context);
+                }
             }
 
             if (entity != null && !entity.IsDestroyed)
@@ -4326,6 +6094,61 @@ namespace Oxide.Plugins
         {
             var configured = config?.DeliveryVisuals == null ? DefaultVisualMoveIntervalSeconds : config.DeliveryVisuals.VisualMoveIntervalSeconds;
             return Mathf.Clamp(configured <= 0f ? DefaultVisualMoveIntervalSeconds : configured, MinimumVisualMoveIntervalSeconds, MaximumVisualMoveIntervalSeconds);
+        }
+
+        private float GetVisualRotationSmoothTimeSeconds()
+        {
+            var configured = config?.DeliveryVisuals == null ? DefaultVisualRotationSmoothTimeSeconds : config.DeliveryVisuals.VisualRotationSmoothTimeSeconds;
+            return Mathf.Clamp(configured <= 0f ? DefaultVisualRotationSmoothTimeSeconds : configured, MinimumVisualRotationSmoothTimeSeconds, MaximumVisualRotationSmoothTimeSeconds);
+        }
+
+        private Quaternion GetSmoothedVisualRotation(BaseEntity visual, Vector3 direction, float interval)
+        {
+            if (visual == null || visual.IsDestroyed || direction.sqrMagnitude <= 0.01f)
+            {
+                return visual == null ? Quaternion.identity : visual.transform.rotation;
+            }
+
+            var targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            var smoothTime = GetVisualRotationSmoothTimeSeconds();
+            if (smoothTime <= MinimumVisualRotationSmoothTimeSeconds + 0.001f)
+            {
+                return targetRotation;
+            }
+
+            var blend = Mathf.Clamp01(Mathf.Max(interval, MinimumVisualMoveIntervalSeconds) / smoothTime);
+            return Quaternion.Slerp(visual.transform.rotation, targetRotation, blend);
+        }
+
+        private void RunFlyoverSoundCues(AirstrikeCallContext context, string prefab, DeliveryFlightPlan plan, string label)
+        {
+            if (context == null || plan == null || config?.DeliveryVisuals == null || !config.DeliveryVisuals.SpawnFlyoverSoundEffects)
+            {
+                return;
+            }
+
+            var duration = Mathf.Max(0.1f, plan.Duration);
+            var interval = GetFlyoverSoundIntervalSeconds();
+            var cueCount = Mathf.Clamp(Mathf.CeilToInt(duration / interval) + 1, 2, 28);
+            for (var i = 0; i < cueCount; i++)
+            {
+                var cueIndex = i;
+                var progress = cueCount <= 1 ? 0f : cueIndex / (float)(cueCount - 1);
+                var delay = Mathf.Clamp(duration * progress, 0.01f, Math.Max(0.01f, duration - 0.05f));
+                Vector3 position;
+                Vector3 direction;
+                Vector3 velocity;
+                EvaluateFlightPlan(plan, delay, out position, out direction, out velocity);
+                ScheduleCallTimer(context, delay, () =>
+                {
+                    if (!IsCallActive(context))
+                    {
+                        return;
+                    }
+
+                    RunFlyoverSoundBurst(prefab, position, label, cueIndex, cueCount);
+                });
+            }
         }
 
         private void RunFlyoverSoundCues(AirstrikeCallContext context, string prefab, Vector3 start, Vector3 end, float duration, string label)
@@ -4390,7 +6213,7 @@ namespace Oxide.Plugins
 
         private bool IsHelicopterVisualPrefab(string prefab)
         {
-            return string.Equals(prefab, AttackHelicopterVisualPrefab, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(prefab, PatrolHelicopterVisualPrefab, StringComparison.OrdinalIgnoreCase);
         }
 
         private float GetFlyoverSoundIntervalSeconds()
@@ -4866,14 +6689,31 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRequireLiveDeliveryCarrier(context, "payload " + payloadIndex + "/" + totalPayloads, out error))
+            {
+                return false;
+            }
+
             if (spec == null || string.IsNullOrWhiteSpace(spec.Prefab))
             {
                 error = "Drone payload is not configured correctly.";
                 return false;
             }
 
-            var impact = ResolveImpactPosition(RandomSpreadPosition(context.Target.Position, context.Strike.SpreadRadius));
-            var spawn = impact + Vector3.up * DroneDropSpawnHeight;
+            var approach = context.PlannedDeliveryApproach.sqrMagnitude <= 0.01f ? GetRocketApproachDirection(context) : context.PlannedDeliveryApproach;
+            var impact = ResolveImpactPosition(GetPlannedImpactPosition(context, payloadIndex, totalPayloads, approach, context.Strike.SpreadRadius));
+            var spawnHeight = GetDronePayloadSpawnHeight(spec);
+            var spawn = EnsurePositionAboveTerrain(impact + Vector3.up * spawnHeight, GetPayloadTerrainClearance());
+            var dropDirection = impact + (Vector3.up * 0.15f) - spawn;
+            if (dropDirection.sqrMagnitude <= 0.01f)
+            {
+                dropDirection = Vector3.down;
+            }
+            else
+            {
+                dropDirection.Normalize();
+            }
+            var dropVelocity = dropDirection * PayloadDownwardVelocity;
             BaseEntity entity = null;
 
             try
@@ -4903,19 +6743,24 @@ namespace Oxide.Plugins
                 if (projectile != null)
                 {
                     projectile.speed = Math.Max(projectile.speed, PayloadDownwardVelocity);
-                    projectile.InitializeVelocity(Vector3.down * PayloadDownwardVelocity);
+                    projectile.InitializeVelocity(dropVelocity);
                 }
 
                 entity.Spawn();
 
                 if (projectile != null)
                 {
-                    projectile.SetVelocity(Vector3.down * PayloadDownwardVelocity);
+                    projectile.SetVelocity(dropVelocity);
+                }
+                else
+                {
+                    entity.SetVelocity(dropVelocity);
                 }
 
                 context.ImpactStarted = true;
                 context.State = StrikeExecutionState.Impacting;
                 context.SpawnedEntities.Add(entity);
+                MarkPayloadReleased(context);
 
                 if (config.General.DebugMode)
                 {
@@ -4944,14 +6789,20 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRequireLiveDeliveryCarrier(context, "heavy payload " + payloadIndex + "/" + totalPayloads, out error))
+            {
+                return false;
+            }
+
             if (spec == null || string.IsNullOrWhiteSpace(spec.Prefab))
             {
                 error = "Heavy drop payload is not configured correctly.";
                 return false;
             }
 
-            var impact = ResolveImpactPosition(RandomSpreadPosition(context.Target.Position, context.Strike.SpreadRadius));
-            var spawn = impact + Vector3.up * HeavyDropSpawnHeight;
+            var approach = context.PlannedDeliveryApproach.sqrMagnitude <= 0.01f ? GetRocketApproachDirection(context) : context.PlannedDeliveryApproach;
+            var impact = ResolveImpactPosition(GetPlannedImpactPosition(context, payloadIndex, totalPayloads, approach, context.Strike.SpreadRadius));
+            var spawn = EnsurePositionAboveTerrain(impact + Vector3.up * HeavyDropSpawnHeight, GetPayloadTerrainClearance());
             BaseEntity entity = null;
 
             try
@@ -4991,6 +6842,7 @@ namespace Oxide.Plugins
                 context.ImpactStarted = true;
                 context.State = StrikeExecutionState.Impacting;
                 context.SpawnedEntities.Add(entity);
+                MarkPayloadReleased(context);
 
                 if (config.General.DebugMode)
                 {
@@ -5019,6 +6871,11 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRequireLiveDeliveryCarrier(context, "rocket " + rocketIndex + "/" + totalRockets, out error))
+            {
+                return false;
+            }
+
             if (spec == null || string.IsNullOrWhiteSpace(spec.Prefab))
             {
                 error = "Rocket payload is not configured correctly.";
@@ -5026,7 +6883,7 @@ namespace Oxide.Plugins
             }
 
             var impact = ResolveImpactPosition(GetRocketVolleyImpactPosition(context, approach, rocketIndex, totalRockets));
-            var spawn = impact - (approach * RocketRunSpawnDistance) + (Vector3.up * RocketRunSpawnHeight);
+            var spawn = EnsurePositionAboveTerrain(impact - (approach * RocketRunSpawnDistance) + (Vector3.up * RocketRunSpawnHeight), GetPayloadTerrainClearance());
             var aimPoint = impact + Vector3.up * 1.25f;
             var direction = aimPoint - spawn;
             if (direction.sqrMagnitude <= 0.01f)
@@ -5076,6 +6933,7 @@ namespace Oxide.Plugins
                 context.ImpactStarted = true;
                 context.State = StrikeExecutionState.Impacting;
                 context.SpawnedEntities.Add(entity);
+                MarkPayloadReleased(context);
 
                 if (config.General.DebugMode)
                 {
@@ -5104,6 +6962,11 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRequireLiveDeliveryCarrier(context, "MLRS rocket " + rocketIndex + "/" + totalRockets, out error))
+            {
+                return false;
+            }
+
             if (spec == null || string.IsNullOrWhiteSpace(spec.Prefab))
             {
                 error = "MLRS payload is not configured correctly.";
@@ -5115,7 +6978,7 @@ namespace Oxide.Plugins
                 UnityEngine.Random.Range(-18f, 18f),
                 UnityEngine.Random.Range(-4f, 8f),
                 UnityEngine.Random.Range(-18f, 18f));
-            var spawn = impact - (approach * MlrsRocketSpawnDistance) + (Vector3.up * MlrsRocketSpawnHeight) + launchJitter;
+            var spawn = EnsurePositionAboveTerrain(impact - (approach * MlrsRocketSpawnDistance) + (Vector3.up * MlrsRocketSpawnHeight) + launchJitter, GetPayloadTerrainClearance());
             var aimPoint = impact + Vector3.up * 1.5f;
             var direction = aimPoint - spawn;
             if (direction.sqrMagnitude <= 0.01f)
@@ -5166,6 +7029,7 @@ namespace Oxide.Plugins
                 context.ImpactStarted = true;
                 context.State = StrikeExecutionState.Impacting;
                 context.SpawnedEntities.Add(entity);
+                MarkPayloadReleased(context);
 
                 if (config.General.DebugMode)
                 {
@@ -5190,6 +7054,11 @@ namespace Oxide.Plugins
         {
             error = "";
             if (!IsCallActive(context))
+            {
+                return false;
+            }
+
+            if (!TryRequireLiveDeliveryCarrier(context, "homing missile " + missileIndex + "/" + totalMissiles, out error))
             {
                 return false;
             }
@@ -5225,7 +7094,7 @@ namespace Oxide.Plugins
             }
 
             var slotOffset = totalMissiles <= 1 ? 0f : (((missileIndex - 1f) / (totalMissiles - 1f)) - 0.5f) * 18f;
-            var spawn = targetPoint - (approach * HomingMissileLaunchDistance) + (Vector3.up * HomingMissileLaunchHeight) + (right * slotOffset);
+            var spawn = EnsurePositionAboveTerrain(targetPoint - (approach * HomingMissileLaunchDistance) + (Vector3.up * HomingMissileLaunchHeight) + (right * slotOffset), GetPayloadTerrainClearance());
             var direction = targetPoint - spawn;
             if (direction.sqrMagnitude <= 0.01f)
             {
@@ -5273,8 +7142,9 @@ namespace Oxide.Plugins
                 context.ImpactStarted = true;
                 context.State = StrikeExecutionState.Impacting;
                 context.SpawnedEntities.Add(entity);
+                MarkPayloadReleased(context);
 
-                ScheduleHomingMissileTrack(context, entity, spec, targetId, spawn, GetNow(), missileIndex, totalMissiles);
+                ScheduleHomingMissileTrack(context, entity, spec, targetId, spawn, GetPreciseNow(), missileIndex, totalMissiles);
 
                 if (config.General.DebugMode)
                 {
@@ -5304,7 +7174,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var elapsed = GetNow() - launchStartedAt;
+                var elapsed = GetPreciseNow() - launchStartedAt;
                 if (elapsed > GetHomingTrackingSeconds(context.Strike))
                 {
                     missile.Kill(BaseNetworkable.DestroyMode.None);
@@ -5557,7 +7427,7 @@ namespace Oxide.Plugins
             }
 
             var impact = ResolveImpactPosition(RandomSpreadPosition(context.Target.Position, context.Strike.SpreadRadius));
-            var spawn = impact + Vector3.up * MortarShellSpawnHeight;
+            var spawn = EnsurePositionAboveTerrain(impact + Vector3.up * MortarShellSpawnHeight, GetPayloadTerrainClearance());
             BaseEntity entity = null;
 
             try
@@ -5626,6 +7496,11 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRequireLiveDeliveryCarrier(context, "A-10 cannon pulse " + pulseIndex + "/" + totalPulses, out error))
+            {
+                return false;
+            }
+
             if (spec == null)
             {
                 error = "A-10 strafe payload is not configured correctly.";
@@ -5642,6 +7517,7 @@ namespace Oxide.Plugins
 
                 context.ImpactStarted = true;
                 context.State = StrikeExecutionState.Impacting;
+                MarkPayloadReleased(context);
 
                 if (config.General.DebugMode)
                 {
@@ -5666,7 +7542,7 @@ namespace Oxide.Plugins
 
                 if (pulseIndex == 1 || pulseIndex % A10MuzzleEffectInterval == 0)
                 {
-                    var muzzlePosition = impact - (direction * 45f) + (Vector3.up * 32f);
+                    var muzzlePosition = EnsurePositionAboveTerrain(impact - (direction * 45f) + (Vector3.up * 32f), GetPayloadTerrainClearance());
                     Effect.server.Run(BradleyMainCannonAttackEffect, muzzlePosition);
                     Effect.server.Run(BradleyMainCannonShellExplosionEffect, effectPosition);
                 }
@@ -5826,10 +7702,30 @@ namespace Oxide.Plugins
         private Vector3 ResolveImpactPosition(Vector3 position)
         {
             RaycastHit hit;
-            var start = position + Vector3.up * 120f;
-            if (Physics.Raycast(start, Vector3.down, out hit, 260f, ImpactRaycastLayer, QueryTriggerInteraction.Ignore))
+            var startY = position.y + 120f;
+            try
+            {
+                if (TerrainMeta.HeightMap != null)
+                {
+                    startY = Mathf.Max(startY, TerrainMeta.HeightMap.GetHeight(position) + 120f);
+                }
+            }
+            catch
+            {
+            }
+
+            var start = new Vector3(position.x, startY, position.z);
+            var rayDistance = Mathf.Max(260f, startY - position.y + 140f);
+            if (Physics.Raycast(start, Vector3.down, out hit, rayDistance, ImpactRaycastLayer, QueryTriggerInteraction.Ignore))
             {
                 return hit.point;
+            }
+
+            float surfaceY;
+            if (TryGetFlightSurfaceHeight(position, out surfaceY))
+            {
+                position.y = surfaceY;
+                return position;
             }
 
             try
@@ -6075,7 +7971,7 @@ namespace Oxide.Plugins
                 return config.AuditWebhooks.SendPlayerCancels;
             }
 
-            if (result.Contains("failed") || result.Contains("refund") || result == "charge_failed")
+            if (result.Contains("failed") || result.Contains("refund") || result.Contains("intercepted") || result == "charge_failed")
             {
                 return config.AuditWebhooks.SendFailuresAndRefunds;
             }
@@ -7985,8 +9881,8 @@ namespace Oxide.Plugins
                 return;
             }
 
-            charges = ClampAirstrikeItemStackAmount(charges);
-            item.amount = charges;
+            charges = ClampAirstrikeItemCharges(charges);
+            item.amount = 1;
             var instanceData = EnsureAirstrikeTokenInstanceData(item);
             instanceData.dataInt = charges;
             UpdateAirstrikeTokenDisplayName(item, charges);
@@ -8009,10 +9905,10 @@ namespace Oxide.Plugins
                 charges = Math.Max(charges, originalAmount);
             }
 
-            charges = ClampAirstrikeItemStackAmount(charges);
+            charges = ClampAirstrikeItemCharges(charges);
             var nameWasCurrent = IsAirstrikeTokenDisplayNameCurrent(item, charges);
             SetAirstrikeTokenCharges(item, charges);
-            return originalAmount != charges || originalCharges != charges || !nameWasCurrent || !string.Equals(originalName, item.name ?? "", StringComparison.Ordinal);
+            return originalAmount != 1 || originalCharges != charges || !nameWasCurrent || !string.Equals(originalName, item.name ?? "", StringComparison.Ordinal);
         }
 
         private int ReadAirstrikeTokenCharges(Item item)
@@ -8024,7 +9920,7 @@ namespace Oxide.Plugins
 
             var storedCharges = item.instanceData == null ? 0 : item.instanceData.dataInt;
             var physicalAmount = item.amount <= 0 ? 1 : item.amount;
-            return ClampAirstrikeItemStackAmount(Math.Max(physicalAmount, storedCharges <= 0 ? 1 : storedCharges));
+            return ClampAirstrikeItemCharges(Math.Max(physicalAmount > 1 ? physicalAmount : 1, storedCharges <= 0 ? 1 : storedCharges));
         }
 
         private ProtoBuf.Item.InstanceData EnsureAirstrikeTokenInstanceData(Item item)
@@ -8045,7 +9941,9 @@ namespace Oxide.Plugins
                 return;
             }
 
-            item.name = config.AirstrikeItem.DisplayName;
+            item.name = charges > 1
+                ? config.AirstrikeItem.DisplayName + " x" + charges
+                : config.AirstrikeItem.DisplayName;
         }
 
         private bool IsAirstrikeTokenDisplayNameCurrent(Item item, int charges)
@@ -8055,7 +9953,10 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            return string.Equals(item.name ?? "", config.AirstrikeItem.DisplayName, StringComparison.Ordinal);
+            var expectedName = charges > 1
+                ? config.AirstrikeItem.DisplayName + " x" + charges
+                : config.AirstrikeItem.DisplayName;
+            return string.Equals(item.name ?? "", expectedName, StringComparison.Ordinal);
         }
 
         private void RefreshActiveAirstrikeItem(BasePlayer player)
@@ -8124,7 +10025,7 @@ namespace Oxide.Plugins
             var remaining = Math.Max(1, amount);
             while (remaining > 0)
             {
-                var charges = Math.Min(remaining, GetAirstrikeMaxStackSize());
+                var charges = Math.Min(remaining, GetAirstrikeMaxChargesPerItem());
                 var item = CreateAirstrikeToken(charges);
                 if (item == null)
                 {
@@ -8158,7 +10059,7 @@ namespace Oxide.Plugins
             TryRegisterAirstrikeCustomItemDefinition();
 
             var shortname = GetAirstrikeCreateShortname();
-            var stackAmount = ClampAirstrikeItemStackAmount(amount);
+            var stackAmount = 1;
             var item = ItemManager.CreateByName(shortname, stackAmount, GetAirstrikeCreateSkinId());
             if (item == null)
             {
@@ -8534,6 +10435,11 @@ namespace Oxide.Plugins
             return DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
 
+        private double GetPreciseNow()
+        {
+            return DateTime.UtcNow.Ticks / (double)TimeSpan.TicksPerSecond;
+        }
+
         private bool IsAdmin(BasePlayer player)
         {
             return player != null && (player.IsAdmin || permission.UserHasPermission(player.UserIDString, AdminPermission));
@@ -8840,13 +10746,48 @@ namespace Oxide.Plugins
             {
                 config.AirstrikeItem.MaxStackSize = defaults.AirstrikeItem.MaxStackSize;
             }
+            if (previousConfigVersion > 0 && previousConfigVersion < 29)
+            {
+                config.DeliveryVisuals.DroneFirstPayloadDelaySeconds = defaults.DeliveryVisuals.DroneFirstPayloadDelaySeconds;
+                config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds = defaults.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds;
+                config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds = defaults.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds;
+                config.DeliveryVisuals.A10FirstPayloadDelaySeconds = defaults.DeliveryVisuals.A10FirstPayloadDelaySeconds;
+                config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds = defaults.DeliveryVisuals.MlrsFirstPayloadDelaySeconds;
+            }
+            if (previousConfigVersion > 0 && previousConfigVersion < 30)
+            {
+                MigrateDefaultHeavyDropsToCargoPlane();
+            }
+            if (previousConfigVersion > 0 && previousConfigVersion < 32)
+            {
+                MigrateDefaultDeliveryVisualAnimationPolish(defaults.DeliveryVisuals);
+            }
+            if (previousConfigVersion > 0 && previousConfigVersion < 33)
+            {
+                MigrateDefaultDeliveryVisualBelievabilityPolish(defaults.DeliveryVisuals);
+            }
+            if (previousConfigVersion > 0 && previousConfigVersion < 34)
+            {
+                MigrateDefaultJetAnimationPacingPolish(defaults.DeliveryVisuals);
+            }
             config.DeliveryVisuals.DroneFlyoverDistance = Mathf.Clamp(config.DeliveryVisuals.DroneFlyoverDistance <= 0f ? defaults.DeliveryVisuals.DroneFlyoverDistance : config.DeliveryVisuals.DroneFlyoverDistance, 15f, 150f);
             config.DeliveryVisuals.DroneFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.DroneFlyoverHeight <= 0f ? defaults.DeliveryVisuals.DroneFlyoverHeight : config.DeliveryVisuals.DroneFlyoverHeight, 8f, 80f);
-            config.DeliveryVisuals.AircraftFlyoverDistance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance <= 0f ? defaults.DeliveryVisuals.AircraftFlyoverDistance : config.DeliveryVisuals.AircraftFlyoverDistance, 60f, 400f);
-            config.DeliveryVisuals.AttackHeliFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.AttackHeliFlyoverHeight <= 0f ? defaults.DeliveryVisuals.AttackHeliFlyoverHeight : config.DeliveryVisuals.AttackHeliFlyoverHeight, 20f, 140f);
-            config.DeliveryVisuals.CargoPlaneFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneFlyoverHeight <= 0f ? defaults.DeliveryVisuals.CargoPlaneFlyoverHeight : config.DeliveryVisuals.CargoPlaneFlyoverHeight, 35f, 220f);
-            config.DeliveryVisuals.MlrsAircraftFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.MlrsAircraftFlyoverHeight <= 0f ? defaults.DeliveryVisuals.MlrsAircraftFlyoverHeight : config.DeliveryVisuals.MlrsAircraftFlyoverHeight, 35f, 160f);
-            config.DeliveryVisuals.A10FlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.A10FlyoverHeight <= 0f ? defaults.DeliveryVisuals.A10FlyoverHeight : config.DeliveryVisuals.A10FlyoverHeight, 25f, 160f);
+            config.DeliveryVisuals.DroneErraticApproachRadius = Mathf.Clamp(config.DeliveryVisuals.DroneErraticApproachRadius <= 0f ? defaults.DeliveryVisuals.DroneErraticApproachRadius : config.DeliveryVisuals.DroneErraticApproachRadius, 0f, 20f);
+            config.DeliveryVisuals.DroneDropLoiterRadius = Mathf.Clamp(config.DeliveryVisuals.DroneDropLoiterRadius <= 0f ? defaults.DeliveryVisuals.DroneDropLoiterRadius : config.DeliveryVisuals.DroneDropLoiterRadius, 0f, 30f);
+            config.DeliveryVisuals.DronePayloadSpawnHeight = Mathf.Clamp(config.DeliveryVisuals.DronePayloadSpawnHeight <= 0f ? defaults.DeliveryVisuals.DronePayloadSpawnHeight : config.DeliveryVisuals.DronePayloadSpawnHeight, DroneDropMinimumSpawnHeight, 25f);
+            config.DeliveryVisuals.DroneMinimumTerrainClearance = Mathf.Clamp(config.DeliveryVisuals.DroneMinimumTerrainClearance <= 0f ? defaults.DeliveryVisuals.DroneMinimumTerrainClearance : config.DeliveryVisuals.DroneMinimumTerrainClearance, 4f, 80f);
+            config.DeliveryVisuals.AircraftMinimumTerrainClearance = Mathf.Clamp(config.DeliveryVisuals.AircraftMinimumTerrainClearance <= 0f ? defaults.DeliveryVisuals.AircraftMinimumTerrainClearance : config.DeliveryVisuals.AircraftMinimumTerrainClearance, 12f, 180f);
+            config.DeliveryVisuals.PayloadMinimumTerrainClearance = Mathf.Clamp(config.DeliveryVisuals.PayloadMinimumTerrainClearance <= 0f ? defaults.DeliveryVisuals.PayloadMinimumTerrainClearance : config.DeliveryVisuals.PayloadMinimumTerrainClearance, 2f, 60f);
+            config.DeliveryVisuals.AircraftFlyoverDistance = Mathf.Clamp(config.DeliveryVisuals.AircraftFlyoverDistance <= 0f ? defaults.DeliveryVisuals.AircraftFlyoverDistance : config.DeliveryVisuals.AircraftFlyoverDistance, 60f, 500f);
+            config.DeliveryVisuals.AttackHeliFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.AttackHeliFlyoverHeight <= 0f ? defaults.DeliveryVisuals.AttackHeliFlyoverHeight : config.DeliveryVisuals.AttackHeliFlyoverHeight, 20f, 180f);
+            config.DeliveryVisuals.CargoPlaneFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneFlyoverHeight <= 0f ? defaults.DeliveryVisuals.CargoPlaneFlyoverHeight : config.DeliveryVisuals.CargoPlaneFlyoverHeight, 35f, 260f);
+            config.DeliveryVisuals.MlrsAircraftFlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.MlrsAircraftFlyoverHeight <= 0f ? defaults.DeliveryVisuals.MlrsAircraftFlyoverHeight : config.DeliveryVisuals.MlrsAircraftFlyoverHeight, 35f, 200f);
+            config.DeliveryVisuals.A10FlyoverHeight = Mathf.Clamp(config.DeliveryVisuals.A10FlyoverHeight <= 0f ? defaults.DeliveryVisuals.A10FlyoverHeight : config.DeliveryVisuals.A10FlyoverHeight, 25f, 220f);
+            config.DeliveryVisuals.AircraftObservationPassHeightMultiplier = Mathf.Clamp(config.DeliveryVisuals.AircraftObservationPassHeightMultiplier <= 0f ? defaults.DeliveryVisuals.AircraftObservationPassHeightMultiplier : config.DeliveryVisuals.AircraftObservationPassHeightMultiplier, 1f, 3f);
+            config.DeliveryVisuals.AircraftStrikePassHeightMultiplier = Mathf.Clamp(config.DeliveryVisuals.AircraftStrikePassHeightMultiplier <= 0f ? defaults.DeliveryVisuals.AircraftStrikePassHeightMultiplier : config.DeliveryVisuals.AircraftStrikePassHeightMultiplier, 0.35f, 1.25f);
+            config.DeliveryVisuals.AttackDiveStartHeightMultiplier = Mathf.Clamp(config.DeliveryVisuals.AttackDiveStartHeightMultiplier <= 0f ? defaults.DeliveryVisuals.AttackDiveStartHeightMultiplier : config.DeliveryVisuals.AttackDiveStartHeightMultiplier, 1f, 3f);
+            config.DeliveryVisuals.AttackStrikePassHeightMultiplier = Mathf.Clamp(config.DeliveryVisuals.AttackStrikePassHeightMultiplier <= 0f ? defaults.DeliveryVisuals.AttackStrikePassHeightMultiplier : config.DeliveryVisuals.AttackStrikePassHeightMultiplier, 0.35f, 1.25f);
+            config.DeliveryVisuals.AttackExitHeightMultiplier = Mathf.Clamp(config.DeliveryVisuals.AttackExitHeightMultiplier <= 0f ? defaults.DeliveryVisuals.AttackExitHeightMultiplier : config.DeliveryVisuals.AttackExitHeightMultiplier, 1f, 3f);
             config.DeliveryVisuals.MortarSourceDistance = Mathf.Clamp(config.DeliveryVisuals.MortarSourceDistance <= 0f ? defaults.DeliveryVisuals.MortarSourceDistance : config.DeliveryVisuals.MortarSourceDistance, 25f, 250f);
             config.DeliveryVisuals.MortarCrewOffset = Mathf.Clamp(config.DeliveryVisuals.MortarCrewOffset <= 0f ? defaults.DeliveryVisuals.MortarCrewOffset : config.DeliveryVisuals.MortarCrewOffset, 1f, 8f);
             if (previousConfigVersion > 0 && previousConfigVersion < 20
@@ -8856,7 +10797,18 @@ namespace Oxide.Plugins
                 config.DeliveryVisuals.VisualMoveIntervalSeconds = defaults.DeliveryVisuals.VisualMoveIntervalSeconds;
             }
             config.DeliveryVisuals.VisualMoveIntervalSeconds = Mathf.Clamp(config.DeliveryVisuals.VisualMoveIntervalSeconds <= 0f ? defaults.DeliveryVisuals.VisualMoveIntervalSeconds : config.DeliveryVisuals.VisualMoveIntervalSeconds, MinimumVisualMoveIntervalSeconds, MaximumVisualMoveIntervalSeconds);
+            config.DeliveryVisuals.VisualRotationSmoothTimeSeconds = Mathf.Clamp(config.DeliveryVisuals.VisualRotationSmoothTimeSeconds <= 0f ? defaults.DeliveryVisuals.VisualRotationSmoothTimeSeconds : config.DeliveryVisuals.VisualRotationSmoothTimeSeconds, MinimumVisualRotationSmoothTimeSeconds, MaximumVisualRotationSmoothTimeSeconds);
             config.DeliveryVisuals.FlyoverSoundIntervalSeconds = Mathf.Clamp(config.DeliveryVisuals.FlyoverSoundIntervalSeconds <= 0f ? defaults.DeliveryVisuals.FlyoverSoundIntervalSeconds : config.DeliveryVisuals.FlyoverSoundIntervalSeconds, 0.25f, 3f);
+            config.DeliveryVisuals.DestroyableDeliveryVehicleFirstPayloadDelaySeconds = Mathf.Clamp(config.DeliveryVisuals.DestroyableDeliveryVehicleFirstPayloadDelaySeconds < 0f ? defaults.DeliveryVisuals.DestroyableDeliveryVehicleFirstPayloadDelaySeconds : config.DeliveryVisuals.DestroyableDeliveryVehicleFirstPayloadDelaySeconds, 0f, 20f);
+            config.DeliveryVisuals.DroneFirstPayloadDelaySeconds = Mathf.Clamp(config.DeliveryVisuals.DroneFirstPayloadDelaySeconds < 0f ? defaults.DeliveryVisuals.DroneFirstPayloadDelaySeconds : config.DeliveryVisuals.DroneFirstPayloadDelaySeconds, 0f, 20f);
+            config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds = Mathf.Clamp(config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds < 0f ? defaults.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds : config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds, 0f, 20f);
+            config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds < 0f ? defaults.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds : config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds, 0f, 20f);
+            config.DeliveryVisuals.A10FirstPayloadDelaySeconds = Mathf.Clamp(config.DeliveryVisuals.A10FirstPayloadDelaySeconds < 0f ? defaults.DeliveryVisuals.A10FirstPayloadDelaySeconds : config.DeliveryVisuals.A10FirstPayloadDelaySeconds, 0f, 20f);
+            config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds = Mathf.Clamp(config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds < 0f ? defaults.DeliveryVisuals.MlrsFirstPayloadDelaySeconds : config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds, 0f, 20f);
+            config.DeliveryVisuals.DroneDeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.DroneDeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.DroneDeliveryVehicleHealth : config.DeliveryVisuals.DroneDeliveryVehicleHealth, 1f, 10000f);
+            config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.AttackHeliDeliveryVehicleHealth : config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth, 1f, 10000f);
+            config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth : config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth, 1f, 10000f);
+            config.DeliveryVisuals.A10DeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.A10DeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.A10DeliveryVehicleHealth : config.DeliveryVisuals.A10DeliveryVehicleHealth, 1f, 10000f);
 
             if (config.LootDistribution.ContainerRules == null)
             {
@@ -8873,6 +10825,201 @@ namespace Oxide.Plugins
             }
 
             config.ConfigVersion = CurrentConfigVersion;
+        }
+
+        private void MigrateDefaultJetAnimationPacingPolish(DeliveryVisualSettings defaults)
+        {
+            if (config?.DeliveryVisuals == null || defaults == null)
+            {
+                return;
+            }
+
+            if (Math.Abs(config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds - 12.5f) <= 0.001f)
+            {
+                config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds = defaults.CargoPlaneFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.A10FirstPayloadDelaySeconds - 11.5f) <= 0.001f)
+            {
+                config.DeliveryVisuals.A10FirstPayloadDelaySeconds = defaults.A10FirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds - 14.5f) <= 0.001f)
+            {
+                config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds = defaults.MlrsFirstPayloadDelaySeconds;
+            }
+
+            if (config.DeliveryVisuals.VisualRotationSmoothTimeSeconds <= 0f)
+            {
+                config.DeliveryVisuals.VisualRotationSmoothTimeSeconds = defaults.VisualRotationSmoothTimeSeconds;
+            }
+        }
+
+        private void MigrateDefaultDeliveryVisualBelievabilityPolish(DeliveryVisualSettings defaults)
+        {
+            if (config?.DeliveryVisuals == null || defaults == null)
+            {
+                return;
+            }
+
+            if (Math.Abs(config.DeliveryVisuals.DroneFlyoverDistance - 55f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneFlyoverDistance = defaults.DroneFlyoverDistance;
+            }
+            if (Math.Abs(config.DeliveryVisuals.DroneFlyoverHeight - 22f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneFlyoverHeight = defaults.DroneFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.DroneErraticApproachRadius - 4.5f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneErraticApproachRadius = defaults.DroneErraticApproachRadius;
+            }
+            if (Math.Abs(config.DeliveryVisuals.DroneDropLoiterRadius - 7f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneDropLoiterRadius = defaults.DroneDropLoiterRadius;
+            }
+            if (Math.Abs(config.DeliveryVisuals.DronePayloadSpawnHeight - DroneDropSpawnHeight) <= 0.001f)
+            {
+                config.DeliveryVisuals.DronePayloadSpawnHeight = defaults.DronePayloadSpawnHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AircraftFlyoverDistance - 260f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AircraftFlyoverDistance = defaults.AircraftFlyoverDistance;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackHeliFlyoverHeight - 60f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackHeliFlyoverHeight = defaults.AttackHeliFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.CargoPlaneFlyoverHeight - 110f) <= 0.001f)
+            {
+                config.DeliveryVisuals.CargoPlaneFlyoverHeight = defaults.CargoPlaneFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.MlrsAircraftFlyoverHeight - 78f) <= 0.001f)
+            {
+                config.DeliveryVisuals.MlrsAircraftFlyoverHeight = defaults.MlrsAircraftFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.A10FlyoverHeight - 84f) <= 0.001f)
+            {
+                config.DeliveryVisuals.A10FlyoverHeight = defaults.A10FlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AircraftObservationPassHeightMultiplier - 1.65f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AircraftObservationPassHeightMultiplier = defaults.AircraftObservationPassHeightMultiplier;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AircraftStrikePassHeightMultiplier - 0.66f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AircraftStrikePassHeightMultiplier = defaults.AircraftStrikePassHeightMultiplier;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackDiveStartHeightMultiplier - 1.75f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackDiveStartHeightMultiplier = defaults.AttackDiveStartHeightMultiplier;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackStrikePassHeightMultiplier - 0.72f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackStrikePassHeightMultiplier = defaults.AttackStrikePassHeightMultiplier;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackExitHeightMultiplier - 1.45f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackExitHeightMultiplier = defaults.AttackExitHeightMultiplier;
+            }
+            if (Math.Abs(config.DeliveryVisuals.DroneFirstPayloadDelaySeconds - 2.5f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneFirstPayloadDelaySeconds = defaults.DroneFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds - 8f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds = defaults.AttackHeliFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds - 11f) <= 0.001f)
+            {
+                config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds = defaults.CargoPlaneFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.A10FirstPayloadDelaySeconds - 9f) <= 0.001f)
+            {
+                config.DeliveryVisuals.A10FirstPayloadDelaySeconds = defaults.A10FirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds - 13f) <= 0.001f)
+            {
+                config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds = defaults.MlrsFirstPayloadDelaySeconds;
+            }
+        }
+
+        private void MigrateDefaultDeliveryVisualAnimationPolish(DeliveryVisualSettings defaults)
+        {
+            if (config?.DeliveryVisuals == null || defaults == null)
+            {
+                return;
+            }
+
+            if (Math.Abs(config.DeliveryVisuals.DroneFlyoverDistance - 45f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneFlyoverDistance = defaults.DroneFlyoverDistance;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AircraftFlyoverDistance - 175f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AircraftFlyoverDistance = defaults.AircraftFlyoverDistance;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackHeliFlyoverHeight - 48f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackHeliFlyoverHeight = defaults.AttackHeliFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.CargoPlaneFlyoverHeight - 92f) <= 0.001f)
+            {
+                config.DeliveryVisuals.CargoPlaneFlyoverHeight = defaults.CargoPlaneFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.MlrsAircraftFlyoverHeight - 58f) <= 0.001f)
+            {
+                config.DeliveryVisuals.MlrsAircraftFlyoverHeight = defaults.MlrsAircraftFlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.A10FlyoverHeight - 68f) <= 0.001f)
+            {
+                config.DeliveryVisuals.A10FlyoverHeight = defaults.A10FlyoverHeight;
+            }
+            if (Math.Abs(config.DeliveryVisuals.DroneFirstPayloadDelaySeconds - 1.5f) <= 0.001f)
+            {
+                config.DeliveryVisuals.DroneFirstPayloadDelaySeconds = defaults.DroneFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds - 7f) <= 0.001f)
+            {
+                config.DeliveryVisuals.AttackHeliFirstPayloadDelaySeconds = defaults.AttackHeliFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds - 9f) <= 0.001f)
+            {
+                config.DeliveryVisuals.CargoPlaneFirstPayloadDelaySeconds = defaults.CargoPlaneFirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.A10FirstPayloadDelaySeconds - 8f) <= 0.001f)
+            {
+                config.DeliveryVisuals.A10FirstPayloadDelaySeconds = defaults.A10FirstPayloadDelaySeconds;
+            }
+            if (Math.Abs(config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds - 12f) <= 0.001f)
+            {
+                config.DeliveryVisuals.MlrsFirstPayloadDelaySeconds = defaults.MlrsFirstPayloadDelaySeconds;
+            }
+        }
+
+        private void MigrateDefaultHeavyDropsToCargoPlane()
+        {
+            MigrateStrikeDeliveryIfMatches("bee_swarm_heavy", "bee_catapult_bomb", "attack_heli", "cargo_plane_jet");
+            MigrateStrikeDeliveryIfMatches("firebomb_run", "firebomb", "attack_heli", "cargo_plane_jet");
+            MigrateStrikeDeliveryIfMatches("propane_bomb_drop", "propane_bomb", "attack_heli", "cargo_plane_jet");
+        }
+
+        private void MigrateStrikeDeliveryIfMatches(string strikeId, string payload, string oldDelivery, string newDelivery)
+        {
+            if (config?.StrikeDefinitions == null || string.IsNullOrWhiteSpace(strikeId))
+            {
+                return;
+            }
+
+            StrikeDefinition strike;
+            if (!config.StrikeDefinitions.TryGetValue(strikeId, out strike) || strike == null)
+            {
+                return;
+            }
+
+            if (string.Equals(strike.Payload, payload, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(strike.Delivery, oldDelivery, StringComparison.OrdinalIgnoreCase))
+            {
+                strike.Delivery = newDelivery;
+            }
         }
 
         private static List<string> DefaultBlockedMonumentNames()
@@ -9126,7 +11273,7 @@ namespace Oxide.Plugins
                 Enabled = true,
                 DisplayName = "Heavy Bee Swarm",
                 TargetType = "ground_ping",
-                Delivery = "attack_heli",
+                Delivery = "cargo_plane_jet",
                 Payload = "bee_catapult_bomb",
                 Tier = 2,
                 RPCost = 175,
@@ -9252,7 +11399,7 @@ namespace Oxide.Plugins
                 Enabled = true,
                 DisplayName = "Firebomb Run",
                 TargetType = "ground_ping",
-                Delivery = "attack_heli",
+                Delivery = "cargo_plane_jet",
                 Payload = "firebomb",
                 Tier = 3,
                 RPCost = 350,

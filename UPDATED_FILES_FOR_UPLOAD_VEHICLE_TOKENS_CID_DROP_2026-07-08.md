@@ -1,6 +1,7 @@
-Raidlands vehicle tokens CID and drop spawn - 2026-07-08
+Raidlands vehicle tokens CID, drop spawn, forward placement, and failed-drop fallback - 2026-07-08
 
 What changed:
+- `RaidlandsVehicleTokens` is now v1.0.6.
 - `RaidlandsVehicleTokens` now registers one CID-backed token per configured vehicle.
 - New token shortnames:
   - `raidlands.vehicle.token.minicopter`
@@ -17,11 +18,17 @@ What changed:
 - CID vehicle tokens still do not import parent item mods; CID supplies the token name, description, max stack size, and vehicle icon.
 - CID definitions are refreshed on token-plugin load so stale definitions with old wrapped-gift descriptions/actions are replaced.
 - Legacy named `wrappedgift` token matching remains enabled so old tokens can still be redeemed, but new token creation no longer falls back to legacy wrapped gifts when CID is missing.
-- Dropping a token now attempts to spawn the vehicle at the dropped token position after `0.1` seconds.
+- Dropping a token now resolves the owner after `0.1` seconds, then requests the vehicle spawn from the player's facing direction instead of the dropped token's feet position.
+- Token spawns now default to a random `5-15m` in front of the player and rotate the vehicle by `-90` degrees so its front points toward the player's left.
+- New config keys control this placement: `Token Spawn Min Forward Distance`, `Token Spawn Max Forward Distance`, and `Token Spawn Yaw Offset Degrees`.
+- Token spawn positions are ground-corrected before being passed to SpawnHeli or VehicleLicence; SpawnHeli token spawns still keep the configured `Dropped Spawn Vertical Offset`.
+- The forward/left-facing placement applies to both dropped-token redemption and direct token redemption paths such as `/raidvehicle`.
 - Dropped-token redemption now retries owner resolution with the nearest active player if the dropped item entity does not carry an owner ID.
 - Successful dropped-token redemption consumes exactly one item from the dropped stack.
-- Failed dropped-token redemption now returns one token to the player's inventory, or drops it at their feet if inventory is full, then removes the failed world-copy token.
-- `VehicleLicence` now exposes `SpawnLicensedVehicleAt(...)` for token drop spawns while reusing license, cooldown, cost, limit, zone, safe-zone, mounted, nearby-player, water-vehicle, and `CanLicensedVehicleSpawn` checks.
+- Failed dropped-token redemption now leaves the original dropped token stack in the world so it can be picked up normally.
+- `VehicleLicence` now exposes token-only spawn hooks for Raidlands vehicle tokens. These use fresh token vehicle records instead of the player's normal one-vehicle license slot, so tokens bypass both the global active-vehicle limit and the "already have this vehicle outside" gate.
+- Token spawns still keep cooldown, cost, zone, safe-zone, mounted, nearby-player, water-vehicle, and `CanLicensedVehicleSpawn` checks.
+- `SpawnHeli` now accepts API option `AllowMultipleForPlayer`; Raidlands vehicle tokens pass it for minicopter, scrap transport, and attack helicopter tokens so SpawnHeli does not return "You already have an Attack Heli" when the player spends another token.
 - Website Admin > Kits now merges vanilla `rust-items.json` with the Raidlands custom item overlay so these tokens can be manually added to kits.
 - No SQL migration was added.
 - No existing `game_kit_items` rows or kit item counts were changed.
@@ -45,6 +52,7 @@ Website icon assets to upload:
 
 Oxide plugin/config files to upload:
 - `oxide/plugins/RaidlandsVehicleTokens.cs`
+- `oxide/plugins/SpawnHeli.cs`
 - `oxide/plugins/VehicleLicence.cs`
 - `oxide/config/RaidlandsVehicleTokens.json`
 - `oxide/plugins/RaidlandsVehicleTokens.json`
@@ -73,9 +81,9 @@ Do not upload as part of this feature:
 
 Reload after upload:
 - `oxide.reload CustomItemDefinitions`
+- `oxide.reload SpawnHeli`
+- `oxide.reload VehicleLicence`
 - `oxide.reload RaidlandsVehicleTokens`
-
-Reload `VehicleLicence` too only if the live server has not already received the earlier `SpawnLicensedVehicleAt(...)` support from this same rollout.
 
 Important reload note:
 - Reload `CustomItemDefinitions` before `RaidlandsVehicleTokens`. Old custom definitions can keep stale wrapped-gift descriptions/actions until CID is reloaded and the token plugin refreshes the definitions.
@@ -84,17 +92,26 @@ Runtime smoke:
 - `raidlands.vehicle.give <playerNameOrSteamId> minicopter 5`
 - Confirm the token context menu does not show `Unwrap`.
 - Drop the stack.
-- Expected: one minicopter spawns at the dropped token position and the world stack becomes `4`.
+- Expected: one minicopter spawns roughly `5-15m` in front of the player, its nose points toward the player's left, and the world stack becomes `4`.
+- Run `/raidvehicle minicopter` while holding or carrying a minicopter token.
+- Expected: the direct redemption path uses the same `5-15m` forward, left-facing placement and consumes one token only after a successful spawn.
+- With the player already at the normal VehicleLicence active-vehicle limit from another vehicle type, redeem another vehicle token.
+- Expected: token spawn is not blocked by `VehiclesLimit`, and VehicleLicence does not kill a random existing vehicle just because the normal limit was reached.
+- With one RHIB/token VehicleLicence vehicle already spawned, redeem another matching token.
+- Expected: the second token spawns a second world vehicle instead of hitting `AlreadyVehicleOut`.
+- With one Attack Helicopter token already spawned, redeem another Attack Helicopter token.
+- Expected: the second token spawns another attack helicopter instead of hitting SpawnHeli's `You already have an Attack Heli.` message.
 - `raidlands.vehicle.give <playerNameOrSteamId> rhib 1`
 - Drop the RHIB token on land.
-- Expected: spawn fails from the water-vehicle check and one RHIB token is returned to the player's inventory, or dropped at their feet if inventory is full.
+- Expected: spawn fails from the water-vehicle check, the original dropped RHIB token remains in the world, and the player can pick it back up.
 - Add one `raidlands.vehicle.token.minicopter` row manually in Admin > Kits, publish, redeem the kit, and confirm the kit hook creates the CID token.
 
 Local verification:
-- Roslyn compile passed for `oxide/plugins/RaidlandsVehicleTokens.cs` after the no-unwrap/refund follow-up.
-- Roslyn compile passed for `oxide/plugins/VehicleLicence.cs`.
+- Roslyn compile passed for `oxide/plugins/RaidlandsVehicleTokens.cs` after the failed drop-spawn fallback follow-up.
+- Roslyn compile passed for `oxide/plugins/SpawnHeli.cs` after adding the API-only multiple-spawn option.
+- Roslyn compile passed for `oxide/plugins/VehicleLicence.cs` after the token-limit and one-license-slot bypass follow-ups.
 - Roslyn compile passed for `oxide/plugins/CustomItemDefinitions.cs`.
-- JSON validation passed for both `RaidlandsVehicleTokens.json` files after the no-unwrap/refund follow-up, and previously passed for `assets/data/raidlands-custom-items.json`.
+- JSON validation passed for both `RaidlandsVehicleTokens.json` files after adding the forward distance/yaw keys, and previously passed for `assets/data/raidlands-custom-items.json`.
 - Duplicate check passed: 9 token definitions, 9 unique custom shortnames, 9 unique custom item IDs.
 - PHP lint passed for `includes/kits.php` and `admin/index.php`.
 - Node syntax check passed for `assets/js/admin-kits.js`.
@@ -102,15 +119,17 @@ Local verification:
 
 Local source hashes:
 - `oxide/plugins/RaidlandsVehicleTokens.cs`
-  - SHA256: `A5104ED8A83E7F32517461B52C8B9DE204CA892821788CF3B7B6CA9331534B1E`
+  - SHA256: `49E09CA8B40B59D3B5256D13F1F7A10F71F06BE16866333B31D520A254A256F9`
+- `oxide/plugins/SpawnHeli.cs`
+  - SHA256: `AF13E4868A6D1444551E792DFC0EB79909D1002E45C8319C8739B5AF280F0168`
 - `oxide/plugins/VehicleLicence.cs`
-  - SHA256: `13671A9F684A7614ECEC74DD43D083119E40DA51656B3D30AD03F49EC4BA7074`
+  - SHA256: `EAD7F5D91EC5E205786240FB6485340BA3183682C64493AAC4E54C9505D7D35F`
 - `oxide/plugins/CustomItemDefinitions.cs`
   - SHA256: `13B8276700D398DBEE658C1F292545E471DF76D487561486A7DCC94F3E45A469`
 - `oxide/config/RaidlandsVehicleTokens.json`
-  - SHA256: `290FF47383DF33DBD518FACBD306F0A992B7A799D3D82F1F46296981ED0A5066`
+  - SHA256: `2D0650CB5C61E491BF59DD3B219CA8338AE88CD6AB4B013BCF94C4EC28BA6AAA`
 - `oxide/plugins/RaidlandsVehicleTokens.json`
-  - SHA256: `290FF47383DF33DBD518FACBD306F0A992B7A799D3D82F1F46296981ED0A5066`
+  - SHA256: `FF2F34E928556158E26A8D43D8AE676FA79F82A82D57E392D1BEC0D6013390D8`
 - `C:\wamp64\www\raidlands\assets\data\raidlands-custom-items.json`
   - SHA256: `74BFD5B1283B687EE1A7B9FABA343038780D39B432B4D804ACF68908955D0344`
 

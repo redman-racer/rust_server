@@ -1,0 +1,17 @@
+{
+  "No Permission": "You don't have permission to use skin sets.",
+  "Syntax": "Use /ss 1-5, /ss save 1-5, /ss load 1-5, /ss delete 1-5, or /ss list.",
+  "Invalid Slot": "Pick a slot from 1 to 5.",
+  "Saved": "Saved your current skin set to slot {0}.",
+  "Loaded": "Applied skin set slot {0}.",
+  "Deleted": "Deleted skin set slot {0}.",
+  "Empty": "Slot {0} is empty. Use /ss save {0} to save your current skins.",
+  "No Skins": "You don't have any skinned worn or belt items to save.",
+  "List Header": "Skin sets: {0}",
+  "List Slot": "{0}:{1}",
+  "Loaded Partial": "Applied skin set slot {0}. Some skins were skipped because you don't own them.",
+  "Saved Item": "Saved {0}'s skin to skin set slot {1}.",
+  "No Item Skin": "That item has no skin to save.",
+  "Not Worn Item": "Only worn item skins can be saved in skin sets.",
+  "Opened": "Drop worn-item skins into the editor. Each row saves one skin set."
+}

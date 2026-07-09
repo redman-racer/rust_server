@@ -1,3 +1,198 @@
+Raidlands vehicle token failed drop-spawn fallback - 2026-07-08
+
+What changed:
+- RaidlandsVehicleTokens is now v1.0.6.
+- Failed dropped-token redemption no longer creates a refund token and removes the original dropped world item.
+- If a dropped token cannot spawn its vehicle, the original dropped stack stays where the player threw it and can be picked up normally.
+- Successful dropped-token spawns still consume exactly one token from the dropped stack.
+- Direct `/raidvehicle` redemption still consumes from inventory only after a successful spawn.
+
+Rust server files to upload:
+- oxide/plugins/RaidlandsVehicleTokens.cs
+
+Reload after upload:
+- oxide.reload RaidlandsVehicleTokens
+
+Quick live smoke:
+- raidlands.vehicle.give <playerNameOrSteamId> rhib 1
+- Drop the RHIB token on land.
+- Expected: water-vehicle spawn check fails, the original dropped RHIB token remains in the world, and you can pick it back up.
+- Drop a minicopter token while facing a clear area.
+- Expected: minicopter spawns 5-15m ahead, nose points left, and the dropped stack decrements by one.
+
+Detailed vehicle-token handoff:
+- UPDATED_FILES_FOR_UPLOAD_VEHICLE_TOKENS_CID_DROP_2026-07-08.md
+
+Local verification:
+- Roslyn compile passed for oxide/plugins/RaidlandsVehicleTokens.cs v1.0.6.
+- Remaining warnings were expected Oxide injected-plugin-reference/config-field warnings.
+
+Local source hash:
+- oxide/plugins/RaidlandsVehicleTokens.cs SHA256: 49E09CA8B40B59D3B5256D13F1F7A10F71F06BE16866333B31D520A254A256F9
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes MoveItem crash and kinematic velocity repair - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.36.
+- Added `ConfigVersion=31`.
+- Airstrike CID binoculars are back to one physical item per slot with charges stored in `instanceData.dataInt`.
+- `AirstrikeItem.MaxStackSize=1`; `MaxChargesPerItem=65535`.
+- `StackSizeController.json` now pins `raidlands.airstrike.designator=1` and keeps `tool.binoculars=1`.
+- Existing bad physical stacks normalize into one movable item named like `Airstrike Targeting Binoculars x25`.
+- Give/API/kit/loot paths create charged single items instead of Rust inventory stacks.
+- Visual flyover rigidbody handling no longer writes velocity/angular velocity after a body has been made kinematic.
+- SpawnHeli's fetch/teleport path now skips velocity clearing when the heli rigidbody is kinematic.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/config/PortableAirstrikes.json
+- oxide/config/StackSizeController.json
+- oxide/plugins/SpawnHeli.cs
+
+Runtime dependencies:
+- Keep oxide/plugins/CustomItemDefinitions.cs uploaded.
+- Keep oxide/plugins/StackSizeController.cs uploaded.
+- Keep oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png uploaded.
+
+Reload after upload:
+- oxide.reload CustomItemDefinitions
+- oxide.reload StackSizeController
+- oxide.reload SpawnHeli
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Confirm the PortableAirstrikes reload banner reports v0.1.36.
+- /strike debug item
+- Expected: actualStack=1, maxCharges=65535, and the PNG-backed icon source.
+- portableairstrikes.giveitem <playerNameOrSteamId> 25
+- Expected: one physical item named Airstrike Targeting Binoculars x25, not a Rust inventory stack count.
+- Move the item between inventory slots and containers.
+- Expected: no disconnect, no RPC Error in MoveItem, and no split_Amount <= 0.
+- Use one valid strike.
+- Expected: the item remains one physical item and decrements to Airstrike Targeting Binoculars x24.
+- Run one attack-heli/rocket-run visual strike.
+- Expected: no repeated kinematic linear/angular velocity spam from the flyover visual.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_MOVEITEM_KINEMATIC_2026-07-08.md
+
+Local verification:
+- JSON validation passed for oxide/config/PortableAirstrikes.json and oxide/config/StackSizeController.json.
+- Roslyn compile passed for oxide/plugins/PortableAirstrikes.cs v0.1.36.
+- Roslyn compile sanity check passed for oxide/plugins/SpawnHeli.cs.
+- Remaining warnings were expected Unity obsolete API and Oxide/config field warnings.
+
+Local source/config hashes:
+- oxide/plugins/PortableAirstrikes.cs SHA256: 2A32C475774F5445655F4B7A61A084BFFE0FC7E7851F9C6FB65ACEE26CBD96C5
+- oxide/config/PortableAirstrikes.json SHA256: 5B1396CBE1F627D0C5A765E247E4900E127A409C8A1A79968EADC1D805F1B5BC
+- oxide/config/StackSizeController.json SHA256: 2CDC563B43F5FEF55B102A3BD98C5163F2E70FAD14F3299E8D9587EB94506796
+- oxide/plugins/SpawnHeli.cs SHA256: 31F9557E2C5B8F739B75047AD67B811AADD9D62CBD5B3D3A95E72A98C8E4728B
+
+Older upload notes follow.
+
+---
+
+Raidlands vehicle token forward spawn placement - 2026-07-08
+
+What changed:
+- RaidlandsVehicleTokens is now v1.0.6.
+- Dropped-token and direct token redemption now request vehicle placement from the player's facing direction instead of the dropped item/player feet position.
+- Failed dropped-token spawns leave the original dropped token stack in the world so it can be picked up normally.
+- Default placement is random 5-15m in front of the player, with yaw offset -90 degrees so the vehicle front points toward the player's left.
+- New config keys: Token Spawn Min Forward Distance, Token Spawn Max Forward Distance, Token Spawn Yaw Offset Degrees.
+- Requested positions are ground-corrected before SpawnHeli/VehicleLicence receive them; SpawnHeli token spawns still use the existing Dropped Spawn Vertical Offset.
+- Existing cooldown, safe-zone, mounted, nearby-player, water-vehicle, space, and token-only VehicleLicence checks remain in place.
+
+Rust server files to upload:
+- oxide/plugins/RaidlandsVehicleTokens.cs
+- oxide/config/RaidlandsVehicleTokens.json
+- oxide/plugins/RaidlandsVehicleTokens.json if you keep this staged config copy on the live server
+
+Runtime dependencies:
+- Keep the existing token-spawn hook versions of oxide/plugins/SpawnHeli.cs and oxide/plugins/VehicleLicence.cs uploaded from the CID/drop-spawn pass.
+- Keep oxide/plugins/CustomItemDefinitions.cs loaded before RaidlandsVehicleTokens if the live server is using CID-backed vehicle token items.
+
+Reload after upload:
+- oxide.reload RaidlandsVehicleTokens
+
+Full reload order if deploying the whole CID/drop-spawn vehicle-token bundle at the same time:
+- oxide.reload CustomItemDefinitions
+- oxide.reload SpawnHeli
+- oxide.reload VehicleLicence
+- oxide.reload RaidlandsVehicleTokens
+
+Quick live smoke:
+- raidlands.vehicle.give <playerNameOrSteamId> minicopter 5
+- Drop the stack while facing a clear area.
+- Expected: one minicopter spawns roughly 5-15m in front of you, its nose points to your left, and the dropped stack becomes 4.
+- Drop an RHIB token on land.
+- Expected: spawn fails and the original dropped RHIB token remains in the world for pickup.
+- Run /raidvehicle minicopter while holding or carrying a minicopter token.
+- Expected: the direct redemption path uses the same forward/left-facing placement and consumes one token only after a successful spawn.
+
+Detailed vehicle-token handoff:
+- UPDATED_FILES_FOR_UPLOAD_VEHICLE_TOKENS_CID_DROP_2026-07-08.md
+
+Local verification:
+- JSON validation passed for oxide/config/RaidlandsVehicleTokens.json and oxide/plugins/RaidlandsVehicleTokens.json.
+- Roslyn compile passed for oxide/plugins/RaidlandsVehicleTokens.cs v1.0.6.
+- Compile warnings were the expected Oxide injected-plugin-reference/config-field warnings.
+
+Local source/config hashes:
+- oxide/plugins/RaidlandsVehicleTokens.cs SHA256: 49E09CA8B40B59D3B5256D13F1F7A10F71F06BE16866333B31D520A254A256F9
+- oxide/config/RaidlandsVehicleTokens.json SHA256: 2D0650CB5C61E491BF59DD3B219CA8338AE88CD6AB4B013BCF94C4EC28BA6AAA
+- oxide/plugins/RaidlandsVehicleTokens.json SHA256: FF2F34E928556158E26A8D43D8AE676FA79F82A82D57E392D1BEC0D6013390D8
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes patrol-heli spawn-order fix - 2026-07-08
+
+What changed:
+- PortableAirstrikes is now v0.1.35.
+- Fixed the patrol-heli visual spawn order for `attack_heli`/rocket-run delivery visuals.
+- The native patrol-heli prefab now keeps its prefab GUID references intact until after `Spawn()`, avoiding the live `GUIDToPath: guid is empty` lead-in and `spawn patrol helicopter failed: Object reference not set to an instance of an object` warning.
+- The spawned patrol-heli visual still disables native brain/AI and clears optional gib/fireball/map-marker references after spawn so the carrier can follow the scripted rocket-run path.
+- `ConfigVersion` remains `30`; this pass has no config migration.
+- Existing cargo-plane, F-15, drone, mortar, payload, RP/token/cooldown, warning marker, audit history, homing gate, and destroyable-carrier behavior were left unchanged.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/config/PortableAirstrikes.json only if the v0.1.32+ vehicle-alignment config has not already been uploaded
+
+Local source/config hashes:
+- oxide/plugins/PortableAirstrikes.cs SHA256: 14C3E77CA32A07722DD1786A0BB4A9A2D68697F177FCC7CBA664032230199E5E
+- oxide/config/PortableAirstrikes.json SHA256: 917F3170D61FC0EEF1809CD0F9F3133392D4B153ED1954091D5E7184F7CE669B
+
+Runtime dependencies to keep uploaded:
+- oxide/plugins/CustomItemDefinitions.cs
+- oxide/plugins/StackSizeController.cs
+- oxide/config/StackSizeController.json
+- oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_PATROL_HELI_SPAWN_ORDER_2026-07-08.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Confirm the PortableAirstrikes reload banner reports v0.1.35.
+- `/strike debugping`, then `/strike rocket_run`; confirm a native patrol-heli approach before rockets release and no `GUIDToPath: guid is empty` or `visual rocket run could not spawn` warning.
+- `/strike debugping`, then `/strike hv_rocket_run`; confirm the same patrol-heli approach.
+- `/strike debugping`, then `/strike incendiary_rocket_run`; confirm the same patrol-heli approach.
+- Check `/strike debug history 10` and `/strike debug stats`.
+- If the patrol-heli visual still does not appear, turn on `General.DebugMode=true`, reload, repeat `/strike rocket_run`, and capture the new phase-specific warning.
+
+Older upload notes follow.
+
+---
+
 Portable Airstrikes stackable CID binoculars - 2026-07-08
 
 What changed:

@@ -1,0 +1,20 @@
+{
+  "raidlands.vehicle.token.minicopter": "Minicopter Token",
+  "raidlands.vehicle.token.minicopter.desc": "Drop this token to spawn a Minicopter.",
+  "raidlands.vehicle.token.scrap_transport_helicopter": "Scrap Transport Helicopter Token",
+  "raidlands.vehicle.token.scrap_transport_helicopter.desc": "Drop this token to spawn a Scrap Transport Helicopter.",
+  "raidlands.vehicle.token.attack_helicopter": "Attack Helicopter Token",
+  "raidlands.vehicle.token.attack_helicopter.desc": "Drop this token to spawn a Attack Helicopter.",
+  "raidlands.vehicle.token.rhib": "RHIB Token",
+  "raidlands.vehicle.token.rhib.desc": "Drop this token to spawn a RHIB.",
+  "raidlands.vehicle.token.tugboat": "Tugboat Token",
+  "raidlands.vehicle.token.tugboat.desc": "Drop this token to spawn a Tugboat.",
+  "raidlands.vehicle.token.solo_submarine": "Solo Submarine Token",
+  "raidlands.vehicle.token.solo_submarine.desc": "Drop this token to spawn a Solo Submarine.",
+  "raidlands.vehicle.token.duo_submarine": "Duo Submarine Token",
+  "raidlands.vehicle.token.duo_submarine.desc": "Drop this token to spawn a Duo Submarine.",
+  "raidlands.vehicle.token.snowmobile": "Snowmobile Token",
+  "raidlands.vehicle.token.snowmobile.desc": "Drop this token to spawn a Snowmobile.",
+  "raidlands.vehicle.token.hot_air_balloon": "Hot Air Balloon Token",
+  "raidlands.vehicle.token.hot_air_balloon.desc": "Drop this token to spawn a Hot Air Balloon."
+}

@@ -38,6 +38,7 @@ namespace Oxide.Plugins
         private readonly string PERMISSION_NO_DAMAGE = "vehiclelicence.nodamage";
         private readonly string PERMISSION_NO_COLLISION_DAMAGE = "vehiclelicence.nocollisiondamage";
         private const string PREFAB_ITEM_DROP = "assets/prefabs/misc/item drop/item_drop.prefab";
+        private const string RAIDLANDS_VEHICLE_TOKEN_COMMAND = "raidlands.vehicle.token";
 
         private const int AMMO_ITEM_ID = -1671551935;
         private const int HV_AMMO_ITEM_ID = -1841918730;
@@ -4013,6 +4014,18 @@ namespace Oxide.Plugins
             return SpawnVehicleAt(player, vehicleType, position, rotation, bypassCooldown, command);
         }
 
+        [HookMethod(nameof(SpawnRaidlandsTokenVehicle))]
+        public bool SpawnRaidlandsTokenVehicle(BasePlayer player, string vehicleType, string command, bool bypassCooldown = false)
+        {
+            return SpawnTokenVehicle(player, vehicleType, null, null, bypassCooldown, command);
+        }
+
+        [HookMethod(nameof(SpawnRaidlandsTokenVehicleAt))]
+        public bool SpawnRaidlandsTokenVehicleAt(BasePlayer player, string vehicleType, Vector3 position, Quaternion rotation, string command, bool bypassCooldown = false)
+        {
+            return SpawnTokenVehicle(player, vehicleType, position, rotation, bypassCooldown, command);
+        }
+
         [HookMethod(nameof(RecallLicensedVehicle))] // added hooks
         public bool RecallLicensedVehicle(BasePlayer player, string vehicleType, string command, bool bypassCooldown = false)
         {
@@ -4589,6 +4602,48 @@ namespace Oxide.Plugins
             return entity != null && !entity.IsDestroyed;
         }
 
+        private bool SpawnTokenVehicle(BasePlayer player, string vehicleType, Vector3? position, Quaternion? rotation, bool bypassCooldown, string command)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(vehicleType))
+            {
+                return false;
+            }
+
+            var settings = GetBaseVehicleSettings(vehicleType);
+            if (settings == null)
+            {
+                return false;
+            }
+
+            var vehicle = Vehicle.Create(player.userID, vehicleType);
+            string reason;
+
+            if (position.HasValue)
+            {
+                var spawnPosition = position.Value;
+                var spawnRotation = rotation ?? player.transform.rotation;
+                if (!CanSpawnAtPosition(player, vehicle, bypassCooldown, command, out reason, ref spawnPosition, ref spawnRotation))
+                {
+                    Print(player, reason);
+                    return false;
+                }
+
+                var entity = SpawnVehicle(player, vehicle, spawnPosition, spawnRotation, false);
+                return entity != null && !entity.IsDestroyed;
+            }
+
+            var autoPosition = Vector3.zero;
+            var autoRotation = Quaternion.identity;
+            if (!CanSpawn(player, vehicle, bypassCooldown, command, out reason, ref autoPosition, ref autoRotation))
+            {
+                Print(player, reason);
+                return false;
+            }
+
+            var spawned = SpawnVehicle(player, vehicle, autoPosition, autoRotation, false);
+            return spawned != null && !spawned.IsDestroyed;
+        }
+
         private bool CanSpawn(BasePlayer player, Vehicle vehicle, bool bypassCooldown, string command, out string reason, ref Vector3 position, ref Quaternion rotation)
         {
 
@@ -4599,7 +4654,7 @@ namespace Oxide.Plugins
             //     return false;
             // }
             BaseEntity randomVehicle = null;
-            if (configData.global.limitVehicles > 0)
+            if (!IsRaidlandsVehicleTokenSpawn(command) && configData.global.limitVehicles > 0)
             {
                 var activeVehicles = storedData.ActiveVehicles(player.userID);
                 var count = activeVehicles.Count();
@@ -4672,7 +4727,7 @@ namespace Oxide.Plugins
         {
             var settings = GetBaseVehicleSettings(vehicle.VehicleType);
             BaseEntity randomVehicle = null;
-            if (configData.global.limitVehicles > 0)
+            if (!IsRaidlandsVehicleTokenSpawn(command) && configData.global.limitVehicles > 0)
             {
                 var activeVehicles = storedData.ActiveVehicles(player.userID);
                 var count = activeVehicles.Count();
@@ -4743,19 +4798,28 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private void SpawnVehicle(BasePlayer player, Vehicle vehicle, Vector3 position, Quaternion rotation, bool response = true)
+        private static bool IsRaidlandsVehicleTokenSpawn(string command)
+        {
+            return string.Equals(command, RAIDLANDS_VEHICLE_TOKEN_COMMAND, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private BaseEntity SpawnVehicle(BasePlayer player, Vehicle vehicle, Vector3 position, Quaternion rotation, bool response = true)
         {
             var settings = GetBaseVehicleSettings(vehicle.VehicleType);
             position += Vector3.up * settings.SpawnHeight;
             var entity = settings.SpawnVehicle(player, vehicle, position, rotation);
             if (entity == null)
             {
-                return;
+                return null;
             }
 
             Interface.CallHook("OnLicensedVehicleSpawned", entity, player, vehicle.VehicleType);
-            if (!response) return;
-            Print(player, Lang("VehicleSpawned", player.UserIDString, settings.DisplayName));
+            if (response)
+            {
+                Print(player, Lang("VehicleSpawned", player.UserIDString, settings.DisplayName));
+            }
+
+            return entity;
         }
 
         private void CacheVehicleEntity(BaseEntity entity, Vehicle vehicle, BasePlayer player)
