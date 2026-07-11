@@ -4,9 +4,18 @@
   "SharedSecret": "",
   "WipeKey": "",
   "RenderName": "Icons",
+  "TextureRenderName": "Default",
   "FileType (Jpg, Png)": "Jpg",
   "ImageResolutionScale": 0.5,
   "AutoPublishOnRustMapApiReady": true,
   "AutoPublishDelaySeconds": 10,
-  "WebRequestTimeoutMilliseconds": 60000
+  "WebRequestTimeoutMilliseconds": 60000,
+  "PublishTerrain": true,
+  "TerrainSampleResolution": 129,
+  "IncludeTerrainColors": true,
+  "IncludeMonuments": true,
+  "PublishSkybox": true,
+  "SkyboxImagePath": "oxide/data/WebsiteMapBridge/current-skybox.png",
+  "PublishPlayerLocations": true,
+  "PlayerLocationIntervalSeconds": 15
 }

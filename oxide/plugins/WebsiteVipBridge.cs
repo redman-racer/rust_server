@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -16,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.5.8")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.6.1")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -32,6 +31,11 @@ namespace Oxide.Plugins
         private Timer pendingPermissionSnapshotTimer;
         private Timer rpPurchaseTimer;
         private Timer rpPointTimer;
+        private Timer heatmapTimer;
+        private DateTime rpPurchasePollStartedAt = DateTime.MinValue;
+        private DateTime rpPointPollStartedAt = DateTime.MinValue;
+        private int rpPurchasePollGeneration;
+        private int rpPointPollGeneration;
         private long cursor;
         private long kitRevision;
         private long permissionRevision;
@@ -51,6 +55,11 @@ namespace Oxide.Plugins
         private bool rpPointPollInFlight;
         private readonly HashSet<string> rpResultPostsInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> rpPointResultPostsInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, HeatmapBucket> heatmapBuckets = new Dictionary<string, HeatmapBucket>(StringComparer.OrdinalIgnoreCase);
+        private DateTime heatmapWindowStartedAt = DateTime.UtcNow;
+        private DateTime lastHeatmapSyncAt = DateTime.MinValue;
+        private bool heatmapEndpointMissing;
+        private bool isUnloading;
 
         [PluginReference]
         private Plugin ServerRewards;
@@ -223,7 +232,7 @@ namespace Oxide.Plugins
                 ["golden_vip"] = Bundle("Golden VIP", "rank_golden_vip"),
                 ["diamond_vip"] = Bundle("Diamond VIP", "rank_diamond_vip"),
                 ["ultimate_vip"] = Bundle("Ultimate VIP", "rank_ultimate_vip"),
-                [" _vip"] = Bundle("Titan VIP", "rank_titan_vip"),
+                ["titan_vip"] = Bundle("Titan VIP", "rank_titan_vip"),
                 ["queue_priority"] = Bundle("Queue Priority", "perk_queue_priority"),
                 ["teleport_instant"] = Bundle("Instant Teleport", "perk_teleport_instant"),
                 ["home_5s"] = Bundle("5 Second Home Teleport", "perk_home_5s"),
@@ -281,6 +290,19 @@ namespace Oxide.Plugins
             public int StatsSyncIntervalSeconds = 300;
             public int StatsDebounceSeconds = 30;
             public int StatsBotSnapshotLimit = 0;
+            public bool HeatmapEnabled = false;
+            public int HeatmapSyncIntervalSeconds = 300;
+            public int HeatmapBucketSize = 100;
+            public List<string> HeatmapMetrics = new List<string>
+            {
+                "player_deaths",
+                "pvp_kills",
+                "npc_deaths",
+                "deaths_by_npc",
+                "roambots_activity"
+            };
+            public int HeatmapRetentionHours = 72;
+            public bool HeatmapIncludeOnlinePositions = false;
             public bool RpPurchasesEnabled = true;
             public int RpPurchasePollIntervalSeconds = 30;
             public int RpPurchasePollLimit = 10;
@@ -617,6 +639,34 @@ namespace Oxide.Plugins
             public int deaths;
         }
 
+        private class HeatmapSnapshot
+        {
+            public string server_id;
+            public string wipe_key;
+            public string wipe_started_at;
+            public string generated_at;
+            public string window_started_at;
+            public string window_ended_at;
+            public int bucket_size;
+            public int retention_hours;
+            public bool includes_online_positions;
+            public List<HeatmapBucket> buckets = new List<HeatmapBucket>();
+        }
+
+        private class HeatmapBucket
+        {
+            public int bucket_x;
+            public int bucket_z;
+            public int center_x;
+            public int center_z;
+            public int player_deaths;
+            public int pvp_kills;
+            public int npc_deaths;
+            public int deaths_by_npc;
+            public int roambots_activity;
+            public int online_positions;
+        }
+
         private class KdrData
         {
             public ulong id;
@@ -717,6 +767,26 @@ namespace Oxide.Plugins
             if (config.StatsDebounceSeconds <= 0)
             {
                 config.StatsDebounceSeconds = defaults.StatsDebounceSeconds;
+            }
+
+            if (config.HeatmapSyncIntervalSeconds <= 0)
+            {
+                config.HeatmapSyncIntervalSeconds = defaults.HeatmapSyncIntervalSeconds;
+            }
+
+            if (config.HeatmapBucketSize <= 0)
+            {
+                config.HeatmapBucketSize = defaults.HeatmapBucketSize;
+            }
+
+            if (config.HeatmapMetrics == null || config.HeatmapMetrics.Count == 0)
+            {
+                config.HeatmapMetrics = defaults.HeatmapMetrics;
+            }
+
+            if (config.HeatmapRetentionHours <= 0)
+            {
+                config.HeatmapRetentionHours = defaults.HeatmapRetentionHours;
             }
 
             if (config.RpPurchasePollIntervalSeconds <= 0)
@@ -826,6 +896,7 @@ namespace Oxide.Plugins
             StartStatusHeartbeat();
             StartRpPurchasePolling();
             StartRpPointPolling();
+            StartHeatmapSync();
 
             var interval = Math.Max(30, config.SyncIntervalSeconds);
             syncTimer = timer.Every(interval, () => RunScheduled("VIP change sync timer", SyncChanges));
@@ -844,6 +915,7 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            isUnloading = true;
             syncTimer?.Destroy();
             statsTimer?.Destroy();
             pendingStatsTimer?.Destroy();
@@ -855,6 +927,11 @@ namespace Oxide.Plugins
             pendingPermissionSnapshotTimer?.Destroy();
             rpPurchaseTimer?.Destroy();
             rpPointTimer?.Destroy();
+            heatmapTimer?.Destroy();
+            rpPurchasePollGeneration++;
+            rpPointPollGeneration++;
+            rpPurchasePollInFlight = false;
+            rpPointPollInFlight = false;
             SaveRpPurchaseData();
             SaveRpPointData();
             SaveDeletedGroupState();
@@ -877,6 +954,44 @@ namespace Oxide.Plugins
         {
             QueueStatsSync();
             QueueStatusHeartbeat();
+        }
+
+        private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            if (entity == null || !IsHeatmapEnabled())
+            {
+                return;
+            }
+
+            var victimPlayer = entity as BasePlayer;
+            var attackerPlayer = info?.InitiatorPlayer;
+
+            if (victimPlayer != null && IsRealPlayerSteamId(victimPlayer.userID))
+            {
+                AddHeatmapMetric(victimPlayer.transform.position, "player_deaths");
+
+                if (attackerPlayer != null && attackerPlayer != victimPlayer && IsRealPlayerSteamId(attackerPlayer.userID))
+                {
+                    AddHeatmapMetric(victimPlayer.transform.position, "pvp_kills");
+                }
+
+                if (attackerPlayer != null && !IsRealPlayerSteamId(attackerPlayer.userID))
+                {
+                    AddHeatmapMetric(victimPlayer.transform.position, "deaths_by_npc");
+                }
+
+                return;
+            }
+
+            if (victimPlayer != null && !IsRealPlayerSteamId(victimPlayer.userID))
+            {
+                AddHeatmapMetric(victimPlayer.transform.position, "npc_deaths");
+
+                if (IsRaidlandsRoamBot(victimPlayer))
+                {
+                    AddHeatmapMetric(victimPlayer.transform.position, "roambots_activity");
+                }
+            }
         }
 
         private void OnPointsUpdated(ulong userId, int balance)
@@ -1143,6 +1258,48 @@ namespace Oxide.Plugins
                 : lastStatusHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
 
             ReplyBridge(player, $"Status heartbeat enabled={config.StatusHeartbeatEnabled}, interval={interval}s, last success={last}. Current heartbeat requested.");
+        }
+
+        [Command("websitevip.heatmap.sync")]
+        private void HeatmapSyncCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            heatmapEndpointMissing = false;
+            SyncHeatmapSnapshot();
+            ReplyBridge(player, "Requested heatmap aggregate sync.");
+        }
+
+        [Command("websitevip.heatmap.status")]
+        private void HeatmapStatusCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            var interval = Math.Max(60, config.HeatmapSyncIntervalSeconds);
+            var last = lastHeatmapSyncAt == DateTime.MinValue
+                ? "never"
+                : lastHeatmapSyncAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+            var message = $"Heatmap enabled={config.HeatmapEnabled}, endpoint_missing={heatmapEndpointMissing}, interval={interval}s, bucket_size={Math.Max(1, config.HeatmapBucketSize)}m, retention={Math.Max(1, config.HeatmapRetentionHours)}h, include_online_positions={config.HeatmapIncludeOnlinePositions}, pending_buckets={heatmapBuckets.Count}, last_success={last}.";
+
+            ReplyBridge(player, message);
+        }
+
+        [Command("websitevip.heatmap.clearwipe")]
+        private void HeatmapClearWipeCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            ClearHeatmapWipe();
+            ReplyBridge(player, "Cleared pending heatmap aggregates for the current wipe window.");
         }
 
         [Command("websitevip.rp.sync")]
@@ -1749,8 +1906,17 @@ namespace Oxide.Plugins
 
             if (rpPurchasePollInFlight)
             {
-                Puts("RP purchase sync skipped because a previous poll is still in flight.");
-                return;
+                var staleAfter = Math.Max(10f, WebRequestTimeoutSeconds() + 5f);
+
+                if ((DateTime.UtcNow - rpPurchasePollStartedAt).TotalSeconds <= staleAfter)
+                {
+                    Puts("RP purchase sync skipped because a previous poll is still in flight.");
+                    return;
+                }
+
+                PrintWarning($"RP purchase poll exceeded {staleAfter:0} seconds; releasing the stale in-flight guard.");
+                rpPurchasePollInFlight = false;
+                rpPurchasePollGeneration++;
             }
 
             LoadRpPurchaseData();
@@ -1758,6 +1924,8 @@ namespace Oxide.Plugins
             PostPendingRpPurchaseResults();
 
             rpPurchasePollInFlight = true;
+            rpPurchasePollStartedAt = DateTime.UtcNow;
+            var pollGeneration = ++rpPurchasePollGeneration;
             var limit = Math.Max(1, config.RpPurchasePollLimit);
             var url = $"{TrimSlash(config.ApiBaseUrl)}/api/server/rp-purchases.php?limit={limit}";
 
@@ -1807,7 +1975,10 @@ namespace Oxide.Plugins
                 }
                 finally
                 {
-                    rpPurchasePollInFlight = false;
+                    if (pollGeneration == rpPurchasePollGeneration)
+                    {
+                        rpPurchasePollInFlight = false;
+                    }
                 }
             });
         }
@@ -2392,8 +2563,17 @@ namespace Oxide.Plugins
 
             if (rpPointPollInFlight)
             {
-                Puts("RP point request sync skipped because a previous poll is still in flight.");
-                return;
+                var staleAfter = Math.Max(10f, WebRequestTimeoutSeconds() + 5f);
+
+                if ((DateTime.UtcNow - rpPointPollStartedAt).TotalSeconds <= staleAfter)
+                {
+                    Puts("RP point request sync skipped because a previous poll is still in flight.");
+                    return;
+                }
+
+                PrintWarning($"RP point request poll exceeded {staleAfter:0} seconds; releasing the stale in-flight guard.");
+                rpPointPollInFlight = false;
+                rpPointPollGeneration++;
             }
 
             LoadRpPointData();
@@ -2401,6 +2581,8 @@ namespace Oxide.Plugins
             PostPendingRpPointResults();
 
             rpPointPollInFlight = true;
+            rpPointPollStartedAt = DateTime.UtcNow;
+            var pollGeneration = ++rpPointPollGeneration;
             var limit = Math.Max(1, config.RpPointRequestPollLimit);
             var url = $"{TrimSlash(config.ApiBaseUrl)}/api/server/rp-point-requests.php?limit={limit}";
 
@@ -2450,7 +2632,10 @@ namespace Oxide.Plugins
                 }
                 finally
                 {
-                    rpPointPollInFlight = false;
+                    if (pollGeneration == rpPointPollGeneration)
+                    {
+                        rpPointPollInFlight = false;
+                    }
                 }
             });
         }
@@ -2929,7 +3114,7 @@ namespace Oxide.Plugins
                 map_name = GetMapDisplayName(),
                 world_size = Math.Max(0, ConVar.Server.worldsize),
                 seed = Math.Max(0, ConVar.Server.seed),
-                wipe_key = ResolveWipeKey(),
+                wipe_key = ResolveWipeKey(wipeStartedAt),
                 wipe_started_at = wipeStartedAt == DateTime.MinValue ? null : wipeStartedAt.ToString("o"),
                 details = new JObject
                 {
@@ -3064,7 +3249,7 @@ namespace Oxide.Plugins
         private StatsSnapshot BuildStatsSnapshot()
         {
             var playersById = new Dictionary<string, StatsPlayer>();
-            var wipeStartedAt = ResolveSecretValue(config.WipeStartedAt);
+            var wipeStartedAt = GetWipeStartedAt();
 
             AddKdrStats(playersById);
             AddPlaytimeStats(playersById);
@@ -3074,8 +3259,8 @@ namespace Oxide.Plugins
 
             return new StatsSnapshot
             {
-                wipe_key = ResolveWipeKey(),
-                wipe_started_at = string.IsNullOrWhiteSpace(wipeStartedAt) ? null : wipeStartedAt,
+                wipe_key = ResolveWipeKey(wipeStartedAt),
+                wipe_started_at = wipeStartedAt == DateTime.MinValue ? null : wipeStartedAt.ToUniversalTime().ToString("o"),
                 generated_at = DateTime.UtcNow.ToString("o"),
                 players = playersById.Values
                     .OrderByDescending(player => player.kills)
@@ -3271,6 +3456,190 @@ namespace Oxide.Plugins
             return limit > 0 && ordered.Count > limit
                 ? ordered.Take(limit).ToList()
                 : ordered;
+        }
+
+        private void StartHeatmapSync()
+        {
+            if (!IsHeatmapEnabled())
+            {
+                Puts("WebsiteVipBridge heatmap sync is disabled.");
+                return;
+            }
+
+            var interval = Math.Max(60, config.HeatmapSyncIntervalSeconds);
+            heatmapTimer = timer.Every(interval, () => RunScheduled("Heatmap sync timer", SyncHeatmapSnapshot));
+            Puts($"WebsiteVipBridge syncing heatmap aggregates every {interval} seconds with {Math.Max(1, config.HeatmapBucketSize)}m buckets.");
+        }
+
+        private bool IsHeatmapEnabled()
+        {
+            return config != null && config.HeatmapEnabled;
+        }
+
+        private bool HeatmapMetricEnabled(string metric)
+        {
+            return config?.HeatmapMetrics != null
+                && config.HeatmapMetrics.Any(item => string.Equals(item, metric, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void AddHeatmapMetric(Vector3 position, string metric)
+        {
+            if (!IsHeatmapEnabled() || !HeatmapMetricEnabled(metric))
+            {
+                return;
+            }
+
+            var bucket = HeatmapBucketForPosition(position);
+
+            switch (metric)
+            {
+                case "player_deaths":
+                    bucket.player_deaths++;
+                    break;
+                case "pvp_kills":
+                    bucket.pvp_kills++;
+                    break;
+                case "npc_deaths":
+                    bucket.npc_deaths++;
+                    break;
+                case "deaths_by_npc":
+                    bucket.deaths_by_npc++;
+                    break;
+                case "roambots_activity":
+                    bucket.roambots_activity++;
+                    break;
+            }
+        }
+
+        private HeatmapBucket HeatmapBucketForPosition(Vector3 position)
+        {
+            var bucketSize = Math.Max(1, config.HeatmapBucketSize);
+            var bucketX = Mathf.FloorToInt(position.x / bucketSize);
+            var bucketZ = Mathf.FloorToInt(position.z / bucketSize);
+            var key = $"{bucketX}:{bucketZ}";
+
+            HeatmapBucket bucket;
+            if (!heatmapBuckets.TryGetValue(key, out bucket))
+            {
+                bucket = new HeatmapBucket
+                {
+                    bucket_x = bucketX,
+                    bucket_z = bucketZ,
+                    center_x = Mathf.RoundToInt((bucketX + 0.5f) * bucketSize),
+                    center_z = Mathf.RoundToInt((bucketZ + 0.5f) * bucketSize)
+                };
+                heatmapBuckets[key] = bucket;
+            }
+
+            return bucket;
+        }
+
+        private void AddConnectedPlayerHeatmapPositions()
+        {
+            if (!config.HeatmapIncludeOnlinePositions || !HeatmapMetricEnabled("online_positions"))
+            {
+                return;
+            }
+
+            foreach (var connected in BasePlayer.activePlayerList)
+            {
+                if (connected == null || !IsRealPlayerSteamId(connected.userID))
+                {
+                    continue;
+                }
+
+                HeatmapBucketForPosition(connected.transform.position).online_positions++;
+            }
+        }
+
+        private bool IsRaidlandsRoamBot(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return false;
+            }
+
+            return (player.UserIDString ?? "").StartsWith("90", StringComparison.Ordinal)
+                || (player.displayName ?? "").IndexOf("Roam", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsRealPlayerSteamId(ulong userId)
+        {
+            return IsSteamId64(userId.ToString());
+        }
+
+        private void SyncHeatmapSnapshot()
+        {
+            if (!IsHeatmapEnabled() || !CanRequest() || heatmapEndpointMissing)
+            {
+                return;
+            }
+
+            AddConnectedPlayerHeatmapPositions();
+
+            if (heatmapBuckets.Count == 0)
+            {
+                lastHeatmapSyncAt = DateTime.UtcNow;
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            var wipeStartedAt = GetWipeStartedAt();
+            var snapshot = new HeatmapSnapshot
+            {
+                server_id = config.ServerId,
+                wipe_key = ResolveWipeKey(wipeStartedAt),
+                wipe_started_at = wipeStartedAt == DateTime.MinValue ? null : wipeStartedAt.ToUniversalTime().ToString("o"),
+                generated_at = now.ToString("o"),
+                window_started_at = heatmapWindowStartedAt.ToString("o"),
+                window_ended_at = now.ToString("o"),
+                bucket_size = Math.Max(1, config.HeatmapBucketSize),
+                retention_hours = Math.Max(1, config.HeatmapRetentionHours),
+                includes_online_positions = config.HeatmapIncludeOnlinePositions,
+                buckets = heatmapBuckets.Values
+                    .OrderBy(bucket => bucket.bucket_x)
+                    .ThenBy(bucket => bucket.bucket_z)
+                    .ToList()
+            };
+
+            var body = JsonConvert.SerializeObject(snapshot);
+            var url = $"{TrimSlash(config.ApiBaseUrl)}/api/server/heatmap-snapshot.php";
+
+            SendPost(url, body, (code, response) =>
+            {
+                if (!IsSuccess(code, response, out var error))
+                {
+                    if (code == 404)
+                    {
+                        heatmapEndpointMissing = true;
+                        PrintWarning("Heatmap snapshot endpoint returned 404. Heatmap posting is paused until WebsiteVipBridge is reloaded or websitevip.heatmap.sync is run after the website endpoint is deployed.");
+                        return;
+                    }
+
+                    PrintWarning($"Heatmap snapshot sync failed: {error}");
+                    return;
+                }
+
+                var payload = JsonConvert.DeserializeObject<StatsResponse>(response);
+
+                if (payload == null || !payload.ok)
+                {
+                    PrintWarning($"Heatmap snapshot sync failed: {payload?.error ?? "invalid response"}");
+                    return;
+                }
+
+                heatmapBuckets.Clear();
+                heatmapWindowStartedAt = DateTime.UtcNow;
+                lastHeatmapSyncAt = heatmapWindowStartedAt;
+                Puts($"Heatmap snapshot synced for {snapshot.buckets.Count} bucket(s).");
+            });
+        }
+
+        private void ClearHeatmapWipe()
+        {
+            heatmapBuckets.Clear();
+            heatmapWindowStartedAt = DateTime.UtcNow;
+            lastHeatmapSyncAt = DateTime.MinValue;
         }
 
         private StatsPlayer EnsureStatsPlayer(Dictionary<string, StatsPlayer> playersById, string steamId)
@@ -5389,7 +5758,7 @@ namespace Oxide.Plugins
             return string.IsNullOrWhiteSpace(value) ? JValue.CreateNull() : new JValue(value);
         }
 
-        private string ResolveWipeKey()
+        private string ResolveWipeKey(DateTime wipeStartedAt)
         {
             var wipeKey = ResolveSecretValue(config.WipeKey);
 
@@ -5398,7 +5767,40 @@ namespace Oxide.Plugins
                 return wipeKey.Trim();
             }
 
-            return $"{config.ServerId}-current";
+            var serverId = CleanWipeKeySegment(config.ServerId, "raidlands-main");
+            var startedAt = wipeStartedAt == DateTime.MinValue ? GetWipeStartedAt() : wipeStartedAt.ToUniversalTime();
+
+            if (startedAt != DateTime.MinValue)
+            {
+                return $"{serverId}-{startedAt:yyyyMMdd'T'HHmmss'Z'}";
+            }
+
+            return $"{serverId}-current";
+        }
+
+        private static string CleanWipeKeySegment(string value, string fallback)
+        {
+            var raw = (value ?? "").Trim();
+            var builder = new StringBuilder(raw.Length);
+
+            foreach (var ch in raw)
+            {
+                builder.Append(IsWipeKeyCharacter(ch) ? ch : '-');
+            }
+
+            var cleaned = builder.ToString().Trim('-', '_', '.', ':');
+            return string.IsNullOrWhiteSpace(cleaned) ? fallback : cleaned;
+        }
+
+        private static bool IsWipeKeyCharacter(char ch)
+        {
+            return (ch >= 'a' && ch <= 'z')
+                || (ch >= 'A' && ch <= 'Z')
+                || (ch >= '0' && ch <= '9')
+                || ch == '_'
+                || ch == '-'
+                || ch == '.'
+                || ch == ':';
         }
 
         public string GetRaidlandsBrandAssetUrl(string key)
@@ -5788,24 +6190,39 @@ namespace Oxide.Plugins
 
         private void SendGet(string url, Action<int, string> callback)
         {
+            if (isUnloading)
+            {
+                return;
+            }
+
             var headers = BuildHeaders("GET", url, "");
-            webrequest.Enqueue(url, null, (code, response) => RunWebCallback($"GET {url}", callback, code, response), this, RequestMethod.GET, headers, WebRequestTimeoutMilliseconds());
+            webrequest.Enqueue(url, null, (code, response) => RunWebCallback($"GET {url}", callback, code, response), this, RequestMethod.GET, headers, WebRequestTimeoutSeconds());
         }
 
         private void SendPost(string url, string body, Action<int, string> callback)
         {
+            if (isUnloading)
+            {
+                return;
+            }
+
             var headers = BuildHeaders("POST", url, body);
             headers["Content-Type"] = "application/json";
-            webrequest.Enqueue(url, body, (code, response) => RunWebCallback($"POST {url}", callback, code, response), this, RequestMethod.POST, headers, WebRequestTimeoutMilliseconds());
+            webrequest.Enqueue(url, body, (code, response) => RunWebCallback($"POST {url}", callback, code, response), this, RequestMethod.POST, headers, WebRequestTimeoutSeconds());
         }
 
-        private float WebRequestTimeoutMilliseconds()
+        private float WebRequestTimeoutSeconds()
         {
-            return (float)Math.Max(5000, config.WebRequestTimeoutMilliseconds);
+            return Math.Max(5000, config.WebRequestTimeoutMilliseconds) / 1000f;
         }
 
         private void RunWebCallback(string context, Action<int, string> callback, int code, string response)
         {
+            if (isUnloading)
+            {
+                return;
+            }
+
             try
             {
                 callback?.Invoke(code, response ?? "");

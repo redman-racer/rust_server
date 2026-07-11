@@ -78,7 +78,7 @@ private string activeWipeSeed;
 private DateTime lastDiskSampleAt = DateTime.MinValue;
 private float cachedDiskGiB;
 private UiSkin activeSkin;
-private readonly string[] tabs = { "dashboard", "players", "staff", "chat", "reports", "manage", "wipe", "logs" };
+private readonly string[] tabs = { "dashboard", "console", "players", "staff", "chat", "reports", "manage", "convars", "wipe", "appearance", "settings", "logs" };
 private class PanelState
 {
 public string Tab = "dashboard";
@@ -122,6 +122,18 @@ public string ChatFilter = string.Empty;
 public string ChatReplyText = string.Empty;
 public string ChatBlacklistText = string.Empty;
 public string ChatTimeoutText = "10m";
+public string ConsoleCommandText = "server.save";
+public string ConsoleTab = "all";
+public string ConsoleFilter = string.Empty;
+public bool ConsoleWrap = true;
+public bool ConsoleMiniOpen;
+public int ConsoleMiniPosition = 1;
+public string ConVarFilter = string.Empty;
+public string ConVarMaxPlayers = string.Empty;
+public string ConVarSaveInterval = string.Empty;
+public string ConVarHostname = string.Empty;
+public string ConVarDescription = string.Empty;
+public string ConVarUrl = string.Empty;
 public string PluginFilter = string.Empty;
 public string GroupFilter = string.Empty;
 public string PermissionFilter = string.Empty;
@@ -284,9 +296,19 @@ public List<ChatEntry> Chat = new List<ChatEntry>();
 public Dictionary<string, List<StaffNote>> Notes = new Dictionary<string, List<StaffNote>>();
 public List<TrackedMute> ActiveMutes = new List<TrackedMute>();
 public Dictionary<string, string> UserSkins = new Dictionary<string, string>();
+public Dictionary<string, PlayerProfile> PlayerProfiles = new Dictionary<string, PlayerProfile>();
 public string NextAutoWipeUtc;
 public string LastWipeUtc;
 public int NextReportId = 1;
+}
+private class PlayerProfile
+{
+public string Id;
+public string Name;
+public string FirstSeen;
+public string LastSeen;
+public string LastIp;
+public int Connections;
 }
 private class UiSkin
 {
@@ -762,6 +784,10 @@ RegisterPermissions();
 ProcessExpiredMutes();
 SampleResources();
 EnsureNextAutoWipe();
+foreach (var player in BasePlayer.activePlayerList)
+{
+UpdatePlayerProfile(player, true);
+}
 }
 private void Unload()
 {
@@ -776,10 +802,16 @@ SaveData();
 }
 private void OnPlayerDisconnected(BasePlayer player, string reason)
 {
+UpdatePlayerProfile(player, false);
+Log(player, "PlayerLeave", player?.UserIDString ?? string.Empty, string.IsNullOrEmpty(reason) ? "Disconnected" : reason);
+SaveData();
 ClearRuntimePlayerState(player);
 }
 private void OnPlayerConnected(BasePlayer player)
 {
+UpdatePlayerProfile(player, true);
+Log(player, "PlayerJoin", player?.UserIDString ?? string.Empty, GetPlayerAddress(player));
+SaveData();
 ClearRuntimePlayerState(player);
 }
 private object OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
@@ -793,9 +825,11 @@ if (blocked)
 player.ChatMessage("<color=#d14a3c>Your message was blocked by chat moderation.</color>");
 LogBlocked(null, "Chat", "Blacklist", player.UserIDString, player.displayName, matched);
 RefreshOpenPanels("chat");
+RefreshConsoleViews();
 return true;
 }
 RefreshOpenPanels("chat");
+RefreshConsoleViews();
 return null;
 }
 private void ClearRuntimePlayerState(BasePlayer player)
@@ -803,6 +837,71 @@ private void ClearRuntimePlayerState(BasePlayer player)
 if (player == null) return;
 openPanels.Remove(player.userID);
 spinningPlayers.Remove(player.userID);
+}
+private void UpdatePlayerProfile(BasePlayer player, bool connected)
+{
+if (player == null) return;
+EnsureDataDefaults();
+var id = player.UserIDString;
+if (!storedData.PlayerProfiles.TryGetValue(id, out var profile) || profile == null)
+{
+profile = new PlayerProfile { Id = id, FirstSeen = Now() };
+storedData.PlayerProfiles[id] = profile;
+}
+profile.Name = player.displayName;
+profile.LastSeen = Now();
+profile.LastIp = GetPlayerAddress(player);
+if (connected) profile.Connections++;
+SaveData();
+}
+private int NewPlayersToday()
+{
+EnsureDataDefaults();
+var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+return storedData.PlayerProfiles.Values.Count(p => p != null && !string.IsNullOrEmpty(p.FirstSeen) && p.FirstSeen.StartsWith(today, StringComparison.OrdinalIgnoreCase));
+}
+private PlayerProfile GetPlayerProfile(string id)
+{
+EnsureDataDefaults();
+if (string.IsNullOrEmpty(id)) return null;
+return storedData.PlayerProfiles.TryGetValue(id, out var profile) ? profile : null;
+}
+private string ShortDate(string value)
+{
+if (string.IsNullOrEmpty(value)) return "unknown";
+return value.Length <= 16 ? value : value.Substring(0, 16);
+}
+private string GetServerFpsText()
+{
+try
+{
+var type = typeof(BasePlayer).Assembly.GetType("Performance");
+var current = type?.GetField("current")?.GetValue(null);
+if (current == null) return "n/a";
+var value = current.GetType().GetField("frameRate")?.GetValue(current) ?? current.GetType().GetProperty("frameRate")?.GetValue(current, null);
+if (value == null) return "n/a";
+return Convert.ToSingle(value).ToString("0");
+}
+catch
+{
+return "n/a";
+}
+}
+private string GetEntityCountText()
+{
+try
+{
+var type = typeof(BasePlayer).Assembly.GetType("BaseNetworkable");
+var entities = type?.GetField("serverEntities")?.GetValue(null);
+if (entities == null) return "n/a";
+var countProperty = entities.GetType().GetProperty("Count");
+var count = countProperty == null ? null : countProperty.GetValue(entities, null);
+return count == null ? "n/a" : count.ToString();
+}
+catch
+{
+return "n/a";
+}
 }
 private void RegisterPermissions()
 {
@@ -856,6 +955,7 @@ if (storedData.Logs == null) storedData.Logs = new List<ActionLog>();
 if (storedData.Chat == null) storedData.Chat = new List<ChatEntry>();
 if (storedData.Notes == null) storedData.Notes = new Dictionary<string, List<StaffNote>>();
 if (storedData.ActiveMutes == null) storedData.ActiveMutes = new List<TrackedMute>();
+if (storedData.PlayerProfiles == null) storedData.PlayerProfiles = new Dictionary<string, PlayerProfile>();
 if (string.IsNullOrEmpty(storedData.NextAutoWipeUtc)) storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 }
 private void StartMuteTimer()
@@ -1156,6 +1256,19 @@ break;
 case "chatsubtab":
 state.ChatSubTab = Get(args, 1, "monitor").ToLowerInvariant();
 break;
+case "consoletab":
+state.ConsoleTab = CleanConsoleTab(Get(args, 1, "all"));
+state.Tab = "console";
+break;
+case "consolewrap":
+state.ConsoleWrap = !state.ConsoleWrap;
+break;
+case "consolemini":
+state.ConsoleMiniOpen = !state.ConsoleMiniOpen;
+break;
+case "consoleminipos":
+state.ConsoleMiniPosition = (state.ConsoleMiniPosition + 1) % 4;
+break;
 case "staffinv":
 state.StaffSubTab = "inventory";
 state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, "main"));
@@ -1315,6 +1428,33 @@ var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : 
 if (field == "reply") state.ChatReplyText = value;
 else if (field == "blacklist") state.ChatBlacklistText = value;
 else if (field == "timeout") state.ChatTimeoutText = string.IsNullOrEmpty(value) ? config.ChatTimeoutDuration : value;
+Draw(player);
+}
+[ConsoleCommand("liveadmin.consolefield")]
+private void ConsoleFieldCommand(ConsoleSystem.Arg arg)
+{
+var player = arg.Player();
+if (player == null || !CanUseQuickActions(player)) return;
+var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
+var state = GetState(player);
+state.ConsoleCommandText = args.Length > 0 ? string.Join(" ", args).Trim() : string.Empty;
+Draw(player);
+}
+[ConsoleCommand("liveadmin.convarfield")]
+private void ConVarFieldCommand(ConsoleSystem.Arg arg)
+{
+var player = arg.Player();
+if (player == null || !CanEditServerInfo(player)) return;
+var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
+if (args.Length == 0) return;
+var state = GetState(player);
+var field = args[0].ToLowerInvariant();
+var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : string.Empty;
+if (field == "maxplayers") state.ConVarMaxPlayers = value;
+else if (field == "saveinterval") state.ConVarSaveInterval = value;
+else if (field == "hostname") state.ConVarHostname = value;
+else if (field == "description") state.ConVarDescription = value;
+else if (field == "url") state.ConVarUrl = value;
 Draw(player);
 }
 [ConsoleCommand("liveadmin.notefield")]
@@ -1616,6 +1756,35 @@ case "serverinfo":
 if (!CanEditServerInfo(player) || IsRateLimited(player, "serverinfo", 2.0)) return;
 ApplyServerInfo(player);
 break;
+case "consolecommand":
+if (!CanUseQuickActions(player) || BlockedBySafeMode(player, "consolecommand", "Server") || IsRateLimited(player, "consolecommand", 1.5)) return;
+var consoleCommand = CleanCommandText(state.ConsoleCommandText);
+if (string.IsNullOrEmpty(consoleCommand)) return;
+RequireConfirm(player, "command", consoleCommand, string.Empty, $"Run console command: {consoleCommand}?");
+break;
+case "consoleexport":
+if (!CanUseQuickActions(player) || IsRateLimited(player, "consoleexport", 3.0)) return;
+ExportConsoleLog(player);
+break;
+case "convarsapply":
+if (!CanEditServerInfo(player) || BlockedBySafeMode(player, "convarsapply", "Server") || IsRateLimited(player, "convarsapply", 2.0)) return;
+ApplyConVars(player);
+break;
+case "settingssafe":
+if (!Can(player, PermOwner)) return;
+config.SafeMode = !config.SafeMode;
+SaveConfig();
+break;
+case "settingscommandsafety":
+if (!Can(player, PermOwner)) return;
+config.EnableCommandSafety = !config.EnableCommandSafety;
+SaveConfig();
+break;
+case "settingschatannounce":
+if (!Can(player, PermOwner)) return;
+config.AllowGlobalChatAnnouncements = !config.AllowGlobalChatAnnouncements;
+SaveConfig();
+break;
 case "wipetoggle":
 if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipetoggle", "Wipe")) return;
 config.AutoWipeEnabled = !config.AutoWipeEnabled;
@@ -1812,94 +1981,341 @@ openPanels.Add(player.userID);
 var state = GetState(player);
 activeSkin = GetPlayerSkin(player);
 var container = new CuiElementContainer();
-Panel(container, UiRoot, "Overlay", "0.03 0.035 0.045 0.96", "0.12 0.10", "0.88 0.90");
-Panel(container, $"{UiRoot}.Top", UiRoot, "0.08 0.09 0.10 0.98", "0 0.91", "1 1");
-Label(container, $"{UiRoot}.Top.Title", $"{UiRoot}.Top", config.Title, 22, "0.025 0.05", "0.35 0.95", TextAnchor.MiddleLeft);
-Panel(container, $"{UiRoot}.Top.Accent", $"{UiRoot}.Top", activeSkin.Accent, "0 0", "1 0.035");
+Panel(container, UiRoot, "Overlay", "Overlay", "0.17 0.12", "0.83 0.88");
+Panel(container, $"{UiRoot}.Top", UiRoot, "0.08 0.09 0.10 0.98", "0 0.925", "1 1");
+Panel(container, $"{UiRoot}.Top.Brand", $"{UiRoot}.Top", activeSkin.Accent, "0.015 0.24", "0.042 0.76");
+Label(container, $"{UiRoot}.Top.BrandText", $"{UiRoot}.Top.Brand", "L", 11, "0 0", "1 1", TextAnchor.MiddleCenter);
+Label(container, $"{UiRoot}.Top.Title", $"{UiRoot}.Top", $"{config.Title}  |  Rust Management", 11, "0.055 0.16", "0.44 0.84", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Top.Accent", $"{UiRoot}.Top", activeSkin.Accent, "0 0", "1 0.025");
+DrawTopSearch(container, state);
 DrawSkinSelector(container, player);
-Label(container, $"{UiRoot}.Top.Status", $"{UiRoot}.Top", $"Online {BasePlayer.activePlayerList.Count}/{ConVar.Server.maxplayers}   Staff {BasePlayer.activePlayerList.Count(p => Can(p, PermUse))}", 12, "0.68 0.05", "0.94 0.95", TextAnchor.MiddleRight);
-Button(container, $"{UiRoot}.Top.Close", $"{UiRoot}.Top", "X", "liveadmin.ui close", config.DangerColor, "0.955 0.18", "0.99 0.82", 14);
-Panel(container, $"{UiRoot}.Nav", UiRoot, "0.06 0.065 0.075 0.98", "0 0", "0.17 0.91");
+Button(container, $"{UiRoot}.Top.Close", $"{UiRoot}.Top", "X", "liveadmin.ui close", config.DangerColor, "0.958 0.24", "0.985 0.76", 12);
+Panel(container, $"{UiRoot}.Nav", UiRoot, "0.06 0.065 0.075 0.98", "0 0", "0.215 0.925");
 DrawNav(container, player, state);
-Panel(container, $"{UiRoot}.Body", UiRoot, "0.04 0.045 0.052 0.92", "0.18 0.06", "0.985 0.89");
-Panel(container, $"{UiRoot}.Footer", UiRoot, "0.08 0.09 0.10 0.96", "0.18 0.005", "0.985 0.05");
+Panel(container, $"{UiRoot}.Body", UiRoot, "0.04 0.045 0.052 0.92", "0.215 0.055", "0.985 0.905");
+Panel(container, $"{UiRoot}.Footer", UiRoot, "0.08 0.09 0.10 0.96", "0.215 0.005", "0.985 0.045");
 Label(container, $"{UiRoot}.Footer.Text", $"{UiRoot}.Footer", FooterText(player, state), 12, "0.015 0", "0.98 1", TextAnchor.MiddleLeft);
 if (!string.IsNullOrEmpty(state.PendingAction)) DrawConfirm(container, state);
 else if (state.Tab == "dashboard") DrawDashboard(container, player);
+else if (state.Tab == "console") DrawLiveConsole(container, player, state);
 else if (state.Tab == "players") DrawPlayers(container, player, state);
 else if (state.Tab == "staff") DrawStaffTools(container, player, state);
 else if (state.Tab == "chat") DrawChat(container, player, state);
 else if (state.Tab == "reports") DrawReports(container, player, state);
 else if (state.Tab == "manage") DrawManage(container, player, state);
+else if (state.Tab == "convars") DrawConVars(container, player, state);
 else if (state.Tab == "wipe") DrawWipe(container, player);
+else if (state.Tab == "appearance") DrawAppearance(container, player);
+else if (state.Tab == "settings") DrawSettings(container, player);
 else if (state.Tab == "logs") DrawLogs(container, player, state);
+if (state.ConsoleMiniOpen && CanUseQuickActions(player)) DrawMiniConsole(container, state);
 CuiHelper.AddUi(player, container);
 }
 private void DrawNav(CuiElementContainer container, BasePlayer player, PanelState state)
 {
-var y = 0.86;
-foreach (var tab in tabs)
-{
-if (!CanSeeTab(player, tab)) continue;
-var selected = state.Tab == tab;
-Button(container, $"{UiRoot}.Nav.{tab}", $"{UiRoot}.Nav", Title(tab), $"liveadmin.ui tab {tab}", selected ? config.AccentColor : "0.12 0.13 0.14 1", $"0.08 {y}", $"0.92 {y + 0.07}", 13);
-y -= 0.085;
+Label(container, $"{UiRoot}.Nav.MainLabel", $"{UiRoot}.Nav", "MAIN", 7, "0.08 0.880", "0.92 0.920", TextAnchor.MiddleLeft);
+DrawNavItem(container, player, state, "dashboard", "D", "Dashboard", 0.825);
+DrawNavItem(container, player, state, "console", "C", "Live Console", 0.765);
+DrawNavItem(container, player, state, "players", "P", "Players", 0.705, BasePlayer.activePlayerList.Count.ToString());
+DrawNavItem(container, player, state, "chat", "T", "Chat", 0.645, ChatBadgeText());
+Label(container, $"{UiRoot}.Nav.ToolsLabel", $"{UiRoot}.Nav", "TOOLS", 7, "0.08 0.585", "0.92 0.625", TextAnchor.MiddleLeft);
+DrawNavItem(container, player, state, "staff", "S", "Staff Tools", 0.530);
+DrawNavItem(container, player, state, "reports", "R", "Reports", 0.470, storedData.Reports.Count(r => r.Status != "Resolved").ToString());
+DrawNavItem(container, player, state, "wipe", "W", "Wipe", 0.410);
+Label(container, $"{UiRoot}.Nav.ManageLabel", $"{UiRoot}.Nav", "MANAGEMENT", 7, "0.08 0.350", "0.92 0.390", TextAnchor.MiddleLeft);
+DrawNavItem(container, player, state, "manage", "M", "Manage", 0.295);
+DrawNavItem(container, player, state, "convars", "V", "ConVars", 0.235);
+DrawNavItem(container, player, state, "appearance", "A", "Appearance", 0.175);
+DrawNavItem(container, player, state, "settings", "G", "Settings", 0.115);
+DrawNavItem(container, player, state, "logs", "L", "Logs", 0.055);
 }
+private void DrawNavItem(CuiElementContainer container, BasePlayer player, PanelState state, string tab, string icon, string label, double y, string badge = null)
+{
+if (!CanSeeTab(player, tab)) return;
+var selected = state.Tab == tab;
+var row = $"{UiRoot}.Nav.{tab}";
+Panel(container, row, $"{UiRoot}.Nav", selected ? "0.13 0.12 0.095 0.96" : "0 0 0 0", $"0.04 {y}", $"0.96 {y + 0.055}");
+if (selected) Panel(container, $"{row}.Accent", row, activeSkin.Accent, "0 0", "0.018 1");
+Label(container, $"{row}.Icon", row, icon, 10, "0.05 0", "0.17 1", TextAnchor.MiddleCenter);
+Button(container, $"{row}.Button", row, label, $"liveadmin.ui tab {tab}", selected ? "0 0 0 0" : "0 0 0 0", "0.18 0", string.IsNullOrEmpty(badge) ? "0.96 1" : "0.72 1", 9, TextAnchor.MiddleLeft);
+if (!string.IsNullOrEmpty(badge))
+{
+Panel(container, $"{row}.Badge", row, selected ? activeSkin.Accent : "0.35 0.48 0.64 0.92", "0.76 0.20", "0.92 0.80");
+Label(container, $"{row}.BadgeText", $"{row}.Badge", badge, 7, "0 0", "1 1", TextAnchor.MiddleCenter);
+}
+}
+private void DrawTopSearch(CuiElementContainer container, PanelState state)
+{
+var key = CurrentFilterKey(state);
+var value = CurrentFilterValue(state);
+Panel(container, $"{UiRoot}.Top.Search", $"{UiRoot}.Top", "0.02 0.012 0.010 0.94", "0.70 0.22", "0.942 0.78");
+Input(container, $"{UiRoot}.Top.Search.Input", $"{UiRoot}.Top.Search", value, $"liveadmin.filter {key}", 8, "0.04 0", "0.96 1");
+}
+private string CurrentFilterKey(PanelState state)
+{
+if (state.Tab == "players") return "players";
+if (state.Tab == "staff") return state.StaffSubTab == "groups" ? "staffgroups" : "staffplayers";
+if (state.Tab == "chat") return "chat";
+if (state.Tab == "console") return "console";
+if (state.Tab == "reports") return "reports";
+if (state.Tab == "convars") return "convars";
+if (state.Tab == "manage" && state.SubTab == "groups") return "groups";
+if (state.Tab == "manage" && state.SubTab == "permissions") return "permissions";
+if (state.Tab == "manage") return "plugins";
+return "players";
+}
+private string CurrentFilterValue(PanelState state)
+{
+if (state.Tab == "players" || state.Tab == "staff") return state.PlayerFilter;
+if (state.Tab == "chat") return state.ChatFilter;
+if (state.Tab == "console") return state.ConsoleFilter;
+if (state.Tab == "reports") return state.ReportFilter;
+if (state.Tab == "convars") return state.ConVarFilter;
+if (state.Tab == "manage" && state.SubTab == "groups") return state.GroupFilter;
+if (state.Tab == "manage" && state.SubTab == "permissions") return state.PermissionFilter;
+if (state.Tab == "manage") return state.PluginFilter;
+return string.Empty;
+}
+private string ChatBadgeText()
+{
+var count = storedData?.Chat == null ? 0 : storedData.Chat.Count(c => c != null && !c.Deleted);
+return count > 99 ? "99+" : count.ToString();
 }
 private void DrawSkinSelector(CuiElementContainer container, BasePlayer player)
 {
 var skin = GetPlayerSkin(player);
-var x = 0.37;
+var x = 0.455;
 foreach (var option in GetSkins())
 {
 var active = option.Key == skin.Key;
-Button(container, $"{UiRoot}.Top.Skin.{option.Key}", $"{UiRoot}.Top", option.Name, $"liveadmin.ui skin {option.Key}", active ? option.Accent : option.Button, $"{x} 0.24", $"{x + 0.092} 0.76", 8);
-x += 0.098;
+Button(container, $"{UiRoot}.Top.Skin.{option.Key}", $"{UiRoot}.Top", option.Name, $"liveadmin.ui skin {option.Key}", active ? option.Accent : option.Button, $"{x} 0.24", $"{x + 0.075} 0.76", 7);
+x += 0.080;
 }
 }
 private void DrawDashboard(CuiElementContainer container, BasePlayer player)
 {
 Header(container, "Dashboard");
 var state = GetState(player);
-SeedServerFields(state);
 Stat(container, "Players Online", BasePlayer.activePlayerList.Count.ToString(), 0);
-Stat(container, "Pending Reports", storedData.Reports.Count(r => r.Status != "Resolved").ToString(), 1);
+Stat(container, "Sleepers", BasePlayer.sleepingPlayerList.Count.ToString(), 1);
 Stat(container, "Staff Online", BasePlayer.activePlayerList.Count(p => Can(p, PermUse)).ToString(), 2);
-Stat(container, "Tracked Mutes", storedData.ActiveMutes.Count.ToString(), 3);
+Stat(container, "New Today", NewPlayersToday().ToString(), 3);
 if (config.SafeMode)
 {
 Label(container, $"{UiRoot}.Body.SafeMode", $"{UiRoot}.Body", "Safe Mode: ON", 12, "0.74 0.645", "0.96 0.675", TextAnchor.MiddleRight);
 }
 DrawResourceMonitor(container);
 DrawStaffCommandCenter(container, player);
-Panel(container, $"{UiRoot}.Body.ServerInfo", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.08", "0.72 0.34");
-Label(container, $"{UiRoot}.Body.ServerInfo.Title", $"{UiRoot}.Body.ServerInfo", "Server Details", 15, "0.035 0.84", "0.45 0.98", TextAnchor.MiddleLeft);
-DrawServerField(container, "Name", "name", state.ServerName, 0.64);
-DrawServerField(container, "Description", "description", state.ServerDescription, 0.47);
-DrawServerField(container, "URL", "url", state.ServerUrl, 0.30);
-DrawServerField(container, "Header Image", "headerimage", state.ServerHeaderImage, 0.13);
-var canEditServer = CanEditServerInfo(player);
-Button(container, $"{UiRoot}.Body.ServerInfo.Apply", $"{UiRoot}.Body.ServerInfo", "Apply Server Info", canEditServer ? "liveadmin.ui act serverinfo" : string.Empty, canEditServer ? config.SuccessColor : "0.12 0.12 0.12 0.65", "0.72 0.84", "0.96 0.96", 10);
-if (CanUseQuickActions(player))
+DrawDashboardActivity(container);
+DrawDashboardServerSnapshot(container, player);
+}
+private void DrawDashboardActivity(CuiElementContainer container)
 {
-Panel(container, $"{UiRoot}.Body.QuickPanel", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.74 0.08", "0.96 0.34");
-Label(container, $"{UiRoot}.Body.QuickTitle", $"{UiRoot}.Body.QuickPanel", "Quick Actions", 14, "0.08 0.84", "0.92 0.98", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Activity", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.08", "0.58 0.34");
+Label(container, $"{UiRoot}.Body.Activity.Title", $"{UiRoot}.Body.Activity", "Live Player Activity", 15, "0.04 0.82", "0.55 0.98", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Activity.Counts", $"{UiRoot}.Body.Activity", $"Joining data: {BasePlayer.activePlayerList.Count} active / {BasePlayer.sleepingPlayerList.Count} sleepers", 8, "0.58 0.84", "0.96 0.96", TextAnchor.MiddleRight);
+var entries = storedData.Logs
+.Where(l => l != null && (l.Action == "PlayerJoin" || l.Action == "PlayerLeave"))
+.OrderByDescending(l => l.Time)
+.Take(5)
+.ToList();
+var y = 0.66;
+if (entries.Count == 0)
+{
+Label(container, $"{UiRoot}.Body.Activity.Empty", $"{UiRoot}.Body.Activity", "No join or leave events recorded since the panel loaded.", 10, "0.04 0.38", "0.96 0.54", TextAnchor.MiddleCenter);
+return;
+}
+foreach (var entry in entries)
+{
+var joined = entry.Action == "PlayerJoin";
+var row = $"{UiRoot}.Body.Activity.Row.{SafeName(entry.Time + entry.Target)}";
+Panel(container, row, $"{UiRoot}.Body.Activity", joined ? "0.09 0.15 0.10 0.88" : "0.16 0.10 0.08 0.88", $"0.04 {y}", $"0.96 {y + 0.09}");
+Label(container, $"{row}.Name", row, $"{(joined ? "JOIN" : "LEFT")}  {Shorten(entry.ActorName, 22)}", 9, "0.03 0.42", "0.55 0.94", TextAnchor.MiddleLeft);
+Label(container, $"{row}.Meta", row, $"{entry.Time}  {Shorten(entry.Details, 44)}", 7, "0.03 0.06", "0.94 0.42", TextAnchor.MiddleLeft);
+y -= 0.105;
+}
+}
+private void DrawDashboardServerSnapshot(CuiElementContainer container, BasePlayer player)
+{
+Panel(container, $"{UiRoot}.Body.ServerSnapshot", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.60 0.08", "0.96 0.34");
+Label(container, $"{UiRoot}.Body.ServerSnapshot.Title", $"{UiRoot}.Body.ServerSnapshot", "Server Snapshot", 15, "0.05 0.82", "0.95 0.98", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.ServerSnapshot.Identity", $"{UiRoot}.Body.ServerSnapshot", $"Identity {Shorten(ConVar.Server.identity ?? "default", 26)}", 8, "0.05 0.66", "0.95 0.78", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.ServerSnapshot.Map", $"{UiRoot}.Body.ServerSnapshot", $"Seed {ConVar.Server.seed}   Size {ConVar.Server.worldsize}", 8, "0.05 0.53", "0.95 0.65", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.ServerSnapshot.Plugin", $"{UiRoot}.Body.ServerSnapshot", $"Plugins {GetKnownPlugins().Count}   Permissions {GetKnownPermissions().Count}", 8, "0.05 0.40", "0.95 0.52", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.ServerSnapshot.Wipe", $"{UiRoot}.Body.ServerSnapshot", $"Next wipe {Shorten(storedData.NextAutoWipeUtc ?? "not scheduled", 30)}", 8, "0.05 0.27", "0.95 0.39", TextAnchor.MiddleLeft);
+if (!CanUseQuickActions(player)) return;
+var quicks = (config.QuickCommands ?? new List<QuickCommand>()).Where(q => q != null && Can(player, q.Permission)).Take(3).ToList();
+var x = 0.05;
+foreach (var quick in quicks)
+{
+Button(container, $"{UiRoot}.Body.ServerSnapshot.Quick.{SafeName(quick.Label)}", $"{UiRoot}.Body.ServerSnapshot", Shorten(quick.Label, 14), $"liveadmin.ui act quick \"{quick.Label}\"", config.AccentColor, $"{x} 0.06", $"{x + 0.28} 0.20", 7);
+x += 0.30;
+}
+}
+private void DrawLiveConsole(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+Header(container, "Live Console");
+if (!CanUseQuickActions(player)) { NoAccess(container); return; }
+state.ConsoleTab = CleanConsoleTab(state.ConsoleTab);
+Panel(container, $"{UiRoot}.Body.Console.Toolbar", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.78", "0.96 0.875");
+DrawConsoleCategoryButton(container, state, "all", "All", 0.025, 0.070);
+DrawConsoleCategoryButton(container, state, "chat", "Chat", 0.105, 0.085);
+DrawConsoleCategoryButton(container, state, "commands", "Commands", 0.200, 0.115);
+DrawConsoleCategoryButton(container, state, "connections", "Connections", 0.325, 0.135);
+DrawConsoleCategoryButton(container, state, "errors", "Errors", 0.470, 0.090);
+Panel(container, $"{UiRoot}.Body.Console.Toolbar.Search", $"{UiRoot}.Body.Console.Toolbar", "0.02 0.025 0.03 0.98", "0.60 0.20", "0.94 0.78");
+Input(container, $"{UiRoot}.Body.Console.Toolbar.Search.Input", $"{UiRoot}.Body.Console.Toolbar.Search", state.ConsoleFilter, "liveadmin.filter console", 8, "0.03 0", "0.97 1");
+Panel(container, $"{UiRoot}.Body.Console.Feed", $"{UiRoot}.Body", "0.045 0.05 0.055 0.96", "0.04 0.26", "0.96 0.76");
+var lines = GetConsoleLines(state.ConsoleTab, state.ConsoleFilter).Take(state.ConsoleWrap ? 8 : 11).ToList();
+var y = 0.88;
+if (lines.Count == 0)
+{
+Label(container, $"{UiRoot}.Body.Console.Feed.Empty", $"{UiRoot}.Body.Console.Feed", "No console entries match this view.", 11, "0.04 0.42", "0.96 0.58", TextAnchor.MiddleCenter);
+}
+foreach (var line in lines)
+{
+DrawConsoleLine(container, $"{UiRoot}.Body.Console.Feed", line, y, state.ConsoleWrap);
+y -= state.ConsoleWrap ? 0.105 : 0.075;
+}
+Panel(container, $"{UiRoot}.Body.Console.Command", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.08", "0.70 0.235");
+Label(container, $"{UiRoot}.Body.Console.Command.Title", $"{UiRoot}.Body.Console.Command", "Run Command", 12, "0.035 0.68", "0.35 0.94", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Console.Command.Box", $"{UiRoot}.Body.Console.Command", "0.02 0.025 0.03 0.98", "0.035 0.18", "0.76 0.58");
+Input(container, $"{UiRoot}.Body.Console.Command.Input", $"{UiRoot}.Body.Console.Command.Box", state.ConsoleCommandText, "liveadmin.consolefield", 9, "0.025 0", "0.975 1");
+Button(container, $"{UiRoot}.Body.Console.Command.Run", $"{UiRoot}.Body.Console.Command", "Run", "liveadmin.ui act consolecommand", config.WarningColor, "0.79 0.18", "0.96 0.58", 9);
+Panel(container, $"{UiRoot}.Body.Console.Options", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.72 0.08", "0.96 0.235");
+Button(container, $"{UiRoot}.Body.Console.Wrap", $"{UiRoot}.Body.Console.Options", state.ConsoleWrap ? "Wrap ON" : "Wrap OFF", "liveadmin.ui consolewrap", state.ConsoleWrap ? config.SuccessColor : "0.12 0.13 0.14 1", "0.05 0.52", "0.31 0.84", 7);
+Button(container, $"{UiRoot}.Body.Console.Export", $"{UiRoot}.Body.Console.Options", "Export", "liveadmin.ui act consoleexport", config.AccentColor, "0.36 0.52", "0.62 0.84", 7);
+Button(container, $"{UiRoot}.Body.Console.Mini", $"{UiRoot}.Body.Console.Options", state.ConsoleMiniOpen ? "Mini ON" : "Mini", "liveadmin.ui consolemini", state.ConsoleMiniOpen ? config.SuccessColor : config.WarningColor, "0.67 0.52", "0.95 0.84", 7);
+Label(container, $"{UiRoot}.Body.Console.Options.Hint", $"{UiRoot}.Body.Console.Options", "Mini stays visible across tabs.", 7, "0.05 0.12", "0.95 0.42", TextAnchor.MiddleCenter);
+}
+private void DrawConsoleCategoryButton(CuiElementContainer container, PanelState state, string key, string label, double x, double width)
+{
+var active = CleanConsoleTab(state.ConsoleTab) == key;
+Button(container, $"{UiRoot}.Body.Console.Tab.{key}", $"{UiRoot}.Body.Console.Toolbar", label, $"liveadmin.ui consoletab {key}", active ? config.AccentColor : "0.12 0.13 0.14 1", $"{x} 0.20", $"{x + width} 0.78", 8);
+}
+private void DrawConsoleLine(CuiElementContainer container, string parent, ConsoleLine line, double y, bool wrap)
+{
+var color = line.Kind == "errors" ? "0.26 0.08 0.06 0.88" : line.Kind == "connections" ? "0.09 0.15 0.10 0.88" : line.Kind == "chat" ? "0.08 0.10 0.13 0.88" : "0.075 0.08 0.09 0.88";
+var row = $"{parent}.Line.{SafeName(line.Id)}";
+Panel(container, row, parent, color, $"0.025 {y}", $"0.975 {y + (wrap ? 0.085 : 0.058)}");
+Label(container, $"{row}.Meta", row, $"{line.Time}  {line.Kind.ToUpperInvariant()}  {Shorten(line.Source, 20)}", 7, "0.02 0.50", "0.38 0.96", TextAnchor.MiddleLeft);
+Label(container, $"{row}.Text", row, wrap ? Shorten(line.Text, 110) : Shorten(line.Text, 150), 8, wrap ? "0.02 0.04" : "0.40 0.02", "0.98 0.54", TextAnchor.MiddleLeft);
+}
+private void DrawMiniConsole(CuiElementContainer container, PanelState state)
+{
+var bounds = MiniConsoleBounds(state.ConsoleMiniPosition);
+Panel(container, $"{UiRoot}.MiniConsole", UiRoot, "0.025 0.025 0.022 0.96", bounds[0], bounds[1]);
+Label(container, $"{UiRoot}.MiniConsole.Title", $"{UiRoot}.MiniConsole", "Mini Console", 10, "0.04 0.84", "0.50 0.98", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.MiniConsole.Move", $"{UiRoot}.MiniConsole", "Move", "liveadmin.ui consoleminipos", "0.12 0.13 0.14 1", "0.58 0.86", "0.75 0.98", 7);
+Button(container, $"{UiRoot}.MiniConsole.Close", $"{UiRoot}.MiniConsole", "X", "liveadmin.ui consolemini", config.DangerColor, "0.80 0.86", "0.95 0.98", 8);
 var y = 0.68;
-foreach (var quick in config.QuickCommands.Where(q => Can(player, q.Permission)).Take(5))
+foreach (var line in GetConsoleLines("all", string.Empty).Take(4))
 {
-Button(container, $"{UiRoot}.Body.Quick.{SafeName(quick.Label)}", $"{UiRoot}.Body.QuickPanel", quick.Label, $"liveadmin.ui act quick \"{quick.Label}\"", config.AccentColor, $"0.08 {y}", $"0.92 {y + 0.105}", 10);
-y -= 0.125;
+Label(container, $"{UiRoot}.MiniConsole.Line.{SafeName(line.Id)}", $"{UiRoot}.MiniConsole", $"{line.Time} {Shorten(line.Text, 46)}", 7, $"0.04 {y}", $"0.96 {y + 0.13}", TextAnchor.MiddleLeft);
+y -= 0.16;
 }
 }
+private string[] MiniConsoleBounds(int position)
+{
+switch (Math.Abs(position) % 4)
+{
+case 0: return new[] { "0.02 0.70", "0.32 0.93" };
+case 1: return new[] { "0.68 0.70", "0.98 0.93" };
+case 2: return new[] { "0.02 0.08", "0.32 0.31" };
+default: return new[] { "0.68 0.08", "0.98 0.31" };
+}
+}
+private class ConsoleLine
+{
+public string Id;
+public string Time;
+public string Kind;
+public string Source;
+public string Text;
+}
+private List<ConsoleLine> GetConsoleLines(string category, string filter)
+{
+category = CleanConsoleTab(category);
+var lines = new List<ConsoleLine>();
+if (storedData?.Chat != null)
+{
+foreach (var entry in storedData.Chat.Where(c => c != null && !c.Deleted))
+{
+lines.Add(new ConsoleLine
+{
+Id = "chat:" + entry.Id,
+Time = entry.Time,
+Kind = entry.Blocked ? "errors" : "chat",
+Source = entry.PlayerName,
+Text = $"{entry.Channel}: {entry.Message}"
+});
+}
+}
+if (storedData?.Logs != null)
+{
+foreach (var log in storedData.Logs.Where(l => l != null))
+{
+lines.Add(new ConsoleLine
+{
+Id = "log:" + log.Time + ":" + log.Action + ":" + log.Target,
+Time = log.Time,
+Kind = ConsoleKind(log),
+Source = string.IsNullOrEmpty(log.ActorName) ? "Server" : log.ActorName,
+Text = $"{log.Result}/{log.Category} {log.Action} {log.Target} {log.Details}"
+});
+}
+}
+return lines
+.Where(l => ConsoleCategoryMatches(category, l.Kind))
+.Where(l => ConsoleTextMatches(l, filter))
+.OrderByDescending(l => l.Time)
+.ToList();
+}
+private string ConsoleKind(ActionLog log)
+{
+var category = (log.Category ?? CategorizeAction(log.Action)).ToLowerInvariant();
+var result = (log.Result ?? string.Empty).ToLowerInvariant();
+if (result == "failed" || result == "blocked" || category == "security") return "errors";
+if (category == "chat") return "chat";
+if (category == "connection") return "connections";
+if (category == "server" || (log.Action ?? string.Empty).IndexOf("command", StringComparison.OrdinalIgnoreCase) >= 0) return "commands";
+return "all";
+}
+private bool ConsoleCategoryMatches(string category, string kind)
+{
+return category == "all" || kind == category || (category == "errors" && kind == "errors");
+}
+private bool ConsoleTextMatches(ConsoleLine line, string filter)
+{
+if (string.IsNullOrEmpty(filter)) return true;
+return MatchesFilter(line.Time, filter) || MatchesFilter(line.Kind, filter) || MatchesFilter(line.Source, filter) || MatchesFilter(line.Text, filter);
+}
+private string CleanConsoleTab(string value)
+{
+value = (value ?? "all").ToLowerInvariant();
+return value == "chat" || value == "commands" || value == "connections" || value == "errors" ? value : "all";
+}
+private void ExportConsoleLog(BasePlayer player)
+{
+var state = GetState(player);
+var lines = GetConsoleLines(state.ConsoleTab, state.ConsoleFilter);
+var folder = Path.Combine(Interface.Oxide.RootDirectory, "logs", "LiveAdmin");
+Directory.CreateDirectory(folder);
+var file = Path.Combine(folder, $"console-{DateTime.UtcNow:yyyyMMdd-HHmmss}.txt");
+File.WriteAllLines(file, lines.Select(l => $"{l.Time} [{l.Kind}] {l.Source}: {l.Text}").ToArray());
+Reply(player, $"Console exported: {file}");
+Log(player, "ConsoleExport", state.ConsoleTab, $"{lines.Count} lines");
 }
 private void DrawStaffCommandCenter(CuiElementContainer container, BasePlayer player)
 {
 Panel(container, $"{UiRoot}.Body.StaffCenter", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.74 0.38", "0.96 0.64");
-Label(container, $"{UiRoot}.Body.StaffCenter.Title", $"{UiRoot}.Body.StaffCenter", "Staff Command", 14, "0.08 0.82", "0.92 0.98", TextAnchor.MiddleLeft);
-Label(container, $"{UiRoot}.Body.StaffCenter.Passive", $"{UiRoot}.Body.StaffCenter", $"Passive modes: {passivePlayers.Count}", 10, "0.08 0.64", "0.92 0.78", TextAnchor.MiddleLeft);
-Label(container, $"{UiRoot}.Body.StaffCenter.Frozen", $"{UiRoot}.Body.StaffCenter", $"Frozen players: {frozenPositions.Count}", 10, "0.08 0.48", "0.92 0.62", TextAnchor.MiddleLeft);
-Label(container, $"{UiRoot}.Body.StaffCenter.Reports", $"{UiRoot}.Body.StaffCenter", $"Open reports: {storedData.Reports.Count(r => r.Status != "Resolved")}", 10, "0.08 0.32", "0.92 0.46", TextAnchor.MiddleLeft);
-Button(container, $"{UiRoot}.Body.StaffCenter.Open", $"{UiRoot}.Body.StaffCenter", "Open Staff Tools", CanSeeTab(player, "staff") ? "liveadmin.ui tab staff" : string.Empty, CanSeeTab(player, "staff") ? config.AccentColor : "0.12 0.12 0.12 0.65", "0.08 0.08", "0.92 0.24", 9);
+Label(container, $"{UiRoot}.Body.StaffCenter.Title", $"{UiRoot}.Body.StaffCenter", "Server Pulse", 14, "0.08 0.82", "0.92 0.98", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffCenter.Fps", $"{UiRoot}.Body.StaffCenter", $"FPS {GetServerFpsText()}   Entities {GetEntityCountText()}", 9, "0.08 0.64", "0.92 0.78", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffCenter.State", $"{UiRoot}.Body.StaffCenter", $"Mutes {storedData.ActiveMutes.Count}   Frozen {frozenPositions.Count}   Passive {passivePlayers.Count}", 9, "0.08 0.48", "0.92 0.62", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffCenter.Reports", $"{UiRoot}.Body.StaffCenter", $"Open reports: {storedData.Reports.Count(r => r.Status != "Resolved")}", 9, "0.08 0.32", "0.92 0.46", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.StaffCenter.Vanish", $"{UiRoot}.Body.StaffCenter", "Vanish", CanUseStaffAction(player, "vanishself") ? $"liveadmin.ui act staffact {player.UserIDString} vanishself" : string.Empty, config.AccentColor, "0.08 0.08", "0.34 0.24", 8);
+Button(container, $"{UiRoot}.Body.StaffCenter.God", $"{UiRoot}.Body.StaffCenter", "God", CanUseStaffAction(player, "godself") ? $"liveadmin.ui act staffact {player.UserIDString} godself" : string.Empty, config.SuccessColor, "0.37 0.08", "0.63 0.24", 8);
+Button(container, $"{UiRoot}.Body.StaffCenter.Noclip", $"{UiRoot}.Body.StaffCenter", "Noclip", CanUseStaffAction(player, "noclipself") ? $"liveadmin.ui act staffact {player.UserIDString} noclipself" : string.Empty, config.WarningColor, "0.66 0.08", "0.92 0.24", 8);
 }
 private void DrawPlayers(CuiElementContainer container, BasePlayer player, PanelState state)
 {
@@ -2025,6 +2441,7 @@ var protectedTarget = IsProtectedTarget(selected);
 var position = selected.transform.position;
 var reports = storedData.Reports.Count(r => r.TargetId == selected.UserIDString);
 var relatedTickets = storedData.Reports.Count(r => r.TargetId == selected.UserIDString || r.ReporterId == selected.UserIDString);
+var profile = GetPlayerProfile(selected.UserIDString);
 Label(container, $"{UiRoot}.Body.StaffDetail.Name", $"{UiRoot}.Body.StaffDetail", selected.displayName, 18, "0.04 0.90", "0.66 0.985", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.StaffDetail.Status", $"{UiRoot}.Body.StaffDetail", protectedTarget ? "Protected account" : "Standard account", 9, "0.68 0.91", "0.96 0.97", TextAnchor.MiddleRight);
 DrawInfoCard(container, "Vitals", $"HP {selected.health:0}", $"Ping {GetPlayerPing(selected)}", $"Connected {GetConnectionAge(selected)}", 0.04, 0.76, 0.29, 0.88);
@@ -2036,7 +2453,8 @@ Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Title", $"{UiRoot}.Body.St
 Label(container, $"{UiRoot}.Body.StaffDetail.Identity.SteamLabel", $"{UiRoot}.Body.StaffDetail.Identity", "Steam ID", 8, "0.03 0.12", "0.16 0.55", TextAnchor.MiddleLeft);
 Panel(container, $"{UiRoot}.Body.StaffDetail.Identity.SteamBox", $"{UiRoot}.Body.StaffDetail.Identity", "0.02 0.025 0.03 0.98", "0.17 0.16", "0.54 0.54");
 Input(container, $"{UiRoot}.Body.StaffDetail.Identity.SteamInput", $"{UiRoot}.Body.StaffDetail.Identity.SteamBox", selected.UserIDString, "liveadmin.noop", 8, "0.03 0", "0.97 1");
-Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Ip", $"{UiRoot}.Body.StaffDetail.Identity", $"IP {GetPlayerAddress(selected)}", 8, "0.58 0.14", "0.97 0.55", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Ip", $"{UiRoot}.Body.StaffDetail.Identity", $"IP {GetPlayerAddress(selected)}", 8, "0.58 0.36", "0.97 0.72", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Seen", $"{UiRoot}.Body.StaffDetail.Identity", $"First {ShortDate(profile?.FirstSeen)}   Last {ShortDate(profile?.LastSeen)}", 7, "0.58 0.04", "0.97 0.34", TextAnchor.MiddleLeft);
 Panel(container, $"{UiRoot}.Body.StaffDetail.GroupsBox", $"{UiRoot}.Body.StaffDetail", "0.055 0.06 0.07 0.96", "0.04 0.42", "0.96 0.56");
 Label(container, $"{UiRoot}.Body.StaffDetail.GroupsBox.Title", $"{UiRoot}.Body.StaffDetail.GroupsBox", "Groups", 10, "0.02 0.58", "0.98 0.96", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.StaffDetail.GroupsBox.Value", $"{UiRoot}.Body.StaffDetail.GroupsBox", Shorten(string.Join(", ", groups), 115), 8, "0.02 0.08", "0.98 0.58", TextAnchor.MiddleLeft);
@@ -2720,6 +3138,55 @@ private void DrawRolePresetButton(CuiElementContainer container, BasePlayer play
 {
 Button(container, $"{UiRoot}.Body.Perms.Detail.Preset.{preset}", $"{UiRoot}.Body.Perms.Detail", preset, Can(player, PermPermissionsManage) ? $"liveadmin.ui act applypreset {group} {preset}" : string.Empty, "0.12 0.13 0.14 1", $"{x} {y}", $"{x + 0.145} {y + 0.055}", 8);
 }
+private void DrawConVars(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+Header(container, "ConVars");
+if (!CanEditServerInfo(player)) { NoAccess(container); return; }
+SeedConVarFields(state);
+Panel(container, $"{UiRoot}.Body.ConVars.Main", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.16", "0.96 0.82");
+Label(container, $"{UiRoot}.Body.ConVars.Title", $"{UiRoot}.Body.ConVars.Main", "Common Server ConVars", 15, "0.04 0.88", "0.55 0.98", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.ConVars.Hint", $"{UiRoot}.Body.ConVars.Main", "Changes are applied through console commands and written to server config where supported.", 9, "0.04 0.80", "0.94 0.88", TextAnchor.MiddleLeft);
+DrawConVarField(container, "Hostname", "hostname", state.ConVarHostname, 0.66);
+DrawConVarField(container, "Description", "description", state.ConVarDescription, 0.52);
+DrawConVarField(container, "Server URL", "url", state.ConVarUrl, 0.38);
+DrawConVarField(container, "Max Players", "maxplayers", state.ConVarMaxPlayers, 0.24);
+DrawConVarField(container, "Save Interval", "saveinterval", state.ConVarSaveInterval, 0.10);
+Button(container, $"{UiRoot}.Body.ConVars.Apply", $"{UiRoot}.Body.ConVars.Main", "Apply ConVars", "liveadmin.ui act convarsapply", config.SuccessColor, "0.76 0.88", "0.96 0.97", 10);
+}
+private void DrawAppearance(CuiElementContainer container, BasePlayer player)
+{
+Header(container, "Appearance");
+Panel(container, $"{UiRoot}.Body.Appearance.Main", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.42", "0.96 0.82");
+Label(container, $"{UiRoot}.Body.Appearance.Title", $"{UiRoot}.Body.Appearance.Main", "Interface Skin", 15, "0.04 0.82", "0.60 0.96", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Appearance.Hint", $"{UiRoot}.Body.Appearance.Main", "Skins only change LiveAdmin visuals. Your selection is stored per user.", 9, "0.04 0.70", "0.94 0.82", TextAnchor.MiddleLeft);
+var skin = GetPlayerSkin(player);
+var x = 0.04;
+foreach (var option in GetSkins())
+{
+var active = option.Key == skin.Key;
+Panel(container, $"{UiRoot}.Body.Appearance.Skin.{option.Key}", $"{UiRoot}.Body.Appearance.Main", active ? option.Accent : option.Panel, $"{x} 0.34", $"{x + 0.28} 0.62");
+Label(container, $"{UiRoot}.Body.Appearance.Skin.{option.Key}.Name", $"{UiRoot}.Body.Appearance.Skin.{option.Key}", option.Name, 12, "0.06 0.48", "0.94 0.90", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Appearance.Skin.{option.Key}.Text", $"{UiRoot}.Body.Appearance.Skin.{option.Key}", active ? "Selected" : "Click to apply", 8, "0.06 0.14", "0.94 0.42", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.Appearance.Skin.{option.Key}.Button", $"{UiRoot}.Body.Appearance.Skin.{option.Key}", string.Empty, $"liveadmin.ui skin {option.Key}", "0 0 0 0", "0 0", "1 1", 1);
+x += 0.31;
+}
+Panel(container, $"{UiRoot}.Body.Appearance.Accents", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.16", "0.96 0.38");
+Label(container, $"{UiRoot}.Body.Appearance.Accents.Title", $"{UiRoot}.Body.Appearance.Accents", "Current Palette", 13, "0.04 0.70", "0.45 0.94", TextAnchor.MiddleLeft);
+DrawSwatch(container, $"{UiRoot}.Body.Appearance.Accent", $"{UiRoot}.Body.Appearance.Accents", "Accent", Skin().Accent, 0.04);
+DrawSwatch(container, $"{UiRoot}.Body.Appearance.Warning", $"{UiRoot}.Body.Appearance.Accents", "Warning", Skin().Warning, 0.24);
+DrawSwatch(container, $"{UiRoot}.Body.Appearance.Danger", $"{UiRoot}.Body.Appearance.Accents", "Danger", Skin().Danger, 0.44);
+DrawSwatch(container, $"{UiRoot}.Body.Appearance.Success", $"{UiRoot}.Body.Appearance.Accents", "Success", Skin().Success, 0.64);
+}
+private void DrawSettings(CuiElementContainer container, BasePlayer player)
+{
+Header(container, "Settings");
+Panel(container, $"{UiRoot}.Body.Settings.Main", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.20", "0.96 0.82");
+Label(container, $"{UiRoot}.Body.Settings.Title", $"{UiRoot}.Body.Settings.Main", "LiveAdmin Safety & Behaviour", 15, "0.04 0.88", "0.70 0.98", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Settings.Hint", $"{UiRoot}.Body.Settings.Main", Can(player, PermOwner) ? "Owner-only toggles for panel behaviour." : "Owner permission required to change these settings.", 9, "0.04 0.80", "0.94 0.88", TextAnchor.MiddleLeft);
+DrawSettingsToggle(container, player, "Safe Mode", "Blocks high-risk actions while enabled.", config.SafeMode, "settingssafe", 0.62);
+DrawSettingsToggle(container, player, "Command Safety", "Blocks unsafe command patterns and protected prefixes.", config.EnableCommandSafety, "settingscommandsafety", 0.44);
+DrawSettingsToggle(container, player, "Global Chat Announcements", "Allows configured mute/unmute announcements to global chat.", config.AllowGlobalChatAnnouncements, "settingschatannounce", 0.26);
+}
 private void DrawLogs(CuiElementContainer container, BasePlayer player, PanelState state)
 {
 Header(container, "Logs");
@@ -2879,6 +3346,24 @@ Label(container, $"{UiRoot}.Body.ServerInfo.{key}.Label", $"{UiRoot}.Body.Server
 Panel(container, $"{UiRoot}.Body.ServerInfo.{key}.Box", $"{UiRoot}.Body.ServerInfo", "0.02 0.025 0.03 0.98", "0.22 " + y, "0.96 " + (y + 0.10));
 Input(container, $"{UiRoot}.Body.ServerInfo.{key}.Input", $"{UiRoot}.Body.ServerInfo.{key}.Box", value, $"liveadmin.serverfield {key}", 9, "0.025 0", "0.975 1");
 }
+private void DrawConVarField(CuiElementContainer container, string label, string key, string value, double y)
+{
+Label(container, $"{UiRoot}.Body.ConVars.{key}.Label", $"{UiRoot}.Body.ConVars.Main", label, 10, $"0.04 {y}", $"0.22 {y + 0.08}", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.ConVars.{key}.Box", $"{UiRoot}.Body.ConVars.Main", "0.02 0.025 0.03 0.98", $"0.24 {y}", $"0.94 {y + 0.08}");
+Input(container, $"{UiRoot}.Body.ConVars.{key}.Input", $"{UiRoot}.Body.ConVars.{key}.Box", value, $"liveadmin.convarfield {key}", 9, "0.025 0", "0.975 1");
+}
+private void DrawSwatch(CuiElementContainer container, string name, string parent, string label, string color, double x)
+{
+Panel(container, $"{name}.Color", parent, color, $"{x} 0.24", $"{x + 0.06} 0.55");
+Label(container, $"{name}.Label", parent, label, 9, $"{x + 0.07} 0.22", $"{x + 0.18} 0.58", TextAnchor.MiddleLeft);
+}
+private void DrawSettingsToggle(CuiElementContainer container, BasePlayer player, string label, string help, bool enabled, string action, double y)
+{
+Panel(container, $"{UiRoot}.Body.Settings.{action}", $"{UiRoot}.Body.Settings.Main", "0.055 0.06 0.07 0.96", $"0.04 {y}", $"0.96 {y + 0.12}");
+Label(container, $"{UiRoot}.Body.Settings.{action}.Label", $"{UiRoot}.Body.Settings.{action}", label, 11, "0.03 0.48", "0.58 0.92", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Settings.{action}.Help", $"{UiRoot}.Body.Settings.{action}", help, 8, "0.03 0.08", "0.66 0.46", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.Settings.{action}.Toggle", $"{UiRoot}.Body.Settings.{action}", enabled ? "Enabled" : "Disabled", Can(player, PermOwner) ? $"liveadmin.ui act {action}" : string.Empty, enabled ? config.SuccessColor : "0.12 0.13 0.14 1", "0.72 0.22", "0.94 0.78", 9);
+}
 private void Row(CuiElementContainer container, string id, string left, string right, string command, double y)
 {
 Panel(container, $"{UiRoot}.Body.{id}", $"{UiRoot}.Body", "0.075 0.08 0.09 1", $"0.04 {y}", $"0.54 {y + 0.055}");
@@ -2944,25 +3429,25 @@ private IEnumerable<UiSkin> GetSkins()
 yield return new UiSkin
 {
 Key = "default",
-Name = "Default",
-Overlay = "0.025 0.026 0.024 0.94",
-Top = "0.070 0.074 0.070 0.98",
-Nav = "0.045 0.050 0.048 0.98",
-Body = "0.035 0.038 0.036 0.92",
-Panel = "0.075 0.078 0.070 0.96",
-PanelAlt = "0.100 0.105 0.092 0.96",
-Slot = "0.30 0.32 0.27 0.36",
-Input = "0.010 0.012 0.016 0.98",
-Button = "0.115 0.125 0.118 0.96",
-ButtonActive = "0.50 0.30 0.16 0.96",
+Name = "Rust",
+Overlay = "0.026 0.025 0.021 0.95",
+Top = "0.120 0.115 0.095 0.98",
+Nav = "0.115 0.110 0.092 0.98",
+Body = "0.045 0.055 0.043 0.93",
+Panel = "0.120 0.115 0.095 0.94",
+PanelAlt = "0.150 0.140 0.115 0.94",
+Slot = "0.30 0.31 0.25 0.36",
+Input = "0.025 0.015 0.012 0.98",
+Button = "0.135 0.135 0.115 0.94",
+ButtonActive = "0.62 0.36 0.18 0.96",
 ButtonDisabled = "0.10 0.10 0.095 0.58",
-Accent = "0.66 0.39 0.20 0.98",
-Warning = "0.82 0.50 0.18 0.96",
-Danger = "0.58 0.16 0.13 0.96",
-Success = "0.30 0.48 0.28 0.96",
-Text = "0.88 0.86 0.78 1",
-MutedText = "0.62 0.60 0.54 1",
-HeaderText = "0.96 0.94 0.84 1"
+Accent = "0.72 0.42 0.22 0.98",
+Warning = "0.86 0.52 0.18 0.96",
+Danger = "0.56 0.15 0.12 0.96",
+Success = "0.34 0.50 0.30 0.96",
+Text = "0.86 0.84 0.76 1",
+MutedText = "0.58 0.56 0.50 1",
+HeaderText = "0.94 0.92 0.82 1"
 };
 yield return new UiSkin
 {
@@ -2990,7 +3475,7 @@ HeaderText = "0.98 0.98 0.94 1"
 yield return new UiSkin
 {
 Key = "contrast",
-Name = "Contrast",
+Name = "High",
 Overlay = "0.000 0.000 0.000 0.96",
 Top = "0.025 0.025 0.025 0.99",
 Nav = "0.018 0.020 0.022 0.99",
@@ -3171,12 +3656,16 @@ return true;
 }
 private bool CanSeeTab(BasePlayer player, string tab)
 {
+if (tab == "console") return CanUseQuickActions(player);
 if (tab == "players") return Can(player, PermPlayersView);
 if (tab == "staff") return CanAny(player, PermStaffToolsView, PermStaffToolsModerate, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups, PermStaffToolsTickets, PermStaffToolsFun, PermStaffToolsDangerous, PermPlayersInventoryView, PermPlayersNotes);
 if (tab == "chat") return CanViewChat(player);
 if (tab == "reports") return Can(player, PermReportsView);
 if (tab == "manage") return Can(player, PermPluginsView) || Can(player, PermGroupsView) || Can(player, PermPermissionsView);
+if (tab == "convars") return CanEditServerInfo(player);
 if (tab == "wipe") return CanViewWipe(player);
+if (tab == "appearance") return Can(player, PermUse);
+if (tab == "settings") return Can(player, PermOwner);
 if (tab == "logs") return CanAny(player, PermOwner, PermAuditView);
 return true;
 }
@@ -3196,6 +3685,8 @@ if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
 if (target == "chatmessage" || target == "chats") target = "chat";
+if (target == "console") target = "console";
+if (target == "convar") target = "convars";
 if (target == "plugin") target = "plugins";
 if (target == "permplugin" || target == "permissionplugins") target = "permplugins";
 if (target == "group") target = "groups";
@@ -3234,6 +3725,18 @@ if (target == "chat")
 state.ChatFilter = value;
 state.ChatPage = 0;
 state.Tab = "chat";
+return true;
+}
+if (target == "console")
+{
+state.ConsoleFilter = value;
+state.Tab = "console";
+return true;
+}
+if (target == "convars")
+{
+state.ConVarFilter = value;
+state.Tab = "convars";
 return true;
 }
 if (target == "plugins")
@@ -3278,6 +3781,8 @@ if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
 if (target == "chatmessage" || target == "chats") target = "chat";
+if (target == "console") target = "console";
+if (target == "convar") target = "convars";
 if (target == "plugin") target = "plugins";
 if (target == "permplugin" || target == "permissionplugins") target = "permplugins";
 if (target == "group") target = "groups";
@@ -3287,6 +3792,8 @@ if (target == "all")
 state.PlayerFilter = string.Empty;
 state.ReportFilter = string.Empty;
 state.ChatFilter = string.Empty;
+state.ConsoleFilter = string.Empty;
+state.ConVarFilter = string.Empty;
 state.PluginFilter = string.Empty;
 state.GroupFilter = string.Empty;
 state.GroupDropdownFilter = string.Empty;
@@ -3323,6 +3830,14 @@ else if (target == "chat" || (target == "current" && state.Tab == "chat"))
 {
 state.ChatFilter = string.Empty;
 state.ChatPage = 0;
+}
+else if (target == "console" || (target == "current" && state.Tab == "console"))
+{
+state.ConsoleFilter = string.Empty;
+}
+else if (target == "convars" || (target == "current" && state.Tab == "convars"))
+{
+state.ConVarFilter = string.Empty;
 }
 else if (target == "groups" || (target == "current" && state.Tab == "manage" && state.SubTab == "groups"))
 {
@@ -3533,6 +4048,15 @@ var state = GetState(player);
 if (state.Tab == tab) Draw(player);
 }
 }
+private void RefreshConsoleViews()
+{
+foreach (var player in BasePlayer.activePlayerList.ToArray())
+{
+if (player == null || !openPanels.Contains(player.userID)) continue;
+var state = GetState(player);
+if (state.Tab == "console" || state.ConsoleMiniOpen) Draw(player);
+}
+}
 private ChatEntry FindChatEntry(string id)
 {
 return storedData.Chat?.FirstOrDefault(c => c != null && c.Id == id);
@@ -3698,6 +4222,14 @@ if (string.IsNullOrEmpty(state.ServerDescription)) state.ServerDescription = Con
 if (string.IsNullOrEmpty(state.ServerUrl)) state.ServerUrl = ConVar.Server.url ?? string.Empty;
 if (string.IsNullOrEmpty(state.ServerHeaderImage)) state.ServerHeaderImage = ConVar.Server.headerimage ?? string.Empty;
 }
+private void SeedConVarFields(PanelState state)
+{
+if (string.IsNullOrEmpty(state.ConVarHostname)) state.ConVarHostname = ConVar.Server.hostname ?? string.Empty;
+if (string.IsNullOrEmpty(state.ConVarDescription)) state.ConVarDescription = ConVar.Server.description ?? string.Empty;
+if (string.IsNullOrEmpty(state.ConVarUrl)) state.ConVarUrl = ConVar.Server.url ?? string.Empty;
+if (string.IsNullOrEmpty(state.ConVarMaxPlayers)) state.ConVarMaxPlayers = ConVar.Server.maxplayers.ToString();
+if (string.IsNullOrEmpty(state.ConVarSaveInterval)) state.ConVarSaveInterval = "300";
+}
 private void ApplyServerInfo(BasePlayer player)
 {
 var state = GetState(player);
@@ -3714,6 +4246,35 @@ RunServerCommand(player, $"server.url {ConsoleArg(state.ServerUrl)}", "set serve
 RunServerCommand(player, $"server.headerimage {ConsoleArg(state.ServerHeaderImage)}", "set server header image");
 RunServerCommand(player, "server.writecfg", "write server config");
 Reply(player, "Server details applied.");
+}
+private void ApplyConVars(BasePlayer player)
+{
+var state = GetState(player);
+SeedConVarFields(state);
+if (!IsHttpUrlOrEmpty(state.ConVarUrl))
+{
+Reply(player, "Server URL must be blank or start with http:// or https://");
+LogFailed(player, "Config", "ConVars", "server", string.Empty, "Invalid URL");
+return;
+}
+if (!int.TryParse(state.ConVarMaxPlayers, out var maxPlayers) || maxPlayers < 1 || maxPlayers > 1000)
+{
+Reply(player, "Max players must be between 1 and 1000.");
+return;
+}
+if (!int.TryParse(state.ConVarSaveInterval, out var saveInterval) || saveInterval < 30 || saveInterval > 3600)
+{
+Reply(player, "Save interval must be between 30 and 3600 seconds.");
+return;
+}
+RunServerCommand(player, $"server.hostname {ConsoleArg(state.ConVarHostname)}", "set convar server.hostname");
+RunServerCommand(player, $"server.description {ConsoleArg(state.ConVarDescription)}", "set convar server.description");
+RunServerCommand(player, $"server.url {ConsoleArg(state.ConVarUrl)}", "set convar server.url");
+RunServerCommand(player, $"server.maxplayers {maxPlayers}", "set convar server.maxplayers");
+RunServerCommand(player, $"server.saveinterval {saveInterval}", "set convar server.saveinterval");
+RunServerCommand(player, "server.writecfg", "write server config");
+Log(player, "ConVarsApply", "server", $"maxplayers {maxPlayers}, saveinterval {saveInterval}");
+Reply(player, "ConVars applied.");
 }
 private void SampleResources()
 {
@@ -4117,7 +4678,7 @@ private bool CanUseStaffAction(BasePlayer actor, string action)
 {
 if (string.IsNullOrEmpty(action)) return false;
 if (action == "save" || action == "broadcast") return CanUseQuickActions(actor);
-if (action == "vanishself") return CanAny(actor, PermOwner, PermStaffToolsModerate, PermStaffToolsActions);
+if (action == "vanishself" || action == "godself" || action == "noclipself") return CanAny(actor, PermOwner, PermStaffToolsModerate, PermStaffToolsActions);
 if (action == "launch" || action == "spin" || action == "randomtp" || action == "passive" || action == "timeout" || action == "fake") return Can(actor, PermStaffToolsFun);
 if (action == "openinv") return CanViewInventory(actor);
 if (action == "give" || action == "givemain" || action == "givebackpack" || action == "givebelt" || action == "givewear" || action.StartsWith("removeinv:", StringComparison.OrdinalIgnoreCase)) return CanModifyInventory(actor);
@@ -4182,6 +4743,16 @@ Log(actor, "StaffSpectate", target.UserIDString, target.displayName);
 else if (action == "vanishself")
 {
 ToggleVanish(actor);
+}
+else if (action == "godself")
+{
+if (Godmode != null && RunPluginCommand(actor, actor, config.GodmodeCommand, "StaffGodmodeSelf")) return;
+Reply(actor, "Godmode plugin is not loaded or command failed.");
+}
+else if (action == "noclipself")
+{
+actor.SendConsoleCommand("noclip");
+Log(actor, "StaffNoclipToggle", actor.UserIDString, actor.displayName);
 }
 else if (action == "warn")
 {
@@ -4933,6 +5504,7 @@ if (storedData.Logs.Count > 500)
 {
 storedData.Logs.RemoveRange(0, storedData.Logs.Count - 500);
 }
+RefreshConsoleViews();
 }
 private string CategorizeAction(string action)
 {
@@ -4942,6 +5514,7 @@ if (action.Contains("plugin")) return "Plugin";
 if (action.Contains("grant") || action.Contains("revoke") || action.Contains("permission")) return "Permission";
 if (action.Contains("group")) return "Group";
 if (action.Contains("ticket") || action.Contains("report")) return "Report";
+if (action.Contains("join") || action.Contains("leave") || action.Contains("connect") || action.Contains("disconnect")) return "Connection";
 if (action.Contains("inventory") || action.Contains("item")) return "Inventory";
 if (action.Contains("config")) return "Config";
 if (action.Contains("server") || action.Contains("command")) return "Server";

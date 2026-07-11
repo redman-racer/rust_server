@@ -30,6 +30,19 @@
   "Ground Placement Distance": 12.0,
   "Ground Clearance": 0.15,
   "Deploy On Item Drop": false,
+  "Rate Limit": {
+    "Enabled": true,
+    "Player Cooldown Seconds": 300.0,
+    "Admins Bypass": true
+  },
+  "Cupboard Limiter Integration": {
+    "Enabled": true,
+    "Require CupboardLimiter Loaded": false,
+    "Respect CupboardLimiter Bypass Permission": true,
+    "CupboardLimiter Bypass Permission": "cupboardlimiter.bypass",
+    "Count Team Cupboards": true,
+    "Assumed Tool Cupboards Per Portafort When Layout Cannot Be Counted": 1
+  },
   "Validate Placement Footprint": true,
   "Placement Footprint Padding": 0.65,
   "Placement Player Clearance": 0.85,

@@ -14,7 +14,8 @@ namespace Oxide.Plugins
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
-        private const string AdminPermission = "raidlands.sentryturrets.admin";
+        private const string AdminPermission = "raidlandssentryturrets.admin";
+        private const string LegacyAdminPermission = "raidlands.sentryturrets.admin";
         private const string RaidlandsEventsDataFileName = "RaidlandsEvents";
         private const string RemoverToolRefundKey = "raidlands.sentryturret";
         private const string VanillaAutoTurretPrefab = "assets/prefabs/npc/autoturret/autoturret_deployed.prefab";
@@ -1361,6 +1362,21 @@ namespace Oxide.Plugins
             return $"id={entityId} type={entity.GetType().Name} short={entity.ShortPrefabName} owner={entity.OwnerID} managed={IsManagedNpcSentry(entity)} event={IsEventManagedSentry(entity)} copySwitch={HasSimpleSwitchChild(entity)} hp={health} range={range} pos={pos} prefab={entity.PrefabName}";
         }
 
+        private bool API_IsRaidlandsManagedSentry(BaseEntity entity)
+        {
+            return IsManagedNpcSentry(entity);
+        }
+
+        private ulong API_GetRaidlandsSentryOwner(BaseEntity entity)
+        {
+            return IsManagedNpcSentry(entity) ? entity.OwnerID : 0UL;
+        }
+
+        private bool API_ShouldBypassNativeSentryAuth(BaseEntity entity)
+        {
+            return IsPlayerOwnedManagedNpcSentry(entity);
+        }
+
         private bool IsSentryItem(Item item)
         {
             if (item?.info == null || config.SentryItem == null)
@@ -1495,7 +1511,7 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (player.IsAdmin || permission.UserHasPermission(player.UserIDString, AdminPermission))
+            if (player.IsAdmin || HasAdminPermission(player.UserIDString))
             {
                 return true;
             }
@@ -2139,7 +2155,12 @@ namespace Oxide.Plugins
             }
 
             var player = arg.Connection.player as BasePlayer;
-            return player != null && permission.UserHasPermission(player.UserIDString, AdminPermission);
+            return player != null && HasAdminPermission(player.UserIDString);
+        }
+
+        private bool HasAdminPermission(string playerId)
+        {
+            return permission.UserHasPermission(playerId, AdminPermission) || permission.UserHasPermission(playerId, LegacyAdminPermission);
         }
 
         private BasePlayer FindPlayer(string value)

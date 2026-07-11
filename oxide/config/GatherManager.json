@@ -3,21 +3,22 @@
     "Dispensers": "Resource Dispensers",
     "Excavators": "Excavators",
     "HelpText": "/gather - Shows you detailed gather information.",
-    "HelpTextAdmin": "To change the resources gained by gathering use the command:\r\ngather.rate <type:dispenser|pickup|quarry|survey> <resource> <multiplier>\r\nTo change the amount of resources in a dispenser type use the command:\r\ndispenser.scale <dispenser:tree|ore|corpse> <multiplier>\r\nTo change the time between Mining Quarry gathers:\r\nquarry.tickrate <seconds>",
+    "HelpTextAdmin": "To change the resources gained by gathering use the command:\r\ngather.rate <type:dispenser|pickup|quarry|excavator|survey> <resource> <multiplier>\r\nTo change the amount of resources in a dispenser type use the command:\r\ndispenser.scale <dispenser:tree|ore|corpse|flesh> <multiplier>\r\nTo change the time between Mining Quarry gathers:\r\nquarry.tickrate <seconds>\r\nTo change the time between Excavator gathers:\r\nexcavator.tickrate <seconds>",
+    "HelpTextExcavatorSpeed": "Time between Excavator gathers: {0} second(s).",
     "HelpTextMiningQuarrySpeed": "Time between Mining Quarry gathers: {0} second(s).",
     "HelpTextPlayer": "Resources gained from gathering have been scaled to the following:",
     "HelpTextPlayerDefault": "Default values.",
     "HelpTextPlayerGains": "Resources gained from {0}:",
     "InvalidArgumentsDispenserType": "Invalid arguments supplied! Use dispenser.scale <dispenser:tree|ore|corpse> <multiplier>",
     "InvalidArgumentsGather": "Invalid arguments supplied! Use gather.rate <type:dispenser|pickup|quarry|excavator|survey> <resource> <multiplier>",
-    "InvalidArgumentsMiningQuarrySpeed": "Invalid arguments supplied! Use quarry.rate <time between gathers in seconds>",
+    "InvalidArgumentsMiningQuarrySpeed": "Invalid arguments supplied! Use quarry.tickrate <seconds> or excavator.tickrate <seconds>",
     "InvalidDispenser": "{0} is not a valid dispenser. Check gather.dispensers for a list of available options.",
     "InvalidMiningQuarrySpeed": "You can't set the speed lower than 1 second!",
     "InvalidModifier": "Invalid modifier supplied! The new modifier always needs to be bigger than 0!",
-    "InvalidResource": "{0} is not a valid resource. Check gather.resources for a list of available options.",
+    "InvalidResource": "{0} was accepted as a custom/shortname resource key. If rates do not apply, run gather.resources and use the listed shortname.",
     "MiningQuarries": "Mining Quarries",
     "ModifyDispenser": "You have set the resource amount for {0} dispensers to x{1}",
-    "ModifyMiningQuarrySpeed": "The Mining Quarry will now provide resources every {0} seconds.",
+    "ModifyMiningQuarrySpeed": "{0} will now provide resources every {1} seconds.",
     "ModifyResource": "You have set the gather rate for {0} to x{1} from {2}.",
     "ModifyResourceRemove": "You have reset the gather rate for {0} from {1}.",
     "NotAllowed": "You don't have permission to use this command.",
@@ -26,15 +27,17 @@
   },
   "Options": {
     "ExcavatorBeltSpeedMax": 0.1,
-    "ExcavatorResourceModifiers": {},
+    "ExcavatorResourceModifiers": {
+      "*": 1000.0
+    },
     "ExcavatorResourceTickRate": 3.0,
     "ExcavatorTimeForFullResources": 120.0,
-    "GatherDispenserModifiers": {
-      "Tree": 1000.0,
-      "Ore": 1000.0
-    },
+    "GatherDispenserModifiers": {},
     "GatherResourceModifiers": {
-      "*": 1000.0
+      "*": 1000.0,
+      "hq.metal.ore": 5000.0,
+      "metal.ore": 1000.0,
+      "sulfur.ore": 1000.0
     },
     "MiningQuarryResourceTickRate": 5.0,
     "PickupResourceModifiers": {
@@ -43,9 +46,7 @@
     "QuarryResourceModifiers": {
       "*": 1000.0
     },
-    "SurveyResourceModifiers": {
-      "*": 1000.0
-    }
+    "SurveyResourceModifiers": {}
   },
   "Settings": {
     "ChatPrefix": "Gather Manager",

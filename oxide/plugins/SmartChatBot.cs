@@ -324,7 +324,7 @@ namespace Oxide.Plugins
             if (_config.JoiningMessage.Count > 0 && _config.JoiningMessageEnabled)
             {
                 var message =
-                    new StringBuilder(_config.JoiningMessage[Random.Next(0, _config.JoiningMessage.Count - 1)]);
+                    new StringBuilder(_config.JoiningMessage[Random.Next(0, _config.JoiningMessage.Count)]);
                 var ip = player.net.connection.ipaddress.Substring(0, player.net.connection.ipaddress.LastIndexOf(':'));
                 message = message.Replace("{name}", player.displayName).Replace("{id}", player.UserIDString)
                     .Replace("{ip}", ip);
@@ -338,7 +338,7 @@ namespace Oxide.Plugins
             if (_config.WelcomeMessage.Count <= 0 || !_config.WelcomeMessageEnabled) return;
             
             {
-                var message = new StringBuilder(_config.WelcomeMessage[Random.Next(0, _config.WelcomeMessage.Count - 1)]);
+                var message = new StringBuilder(_config.WelcomeMessage[Random.Next(0, _config.WelcomeMessage.Count)]);
                 var ip = player.net.connection.ipaddress.Substring(0, player.net.connection.ipaddress.LastIndexOf(':'));
                 message = message.Replace("{name}", player.displayName).Replace("{id}", player.UserIDString)
                     .Replace("{ip}", ip);
@@ -354,7 +354,7 @@ namespace Oxide.Plugins
             if (_config.LeavingMessage.Count <= 0 || !_config.LeavingMessageEnabled) return;
             
             var message =
-                new StringBuilder(_config.LeavingMessage[Random.Next(0, _config.LeavingMessage.Count - 1)]);
+                new StringBuilder(_config.LeavingMessage[Random.Next(0, _config.LeavingMessage.Count)]);
             var ip = player.net.connection.ipaddress.Substring(0, player.net.connection.ipaddress.LastIndexOf(':'));
             message = message.Replace("{name}", player.displayName).Replace("{id}", player.UserIDString)
                 .Replace("{ip}", ip).Replace("{reason}", reason);

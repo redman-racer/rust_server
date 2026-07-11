@@ -15,7 +15,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.71")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.76")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -36,6 +36,7 @@ namespace Oxide.Plugins
         private const string F1GrenadePrefab = "assets/prefabs/weapons/f1 grenade/grenade.f1.deployed.prefab";
         private const string SmokeGrenadePrefab = "assets/prefabs/tools/smoke grenade/grenade.smoke.deployed.prefab";
         private const string GenericRadiusMapMarkerPrefab = "assets/prefabs/tools/map/genericradiusmarker.prefab";
+        private const int MaxTrackedSmokeOccluders = 64;
         private const float NativeBotMapMarkerBaseRadius = 0.015f;
         private const float NativeBotMapMarkerRadiusPerConfiguredMeter = 0.004f;
         private const float MinimumNativeBotMapMarkerRadius = 0.02f;
@@ -77,6 +78,20 @@ namespace Oxide.Plugins
         private const string BotAvatarImagePrefix = "raidlands_roambot_avatar_";
         private const int AdminPanelMaximumPopulation = 500;
         private const int AdminLearningProfilePageSize = 4;
+        private static readonly string[] SmokeOccluderPrefabTokens =
+        {
+            "grenade.smoke.deployed",
+            "smokegrenade",
+            "smoke_grenade",
+            "smoke.grenade.static",
+            "40mm_grenade_smoke",
+            "rocket_smoke",
+            "smoke_cover",
+            "smoke_signal",
+            "generator_smoke",
+            "npcgrenade.smoke",
+            "scientist2.grenade.smoke"
+        };
         private static readonly GameObjectRef[] NoScientistBodyEffects = new GameObjectRef[0];
         private static readonly FieldInfo ScientistRadioChatterActionField = typeof(ScientistNPC).GetField("_playRadioChatter", BindingFlags.Instance | BindingFlags.NonPublic);
         private const string LearningSubpageObserve = "observe";
@@ -167,6 +182,8 @@ namespace Oxide.Plugins
         private readonly List<BaseEntity> botPlacedEntities = new List<BaseEntity>();
         private readonly List<BotUtilityEntity> botUtilityEntities = new List<BotUtilityEntity>();
         private readonly List<UtilityDangerZone> utilityDangerZones = new List<UtilityDangerZone>();
+        private readonly List<SmokeOccluder> activeSmokeOccluders = new List<SmokeOccluder>();
+        private readonly HashSet<LootableCorpse> populatedBotCorpses = new HashSet<LootableCorpse>();
         private readonly HashSet<string> registeredAvatarImages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, KitEligibility> eligibleKits = new Dictionary<string, KitEligibility>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, SquadBlackboard> squadBlackboards = new Dictionary<int, SquadBlackboard>();
@@ -182,6 +199,7 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, RecentBotDeath> recentBotDeaths = new Dictionary<ulong, RecentBotDeath>();
         private readonly Dictionary<string, BotChatConversation> botChatConversations = new Dictionary<string, BotChatConversation>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, BotChatRecentFight> botChatRecentFights = new Dictionary<string, BotChatRecentFight>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<ulong, LastBotInfo> lastBotInfoByPlayer = new Dictionary<ulong, LastBotInfo>();
         private readonly Dictionary<string, float> recentBotChatInputs = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<BaseCombatEntity, MapMarkerGenericRadius> botMapMarkers = new Dictionary<BaseCombatEntity, MapMarkerGenericRadius>();
         private readonly HashSet<string> missingSecretWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -266,6 +284,9 @@ namespace Oxide.Plugins
             [JsonProperty("Spawn Settings")]
             public SpawnConfig Spawn = new SpawnConfig();
 
+            [JsonProperty("Ambient Squad Respawn Rejoin")]
+            public AmbientSquadRespawnRejoinConfig AmbientSquadRespawnRejoin = new AmbientSquadRespawnRejoinConfig();
+
             [JsonProperty("Prefab Candidates In Order")]
             public List<string> PrefabCandidates = new List<string>
             {
@@ -341,6 +362,29 @@ namespace Oxide.Plugins
 
             [JsonProperty("Respawn Delay Seconds")]
             public float RespawnDelaySeconds = 20f;
+        }
+
+        private class AmbientSquadRespawnRejoinConfig
+        {
+            public bool Enabled = true;
+
+            [JsonProperty("Minimum Teammate Health Fraction")]
+            public float MinimumTeammateHealthFraction = 0.98f;
+
+            [JsonProperty("Teammate Recent Damage Window Seconds")]
+            public float TeammateRecentDamageWindowSeconds = 15f;
+
+            [JsonProperty("Direct Teammate Teleport Radius")]
+            public float DirectTeammateTeleportRadius = 2.25f;
+
+            [JsonProperty("Teleport Position Attempts")]
+            public int TeleportPositionAttempts = 10;
+
+            [JsonProperty("Wakeup Equip Delay Seconds")]
+            public float WakeupEquipDelaySeconds = 4f;
+
+            [JsonProperty("Fallback To Normal Spawn")]
+            public bool FallbackToNormalSpawn = true;
         }
 
         private class KitSelectionConfig
@@ -519,19 +563,19 @@ namespace Oxide.Plugins
             public float MinimumExposedTargetFraction = 0.25f;
 
             [JsonProperty("Minimum Exposed Target Fraction To Shoot")]
-            public float MinimumExposedTargetFractionToShoot = 0.25f;
+            public float MinimumExposedTargetFractionToShoot = 0.34f;
 
             [JsonProperty("Foliage Blocks Vision")]
             public bool FoliageBlocksVision = true;
 
             [JsonProperty("Foliage Vision Check Radius")]
-            public float FoliageVisionCheckRadius = 0.65f;
+            public float FoliageVisionCheckRadius = 0.9f;
 
             [JsonProperty("Maximum Clear Vision Through Foliage")]
-            public float MaximumClearVisionThroughFoliage = 24f;
+            public float MaximumClearVisionThroughFoliage = 14f;
 
             [JsonProperty("Foliage Hits To Block Vision")]
-            public int FoliageHitsToBlockVision = 2;
+            public int FoliageHitsToBlockVision = 1;
 
             [JsonProperty("Foliage Terrain Sampling")]
             public bool FoliageTerrainSampling = true;
@@ -760,6 +804,18 @@ namespace Oxide.Plugins
 
             [JsonProperty("Smoke Screen Distance")]
             public float SmokeScreenDistance = 8f;
+
+            [JsonProperty("Smoke Blocks Vision")]
+            public bool SmokeBlocksVision = true;
+
+            [JsonProperty("Smoke Vision Radius")]
+            public float SmokeVisionRadius = 7.5f;
+
+            [JsonProperty("Smoke Vision Height")]
+            public float SmokeVisionHeight = 5f;
+
+            [JsonProperty("Smoke Vision Lifetime Seconds")]
+            public float SmokeVisionLifetimeSeconds = 30f;
 
             [JsonProperty("Maximum Active Bot Utility Projectiles")]
             public int MaxActiveBotUtilityProjectiles = 8;
@@ -1831,6 +1887,8 @@ namespace Oxide.Plugins
             public float CrouchHoldUntil;
             public float NextCrouchDecisionAt;
             public float LastCrouchChangedAt;
+            public float ActionBlockedUntil;
+            public string ActionBlockReason = "none";
 
             public bool IsShooting;
             public bool IsInBaseRestrictedArea;
@@ -1870,6 +1928,14 @@ namespace Oxide.Plugins
             public float LeashRadius;
             public float LeashChaseGraceSeconds;
             public JObject Objective = new JObject();
+        }
+
+        private class AmbientRespawnRequest
+        {
+            public int TeamId;
+            public string PreferredPrefab = "";
+            public float QueuedAt;
+            public string Reason = "";
         }
 
         private enum TacticalState
@@ -1985,8 +2051,25 @@ namespace Oxide.Plugins
             public int SolidBlockedProbePoints;
             public int FoliageBlockedProbePoints;
             public int FoliageBlockerHits;
+            public int SmokeBlockedProbePoints;
+            public int SmokeBlockerHits;
             public string BlockReason = "none";
             public Vector3 BestVisiblePoint;
+        }
+
+        private class LastBotInfo
+        {
+            public string DisplayName = "";
+            public string KitName = "";
+            public string SkillTier = "";
+            public string PlayerProfileKey = "";
+            public string ProfileSourceName = "";
+            public string RequestedProfile = "";
+            public string RequestedDifficulty = "";
+            public string ClanTag = "";
+            public int Kills;
+            public int Deaths;
+            public bool PlayerWon;
         }
 
         private class CoverPlan
@@ -2057,6 +2140,17 @@ namespace Oxide.Plugins
             public int TeamId;
             public string UtilityType = "";
             public float SpawnedAt;
+        }
+
+        private class SmokeOccluder
+        {
+            public BaseEntity Entity;
+            public Vector3 LastKnownPosition;
+            public float SpawnedAt;
+            public float ExpiresAt;
+            public float Radius;
+            public float Height;
+            public string Source = "";
         }
 
         private class UtilityDangerZone
@@ -2715,6 +2809,11 @@ namespace Oxide.Plugins
                 config.Spawn = defaults.Spawn;
             }
 
+            if (config.AmbientSquadRespawnRejoin == null)
+            {
+                config.AmbientSquadRespawnRejoin = defaults.AmbientSquadRespawnRejoin;
+            }
+
             config.Spawn.SpawnMode = NormalizeSpawnMode(config.Spawn.SpawnMode);
             config.Spawn.MaxPositionAttempts = Math.Max(10, config.Spawn.MaxPositionAttempts);
             config.Spawn.NavmeshSampleDistance = Math.Max(2f, config.Spawn.NavmeshSampleDistance);
@@ -2758,6 +2857,11 @@ namespace Oxide.Plugins
             config.MaintainIntervalSeconds = Math.Max(5f, config.MaintainIntervalSeconds);
             config.ScoreboardIntervalSeconds = Math.Max(15f, config.ScoreboardIntervalSeconds);
             config.RespawnDelaySeconds = Math.Max(5f, config.RespawnDelaySeconds);
+            config.AmbientSquadRespawnRejoin.MinimumTeammateHealthFraction = Mathf.Clamp(config.AmbientSquadRespawnRejoin.MinimumTeammateHealthFraction <= 0f ? defaults.AmbientSquadRespawnRejoin.MinimumTeammateHealthFraction : config.AmbientSquadRespawnRejoin.MinimumTeammateHealthFraction, 0.1f, 1f);
+            config.AmbientSquadRespawnRejoin.TeammateRecentDamageWindowSeconds = Mathf.Clamp(config.AmbientSquadRespawnRejoin.TeammateRecentDamageWindowSeconds < 0f ? defaults.AmbientSquadRespawnRejoin.TeammateRecentDamageWindowSeconds : config.AmbientSquadRespawnRejoin.TeammateRecentDamageWindowSeconds, 0f, 120f);
+            config.AmbientSquadRespawnRejoin.DirectTeammateTeleportRadius = Mathf.Clamp(config.AmbientSquadRespawnRejoin.DirectTeammateTeleportRadius <= 0f ? defaults.AmbientSquadRespawnRejoin.DirectTeammateTeleportRadius : config.AmbientSquadRespawnRejoin.DirectTeammateTeleportRadius, 0.5f, 8f);
+            config.AmbientSquadRespawnRejoin.TeleportPositionAttempts = Clamp(config.AmbientSquadRespawnRejoin.TeleportPositionAttempts <= 0 ? defaults.AmbientSquadRespawnRejoin.TeleportPositionAttempts : config.AmbientSquadRespawnRejoin.TeleportPositionAttempts, 1, 40);
+            config.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds = Mathf.Clamp(config.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds < 0f ? defaults.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds : config.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds, 0f, 30f);
 
             if (config.AI == null)
             {
@@ -2778,38 +2882,13 @@ namespace Oxide.Plugins
                 config.AI.CloseAwarenessRadius = defaults.AI.CloseAwarenessRadius;
             }
 
-            if (config.AI.MinimumExposedTargetFraction >= 0.44f)
-            {
-                config.AI.MinimumExposedTargetFraction = defaults.AI.MinimumExposedTargetFraction;
-            }
-
-            if (config.AI.MinimumExposedTargetFractionToShoot >= 0.49f)
-            {
-                config.AI.MinimumExposedTargetFractionToShoot = defaults.AI.MinimumExposedTargetFractionToShoot;
-            }
-
-            if (config.AI.FoliageVisionCheckRadius <= 0.66f || config.AI.FoliageVisionCheckRadius >= 1.5f)
-            {
-                config.AI.FoliageVisionCheckRadius = defaults.AI.FoliageVisionCheckRadius;
-            }
-
-            if (config.AI.MaximumClearVisionThroughFoliage <= 8.1f || config.AI.MaximumClearVisionThroughFoliage >= 23.9f)
-            {
-                config.AI.MaximumClearVisionThroughFoliage = defaults.AI.MaximumClearVisionThroughFoliage;
-            }
-
-            if (config.AI.FoliageHitsToBlockVision <= 0 || config.AI.FoliageHitsToBlockVision >= 2)
-            {
-                config.AI.FoliageHitsToBlockVision = defaults.AI.FoliageHitsToBlockVision;
-            }
-
             config.AI.VisionFovDegrees = Mathf.Clamp(config.AI.VisionFovDegrees, 30f, 360f);
             config.AI.CloseAwarenessRadius = Math.Max(0f, config.AI.CloseAwarenessRadius);
-            config.AI.MinimumExposedTargetFraction = Mathf.Clamp(config.AI.MinimumExposedTargetFraction, 0.1f, 1f);
-            config.AI.MinimumExposedTargetFractionToShoot = Mathf.Clamp(config.AI.MinimumExposedTargetFractionToShoot, config.AI.MinimumExposedTargetFraction, 1f);
-            config.AI.FoliageVisionCheckRadius = Mathf.Clamp(config.AI.FoliageVisionCheckRadius, 0.1f, 3f);
-            config.AI.MaximumClearVisionThroughFoliage = Mathf.Clamp(config.AI.MaximumClearVisionThroughFoliage, 1f, config.AI.VisionRange);
-            config.AI.FoliageHitsToBlockVision = Math.Max(1, config.AI.FoliageHitsToBlockVision);
+            config.AI.MinimumExposedTargetFraction = Mathf.Clamp(config.AI.MinimumExposedTargetFraction <= 0f ? defaults.AI.MinimumExposedTargetFraction : config.AI.MinimumExposedTargetFraction, 0.1f, 1f);
+            config.AI.MinimumExposedTargetFractionToShoot = Mathf.Clamp(config.AI.MinimumExposedTargetFractionToShoot <= 0f ? defaults.AI.MinimumExposedTargetFractionToShoot : config.AI.MinimumExposedTargetFractionToShoot, config.AI.MinimumExposedTargetFraction, 1f);
+            config.AI.FoliageVisionCheckRadius = Mathf.Clamp(config.AI.FoliageVisionCheckRadius <= 0f ? defaults.AI.FoliageVisionCheckRadius : config.AI.FoliageVisionCheckRadius, 0.1f, 3f);
+            config.AI.MaximumClearVisionThroughFoliage = Mathf.Clamp(config.AI.MaximumClearVisionThroughFoliage <= 0f ? defaults.AI.MaximumClearVisionThroughFoliage : config.AI.MaximumClearVisionThroughFoliage, 1f, config.AI.VisionRange);
+            config.AI.FoliageHitsToBlockVision = Clamp(config.AI.FoliageHitsToBlockVision <= 0 ? defaults.AI.FoliageHitsToBlockVision : config.AI.FoliageHitsToBlockVision, 1, 12);
             config.AI.FoliageTerrainSampleStep = Mathf.Clamp(config.AI.FoliageTerrainSampleStep <= 0f ? defaults.AI.FoliageTerrainSampleStep : config.AI.FoliageTerrainSampleStep, 3f, 18f);
             config.AI.FoliageTerrainSamplesToBlockVision = Clamp(config.AI.FoliageTerrainSamplesToBlockVision <= 0 ? defaults.AI.FoliageTerrainSamplesToBlockVision : config.AI.FoliageTerrainSamplesToBlockVision, 1, 12);
             if (config.AI.FoliageOccluderLayerNames == null || config.AI.FoliageOccluderLayerNames.Count == 0)
@@ -2875,6 +2954,9 @@ namespace Oxide.Plugins
             config.AI.GrenadeAllyAvoidRadius = Mathf.Clamp(config.AI.GrenadeAllyAvoidRadius <= 0f ? defaults.AI.GrenadeAllyAvoidRadius : config.AI.GrenadeAllyAvoidRadius, config.AI.GrenadeDangerRadius, 24f);
             config.AI.GrenadeAvoidanceSeconds = Mathf.Clamp(config.AI.GrenadeAvoidanceSeconds <= 0f ? defaults.AI.GrenadeAvoidanceSeconds : config.AI.GrenadeAvoidanceSeconds, config.AI.GrenadeFuseSeconds, 12f);
             config.AI.SmokeScreenDistance = Mathf.Clamp(config.AI.SmokeScreenDistance <= 0f ? defaults.AI.SmokeScreenDistance : config.AI.SmokeScreenDistance, 2f, 18f);
+            config.AI.SmokeVisionRadius = Mathf.Clamp(config.AI.SmokeVisionRadius <= 0f ? defaults.AI.SmokeVisionRadius : config.AI.SmokeVisionRadius, 1f, 18f);
+            config.AI.SmokeVisionHeight = Mathf.Clamp(config.AI.SmokeVisionHeight <= 0f ? defaults.AI.SmokeVisionHeight : config.AI.SmokeVisionHeight, 1f, 12f);
+            config.AI.SmokeVisionLifetimeSeconds = Mathf.Clamp(config.AI.SmokeVisionLifetimeSeconds <= 0f ? defaults.AI.SmokeVisionLifetimeSeconds : config.AI.SmokeVisionLifetimeSeconds, 5f, 90f);
             config.AI.MaxActiveBotUtilityProjectiles = Clamp(config.AI.MaxActiveBotUtilityProjectiles <= 0 ? defaults.AI.MaxActiveBotUtilityProjectiles : config.AI.MaxActiveBotUtilityProjectiles, 1, 30);
             config.AI.BarricadeCooldownSeconds = Mathf.Clamp(Math.Min(config.AI.BarricadeCooldownSeconds, defaults.AI.BarricadeCooldownSeconds), 5f, 45f);
             config.AI.BarricadePrefab = WoodenBarricadeCoverPrefab;
@@ -5301,7 +5383,7 @@ namespace Oxide.Plugins
             return spawned;
         }
 
-        private BaseCombatEntity TrySpawnBot(Vector3 position, int teamId, string preferredPrefab, ManagedBotSpawnContext managedContext = null)
+        private BaseCombatEntity TrySpawnBot(Vector3 position, int teamId, string preferredPrefab, ManagedBotSpawnContext managedContext = null, bool holdInitialMovement = false, float actionBlockedUntil = 0f, string actionBlockReason = "")
         {
             foreach (var prefab in ActivePrefabCandidates(preferredPrefab))
             {
@@ -5353,8 +5435,26 @@ namespace Oxide.Plugins
 
                 var runtime = ConfigureBot(bot, position, teamId, prefab, managedContext);
                 PrepareNpcBody(bot);
-                runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition, runtime);
-                MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+                if (actionBlockedUntil > Time.realtimeSinceStartup)
+                {
+                    runtime.ActionBlockedUntil = actionBlockedUntil;
+                    runtime.ActionBlockReason = string.IsNullOrWhiteSpace(actionBlockReason) ? "spawn_hold" : actionBlockReason;
+                    runtime.NextDecisionAt = Math.Max(runtime.NextDecisionAt, actionBlockedUntil);
+                    runtime.NextPerceptionAt = Math.Max(runtime.NextPerceptionAt, actionBlockedUntil);
+                }
+
+                if (holdInitialMovement)
+                {
+                    runtime.CurrentDestination = position;
+                    runtime.Movement.LastProgressAt = Time.realtimeSinceStartup;
+                    StopBotAttack(bot, runtime);
+                }
+                else
+                {
+                    runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition, runtime);
+                    MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+                }
+
                 ScheduleBodyPrepare(bot);
 
                 if (config.Debug.DebugSpawnDetails)
@@ -5803,7 +5903,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            PopulateCorpseLoot(corpse, plan);
+            PopulateCorpseLootOnce(corpse, plan);
             return corpse;
         }
 
@@ -5816,7 +5916,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            PopulateCorpseLoot(corpse, plan);
+            PopulateCorpseLootOnce(corpse, plan);
             return null;
         }
 
@@ -5875,12 +5975,14 @@ namespace Oxide.Plugins
                     || (plan.MainItems != null && plan.MainItems.Count > 0));
         }
 
-        private void PopulateCorpseLoot(LootableCorpse corpse, BotCorpseLootPlan plan)
+        private void PopulateCorpseLootOnce(LootableCorpse corpse, BotCorpseLootPlan plan)
         {
-            if (corpse?.containers == null || corpse.containers.Length == 0)
+            if (corpse == null || populatedBotCorpses.Contains(corpse) || corpse.containers == null || corpse.containers.Length == 0)
             {
                 return;
             }
+
+            populatedBotCorpses.Add(corpse);
 
             ApplyPlayerLikeCorpseIdentity(corpse, plan);
             var main = corpse.containers[0];
@@ -7120,10 +7222,7 @@ namespace Oxide.Plugins
                     UpdateScoreboards();
                 }
 
-                if (config.Enabled && !IsManagedBot(victimRuntime))
-                {
-                    timer.Once(config.RespawnDelaySeconds, MaintainPopulation);
-                }
+                QueueAmbientRespawn(victimRuntime, "death");
 
                 return;
             }
@@ -7144,6 +7243,228 @@ namespace Oxide.Plugins
             if (victimPlayer != null)
             {
                 MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), now);
+            }
+        }
+
+        private void QueueAmbientRespawn(BotRuntime runtime, string reason)
+        {
+            if (config?.Enabled != true || runtime == null || IsManagedBot(runtime))
+            {
+                return;
+            }
+
+            var request = new AmbientRespawnRequest
+            {
+                TeamId = runtime.TeamId,
+                PreferredPrefab = runtime.Prefab ?? "",
+                QueuedAt = Time.realtimeSinceStartup,
+                Reason = reason ?? ""
+            };
+
+            timer.Once(config.RespawnDelaySeconds, () => HandleAmbientRespawn(request));
+        }
+
+        private void HandleAmbientRespawn(AmbientRespawnRequest request)
+        {
+            CleanupInactiveBots();
+
+            if (config?.Enabled != true)
+            {
+                return;
+            }
+
+            var target = Math.Min(TargetPopulation(), Math.Max(0, config.ManagedApi.MaximumTotalActiveBots - ManagedBotCount()));
+
+            if (AmbientBotCount() >= target)
+            {
+                return;
+            }
+
+            if (request != null
+                && config.AmbientSquadRespawnRejoin?.Enabled == true
+                && TryRespawnAmbientNearHealthyTeammate(request))
+            {
+                return;
+            }
+
+            if (config.AmbientSquadRespawnRejoin == null || config.AmbientSquadRespawnRejoin.FallbackToNormalSpawn)
+            {
+                MaintainPopulation();
+            }
+        }
+
+        private bool TryRespawnAmbientNearHealthyTeammate(AmbientRespawnRequest request)
+        {
+            if (request == null || request.TeamId <= 0)
+            {
+                return false;
+            }
+
+            RefreshEligibleKits();
+
+            if (eligibleKits.Count == 0)
+            {
+                return false;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            var candidates = activeBots
+                .Where(entry => IsLiveBot(entry.Key)
+                    && entry.Value != null
+                    && !IsManagedBot(entry.Value)
+                    && entry.Value.TeamId == request.TeamId)
+                .OrderBy(_ => UnityEngine.Random.value)
+                .ToList();
+
+            foreach (var candidate in candidates)
+            {
+                if (!IsHealthyRespawnRejoinTeammate(candidate.Key, candidate.Value, now, out var reason))
+                {
+                    if (config?.Debug?.DebugSpawnDetails == true)
+                    {
+                        DebugLog($"respawn-rejoin-skip:{candidate.Value.BotKey}", $"Skipping {candidate.Value.DisplayName} as rejoin teammate for team {request.TeamId}: {reason}.");
+                    }
+
+                    continue;
+                }
+
+                if (!TryFindDirectTeammateTeleportPosition(candidate.Key, out var position))
+                {
+                    if (config?.Debug?.DebugSpawnDetails == true)
+                    {
+                        DebugLog($"respawn-rejoin-position:{candidate.Value.BotKey}", $"Could not find direct teammate teleport spot near {candidate.Value.DisplayName} at {FormatVector(candidate.Key.transform.position)}.");
+                    }
+
+                    continue;
+                }
+
+                var holdUntil = now + Math.Max(0f, config.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds);
+                var bot = TrySpawnBot(position, request.TeamId, request.PreferredPrefab, null, true, holdUntil, "squad_rejoin");
+
+                if (bot == null)
+                {
+                    continue;
+                }
+
+                var runtime = RuntimeFor(bot);
+
+                if (runtime != null)
+                {
+                    runtime.HomePosition = position;
+                    runtime.SpawnPosition = position;
+                    runtime.CurrentDestination = position;
+                    runtime.LastFormationReason = $"rejoin:{candidate.Value.BotKey}";
+                }
+
+                if (config?.Debug?.DebugSpawnDetails == true)
+                {
+                    DebugLog($"respawn-rejoin:{request.TeamId}", $"Respawned ambient team {request.TeamId} bot beside healthy teammate {candidate.Value.DisplayName} at {FormatVector(position)} after {Math.Max(0f, now - request.QueuedAt):0}s queued.");
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsHealthyRespawnRejoinTeammate(BaseCombatEntity bot, BotRuntime runtime, float now, out string reason)
+        {
+            reason = "ok";
+
+            if (bot == null || runtime == null || !IsLiveBot(bot))
+            {
+                reason = "not_live";
+                return false;
+            }
+
+            var maxHealth = Math.Max(1f, BotMaxHealth(bot, runtime));
+            var healthFraction = Mathf.Clamp01(bot.Health() / maxHealth);
+            var minimum = config?.AmbientSquadRespawnRejoin?.MinimumTeammateHealthFraction ?? 0.98f;
+
+            if (healthFraction < minimum)
+            {
+                reason = $"health {healthFraction.ToString("0.00", CultureInfo.InvariantCulture)} < {minimum.ToString("0.00", CultureInfo.InvariantCulture)}";
+                return false;
+            }
+
+            var recentWindow = Math.Max(0f, config?.AmbientSquadRespawnRejoin?.TeammateRecentDamageWindowSeconds ?? 15f);
+
+            if (recentWindow > 0f)
+            {
+                var lastDamage = Math.Max(runtime.LastDamageTakenAt, runtime.Memory?.LastDamagedAt ?? 0f);
+
+                if (lastDamage > 0f && now - lastDamage <= recentWindow)
+                {
+                    reason = $"damaged {Math.Max(0f, now - lastDamage).ToString("0.0", CultureInfo.InvariantCulture)}s ago";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryFindDirectTeammateTeleportPosition(BaseCombatEntity teammate, out Vector3 position)
+        {
+            position = Vector3.zero;
+
+            if (teammate == null)
+            {
+                return false;
+            }
+
+            var origin = teammate.transform.position;
+            var radius = Math.Max(0.5f, config?.AmbientSquadRespawnRejoin?.DirectTeammateTeleportRadius ?? 2.25f);
+            var attempts = Math.Max(1, config?.AmbientSquadRespawnRejoin?.TeleportPositionAttempts ?? 10);
+
+            for (var attempt = 0; attempt < attempts; attempt++)
+            {
+                var candidate = DirectTeammateTeleportCandidate(teammate, origin, radius, attempt);
+
+                if (!TryProjectToLandSurface(ref candidate))
+                {
+                    continue;
+                }
+
+                if (IsBlockedLandPosition(candidate))
+                {
+                    continue;
+                }
+
+                var sampleDistance = Math.Max(config.Spawn.NavmeshSampleDistance, radius + 3f);
+
+                if (!NavMesh.SamplePosition(candidate, out var hit, sampleDistance, NavMesh.AllAreas))
+                {
+                    continue;
+                }
+
+                if (IsBlockedLandPosition(hit.position) || Distance2D(origin, hit.position) > Math.Max(radius + 4f, 7f))
+                {
+                    continue;
+                }
+
+                position = hit.position;
+                return true;
+            }
+
+            return false;
+        }
+
+        private Vector3 DirectTeammateTeleportCandidate(BaseCombatEntity teammate, Vector3 origin, float radius, int attempt)
+        {
+            switch (attempt)
+            {
+                case 0:
+                    return origin + teammate.transform.right * radius;
+                case 1:
+                    return origin - teammate.transform.right * radius;
+                case 2:
+                    return origin + teammate.transform.forward * radius;
+                case 3:
+                    return origin - teammate.transform.forward * radius;
+                default:
+                    var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+                    var distance = UnityEngine.Random.Range(Math.Min(0.75f, radius), radius);
+                    return origin + new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
             }
         }
 
@@ -7201,8 +7522,34 @@ namespace Oxide.Plugins
             return null;
         }
 
+        private void OnEntitySpawned(BaseNetworkable entity)
+        {
+            var baseEntity = entity as BaseEntity;
+
+            if (baseEntity == null || config?.AI?.SmokeBlocksVision != true || !IsSmokeOccluderEntity(baseEntity))
+            {
+                return;
+            }
+
+            RegisterSmokeOccluder(baseEntity, Time.realtimeSinceStartup, "world");
+        }
+
         private void OnEntityKill(BaseNetworkable entity)
         {
+            var baseEntity = entity as BaseEntity;
+
+            var corpse = entity as LootableCorpse;
+
+            if (corpse != null)
+            {
+                populatedBotCorpses.Remove(corpse);
+            }
+
+            if (baseEntity != null)
+            {
+                activeSmokeOccluders.RemoveAll(smoke => smoke == null || smoke.Entity == baseEntity);
+            }
+
             var bot = entity as BaseCombatEntity;
 
             if (bot == null)
@@ -7234,13 +7581,19 @@ namespace Oxide.Plugins
         [ChatCommand("raidbots")]
         private void ChatRaidBots(BasePlayer player, string command, string[] args)
         {
-            if (!CanAdmin(player))
+            var mode = args != null && args.Length > 0 ? (args[0] ?? "").Trim().ToLowerInvariant() : "admin";
+
+            if (mode == "showlastinfo")
             {
-                player?.ChatMessage("You do not have permission to manage Raidlands roam bots.");
+                ShowLastBotInfo(player);
                 return;
             }
 
-            var mode = args != null && args.Length > 0 ? (args[0] ?? "").Trim().ToLowerInvariant() : "admin";
+            if (!CanAdmin(player))
+            {
+                player?.ChatMessage("Use /raidbots showlastinfo to view the last Raidlands bot you fought.");
+                return;
+            }
 
             if (string.IsNullOrWhiteSpace(mode) || mode == "admin" || mode == "panel" || mode == "settings")
             {
@@ -7256,6 +7609,66 @@ namespace Oxide.Plugins
             }
 
             player.ChatMessage("Use /raidbots admin to open the Raidlands roam bot admin panel.");
+        }
+
+        [ChatCommand("lastbotinfo")]
+        private void ChatLastBotInfo(BasePlayer player, string command, string[] args)
+        {
+            ShowLastBotInfo(player);
+        }
+
+        private void ShowLastBotInfo(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            if (!lastBotInfoByPlayer.TryGetValue(player.userID, out var info) || info == null)
+            {
+                player.ChatMessage("No recent Raidlands bot fight was found. Fight a roam bot, then use /lastbotinfo again.");
+                return;
+            }
+
+            var kd = info.Deaths <= 0
+                ? info.Kills.ToString(CultureInfo.InvariantCulture)
+                : (info.Kills / (float)Math.Max(1, info.Deaths)).ToString("0.00", CultureInfo.InvariantCulture);
+            var profile = !string.IsNullOrWhiteSpace(info.PlayerProfileKey)
+                ? info.PlayerProfileKey
+                : !string.IsNullOrWhiteSpace(info.RequestedProfile) ? info.RequestedProfile : "default skill model";
+            var trainedOn = string.IsNullOrWhiteSpace(info.ProfileSourceName) ? "not player-trained" : info.ProfileSourceName;
+            var difficulty = string.IsNullOrWhiteSpace(info.RequestedDifficulty) ? info.SkillTier : info.RequestedDifficulty;
+            var clan = string.IsNullOrWhiteSpace(info.ClanTag) ? "none" : info.ClanTag;
+
+            player.ChatMessage("<color=#f2c94c><b>Last Raidlands Bot</b></color>"
+                + $"\nName: {info.DisplayName}  Result: {(info.PlayerWon ? "you won" : "bot won")}"
+                + $"\nProfile: {profile}  Trained on: {trainedOn}"
+                + $"\nDifficulty: {difficulty}  Kit: {info.KitName}  Clan: {clan}"
+                + $"\nBot lifetime K/D: {info.Kills}/{info.Deaths} ({kd})");
+        }
+
+        private void RememberLastBotInfo(BasePlayer player, BotRuntime runtime, bool playerWon)
+        {
+            if (player == null || runtime == null)
+            {
+                return;
+            }
+
+            var stats = EnsureBotStats(runtime);
+            lastBotInfoByPlayer[player.userID] = new LastBotInfo
+            {
+                DisplayName = runtime.DisplayName ?? "Raidlands Bot",
+                KitName = string.IsNullOrWhiteSpace(runtime.KitName) ? "unknown" : runtime.KitName,
+                SkillTier = string.IsNullOrWhiteSpace(runtime.SkillTier) ? "unknown" : runtime.SkillTier,
+                PlayerProfileKey = runtime.PlayerProfileKey ?? "",
+                ProfileSourceName = runtime.ProfileSourceName ?? "",
+                RequestedProfile = runtime.RequestedProfile ?? "",
+                RequestedDifficulty = runtime.RequestedDifficulty ?? "",
+                ClanTag = runtime.ClanTag ?? "",
+                Kills = stats.kills,
+                Deaths = stats.deaths,
+                PlayerWon = playerWon
+            };
         }
 
         [ConsoleCommand("raidbots.ui")]
@@ -11129,6 +11542,11 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                if (IsBotActionBlocked(entry.Value, now))
+                {
+                    continue;
+                }
+
                 entry.Value.NextPerceptionAt = now + Math.Max(0.1f, config.AI.PerceptionTickSeconds);
                 UpdatePerception(entry.Key, entry.Value, now);
             }
@@ -11150,6 +11568,12 @@ namespace Oxide.Plugins
 
                 if (!EnsureBotPositionUsable(bot, runtime, now))
                 {
+                    continue;
+                }
+
+                if (IsBotActionBlocked(runtime, now))
+                {
+                    StopBotAttack(bot, runtime);
                     continue;
                 }
 
@@ -11178,6 +11602,23 @@ namespace Oxide.Plugins
                 ExecuteDecision(bot, runtime, decision, now);
                 UpdateBotPosture(bot, runtime, now);
             }
+        }
+
+        private bool IsBotActionBlocked(BotRuntime runtime, float now)
+        {
+            if (runtime == null || runtime.ActionBlockedUntil <= 0f)
+            {
+                return false;
+            }
+
+            if (now < runtime.ActionBlockedUntil)
+            {
+                return true;
+            }
+
+            runtime.ActionBlockedUntil = 0f;
+            runtime.ActionBlockReason = "none";
+            return false;
         }
 
         private void UpdateRetreatPosture(BaseCombatEntity bot, BotRuntime runtime, float now)
@@ -11963,10 +12404,11 @@ namespace Oxide.Plugins
             AddAdminToggle(container, panel, "Smoke", "allow_smoke", config.AI.AllowSmoke, 0.29f, 0.685f, 0.51f, "ai");
             AddAdminToggle(container, panel, "Barricades", "allow_barricades", config.AI.AllowBarricades, 0.53f, 0.685f, 0.75f, "ai");
             AddAdminToggle(container, panel, "Base avoid", "base_avoidance", config.AI.DoNotEnterBases, 0.77f, 0.685f, 0.95f, "ai");
-            AddAdminToggle(container, panel, "Jiggle", "jiggle", config.AI.AllowJigglePeeking, 0.05f, 0.61f, 0.27f, "ai");
-            AddAdminToggle(container, panel, "Jump peek", "jump_peek", config.AI.AllowJumpPeekApproximation, 0.29f, 0.61f, 0.51f, "ai");
-            AddAdminToggle(container, panel, "Foliage", "foliage", config.AI.FoliageBlocksVision, 0.53f, 0.61f, 0.75f, "ai");
-            AddAdminToggle(container, panel, "Foliage terrain", "foliage_terrain", config.AI.FoliageTerrainSampling, 0.77f, 0.61f, 0.95f, "ai");
+            AddAdminToggle(container, panel, "Jiggle", "jiggle", config.AI.AllowJigglePeeking, 0.05f, 0.61f, 0.21f, "ai");
+            AddAdminToggle(container, panel, "Jump", "jump_peek", config.AI.AllowJumpPeekApproximation, 0.23f, 0.61f, 0.39f, "ai");
+            AddAdminToggle(container, panel, "Foliage", "foliage", config.AI.FoliageBlocksVision, 0.41f, 0.61f, 0.57f, "ai");
+            AddAdminToggle(container, panel, "Forest", "foliage_terrain", config.AI.FoliageTerrainSampling, 0.59f, 0.61f, 0.75f, "ai");
+            AddAdminToggle(container, panel, "Smoke LOS", "smoke_los", config.AI.SmokeBlocksVision, 0.77f, 0.61f, 0.95f, "ai");
 
             AddAdminFloatControl(container, panel, "Vision", "vision_range", config.AI.VisionRange, 10f, 50f, 0.05f, 0.50f, 0.47f, "ai");
             AddAdminFloatControl(container, panel, "FOV", "vision_fov", config.AI.VisionFovDegrees, 10f, 30f, 0.53f, 0.50f, 0.95f, "ai");
@@ -11976,8 +12418,9 @@ namespace Oxide.Plugins
             AddAdminFloatControl(container, panel, "Search", "search_last_seen", config.AI.SearchLastSeenSeconds, 5f, 15f, 0.53f, 0.33f, 0.95f, "ai");
             AddAdminFloatControl(container, panel, "Gun hear", "hearing_gun", config.AI.UnsuppressedGunshotHearingRange, 10f, 50f, 0.05f, 0.245f, 0.47f, "ai");
             AddAdminFloatControl(container, panel, "Supp hear", "hearing_suppressed", config.AI.SuppressedGunshotHearingRange, 5f, 25f, 0.53f, 0.245f, 0.95f, "ai");
-            AddAdminFloatControl(container, panel, "Cover radius", "cover_radius", config.AI.CoverSearchRadius, 2f, 10f, 0.05f, 0.16f, 0.47f, "ai");
-            AddAdminFloatControl(container, panel, "Flank dist", "flank_distance", config.AI.SquadFlankDistance, 2f, 10f, 0.53f, 0.16f, 0.95f, "ai");
+            AddAdminFloatControl(container, panel, "Cover rad", "cover_radius", config.AI.CoverSearchRadius, 2f, 10f, 0.05f, 0.16f, 0.31f, "ai");
+            AddAdminFloatControl(container, panel, "Flank dist", "flank_distance", config.AI.SquadFlankDistance, 2f, 10f, 0.365f, 0.16f, 0.635f, "ai");
+            AddAdminFloatControl(container, panel, "Smoke rad", "smoke_vision_radius", config.AI.SmokeVisionRadius, 0.5f, 1.5f, 0.68f, 0.16f, 0.95f, "ai");
             AddAdminToggle(container, panel, "Crouch", "allow_crouch", config.AI.AllowCrouch, 0.05f, 0.075f, 0.23f, "ai");
             AddAdminToggle(container, panel, "Shoot duck", "crouch_shoot", config.AI.CrouchWhileShooting, 0.25f, 0.075f, 0.47f, "ai");
             AddAdminToggle(container, panel, "Heal duck", "crouch_heal", config.AI.CrouchWhileCoverHealing, 0.49f, 0.075f, 0.71f, "ai");
@@ -13324,12 +13767,17 @@ namespace Oxide.Plugins
 
             foreach (var point in points)
             {
-                if (!IsTargetSightLineClear(bot, player, from, point, out var blockReason, out var foliageHits))
+                if (!IsTargetSightLineClear(bot, player, from, point, out var blockReason, out var blockerHits))
                 {
                     if (string.Equals(blockReason, "foliage", StringComparison.OrdinalIgnoreCase))
                     {
                         result.FoliageBlockedProbePoints++;
-                        result.FoliageBlockerHits += foliageHits;
+                        result.FoliageBlockerHits += blockerHits;
+                    }
+                    else if (string.Equals(blockReason, "smoke", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.SmokeBlockedProbePoints++;
+                        result.SmokeBlockerHits += blockerHits;
                     }
                     else
                     {
@@ -13355,13 +13803,15 @@ namespace Oxide.Plugins
             result.CanSee = result.VisibleProbePoints > 0 && result.ExposedFraction >= minimum;
             result.BlockReason = result.CanSee
                 ? "visible"
-                : result.VisibleProbePoints > 0
-                    ? $"exposure {result.VisibleProbePoints}/{result.TotalProbePoints}"
-                    : result.FoliageBlockedProbePoints > 0
-                        ? $"foliage {result.FoliageBlockedProbePoints}/{result.TotalProbePoints} hits={result.FoliageBlockerHits}"
-                        : result.SolidBlockedProbePoints > 0
-                            ? $"solid {result.SolidBlockedProbePoints}/{result.TotalProbePoints}"
-                            : "no_probe_clear";
+                : result.SmokeBlockedProbePoints > 0
+                    ? $"smoke {result.SmokeBlockedProbePoints}/{result.TotalProbePoints} hits={result.SmokeBlockerHits}"
+                    : result.VisibleProbePoints > 0
+                        ? $"exposure {result.VisibleProbePoints}/{result.TotalProbePoints}"
+                        : result.FoliageBlockedProbePoints > 0
+                            ? $"foliage {result.FoliageBlockedProbePoints}/{result.TotalProbePoints} hits={result.FoliageBlockerHits}"
+                            : result.SolidBlockedProbePoints > 0
+                                ? $"solid {result.SolidBlockedProbePoints}/{result.TotalProbePoints}"
+                                : "no_probe_clear";
             return result;
         }
 
@@ -13397,10 +13847,10 @@ namespace Oxide.Plugins
             return IsTargetSightLineClear(bot, player, from, to, out _, out _);
         }
 
-        private bool IsTargetSightLineClear(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to, out string blockReason, out int foliageHits)
+        private bool IsTargetSightLineClear(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to, out string blockReason, out int blockerHits)
         {
             blockReason = "clear";
-            foliageHits = 0;
+            blockerHits = 0;
             var mask = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed", "Default", "Tree", "Resource");
             var directLineClear = true;
 
@@ -13420,7 +13870,13 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (IsVisionConcealedByFoliage(bot, player, from, to, out foliageHits))
+            if (IsVisionConcealedBySmoke(from, to, out blockerHits))
+            {
+                blockReason = "smoke";
+                return false;
+            }
+
+            if (IsVisionConcealedByFoliage(bot, player, from, to, out blockerHits))
             {
                 blockReason = "foliage";
                 return false;
@@ -15178,6 +15634,142 @@ namespace Oxide.Plugins
         {
             botUtilityEntities.RemoveAll(entry => entry == null || entry.Entity == null || entry.Entity.IsDestroyed);
             utilityDangerZones.RemoveAll(zone => zone == null || zone.ExpiresAt <= now);
+            CleanupSmokeOccluders(now);
+        }
+
+        private bool IsSmokeOccluderEntity(BaseEntity entity)
+        {
+            if (entity == null)
+            {
+                return false;
+            }
+
+            var text = $"{entity.ShortPrefabName} {entity.PrefabName}".ToLowerInvariant();
+            return SmokeOccluderPrefabTokens.Any(token => text.Contains(token));
+        }
+
+        private void RegisterSmokeOccluder(BaseEntity entity, float now, string source)
+        {
+            if (entity == null || config?.AI?.SmokeBlocksVision != true)
+            {
+                return;
+            }
+
+            CleanupSmokeOccluders(now);
+            activeSmokeOccluders.RemoveAll(smoke => smoke == null || smoke.Entity == entity);
+            activeSmokeOccluders.Add(new SmokeOccluder
+            {
+                Entity = entity,
+                LastKnownPosition = entity.transform.position,
+                SpawnedAt = now,
+                ExpiresAt = now + config.AI.SmokeVisionLifetimeSeconds,
+                Radius = config.AI.SmokeVisionRadius,
+                Height = config.AI.SmokeVisionHeight,
+                Source = source ?? "world"
+            });
+
+            while (activeSmokeOccluders.Count > MaxTrackedSmokeOccluders)
+            {
+                var oldest = activeSmokeOccluders
+                    .OrderBy(smoke => smoke?.SpawnedAt ?? float.MaxValue)
+                    .FirstOrDefault();
+
+                if (oldest == null || !activeSmokeOccluders.Remove(oldest))
+                {
+                    break;
+                }
+            }
+        }
+
+        private void CleanupSmokeOccluders(float now)
+        {
+            activeSmokeOccluders.RemoveAll(smoke => smoke == null
+                || smoke.Entity == null
+                || smoke.Entity.IsDestroyed
+                || now >= smoke.ExpiresAt);
+        }
+
+        private bool IsVisionConcealedBySmoke(Vector3 from, Vector3 to, out int blockerHits)
+        {
+            blockerHits = 0;
+
+            if (config?.AI?.SmokeBlocksVision != true)
+            {
+                return false;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            CleanupSmokeOccluders(now);
+
+            foreach (var smoke in activeSmokeOccluders)
+            {
+                if (smoke == null)
+                {
+                    continue;
+                }
+
+                var center = SmokeOccluderPosition(smoke);
+                var radius = Mathf.Clamp(smoke.Radius <= 0f ? config.AI.SmokeVisionRadius : smoke.Radius, 1f, 18f);
+                var height = Mathf.Clamp(smoke.Height <= 0f ? config.AI.SmokeVisionHeight : smoke.Height, 1f, 12f);
+
+                if (!SegmentIntersectsSmokeVolume(from, to, center, radius, height))
+                {
+                    continue;
+                }
+
+                blockerHits++;
+                return true;
+            }
+
+            return false;
+        }
+
+        private Vector3 SmokeOccluderPosition(SmokeOccluder smoke)
+        {
+            if (smoke?.Entity != null && !smoke.Entity.IsDestroyed)
+            {
+                smoke.LastKnownPosition = smoke.Entity.transform.position;
+            }
+
+            return smoke == null ? Vector3.zero : smoke.LastKnownPosition;
+        }
+
+        private bool SegmentIntersectsSmokeVolume(Vector3 from, Vector3 to, Vector3 center, float radius, float height)
+        {
+            if (center == Vector3.zero)
+            {
+                return false;
+            }
+
+            var delta = to - from;
+            var distance = delta.magnitude;
+
+            if (distance <= 0.01f)
+            {
+                return false;
+            }
+
+            var minY = center.y - 0.75f;
+            var maxY = center.y + height;
+            var step = Mathf.Clamp(radius * 0.35f, 0.75f, 2.5f);
+            var samples = Mathf.Clamp(Mathf.CeilToInt(distance / step), 2, 80);
+
+            for (var i = 0; i <= samples; i++)
+            {
+                var point = from + delta * (i / (float)samples);
+
+                if (point.y < minY || point.y > maxY)
+                {
+                    continue;
+                }
+
+                if (Distance2D(point, center) <= radius)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryThrowBotUtility(BaseCombatEntity bot, BotRuntime runtime, Vector3 impactPosition, bool smoke, float now)
@@ -15263,6 +15855,11 @@ namespace Oxide.Plugins
             }
 
             entity.Spawn();
+
+            if (smoke)
+            {
+                RegisterSmokeOccluder(entity, now, "bot_utility");
+            }
 
             if (projectile != null)
             {
@@ -20660,7 +21257,18 @@ namespace Oxide.Plugins
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
             var now = Time.realtimeSinceStartup;
-            return $"type={runtime.EntityType}, state={runtime.State}, owner={BotOwnerStatus(runtime)}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, learn={LearningRuntimeStatus(runtime)}, leash={ManagedLeashStatus(runtime)}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, crouch={CrouchStatus(runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot, runtime)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            return $"type={runtime.EntityType}, state={runtime.State}, owner={BotOwnerStatus(runtime)}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, wake={ActionBlockStatus(runtime, now)}, learn={LearningRuntimeStatus(runtime)}, leash={ManagedLeashStatus(runtime)}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, crouch={CrouchStatus(runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot, runtime)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+        }
+
+        private string ActionBlockStatus(BotRuntime runtime, float now)
+        {
+            if (runtime == null || runtime.ActionBlockedUntil <= now)
+            {
+                return "ready";
+            }
+
+            var reason = string.IsNullOrWhiteSpace(runtime.ActionBlockReason) ? "hold" : runtime.ActionBlockReason;
+            return $"{reason}:{Math.Max(0f, runtime.ActionBlockedUntil - now).ToString("0.0", CultureInfo.InvariantCulture)}s";
         }
 
         private string BotOwnerStatus(BotRuntime runtime)
@@ -21332,6 +21940,7 @@ namespace Oxide.Plugins
                 return;
             }
 
+            RememberLastBotInfo(killer, victimRuntime, true);
             BroadcastKillFeed(killer, null, victimEntity, victimRuntime, info);
             RememberBotChatFight(killer, victimRuntime);
 
@@ -21353,6 +21962,7 @@ namespace Oxide.Plugins
                 return;
             }
 
+            RememberLastBotInfo(victim, killerRuntime, false);
             ApplyBotNativeDeathInfo(victim, killerEntity, killerRuntime, info);
             BroadcastKillFeed(killerEntity, killerRuntime, victim, null, info);
             RememberBotChatFight(victim, killerRuntime);
@@ -23068,6 +23678,9 @@ namespace Oxide.Plugins
                 case "foliage_terrain":
                     config.AI.FoliageTerrainSampling = !config.AI.FoliageTerrainSampling;
                     return true;
+                case "smoke_los":
+                    config.AI.SmokeBlocksVision = !config.AI.SmokeBlocksVision;
+                    return true;
                 case "base_avoidance":
                     config.AI.DoNotEnterBases = !config.AI.DoNotEnterBases;
                     return true;
@@ -23498,6 +24111,9 @@ namespace Oxide.Plugins
                 case "foliage_clear":
                     config.AI.MaximumClearVisionThroughFoliage = Mathf.Clamp(value, 1f, config.AI.VisionRange);
                     return true;
+                case "smoke_vision_radius":
+                    config.AI.SmokeVisionRadius = Mathf.Clamp(value, 1f, 18f);
+                    return true;
                 case "cover_radius":
                     config.AI.CoverSearchRadius = Math.Max(4f, value);
                     return true;
@@ -23699,6 +24315,9 @@ namespace Oxide.Plugins
                     return true;
                 case "foliage_clear":
                     value = config.AI.MaximumClearVisionThroughFoliage;
+                    return true;
+                case "smoke_vision_radius":
+                    value = config.AI.SmokeVisionRadius;
                     return true;
                 case "cover_radius":
                     value = config.AI.CoverSearchRadius;

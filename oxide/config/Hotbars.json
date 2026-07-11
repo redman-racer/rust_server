@@ -1,0 +1,10 @@
+{
+  "OnlyUsableItems": true,
+  "RestoreHotbarOnDeath": false,
+  "HotbarContainerBounds": {
+    "AnchorMin": "0.36 0.28",
+    "AnchorMax": "0.64 0.72",
+    "OffsetMin": "0 0",
+    "OffsetMax": "0 0"
+  }
+}

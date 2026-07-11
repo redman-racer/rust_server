@@ -1,6 +1,6 @@
 # Portable Airstrikes Development Log
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 ## Purpose
 
@@ -18,23 +18,27 @@ This log should be updated after each implementation pass so future work starts 
 Plugin file:
 
 - `oxide/plugins/PortableAirstrikes.cs`
+- `oxide/plugins/PortableAirstrikesAnimationEditor.cs`
+- `oxide/plugins/WebsiteAirstrikeAnimationBridge.cs`
 
 Current plugin version:
 
-- `PortableAirstrikes` v0.1.36
+- `PortableAirstrikes` v0.1.51
+- `PortableAirstrikesAnimationEditor` v0.2.8
+- `WebsiteAirstrikeAnimationBridge` v1.0.1
 
 Current upload note:
 
-- `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_MOVEITEM_KINEMATIC_2026-07-08.md`
+- `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_RIDES_2026-07-11.md`
 
 Current state:
 
-- The plugin now has the low-tier direct-command drone-drop slice for bee, grenade, utility, fire, and 40mm payloads, the first heavy-drop slice for heavy bee, firebomb, and propane payloads, the off-map mortar slice, the first rocket-run slice for HV, standard, and incendiary rockets, the first A-10 strafe slice, the scrollable CUI picker/confirmation flow, optional loot injection, the first disabled-by-default MLRS rocket slice, opt-in monument blocking for configured monuments, the first disabled-by-default vehicle homing missile slice, player status/cancel commands for pre-impact calls, heavy-strike warning map markers, in-game warning fanout, warning recipient diagnostics, optional audit Discord webhook forwarding, configurable visual delivery flyovers/artillery sources, the airstrike targeting binocular/default-strike flow, the CustomItemDefinitions item-definition layer, the v0.1.23 stacked-binocular/automatic raycast targeting pass, the v0.1.24 inventory-safe stack-cap fix, the v0.1.25 charge-backed binocular fix, the v0.1.28 client-safe visual prefab fix, the v0.1.29 stack/icon/rotor-wash repair, the v0.1.30 stackable CID item pass, the v0.1.31 destroyable vehicle-delivery timing/spawn reliability pass, the v0.1.32 native delivery-vehicle asset alignment pass, the v0.1.33 native patrol-heli visual path, the v0.1.35 patrol-heli prefab GUID/spawn-order repair, and the v0.1.36 MoveItem/kinematic velocity repair.
+- The plugin now has the low-tier direct-command drone-drop slice for bee, grenade, utility, fire, and 40mm payloads, the first heavy-drop slice for heavy bee, firebomb, and propane payloads, the off-map mortar slice, the first rocket-run slice for HV, standard, and incendiary rockets, the first A-10 strafe slice, the scrollable CUI picker/confirmation flow, optional loot injection, the first disabled-by-default MLRS rocket slice, opt-in monument blocking for configured monuments, the first disabled-by-default vehicle homing missile slice, player status/cancel commands for pre-impact calls, heavy-strike warning map markers, in-game warning fanout, warning recipient diagnostics, optional audit Discord webhook forwarding, configurable visual delivery flyovers/artillery sources, the airstrike targeting binocular/default-strike flow, the CustomItemDefinitions item-definition layer, the v0.1.23 stacked-binocular/automatic raycast targeting pass, the v0.1.24 inventory-safe stack-cap fix, the v0.1.25 charge-backed binocular fix, the v0.1.28 client-safe visual prefab fix, the v0.1.29 stack/icon/rotor-wash repair, the v0.1.30 stackable CID item pass, the v0.1.31 destroyable vehicle-delivery timing/spawn reliability pass, the v0.1.32 native delivery-vehicle asset alignment pass, the v0.1.33 native patrol-heli visual path, the v0.1.35 patrol-heli prefab GUID/spawn-order repair, the v0.1.36 MoveItem/kinematic velocity repair, the v0.1.40 animation-editor waypoint-profile runtime integration, the v0.1.41 vehicle-aware homing target-lock repair, the v0.1.42 minicopter ping recovery follow-up, the v0.1.43 in-game admin workbench, the v0.1.44 admin CUI layout cleanup, the v0.1.45 per-profile waypoint stop-motion toggle, the v0.1.46 blended rotation/heading follow-up, the v0.1.47 carrier-tied multi-release payload event system, and the v0.1.48 editor-parity position/rotation playback repair.
 - It can store a target, list strike definitions, validate a selected strike, check item/RP/permission/cooldown constraints, charge RP, consume the configured airstrike binocular item, start cooldowns, and dispatch bounded drone-drop, heavy-drop, rocket-run, off-map mortar, A-10 strafe, MLRS, and homing missile executors.
 - Default live item is now the CID shortname `raidlands.airstrike.designator` named `Airstrike Targeting Binoculars`, parented to `tool.binoculars`; the legacy named `tool.binoculars` fallback still works when CID is unavailable and fallback is enabled.
 - Actual Rust item stack size is `1` for the CID shortname `raidlands.airstrike.designator` and vanilla `tool.binoculars`; airstrike charge counts are stored in `item.instanceData.dataInt`, and old bad physical stacks normalize into one movable item named like `Airstrike Targeting Binoculars x25`.
 - Holding the configured item gives player instructions, and a ping while holding it creates a short-lived cyan/amber targeting marker.
-- Tool pings now first try the same raycast/entity capture that `/strike debugping` used, so vehicle-target pings can carry entity tracking without requiring the admin debug command.
+- Tool pings now prefer associated ping entities, normalize mounted players and child/seat hits back to their parent vehicle, include Vehicle Detailed colliders, try a small sphere-cast along the player's aim, and only fall back to ground targeting after a vehicle-near-ping search fails, so vehicle-target pings can carry entity tracking for homing strikes without requiring the admin debug command.
 - If the player has no saved default, the tool ping opens `/strike`; the confirmed selection is saved in `PortableAirstrikes_Data.DefaultStrikeByUser`.
 - If the player has a saved default, the tool ping attempts that strike immediately. Players can view/change it with `/strike default show`, `/strike default <strikeId>`, and `/strike default clear`.
 - `bee_swarm_drone`, `beancan_drop`, `f1_cluster`, `smoke_screen`, `flash_breach`, `molotov_drop`, and `he_40mm_micro` use the configured `BaseCount`, `MaxCount`, and `SpreadRadius`, then spawn payloads above the target with staggered timers.
@@ -49,7 +53,19 @@ Current state:
 - Heavy-strike warning markers use native `MapMarkerGenericRadius` entities while `General.UseMapMarkersForHeavyStrikes=true`, clean up on completion/failure/cancel/unload, and are intended as public counterplay markers.
 - Accepted strikes can now notify the caller's online Rust team by default, and heavy strikes can optionally notify nearby online players through config without using Discord.
 - Accepted strikes now print and audit warning fanout recipient counts, and admins can preview warning recipients with `/strike debug warnings <strikeId>` against the current stored target.
-- `DeliveryVisuals` now controls scripted native drone, cargo-plane, patrol-helicopter, F-15, and mortar/artillery visuals, repeated autoload-safe flyover sound cues, high-rate movement intervals, optional temporary mortar NPC crew, destroyable delivery vehicle health, and per-delivery first-payload approach timing. Rotor-wash effect sends are intentionally disabled because the prefabs are not in an autoloaded asset scene.
+- `DeliveryVisuals` now controls scripted native drone, cargo-plane, patrol-helicopter, F-15, and mortar/artillery visuals, repeated autoload-safe flyover sound cues, high-rate movement intervals, optional temporary mortar NPC crew, destroyable delivery vehicle health, and per-delivery first-payload approach timing. Runtime delivery visuals can also consume compatible target-relative waypoint profiles from `oxide/data/PortableAirstrikes/VisualProfiles.json`, authored by `PortableAirstrikesAnimationEditor`; live scripted playback now uses the same waypoint timestamps, duration, terrain clearance, stop/blend interpolation, tangent heading, per-waypoint XYZ rotation offsets, and profile rotation smoothing as the editor preview. Rotor-wash effect sends are intentionally disabled because the prefabs are not in an autoloaded asset scene.
+- Visual profiles can now optionally become runtime payload-release contracts through `PayloadReleaseMode`, `MaxPayloadCount`, `PayloadReleaseIntervalSeconds`, `ReleaseTemplate`, and rich `PayloadEvents`; when configured, carrier-backed strikes release mixed payload IDs from the live delivery carrier position at each event time and cap release units against the strike's existing count budget.
+- `/airanim payload ...` commands and the timeline/release popup now support adding, selecting, duplicating, deleting, and editing multiple `P1/P2/...` release markers with per-release ordnance type, count, offsets, launch/fuse/spread/tracking values, and damage scales.
+- `WebsiteAirstrikeAnimationBridge` now owns the game-side website sync path for animation bundles: signed website pulls, startup recovery checks, local-save/bootstrap/conflict snapshot uploads, install backups, local dirty protection, rollback, sync receipts, and the `/airanimsync` admin panel/console commands. The website runtime-profile importer mirrors Rust generated-release timing by treating `ReleaseTemplate.Time <= 0` as unset and falling back to `FirstPayloadDelaySeconds`.
+- `/strike admin` now opens a permission-gated in-game admin workbench with dashboard, quick give, strike availability/pricing, balance, safety, visuals/profile assignment, loot/audit, and activity tabs.
+- The admin workbench layout now keeps the sidebar below the header, separates dashboard cards from the title text, keeps selected-strike fields out of the strike list, and spaces toggle grids away from form fields on the Safety, Visuals, and Loot/Audit tabs.
+- `PortableAirstrikes` v0.1.50 polishes the admin workbench with a paginated/sortable/filterable Give table, fixes Give search text input by using the same single-line keyboard setup as the animation editor, ports the animation editor's keypad-style exact number entry to admin numeric fields, removes editor-owned visual timing/height controls from the Visuals tab, and replaces profile cycling with a scrollable compatible-profile list where the selected profile is highlighted and changed only through explicit Select buttons.
+- `PortableAirstrikes` v0.1.51 refactors `/strike admin` around strike wrappers plus included Strike Profiles: strike definitions now carry `AcceptedTargetTypes`, `StrikeProfiles`, per-profile start delays/count caps, and positive runtime multipliers, while payload/delivery authoring moves out of the Strikes tab and into `VisualProfiles.json` profiles. Deleting a strike from the admin panel removes only the wrapper and clears saved player defaults; it never deletes a visual/profile definition.
+- Strike definitions now include optional `VisualProfileId`; runtime lookup tries the explicit compatible profile first, then name-based candidates, then vehicle defaults. Missing or incompatible explicit profiles warn and fall back instead of forcing the wrong visual.
+- Strike wrappers can accept multiple target types. Runtime validation now accepts any configured target type, and bundled profile execution starts every enabled included profile that can run for the current target. Homing profiles are skipped unless the target came from a vehicle ping, and profile payload counts remain capped by the profile's own event/max contract with wrapper limits only able to reduce the count.
+- Delivery/payload compatibility is centralized for config normalization, admin UI choices, and runtime validation. Unsupported hand-edited strike definitions show in the admin panel and are rejected before a strike starts.
+- When `PortableAirstrikesAnimationEditor` is loaded, the admin workbench can list compatible profile summaries, assign a profile to a strike, create/open a starter profile, reload profile data, and launch `/airanim` for preview/save work. If the editor is unloaded, the rest of the panel still works and profile controls degrade disabled/read-only.
+- `PortableAirstrikesAnimationEditor` v0.2.8 adds preview ride controls: before preview, an admin can use `/airanim ride <player>` to queue the rider for the next preview and `/airanim ride stage [player]` to move the queued or named rider to the profile's start chase point so the area can load before playback starts. During an active `/airanim preview`, `/airanim ride` or the preview bar `RIDE` follows the selected profile vehicle from a close 5m back / 2.5m up chase position, `/airanim ride <player>` attaches another online player, and `/airanim ride stop [player]` detaches/cancels and returns the rider to their original position. Ride mode hides the editor and preview CUI while attached so the rider keeps normal camera/look control, non-admin riders can detach themselves, and cargo-plane previews now use the editor's manual waypoint playback path so pause/resume freezes the visible plane like other vehicles.
 - All configured strike IDs now have an executor route. Homing remains disabled/gated by default; MLRS availability is preserved from the live config and should only be enabled publicly after deliberate smoke/balance tuning.
 - Loot injection live tuning is deferred until the end. Homing missiles remain disabled by default pending broader balance and safety tuning; MLRS should follow the deliberately enabled/disabled choice in the live config.
 
@@ -87,6 +103,7 @@ Implemented in `oxide/plugins/PortableAirstrikes.cs`:
 Implemented commands:
 
 - `/strike`
+- `/strike admin`
 - `/strike list`
 - `/strike balance`
 - `/strike reload`
@@ -106,6 +123,8 @@ Implemented commands:
 - `/strike cancel`
 - `/strike <strikeId>`
 - `portableairstrikes.giveitem <playerNameOrSteamId> [amount]`
+- `portableairstrikes.adminui ...`
+- `portableairstrikes.adminfield ...`
 
 ### Generic Airstrike Item
 
@@ -712,6 +731,71 @@ Implemented in v0.1.36:
 - SpawnHeli fetch/teleport now skips velocity clearing when the heli rigidbody is missing or already kinematic.
 - Existing cargo-plane, F-15, drone, mortar, payload, RP/token/cooldown, warning marker, audit history, homing gate, and destroyable-carrier behavior were left unchanged.
 
+Implemented in v0.1.43:
+
+- Added root `ConfigVersion=35`.
+- Added `/strike admin`, gated by the existing `portableairstrikes.admin` permission.
+- Added the admin CUI workbench with Dashboard, Give Items, Strikes, Balance, Safety, Visuals, Loot/Audit, and Activity tabs.
+- Added quick player search and inventory-safe charge-backed grants for `Airstrike Targeting Binoculars`, using the same give path as `/strike giveitem`.
+- Added admin editing for strike enabled state, display name, permission, RP cost, tier, target type, payload, delivery, warning/cooldown timings, count/spread/rocket/missile/A-10 fields, homing fields, and damage scales.
+- Added admin editing for global safety/operations settings, currency provider/enabled state, item-consumption/admin-bypass behavior, visual timings/toggles, loot injection rules, and audit webhook settings.
+- Added shared delivery/payload compatibility helpers and uses them from config normalization, admin delivery options, and runtime validation. `TryGetExecutor` remains the hard executor stop, so bad hand-edited configs cannot start a strike.
+- Added `StrikeDefinition.VisualProfileId`, with runtime profile lookup ordered as explicit profile, name-based candidates, then vehicle default.
+- Explicit animation profile assignments are checked against the effective visual vehicle: `drone`, `cargo_plane`, `attack_heli`, `f15`, or `a10`. Mortar strikes continue to use mortar visual settings rather than waypoint profiles.
+- Added `PortableAirstrikesAnimationEditor` public API hooks for listing profiles, opening a profile for a player, creating/opening a starter profile for a vehicle, saving profiles, and reloading profile data.
+- Existing `/strike`, `/strike giveitem`, `/strike debug`, default-strike, cancel/status, active-call, executor, cooldown, audit, loot, and binocular-targeting paths were left in place.
+
+Implemented in v0.1.44:
+
+- Kept root `ConfigVersion=35`; this is a code-only admin CUI layout fix.
+- Moved the left sidebar buttons fully below the header so the Dashboard tab no longer overlaps the header summary.
+- Moved dashboard metric cards down so the first row no longer collides with the Dashboard title/subtitle.
+- Switched the selected strike RP/Tier row to the detail-panel number-row helper so it no longer paints over the strike list.
+- Moved Safety toggles and the currency-provider selector into separate vertical bands.
+- Moved Visuals toggles above the visual timing rows so `Require Carrier` and `Refund Carrier` no longer overlap `Drone Dist` and other inputs.
+- Moved Loot/Audit toggles above the loot-rule section so `Loot container rules` no longer collides with the second toggle row.
+- Existing admin actions, config save/reload behavior, animation profile controls, strike execution, and item grant behavior were left unchanged.
+
+Implemented in v0.1.45:
+
+- Added `StopAtWaypoints` to shared visual profile data, defaulting to `true` for backward compatibility.
+- Added `/airanim stopwaypoints <on|off|toggle>` and a `STOP WP ON/OFF` editor button.
+- Kept the existing `Mathf.SmoothStep` stop/ease movement when `StopAtWaypoints=true`.
+- Added blended Hermite-style waypoint interpolation when `StopAtWaypoints=false`, preserving waypoint timestamps while blending velocity through the point instead of slowing to zero.
+- Applied the same interpolation flag in `PortableAirstrikes` runtime flight-plan evaluation so live visual motion matches editor preview.
+- Updated bundled `VisualProfiles.json` to explicitly persist `StopAtWaypoints=true` for the current profiles.
+
+Implemented in v0.1.46:
+
+- Updated blended waypoint mode so marker arrows, silent waypoint object outlines, editor previews, and live runtime visuals derive heading from blended Hermite velocity.
+- This keeps the plane nose/arrow rotating through waypoint turns instead of pointing exactly at the next segment and visually pausing to rotate at each node.
+- Existing `StopAtWaypoints=true` behavior is unchanged.
+
+Implemented in v0.1.47:
+
+- Extended `VisualProfiles.json` with `PayloadReleaseMode`, `MaxPayloadCount`, `PayloadReleaseIntervalSeconds`, `ReleaseTemplate`, and rich per-event payload release fields while keeping existing profiles in legacy/manual mode by default.
+- Added multi-release timeline editing in `PortableAirstrikesAnimationEditor`: `ADD RELEASE`, clickable `P1/P2/...` markers, waypoint `PAY` release insertion, release popup editing, duplicate/delete/prev/next/save/preview actions, and `/airanim payload ...` chat commands.
+- Carrier-backed runtime executors now resolve the visual profile before scheduling payload timers; configured release events can mix current payload IDs and release from the live carrier transform plus per-event carrier offsets.
+- Release events cap against the selected strike's count budget and optional profile `MaxPayloadCount`; generated mode truncates release points that would exceed `DurationSeconds`.
+- Per-event target offsets, spread, launch speed, fuse, tracking, splash/impact, and damage-scale fields feed custom damage paths for homing/A-10 and best-effort tagged native projectile damage scaling.
+- Profiles containing homing ordnance now require a vehicle-backed target before charge/consume.
+
+Implemented in v0.1.48:
+
+- Carried each authored waypoint's `RotationX`, `RotationY`, and `RotationZ` into the live `DeliveryFlightPlan` instead of discarding those fields after loading `VisualProfiles.json`.
+- Live scripted drone, patrol-helicopter, F-15, and A-10 playback now composes tangent heading with the same interpolated waypoint rotation offset used by the editor preview, including full rollovers.
+- Profile rotation interpolation uses the same `StopAtWaypoints` choice and `RotationSmoothTimeSeconds` clamp as editor preview.
+- Removed runtime retiming/stretching for authored profiles: live playback now preserves the profile's exact `DurationSeconds`, waypoint times, and `FirstPayloadDelaySeconds` rather than scaling the animation to executor finish padding.
+- Keeps the strike call/carrier alive for at least the authored profile duration so normal executor completion cannot cut off the final animation segment early.
+- Preserved the profile's authored terrain-clearance contract in live playback and aligned the runtime profile defaults with the editor's 12 m drone / 55 m aircraft defaults.
+- Native cargo-plane profiles retain the existing native route behavior in both editor and runtime; the exact transform playback repair applies to scripted vehicle previews/flyovers.
+
+Editor follow-up in PortableAirstrikesAnimationEditor v0.1.29:
+
+- Editor previews now pop a harmless flare burst at every legacy first-payload cue and authored payload release event.
+- Release effects use the preview carrier's live transform so scripted aircraft and the native cargo plane emit the flare at their visible position instead of only at the evaluated waypoint position.
+- All preview carriers use the attack-helicopter flare burst from autoloaded `AssetScene-prefabs`; the earlier F-15 and patrol-helicopter effects were rejected because they require non-autoloaded `AssetScene-props.other`.
+
 ### Central Validation
 
 Implemented:
@@ -874,6 +958,49 @@ Completed:
 - Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.33 against `RustDedicated_Data/Managed`; remaining warnings are Unity `Rigidbody.velocity` deprecation warnings in the visual movement helpers.
 - JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.35 patrol-heli spawn-order fix.
 - Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.35 against `RustDedicated_Data/Managed`; remaining warnings are Unity `Rigidbody.velocity` deprecation warnings in the visual movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.15 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.16 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.17 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.18 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.19 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.20 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.21 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Targeted `git diff --check` passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs`, `Docs/AirStrikes/portable_airstrikes_development_log.md`, and `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_WAYPOINT_MARKERS_2026-07-09.md` after the v0.1.21 exact-value modal pass.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.22 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Targeted `git diff --check` passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs`, `Docs/AirStrikes/portable_airstrikes_development_log.md`, and `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_WAYPOINT_MARKERS_2026-07-09.md` after the v0.1.22 exact-value keypad pass.
+- Targeted `git diff --check` passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs`, `Docs/AirStrikes/portable_airstrikes_development_log.md`, and `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_WAYPOINT_MARKERS_2026-07-09.md` after the target-column cleanup and restored exact-input editor pass.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.23 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.41 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement helpers.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.41 vehicle-aware homing target-lock repair.
+- Targeted `git diff --check` passed for `oxide/plugins/PortableAirstrikes.cs` after the v0.1.41 vehicle-aware homing target-lock repair.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.42 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.43 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.23 with the admin API hooks against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.43 admin panel/config-version pass.
+- Targeted `git diff --check` passed for the v0.1.43 Portable Airstrikes admin panel files.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.44 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement helpers.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.44 admin layout pass.
+- Targeted `git diff --check` passed for the v0.1.44 Portable Airstrikes admin layout files.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.25 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.45 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement helpers.
+- JSON parse check passed for `oxide/data/PortableAirstrikes/VisualProfiles.json` after the v0.1.45 waypoint stop-motion toggle pass.
+- Targeted `git diff --check` passed for the v0.1.45 waypoint stop-motion files; Git only warned that LF will be normalized to CRLF when it next touches the plugin files.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.26 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.46 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement helpers.
+- JSON parse checks passed for `oxide/data/PortableAirstrikes/VisualProfiles.json` and `oxide/config/PortableAirstrikes.json` after the v0.1.47 release-event schema pass.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.47 against `RustDedicated_Data/Managed`; remaining warnings are Unity `Rigidbody.velocity` deprecation warnings in visual movement/carrier velocity helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.1.27 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
+- Targeted `git diff --check` passed for the tracked v0.1.47 plugin/doc/upload-note changes; Git only warned that LF will be normalized to CRLF when it next touches the edited text files. `VisualProfiles.json` is ignored by Git, so it was verified with JSON parse/hash instead.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.48 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement/carrier velocity helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.50 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement/carrier velocity helpers.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.50 admin panel polish pass.
+- Targeted `git diff --check` passed for `oxide/plugins/PortableAirstrikes.cs` after the v0.1.50 admin panel polish pass; Git only warned that LF will be normalized to CRLF when it next touches the plugin file.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.51 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement/carrier velocity helpers.
+- JSON parse check passed for `oxide/config/PortableAirstrikes.json` after the v0.1.51 admin strike-profile wrapper pass.
+- Targeted `git diff --check` passed for the tracked v0.1.51 Portable Airstrikes plugin/config/doc/upload-note files; the new detailed upload note passed a separate trailing-whitespace check.
+- v0.1.52 fixes the `/strike admin` layout regressions visible on Give Items, Strikes, and Balance; adds clickable `?` page/field help that writes explanations to the admin status line; adds Help and Commands tabs; and categorizes chat vs console/admin command references inside the admin panel.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikes.cs` v0.1.52 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in visual movement/carrier velocity helpers.
+- Roslyn compile check passed for `oxide/plugins/PortableAirstrikesAnimationEditor.cs` v0.2.8 against `RustDedicated_Data/Managed`; remaining warnings are the existing Unity `Rigidbody.velocity` deprecation warnings in preview movement helpers.
 
 Still required:
 
@@ -886,6 +1013,11 @@ Still required:
 - In-game smoke for the v0.1.35 patrol-heli spawn-order fix, especially `hv_rocket_run`, `rocket_run`, and `incendiary_rocket_run`.
 - Continued in-game smoke for the v0.1.32 vehicle-asset alignment pass on cargo-plane heavy drops, F-15 A-10 strafes, and F-15 MLRS flyovers.
 - Live confirmation that optional mortar crew NPC visuals remain non-disruptive with player-target sensing suppressed; set `DeliveryVisuals.SpawnMortarCrewNpc=false` if they behave noisily.
+- Live confirmation that `/airanim target` and `/airanim markers` move the target column without leaving new pink smoke after target changes, `/airanim end`, or `oxide.reload PortableAirstrikesAnimationEditor`.
+- Live confirmation that a binocular ping placed directly on a minicopter stores a `vehicle ping`, shows enabled homing rows in `/strike`, and allows `/strike homing_heli` or `/strike homing_jet` to start instead of reporting a ground target mismatch.
+- Live smoke for `/strike admin`: non-admin denied, admin opens the workbench, quick give grants charged binoculars, strike edits persist across `oxide.reload PortableAirstrikes`, unsupported delivery/payload combos remain blocked, compatible animation profiles can be assigned, unloaded animation editor state disables only the profile controls, and the Dashboard/Give/Strikes/Balance/Safety/Visuals/Loot-Audit/Activity tabs no longer show text or control overlap at the tested 1636x937 viewport.
+- Live smoke for v0.1.47 release events: add/duplicate/delete/reorder markers in `/airanim`, save/reload `VisualProfiles.json`, run mixed cargo/heli/F-15 profiles, verify carrier-destroyed-before-release stops payloads, and verify carrier-destroyed-after-one-release leaves released payloads active while stopping unreleased events.
+- Live smoke for editor v0.1.29 release flares: reload after the asset-scene-safe correction, preview legacy and multi-release profiles across patrol-heli, F-15/A-10, cargo-plane, and drone carriers, and confirm one flare burst appears at the visible carrier for every release cue without an asset-scene error or damaging ordnance.
 
 ## v0.1.18 Visual Live Smoke Evidence
 
@@ -1139,10 +1271,26 @@ Defer these until after one direct-command strike works:
 
 ## Upload And Reload Handoff
 
-Current live-server upload for v0.1.35:
+Waypoint editor display fix on 2026-07-09:
+
+- `PortableAirstrikesAnimationEditor` v0.1.8 stops using native vehicle prefabs as static waypoint display objects.
+- `/airanim objects` now toggles silent `ddraw` vehicle/object outlines layered over the waypoint bubbles.
+- The waypoint marker refresh loop no longer fires deploy/impact effects, so waypoint display mode should not create repeated or stuck audio. Real vehicle prefabs and flyby sounds remain part of `/airanim preview`.
+- `PortableAirstrikesAnimationEditor` v0.1.13 makes exact waypoint position/rotation fields single-line and keyboard-backed, switches them to axis-specific submit commands, and reports an explicit status warning if Rust CUI submits the field without a typed value.
+- `PortableAirstrikesAnimationEditor` v0.1.15 played the airdrop/supply-signal smoke effect at the active `/airanim target`, kept a client-side smoke-column fallback on the marker ticker, and avoided spawning the supply-signal entity so no real airdrop/drop-finish behavior was triggered.
+- `PortableAirstrikesAnimationEditor` v0.1.16 keeps successful typed X/Y/Z coordinate and rotation submits from immediately rebuilding the open CUI, so multi-digit manual edits no longer get clobbered by the first accepted digit while typing.
+- `PortableAirstrikesAnimationEditor` v0.1.17 debounces typed X/Y/Z coordinate and rotation commands before applying them to the waypoint, so partial Rust CUI text-change submits settle on the final typed value before markers are rebuilt.
+- `PortableAirstrikesAnimationEditor` v0.1.18 stops firing the native `smoke_signal_full` effect for editor targets because that effect cannot be killed after the target point changes. Target display now uses the killable native map marker plus the short refreshed client-side target column.
+- `PortableAirstrikesAnimationEditor` v0.1.19 replaces editable CUI number fields with click-to-edit chat prompts, so exact coordinate/rotation values are applied from server-received chat instead of unreliable client-only input text.
+- `PortableAirstrikesAnimationEditor` v0.1.20 restores editable CUI number fields and submits them through generic `setpos/setrot <axis> <value>` commands, avoiding the chat prompt while preserving the debounced server-side waypoint update.
+- `PortableAirstrikesAnimationEditor` v0.1.21 replaces the prefilled exact-value CUI fields with value buttons that open a focused edit modal. The modal input only captures a pending draft; waypoint position/rotation changes happen only after the admin clicks `APPLY`, so focus or partial Rust CUI submits no longer move a waypoint to stale `0` or `1` values.
+- `PortableAirstrikesAnimationEditor` v0.1.22 removes the remaining Rust CUI text input from the exact-value modal and uses server-side keypad buttons for digits, minus, decimal, backspace, clear, and current value. `APPLY` now commits only that server-built draft, so the Rust keyboard `OK` path cannot submit an unintended `1`.
+- `PortableAirstrikesAnimationEditor` v0.1.23 reserves minimum-width timeline slots before rendering waypoint cards, so tightly spaced waypoint times no longer overlap their `SEL`, move, `PAY`, or segment buttons.
+- `PortableAirstrikesAnimationEditor` v0.1.25 adds per-profile `StopAtWaypoints` authoring with `/airanim stopwaypoints <on|off|toggle>` and the `STOP WP ON/OFF` CUI button. When disabled, preview motion uses blended waypoint velocity instead of easing to a stop at each waypoint.
+
+Current live-server upload for PortableAirstrikes v0.1.48 editor-parity playback repair:
 
 - `oxide/plugins/PortableAirstrikes.cs`
-- `oxide/config/PortableAirstrikes.json` only if the v0.1.32+ vehicle-alignment config has not already been uploaded; v0.1.35 itself has no config migration.
 
 Runtime dependencies to keep from earlier passes:
 
@@ -1158,6 +1306,6 @@ oxide.reload PortableAirstrikes
 ```
 
 Docs-only changes, including this file, do not need to be uploaded to the live Rust server for runtime behavior.
-The v0.1.32 runtime change requires PortableAirstrikes plugin/config updates. Keep `StackSizeController`, `CustomItemDefinitions.cs`, and the Oxide data PNG from earlier passes on the live server because PortableAirstrikes still registers the CID item and stores that PNG in Rust FileStorage for the item icon.
+The v0.1.48 repair only changes runtime playback code. Keep the live `PortableAirstrikesAnimationEditor.cs`, `VisualProfiles.json`, `oxide/config/PortableAirstrikes.json`, `StackSizeController`, `CustomItemDefinitions.cs`, and the Oxide data PNG from earlier passes; do not overwrite the live profile data just to deploy this fix.
 
 When the next code pass changes the plugin, create or update a dedicated upload note instead of mixing it into unrelated manifests.

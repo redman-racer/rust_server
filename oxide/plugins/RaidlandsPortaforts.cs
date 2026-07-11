@@ -8,11 +8,13 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsPortaforts", "Raidlands", "1.2.7")]
+    [Info("RaidlandsPortaforts", "Raidlands", "1.2.8")]
     [Description("Provides Raidlands Portafort token items backed by CopyPaste placement.")]
     public class RaidlandsPortaforts : RustPlugin
     {
         private const string AdminPermission = "raidlands.portaforts.admin";
+        private const string CooldownBypassPermission = "raidlands.portaforts.cooldown.bypass";
+        private const string CooldownDataFile = "RaidlandsPortaforts_Cooldowns";
         private static readonly int GroundLayer = LayerMask.GetMask("Terrain", "World", "Water", "Default");
         private static readonly int PlacementBlockLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Deployed", "Vehicle Large");
         private static readonly int RoadCheckLayer = LayerMask.GetMask("World");
@@ -23,7 +25,11 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin ImageLibrary;
 
+        [PluginReference]
+        private Plugin CupboardLimiter;
+
         private Configuration config;
+        private CooldownData cooldownData;
         private readonly Dictionary<ulong, float> pendingThrowableTokens = new Dictionary<ulong, float>();
         private readonly List<MonumentPlacementZone> monumentPlacementZones = new List<MonumentPlacementZone>();
         private bool monumentPlacementZonesLoaded;
@@ -68,6 +74,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("Deploy On Item Drop")]
             public bool DeployOnItemDrop = false;
+
+            [JsonProperty("Rate Limit")]
+            public RateLimitSettings RateLimit = new RateLimitSettings();
+
+            [JsonProperty("Cupboard Limiter Integration")]
+            public CupboardLimiterIntegrationSettings CupboardLimiterIntegration = new CupboardLimiterIntegrationSettings();
 
             [JsonProperty("Validate Placement Footprint")]
             public bool ValidatePlacementFootprint = true;
@@ -146,6 +158,45 @@ namespace Oxide.Plugins
             };
         }
 
+        private class RateLimitSettings
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Player Cooldown Seconds")]
+            public float PlayerCooldownSeconds = 300f;
+
+            [JsonProperty("Admins Bypass")]
+            public bool AdminsBypass = true;
+        }
+
+        private class CupboardLimiterIntegrationSettings
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Require CupboardLimiter Loaded")]
+            public bool RequireCupboardLimiterLoaded = false;
+
+            [JsonProperty("Respect CupboardLimiter Bypass Permission")]
+            public bool RespectCupboardLimiterBypassPermission = true;
+
+            [JsonProperty("CupboardLimiter Bypass Permission")]
+            public string BypassPermission = "cupboardlimiter.bypass";
+
+            [JsonProperty("Count Team Cupboards")]
+            public bool CountTeamCupboards = true;
+
+            [JsonProperty("Assumed Tool Cupboards Per Portafort When Layout Cannot Be Counted")]
+            public int AssumedToolCupboardsPerPortafort = 1;
+        }
+
+        private class CooldownData
+        {
+            [JsonProperty("Player Cooldown Until")]
+            public Dictionary<string, double> PlayerCooldownUntil = new Dictionary<string, double>();
+        }
+
         private class TokenItem
         {
             [JsonProperty("Shortname")]
@@ -211,6 +262,31 @@ namespace Oxide.Plugins
             if (config.GroundClearance < 0f)
             {
                 config.GroundClearance = 0.15f;
+            }
+
+            if (config.RateLimit == null)
+            {
+                config.RateLimit = new RateLimitSettings();
+            }
+
+            if (config.RateLimit.PlayerCooldownSeconds < 0f)
+            {
+                config.RateLimit.PlayerCooldownSeconds = 0f;
+            }
+
+            if (config.CupboardLimiterIntegration == null)
+            {
+                config.CupboardLimiterIntegration = new CupboardLimiterIntegrationSettings();
+            }
+
+            if (string.IsNullOrWhiteSpace(config.CupboardLimiterIntegration.BypassPermission))
+            {
+                config.CupboardLimiterIntegration.BypassPermission = new CupboardLimiterIntegrationSettings().BypassPermission;
+            }
+
+            if (config.CupboardLimiterIntegration.AssumedToolCupboardsPerPortafort < 0)
+            {
+                config.CupboardLimiterIntegration.AssumedToolCupboardsPerPortafort = 0;
             }
 
             if (config.PlacementFootprintPadding <= 0f)
@@ -291,26 +367,124 @@ namespace Oxide.Plugins
             Config.WriteObject(config, true);
         }
 
+        private void LoadCooldownData()
+        {
+            try
+            {
+                cooldownData = Interface.Oxide.DataFileSystem.ReadObject<CooldownData>(CooldownDataFile) ?? new CooldownData();
+            }
+            catch
+            {
+                cooldownData = new CooldownData();
+            }
+
+            if (cooldownData.PlayerCooldownUntil == null)
+            {
+                cooldownData.PlayerCooldownUntil = new Dictionary<string, double>();
+            }
+        }
+
+        private void SaveCooldownData()
+        {
+            EnsureCooldownData();
+            Interface.Oxide.DataFileSystem.WriteObject(CooldownDataFile, cooldownData);
+        }
+
+        private void EnsureCooldownData()
+        {
+            if (cooldownData == null)
+            {
+                LoadCooldownData();
+            }
+
+            if (cooldownData.PlayerCooldownUntil == null)
+            {
+                cooldownData.PlayerCooldownUntil = new Dictionary<string, double>();
+            }
+        }
+
+        private void PruneExpiredCooldowns()
+        {
+            EnsureCooldownData();
+
+            var now = NowSeconds();
+            var expired = new List<string>();
+            foreach (var pair in cooldownData.PlayerCooldownUntil)
+            {
+                if (pair.Value <= now)
+                {
+                    expired.Add(pair.Key);
+                }
+            }
+
+            if (expired.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var playerId in expired)
+            {
+                cooldownData.PlayerCooldownUntil.Remove(playerId);
+            }
+
+            SaveCooldownData();
+        }
+
         private void Init()
         {
             permission.RegisterPermission(AdminPermission, this);
+            permission.RegisterPermission(CooldownBypassPermission, this);
+            LoadCooldownData();
         }
 
         private void OnServerInitialized()
         {
             RegisterTokenIcon();
             LoadMonumentPlacementZones();
+            PruneExpiredCooldowns();
         }
 
         private void OnPluginLoaded(Plugin plugin)
         {
-            if (plugin == null || !string.Equals(plugin.Name, "ImageLibrary", StringComparison.OrdinalIgnoreCase))
+            if (plugin == null)
             {
                 return;
             }
 
-            ImageLibrary = plugin;
-            timer.Once(1f, RegisterTokenIcon);
+            if (string.Equals(plugin.Name, "ImageLibrary", StringComparison.OrdinalIgnoreCase))
+            {
+                ImageLibrary = plugin;
+                timer.Once(1f, RegisterTokenIcon);
+                return;
+            }
+
+            if (string.Equals(plugin.Name, "CupboardLimiter", StringComparison.OrdinalIgnoreCase))
+            {
+                CupboardLimiter = plugin;
+            }
+        }
+
+        private void OnPluginUnloaded(Plugin plugin)
+        {
+            if (plugin == null)
+            {
+                return;
+            }
+
+            if (string.Equals(plugin.Name, "CupboardLimiter", StringComparison.OrdinalIgnoreCase))
+            {
+                CupboardLimiter = null;
+            }
+        }
+
+        private void OnServerSave()
+        {
+            SaveCooldownData();
+        }
+
+        private void Unload()
+        {
+            SaveCooldownData();
         }
 
         [HookMethod(nameof(API_GetPortafortTokenIconUrl))]
@@ -516,6 +690,11 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRunDeployPreflight(player, dataPath, false))
+            {
+                return false;
+            }
+
             var result = PastePortafort(player, filename, dataPath, null);
             if (!IsPasteSuccess(result))
             {
@@ -524,6 +703,7 @@ namespace Oxide.Plugins
             }
 
             ConsumeOne(item);
+            StartPlayerCooldown(player);
             Reply(player, "Portafort deployed.");
             return true;
         }
@@ -607,6 +787,11 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (!TryRunDeployPreflight(player, dataPath, refundOnFailure))
+            {
+                return false;
+            }
+
             var result = PastePortafort(player, filename, dataPath, groundPoint);
             if (!IsPasteSuccess(result))
             {
@@ -619,8 +804,317 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            StartPlayerCooldown(player);
             Reply(player, "Portafort deployed.");
             return true;
+        }
+
+        private bool TryRunDeployPreflight(BasePlayer player, string dataPath, bool refundOnFailure)
+        {
+            string error;
+            if (!TryCheckPlayerCooldown(player, out error))
+            {
+                Reply(player, error);
+                RefundPreflightToken(player, refundOnFailure);
+                return false;
+            }
+
+            if (!TryCheckCupboardLimit(player, dataPath, out error))
+            {
+                Reply(player, error);
+                RefundPreflightToken(player, refundOnFailure);
+                return false;
+            }
+
+            return true;
+        }
+
+        private void RefundPreflightToken(BasePlayer player, bool refundOnFailure)
+        {
+            if (!refundOnFailure || player == null)
+            {
+                return;
+            }
+
+            GiveTokens(player, 1);
+            Reply(player, "Your Portafort Token was refunded.");
+        }
+
+        private bool TryCheckPlayerCooldown(BasePlayer player, out string error)
+        {
+            error = null;
+
+            if (player == null || config.RateLimit == null || !config.RateLimit.Enabled || config.RateLimit.PlayerCooldownSeconds <= 0f)
+            {
+                return true;
+            }
+
+            if (PlayerBypassesCooldown(player))
+            {
+                return true;
+            }
+
+            EnsureCooldownData();
+
+            double cooldownUntil;
+            var playerId = player.UserIDString;
+            var now = NowSeconds();
+            if (!cooldownData.PlayerCooldownUntil.TryGetValue(playerId, out cooldownUntil) || cooldownUntil <= now)
+            {
+                return true;
+            }
+
+            error = $"You can deploy another Portafort in {FormatDuration(cooldownUntil - now)}.";
+            return false;
+        }
+
+        private bool PlayerBypassesCooldown(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return false;
+            }
+
+            if (permission.UserHasPermission(player.UserIDString, CooldownBypassPermission))
+            {
+                return true;
+            }
+
+            return config.RateLimit != null
+                && config.RateLimit.AdminsBypass
+                && permission.UserHasPermission(player.UserIDString, AdminPermission);
+        }
+
+        private void StartPlayerCooldown(BasePlayer player)
+        {
+            if (player == null || config.RateLimit == null || !config.RateLimit.Enabled || config.RateLimit.PlayerCooldownSeconds <= 0f)
+            {
+                return;
+            }
+
+            if (PlayerBypassesCooldown(player))
+            {
+                return;
+            }
+
+            EnsureCooldownData();
+            cooldownData.PlayerCooldownUntil[player.UserIDString] = NowSeconds() + config.RateLimit.PlayerCooldownSeconds;
+            SaveCooldownData();
+        }
+
+        private bool TryCheckCupboardLimit(BasePlayer player, string dataPath, out string error)
+        {
+            error = null;
+
+            var settings = config.CupboardLimiterIntegration;
+            if (player == null || settings == null || !settings.Enabled)
+            {
+                return true;
+            }
+
+            if (settings.RespectCupboardLimiterBypassPermission
+                && !string.IsNullOrWhiteSpace(settings.BypassPermission)
+                && permission.UserHasPermission(player.UserIDString, settings.BypassPermission))
+            {
+                return true;
+            }
+
+            if (CupboardLimiter == null || !CupboardLimiter.IsLoaded)
+            {
+                if (!settings.RequireCupboardLimiterLoaded)
+                {
+                    return true;
+                }
+
+                error = "Portafort placement is waiting on CupboardLimiter. Try again once it is loaded.";
+                return false;
+            }
+
+            var addedCupboards = CountToolCupboardsInLayout(dataPath);
+            if (addedCupboards <= 0)
+            {
+                addedCupboards = Math.Max(0, settings.AssumedToolCupboardsPerPortafort);
+            }
+
+            if (addedCupboards <= 0)
+            {
+                return true;
+            }
+
+            int limit;
+            string limitError;
+            if (!TryGetCupboardLimiterLimit(player, out limit, out limitError))
+            {
+                if (!settings.RequireCupboardLimiterLoaded)
+                {
+                    PrintWarning(limitError);
+                    return true;
+                }
+
+                error = "Could not read your CupboardLimiter limit. Try again later.";
+                return false;
+            }
+
+            var currentCupboards = CountCurrentToolCupboardsForLimit(player);
+            var projectedCupboards = currentCupboards + addedCupboards;
+            if (projectedCupboards <= limit)
+            {
+                return true;
+            }
+
+            error = $"Portafort blocked by your tool cupboard limit: this would put you at {projectedCupboards}/{limit} cupboards.";
+            return false;
+        }
+
+        private bool TryGetCupboardLimiterLimit(BasePlayer player, out int limit, out string error)
+        {
+            limit = 0;
+            error = null;
+
+            try
+            {
+                var result = CupboardLimiter.Call("GetTCLimit", player, false);
+                if (result == null)
+                {
+                    error = "CupboardLimiter.GetTCLimit returned no result.";
+                    return false;
+                }
+
+                limit = Convert.ToInt32(result, CultureInfo.InvariantCulture);
+                if (limit <= 0)
+                {
+                    error = $"CupboardLimiter.GetTCLimit returned invalid limit '{result}'.";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = $"CupboardLimiter.GetTCLimit failed: {exception.Message}";
+                return false;
+            }
+        }
+
+        private int CountCurrentToolCupboardsForLimit(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return 0;
+            }
+
+            var ownerIds = BuildCupboardLimitOwnerSet(player);
+            var count = 0;
+
+            foreach (var networkable in BaseNetworkable.serverEntities)
+            {
+                var cupboard = networkable as BuildingPrivlidge;
+                if (cupboard == null || cupboard.IsDestroyed || !ownerIds.Contains(cupboard.OwnerID))
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
+        }
+
+        private HashSet<ulong> BuildCupboardLimitOwnerSet(BasePlayer player)
+        {
+            var ownerIds = new HashSet<ulong>();
+            if (player == null)
+            {
+                return ownerIds;
+            }
+
+            var settings = config.CupboardLimiterIntegration;
+            var team = player.Team;
+            if (settings != null && settings.CountTeamCupboards && team != null && team.members != null && team.members.Count > 1)
+            {
+                foreach (var memberId in team.members)
+                {
+                    if (memberId != 0UL)
+                    {
+                        ownerIds.Add(memberId);
+                    }
+                }
+
+                if (team.invites != null)
+                {
+                    foreach (var invitedId in team.invites)
+                    {
+                        if (invitedId != 0UL)
+                        {
+                            ownerIds.Add(invitedId);
+                        }
+                    }
+                }
+            }
+
+            if (ownerIds.Count == 0)
+            {
+                ownerIds.Add(player.userID);
+            }
+
+            return ownerIds;
+        }
+
+        private int CountToolCupboardsInLayout(string dataPath)
+        {
+            if (string.IsNullOrWhiteSpace(dataPath))
+            {
+                return 0;
+            }
+
+            try
+            {
+                var data = Interface.Oxide.DataFileSystem.GetDatafile(dataPath);
+                var entities = data?["entities"] as System.Collections.IEnumerable;
+                if (entities == null)
+                {
+                    return 0;
+                }
+
+                var count = 0;
+                foreach (var entityObject in entities)
+                {
+                    var entity = entityObject as Dictionary<string, object>;
+                    if (entity == null)
+                    {
+                        continue;
+                    }
+
+                    string prefabName;
+                    if (!TryGetString(entity, "prefabname", out prefabName) && !TryGetString(entity, "prefab", out prefabName))
+                    {
+                        continue;
+                    }
+
+                    if (IsToolCupboardPrefab(prefabName))
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+            catch (Exception exception)
+            {
+                PrintWarning($"Could not count tool cupboards in Portafort layout '{dataPath}': {exception.Message}");
+                return 0;
+            }
+        }
+
+        private bool IsToolCupboardPrefab(string prefabName)
+        {
+            if (string.IsNullOrWhiteSpace(prefabName))
+            {
+                return false;
+            }
+
+            return prefabName.IndexOf("cupboard.tool", StringComparison.OrdinalIgnoreCase) >= 0
+                || prefabName.IndexOf("tool cupboard", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private object PastePortafort(BasePlayer player, string filename, string dataPath, Vector3? groundOverride)
@@ -1304,9 +1798,49 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private bool TryGetString(Dictionary<string, object> values, string key, out string value)
+        {
+            value = null;
+
+            if (values == null || string.IsNullOrWhiteSpace(key))
+            {
+                return false;
+            }
+
+            object raw;
+            if (!values.TryGetValue(key, out raw) || raw == null)
+            {
+                return false;
+            }
+
+            value = raw.ToString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
         private string FormatVector(Vector3 position)
         {
             return string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", position.x, position.y, position.z);
+        }
+
+        private double NowSeconds()
+        {
+            return DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+        }
+
+        private string FormatDuration(double seconds)
+        {
+            var duration = TimeSpan.FromSeconds(Math.Max(1d, Math.Ceiling(seconds)));
+            if (duration.TotalHours >= 1d)
+            {
+                return string.Format(CultureInfo.InvariantCulture, "{0}h {1}m", (int)duration.TotalHours, duration.Minutes);
+            }
+
+            if (duration.TotalMinutes >= 1d)
+            {
+                return string.Format(CultureInfo.InvariantCulture, "{0}m {1}s", (int)duration.TotalMinutes, duration.Seconds);
+            }
+
+            return string.Format(CultureInfo.InvariantCulture, "{0}s", duration.Seconds);
         }
 
         private bool IsCopyPasteDataUsable(string dataPath, out string reason)

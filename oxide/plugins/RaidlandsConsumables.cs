@@ -534,8 +534,8 @@ namespace Oxide.Plugins
             if (firstApply && config.MetabolismRefresh.InstantHealOnConsume > 0f)
             {
                 player.Heal(config.MetabolismRefresh.InstantHealOnConsume);
-                TopOffSerumHealth(player);
-                timer.Once(0.1f, () => TopOffSerumHealth(player));
+                ClampSerumHealth(player);
+                timer.Once(0.1f, () => ClampSerumHealth(player));
             }
             else
             {

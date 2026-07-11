@@ -2,8 +2,8 @@
   "Chat Prefix": "<color=#ff3b3b>Raidlands</color> ",
   "Show Chat Prefix": true,
   "Bot Icon (SteamID)": 0,
-  "Cooldown Between Auto Responses For User": "10s",
-  "Global Cooldown Between Auto Responses": "2s",
+  "Cooldown Between Auto Responses For User": "45s",
+  "Global Cooldown Between Auto Responses": "15s",
   "Use Default Chat (0), Chat Plus (1), Better Chat (2)": 0,
   "Debug": false,
   "Allow Multiple Auto Responses": false,
@@ -31,39 +31,333 @@
   "Show Leaving Message To Player That Left": false,
   "Auto Messages": [
     {
-      "Permission": "smartchatbot.messages",
+      "Permission": "",
       "Message Frequency": "5m",
       "Auto Messages": [
         {
           "Is Enabled": true,
-          "Message": "Visit https://raidlands.net/ for store perks, Discord, and live stats."
+          "Message": "Visit https://raidlands.net/ for store perks, Discord, live stats, rewards, and wipe info."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Need help? Use the website links at https://raidlands.net/ or ask staff in Discord with your Steam name."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Earn and spend RP through the Raidlands rewards systems. Check https://raidlands.net/ for current rewards and games."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Track kills, deaths, KDR, playtime, and wipe history on the Raidlands leaderboard at https://raidlands.net/."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Vote for Raidlands to earn RP, then spend it on rewards and RP games through https://raidlands.net/."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "The Raidlands website has RP casino-style games, vote rewards, leaderboards, store perks, and live server tools."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Check the server page on https://raidlands.net/ for the live map, 3D terrain view, heatmap playback, wipe info, and server status."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Clan leaders can manage members on the Raidlands website: invite, promote, demote, kick, and keep clan access organized."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Got a feature idea? Use the website feature board to suggest it and vote on planned Raidlands additions."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Portable Airstrikes, VIP kits, vehicle tokens, portaforts, sentries, and other perks are listed or supported through https://raidlands.net/."
         }
       ]
     }
   ],
   "Auto Responses": [
     {
-      "Permission": "smartchatbot.response",
+      "Permission": "",
       "Auto Responses": [
         {
-          "Is Enabled": false,
+          "Is Enabled": true,
           "Remove Message From Sender": false,
           "Send Response For Everyone (true) or Only For Sender (false)": true,
           "Triggers": [
             {
-              "Percentage Of Contained Words": 0.75,
+              "Percentage Of Contained Words": 0.5,
               "Regex Enabled": false,
               "Words": [
-                "How",
-                "this",
-                "bot",
-                "works"
+                "discord",
+                "website"
               ]
             }
           ],
           "Answers": [
-            "This bot really works.",
-            "IT WORKS OMG!"
+            "Discord and website links are at https://raidlands.net/.",
+            "You can find Discord, store, stats, leaderboards, rewards, RP games, clan tools, and wipe info at https://raidlands.net/."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.5,
+              "Regex Enabled": false,
+              "Words": [
+                "store",
+                "vip",
+                "donate",
+                "kit",
+                "kits"
+              ]
+            }
+          ],
+          "Answers": [
+            "Store perks and kit details are on https://raidlands.net/. VIP perks sync automatically after purchase.",
+            "Looking for VIP, kits, or perks? Check https://raidlands.net/ and make sure your Steam account is linked."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "wipe",
+                "map",
+                "bp"
+              ]
+            }
+          ],
+          "Answers": [
+            "Wipe, map, leaderboard, and server status info are posted on https://raidlands.net/.",
+            "Check https://raidlands.net/ for the latest wipe/map details, live server status, 3D terrain, and heatmap playback."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "rp",
+                "reward",
+                "rewards",
+                "points"
+              ]
+            }
+          ],
+          "Answers": [
+            "Raidlands RP, vote rewards, rewards shop, and RP casino-style games are managed through https://raidlands.net/.",
+            "Vote for Raidlands to earn RP, then spend it on rewards or RP games through https://raidlands.net/."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "airstrike",
+                "airstrikes",
+                "strike"
+              ]
+            }
+          ],
+          "Answers": [
+            "Use /strike after setting a target. Airstrike items, costs, and permissions depend on your current perks and balance.",
+            "Portable Airstrikes use /strike. If you have an Airstrike Authorization item and permission, capture a target and call it in."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": false,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "admin",
+                "staff",
+                "help",
+                "support"
+              ]
+            }
+          ],
+          "Answers": [
+            "Need staff help? Send details in Discord from https://raidlands.net/ and include your Steam name.",
+            "For support, use the Discord link at https://raidlands.net/ and include what happened, where, and your Steam name."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "leaderboard",
+                "leaderboards",
+                "stats",
+                "kdr",
+                "kills",
+                "deaths"
+              ]
+            }
+          ],
+          "Answers": [
+            "Leaderboards on https://raidlands.net/ track kills, deaths, KDR, playtime, and current wipe stats.",
+            "Check https://raidlands.net/ for current and previous wipe leaderboard browsing."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "casino",
+                "gamble",
+                "jackpot",
+                "slots",
+                "wager"
+              ]
+            }
+          ],
+          "Answers": [
+            "RP casino-style games are on https://raidlands.net/. Earn RP from voting and rewards, then try the active RP games.",
+            "Feeling lucky? The website has RP games and reward options at https://raidlands.net/."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "vote",
+                "voting",
+                "toprust",
+                "rp"
+              ]
+            }
+          ],
+          "Answers": [
+            "Vote links are on https://raidlands.net/. Voting earns RP you can use for rewards and RP games.",
+            "Voting helps the server grow and earns you RP. Check the vote rewards page at https://raidlands.net/."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "clan",
+                "clans",
+                "invite",
+                "promote",
+                "demote",
+                "kick"
+              ]
+            }
+          ],
+          "Answers": [
+            "Clan management is on https://raidlands.net/: invite members, promote or demote ranks, kick members, and keep clan access organized.",
+            "Use the Raidlands website for clan invites, promotions, kicks, and member management."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "heatmap",
+                "3d",
+                "terrain",
+                "activity",
+                "locations"
+              ]
+            }
+          ],
+          "Answers": [
+            "The server page on https://raidlands.net/ has the live map, 3D terrain view, heatmap playback, and server status.",
+            "Want to see where the action is? Check the Raidlands 3D map and heatmap tools at https://raidlands.net/."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "feature",
+                "features",
+                "suggest",
+                "suggestion",
+                "vote"
+              ]
+            }
+          ],
+          "Answers": [
+            "The website feature board lets linked players suggest ideas and vote on planned Raidlands additions.",
+            "Have an idea for the server? Use the feature board on https://raidlands.net/ to suggest it or vote."
+          ]
+        },
+        {
+          "Is Enabled": true,
+          "Remove Message From Sender": false,
+          "Send Response For Everyone (true) or Only For Sender (false)": true,
+          "Triggers": [
+            {
+              "Percentage Of Contained Words": 0.34,
+              "Regex Enabled": false,
+              "Words": [
+                "portafort",
+                "portaforts",
+                "sentry",
+                "sentries",
+                "vehicle",
+                "tokens"
+              ]
+            }
+          ],
+          "Answers": [
+            "Raidlands has extra perk systems like portaforts, sentries, vehicle tokens, VIP kits, and Portable Airstrikes.",
+            "Check https://raidlands.net/ for perk info, kits, store access, and player tools tied into the Rust server."
           ]
         }
       ]

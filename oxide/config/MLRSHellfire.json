@@ -1,0 +1,11 @@
+{
+  "PluginPicture": 76561198838421574,
+  "PluginPrefix": "<color=#191A28>[</color><color=#CC3B28>MLRS Hellfire</color><color=#191A28>]</color> ",
+  "HellfireRocketDamageModifier": 1.0,
+  "HellfireRocketExplosiveRadiusModifier": 1.0,
+  "MLRSFireInterval in seconds": 1.0,
+  "RemoteMLRSFireInterval in seconds": 1.0,
+  "HellfireFireInterval in seconds": 0.3,
+  "Allow using of MLRS for all players like in vanilla rust": true,
+  "Max amount of rockets which can spawn when using hellfire command with custom missle amount": 50
+}

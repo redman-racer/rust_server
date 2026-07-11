@@ -21,7 +21,7 @@ namespace Oxide.Plugins
         #region Fields
 
         [PluginReference]
-        private readonly Plugin Clans, Friends, Bank, AutoLock;
+        private readonly Plugin Clans, Friends, Bank, AutoLock, RaidlandsSentryTurrets;
 
         private const string PERMISSION_USE = "automaticauthorization.use";
 
@@ -123,6 +123,44 @@ namespace Oxide.Plugins
                 DestroyUI(player);
             }
             SaveData();
+        }
+
+        private object OnTurretTarget(AutoTurret turret, BaseCombatEntity entity)
+        {
+            if (!IsManagedScientistSentry(turret))
+            {
+                return null;
+            }
+
+            var player = entity as BasePlayer;
+            if (player == null)
+            {
+                return null;
+            }
+
+            return IsScientistSentryAuthorized(turret, player.userID) ? (object)false : null;
+        }
+
+        private object CanUseTurret(BasePlayer player, AutoTurret turret)
+        {
+            if (!ShouldBypassNativeScientistSentryAuth(turret))
+            {
+                return null;
+            }
+
+            Print(player, "Use /autoauth sentry while looking at this scientist sentry.");
+            return false;
+        }
+
+        private object OnTurretAuthorize(AutoTurret turret, BasePlayer player)
+        {
+            if (!ShouldBypassNativeScientistSentryAuth(turret))
+            {
+                return null;
+            }
+
+            Print(player, "Scientist sentry auth is managed by Rust team membership. Use /autoauth sentry for manual controls.");
+            return false;
         }
 
         private void OnEntitySpawned(AutoTurret autoTurret)
@@ -382,6 +420,8 @@ namespace Oxide.Plugins
             {
                 entityCache.autoTurrets.Remove(autoTurret);
             }
+
+            PruneScientistSentrySuppressions(autoTurret);
         }
 
         private void CheckEntityKill(BuildingPrivlidge buildingPrivlidge)
@@ -456,6 +496,13 @@ namespace Oxide.Plugins
                 {
                     continue;
                 }
+
+                if (IsManagedScientistSentry(autoTurret))
+                {
+                    ApplyScientistSentryAuthorization(autoTurret, playerId);
+                    continue;
+                }
+
                 var isOnline = autoTurret.IsOnline();
                 if (isOnline)
                 {
@@ -646,6 +693,154 @@ namespace Oxide.Plugins
             return sharePlayers;
         }
 
+        private HashSet<ulong> GetScientistSentryAuthIds(ulong ownerId, AutoTurret turret = null)
+        {
+            var sharePlayers = new HashSet<ulong> { ownerId };
+            var shareData = GetShareData(ownerId, true);
+
+            var teamsShare = shareData.GetShareEntry(ShareType.Teams);
+            if (teamsShare.enabled && teamsShare.turret)
+            {
+                var teamMembers = GetTeamMembers(ownerId);
+                if (teamMembers != null)
+                {
+                    foreach (var member in teamMembers)
+                    {
+                        sharePlayers.Add(member);
+                    }
+                }
+            }
+
+            if (configData.ScientistSentries.IncludeFriends)
+            {
+                var friendsShare = shareData.GetShareEntry(ShareType.Friends);
+                if (friendsShare.enabled && friendsShare.turret)
+                {
+                    var friends = GetFriends(ownerId);
+                    if (friends != null)
+                    {
+                        foreach (var friend in friends)
+                        {
+                            sharePlayers.Add(friend);
+                        }
+                    }
+                }
+            }
+
+            if (configData.ScientistSentries.IncludeClans)
+            {
+                var clansShare = shareData.GetShareEntry(ShareType.Clans);
+                if (clansShare.enabled && clansShare.turret)
+                {
+                    var clanMembers = GetClanMembers(ownerId);
+                    if (clanMembers != null)
+                    {
+                        foreach (var member in clanMembers)
+                        {
+                            sharePlayers.Add(member);
+                        }
+                    }
+                }
+            }
+
+            ApplyScientistSentrySuppressions(turret, ownerId, sharePlayers);
+            return sharePlayers;
+        }
+
+        private void ApplyScientistSentryAuthorization(AutoTurret turret, ulong ownerId)
+        {
+            if (turret == null || turret.IsDestroyed)
+            {
+                return;
+            }
+
+            var authList = GetScientistSentryAuthIds(ownerId, turret);
+            if (configData.ScientistSentries.SyncAuthorizedPlayersMirror)
+            {
+                var isOnline = turret.IsOnline();
+                if (isOnline)
+                {
+                    turret.SetIsOnline(false);
+                }
+
+                turret.authorizedPlayers.Clear();
+                foreach (var playerId in authList)
+                {
+                    turret.authorizedPlayers.Add(playerId);
+                }
+
+                if (isOnline)
+                {
+                    turret.SetIsOnline(true);
+                }
+            }
+
+            turret.target = null;
+            turret.SendNetworkUpdate();
+        }
+
+        private bool IsScientistSentryAuthorized(AutoTurret turret, ulong playerId)
+        {
+            var ownerId = GetManagedScientistSentryOwner(turret);
+            return ownerId.IsSteamId() && GetScientistSentryAuthIds(ownerId, turret).Contains(playerId);
+        }
+
+        private bool IsManagedScientistSentry(BaseEntity entity)
+        {
+            return RaidlandsSentryTurrets != null && entity != null && RaidlandsSentryTurrets.Call<bool>("API_IsRaidlandsManagedSentry", entity);
+        }
+
+        private bool ShouldBypassNativeScientistSentryAuth(BaseEntity entity)
+        {
+            return RaidlandsSentryTurrets != null && entity != null && RaidlandsSentryTurrets.Call<bool>("API_ShouldBypassNativeSentryAuth", entity);
+        }
+
+        private ulong GetManagedScientistSentryOwner(BaseEntity entity)
+        {
+            if (RaidlandsSentryTurrets == null || entity == null)
+            {
+                return 0UL;
+            }
+
+            return RaidlandsSentryTurrets.Call<ulong>("API_GetRaidlandsSentryOwner", entity);
+        }
+
+        private void ApplyScientistSentrySuppressions(AutoTurret turret, ulong ownerId, HashSet<ulong> authIds)
+        {
+            if (turret == null || turret.net == null || authIds == null)
+            {
+                return;
+            }
+
+            HashSet<ulong> suppressed;
+            if (!storedData.scientistSentrySuppressions.TryGetValue(turret.net.ID.Value, out suppressed))
+            {
+                return;
+            }
+
+            authIds.Add(ownerId);
+            foreach (var playerId in suppressed)
+            {
+                if (playerId != ownerId)
+                {
+                    authIds.Remove(playerId);
+                }
+            }
+        }
+
+        private void PruneScientistSentrySuppressions(AutoTurret turret)
+        {
+            if (turret?.net == null)
+            {
+                return;
+            }
+
+            if (storedData.scientistSentrySuppressions.Remove(turret.net.ID.Value))
+            {
+                SaveData();
+            }
+        }
+
         private bool CanSharingLock(BaseLock baseLock, BaseEntity parentEntity, StoredData.ShareData shareData, ShareType shareType, ulong ownerId, ulong playerId)
         {
             var shareEntry = shareData.GetShareEntry(shareType);
@@ -820,6 +1015,7 @@ namespace Oxide.Plugins
                 }
                 if (playerTeam.members.Contains(player.userID))
                 {
+                    ClearScientistSentrySuppressionForTeamRejoin(playerTeam.members, player.userID);
                     UpdateTeamAuthList(playerTeam.members);
                 }
             });
@@ -877,6 +1073,43 @@ namespace Oxide.Plugins
             foreach (var member in teamMembers)
             {
                 UpdateAuthList(member, AutoAuthType.All);
+            }
+        }
+
+        private void ClearScientistSentrySuppressionForTeamRejoin(List<ulong> teamMembers, ulong playerId)
+        {
+            if (teamMembers == null || teamMembers.Count <= 0)
+            {
+                return;
+            }
+
+            var changed = false;
+            foreach (var ownerId in teamMembers)
+            {
+                EntityCache entityCache;
+                if (!_playerEntities.TryGetValue(ownerId, out entityCache))
+                {
+                    continue;
+                }
+
+                foreach (var turret in entityCache.autoTurrets)
+                {
+                    if (!IsManagedScientistSentry(turret) || turret?.net == null)
+                    {
+                        continue;
+                    }
+
+                    HashSet<ulong> suppressed;
+                    if (storedData.scientistSentrySuppressions.TryGetValue(turret.net.ID.Value, out suppressed) && suppressed.Remove(playerId))
+                    {
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                SaveData();
             }
         }
 
@@ -1321,6 +1554,11 @@ namespace Oxide.Plugins
                     CreateMainUI(player);
                     return;
 
+                case "sentry":
+                case "scientist":
+                    HandleScientistSentryCommand(player, args);
+                    return;
+
                 case "t":
                 case "at":
                 case "team":
@@ -1644,6 +1882,125 @@ namespace Oxide.Plugins
             return false;
         }
 
+        private void HandleScientistSentryCommand(BasePlayer player, string[] args)
+        {
+            var turret = GetLookAtManagedScientistSentry(player);
+            if (turret == null)
+            {
+                Print(player, "Look at a Raidlands scientist sentry and run: /autoauth sentry <list|deauth|reauth> [playerNameOrSteamId]");
+                return;
+            }
+
+            var ownerId = GetManagedScientistSentryOwner(turret);
+            if (ownerId != player.userID && !player.IsAdmin)
+            {
+                Print(player, "Only the sentry owner or an admin can manage scientist sentry auth.");
+                return;
+            }
+
+            if (args.Length <= 1 || string.Equals(args[1], "list", StringComparison.OrdinalIgnoreCase))
+            {
+                Print(player, DescribeScientistSentryAuth(turret, ownerId));
+                return;
+            }
+
+            if (args.Length < 3)
+            {
+                Print(player, "Usage: /autoauth sentry <deauth|reauth> <playerNameOrSteamId>");
+                return;
+            }
+
+            var target = FindAuthTarget(args[2]);
+            if (target == 0)
+            {
+                Print(player, "Player not found. Use an online/sleeping player name or a SteamID.");
+                return;
+            }
+
+            var entityId = turret.net.ID.Value;
+            HashSet<ulong> suppressed;
+            if (!storedData.scientistSentrySuppressions.TryGetValue(entityId, out suppressed))
+            {
+                suppressed = new HashSet<ulong>();
+                storedData.scientistSentrySuppressions[entityId] = suppressed;
+            }
+
+            switch (args[1].ToLower())
+            {
+                case "deauth":
+                case "remove":
+                case "suppress":
+                    if (target == ownerId)
+                    {
+                        Print(player, "The sentry owner cannot be deauthed.");
+                        return;
+                    }
+
+                    suppressed.Add(target);
+                    SaveData();
+                    ApplyScientistSentryAuthorization(turret, ownerId);
+                    Print(player, $"Scientist sentry deauthed {target} until they leave and rejoin the owner's team or you reauth them.");
+                    return;
+
+                case "reauth":
+                case "add":
+                case "unsuppress":
+                    suppressed.Remove(target);
+                    if (suppressed.Count == 0)
+                    {
+                        storedData.scientistSentrySuppressions.Remove(entityId);
+                    }
+                    SaveData();
+                    ApplyScientistSentryAuthorization(turret, ownerId);
+                    Print(player, $"Scientist sentry suppression cleared for {target}.");
+                    return;
+
+                default:
+                    Print(player, "Usage: /autoauth sentry <list|deauth|reauth> [playerNameOrSteamId]");
+                    return;
+            }
+        }
+
+        private AutoTurret GetLookAtManagedScientistSentry(BasePlayer player)
+        {
+            RaycastHit hit;
+            if (player == null || !Physics.Raycast(player.eyes.HeadRay(), out hit, 8f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                return null;
+            }
+
+            var entity = hit.GetEntity() as AutoTurret;
+            return IsManagedScientistSentry(entity) ? entity : null;
+        }
+
+        private ulong FindAuthTarget(string nameOrId)
+        {
+            ulong playerId;
+            if (ulong.TryParse(nameOrId, out playerId) && playerId.IsSteamId())
+            {
+                return playerId;
+            }
+
+            var player = BasePlayer.FindAwakeOrSleeping(nameOrId);
+            return player == null ? 0UL : player.userID;
+        }
+
+        private string DescribeScientistSentryAuth(AutoTurret turret, ulong ownerId)
+        {
+            var authIds = GetScientistSentryAuthIds(ownerId, turret).OrderBy(id => id).Select(id => id.ToString()).ToList();
+            var suppressedIds = new List<string>();
+            if (turret?.net != null)
+            {
+                HashSet<ulong> suppressed;
+                if (storedData.scientistSentrySuppressions.TryGetValue(turret.net.ID.Value, out suppressed))
+                {
+                    suppressedIds = suppressed.OrderBy(id => id).Select(id => id.ToString()).ToList();
+                }
+            }
+
+            return $"Scientist sentry owner={ownerId}\nauthorized={string.Join(", ", authIds)}\nsuppressed={string.Join(", ", suppressedIds)}";
+        }
+
         private void CmdAutoAuthUI(BasePlayer player, string command, string[] args)
         {
             if (!permission.UserHasPermission(player.UserIDString, PERMISSION_USE))
@@ -1724,6 +2081,9 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Clans Share Settings")]
             public ShareSettings ClansShare { get; set; } = new ShareSettings();
 
+            [JsonProperty(PropertyName = "Raidlands Scientist Sentry Settings")]
+            public ScientistSentrySettings ScientistSentries { get; set; } = new ScientistSentrySettings();
+
             [JsonProperty(PropertyName = "Default Share Settings")]
             public Dictionary<ShareType, ShareSettings> DefaultShare { get; set; } = new Dictionary<ShareType, ShareSettings>
             {
@@ -1766,6 +2126,18 @@ namespace Oxide.Plugins
 
                 [JsonProperty(PropertyName = "Share Other Locked Entities")]
                 public bool ShareOtherEntity { get; set; } = true;
+            }
+
+            public class ScientistSentrySettings
+            {
+                [JsonProperty(PropertyName = "Include Friends For Scientist Sentries")]
+                public bool IncludeFriends { get; set; } = false;
+
+                [JsonProperty(PropertyName = "Include Clans For Scientist Sentries")]
+                public bool IncludeClans { get; set; } = false;
+
+                [JsonProperty(PropertyName = "Synchronize Authorized Players Mirror")]
+                public bool SyncAuthorizedPlayersMirror { get; set; } = true;
             }
 
             public ShareSettings GetShareSettings(ShareType shareType)
@@ -1852,6 +2224,11 @@ namespace Oxide.Plugins
 
         private void UpdateConfigValues()
         {
+            if (configData.ScientistSentries == null)
+            {
+                configData.ScientistSentries = new ConfigData.ScientistSentrySettings();
+            }
+
             if (configData.Version < Version)
             {
                 if (configData.Version <= default(VersionNumber))
@@ -1893,6 +2270,9 @@ namespace Oxide.Plugins
         {
             [JsonProperty(PropertyName = "shareData")]
             public Dictionary<ulong, ShareData> playerShareData = new Dictionary<ulong, ShareData>();
+
+            [JsonProperty(PropertyName = "scientistSentrySuppressions")]
+            public Dictionary<ulong, HashSet<ulong>> scientistSentrySuppressions = new Dictionary<ulong, HashSet<ulong>>();
 
             public class ShareData
             {
@@ -2033,6 +2413,11 @@ namespace Oxide.Plugins
             if (storedData == null)
             {
                 ClearData();
+            }
+
+            if (storedData.scientistSentrySuppressions == null)
+            {
+                storedData.scientistSentrySuppressions = new Dictionary<ulong, HashSet<ulong>>();
             }
         }
 

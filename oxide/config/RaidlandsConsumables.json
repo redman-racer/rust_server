@@ -29,7 +29,7 @@
     "Minimum Oxygen": 1.0,
     "Clear Radiation": true,
     "Clear Bleeding": true,
-    "Instant Heal On Consume": 100.0
+    "Instant Heal On Consume": 10.0
   },
   "Source Buff Items": [
     "maxhealthtea.pure",

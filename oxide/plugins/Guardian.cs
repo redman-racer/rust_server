@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Guardian", "WhiteDragon", "1.7.9")]
+    [Info("Guardian", "WhiteDragon", "1.8.0")]
     [Description("Protects the server from various annoyances, cheats, and macro attacks.")]
     class Guardian : CovalencePlugin
     {
@@ -282,6 +282,8 @@ namespace Oxide.Plugins
                     {
                         var position = info.HitPositionWorld;
 
+                        var distance = Vector3.Distance(position, weapon.Position);
+
                         bool can_trigger = false, hit_location = true, pvp = false;
 
                         string target;
@@ -302,38 +304,6 @@ namespace Oxide.Plugins
                         case Entity.Type.Player:     can_trigger = pvp = true; break;
                         default:
                             hit_location = false; break;
-                        }
-
-                        // Distance fix:
-                        // The old Aim check used Vector3.Distance(info.HitPositionWorld, weapon.Position).
-                        // That can false flag if Guardian's cached weapon/projectile position is stale.
-                        // For PvP, use the real attacker-to-victim distance, which matches normal kill-feed distance better.
-                        var cached_distance = Vector3.Distance(position, weapon.Position);
-                        var pointstart_distance = Vector3.Distance(info.PointStart, position);
-                        var projectile_distance = info.ProjectileDistance;
-                        var victim_player = entity as BasePlayer;
-
-                        var distance = projectile_distance;
-
-                        if(pvp && victim_player != null)
-                        {
-                            distance = Vector3.Distance(player.transform.position, victim_player.transform.position);
-                        }
-                        else if(distance <= 0.0f || float.IsNaN(distance) || float.IsInfinity(distance) || distance > 1000.0f)
-                        {
-                            distance = pointstart_distance;
-                        }
-
-                        if(distance <= 0.0f || float.IsNaN(distance) || float.IsInfinity(distance) || distance > 1000.0f)
-                        {
-                            distance = cached_distance;
-                        }
-
-                        // Final PvP sanity guard. Never allow a stale projectile/cache distance to create
-                        // a 1000m+ Aim warning when the actual players are close together.
-                        if(pvp && victim_player != null && distance > 300.0f)
-                        {
-                            return;
                         }
 
                         if(can_trigger)
@@ -483,9 +453,6 @@ namespace Oxide.Plugins
                                 { "angle_variance", angle_variance.ToString("F6") },
                                 { "bodypart", bodypart },
                                 { "distance", distance.ToString("F1") },
-                                { "projectile_distance", projectile_distance.ToString("F1") },
-                                { "pointstart_distance", pointstart_distance.ToString("F1") },
-                                { "cached_distance", cached_distance.ToString("F1") },
                                 { "playerid", player.UserIDString },
                                 { "playername", Text.Sanitize(player.displayName) },
                                 { "pvp_variance", pvp_variance.ToString("F6") },
@@ -3815,6 +3782,115 @@ namespace Oxide.Plugins
 
         #endregion _command_
 
+        #region _auto_detect_
+
+        private static class AutoDetect
+        {
+            public class Settings
+            {
+                public bool Enabled;
+                public int ScoreThreshold;
+                public int DistinctSignals;
+                public int WindowSeconds;
+                public int CooldownSeconds;
+                public bool Kick;
+
+                public Settings()
+                {
+                    Enabled = true;
+                    ScoreThreshold = 6;
+                    DistinctSignals = 2;
+                    WindowSeconds = 600;
+                    CooldownSeconds = 900;
+                    Kick = false;
+                }
+
+                public void Validate()
+                {
+                    Configuration.Clamp(ref ScoreThreshold, 2, 100);
+                    Configuration.Clamp(ref DistinctSignals, 2, 10);
+                    Configuration.Clamp(ref WindowSeconds, 60, 3600);
+                    Configuration.Clamp(ref CooldownSeconds, 60, 86400);
+                }
+            }
+
+            private class Signal
+            {
+                public DateTime Time;
+                public string Type;
+                public int Weight;
+            }
+
+            private static readonly Dictionary<ulong, List<Signal>> signals = new Dictionary<ulong, List<Signal>>();
+            private static readonly Dictionary<ulong, DateTime> actions = new Dictionary<ulong, DateTime>();
+
+            public static void Unload()
+            {
+                signals.Clear();
+                actions.Clear();
+            }
+
+            private static int Weight(string type)
+            {
+                if(string.IsNullOrEmpty(type)) return 1;
+                var value = type.ToLowerInvariant();
+                if(value.Contains("wall") || value.Contains("trajectory") || value.Contains("recoil") || value.Contains("aim")) return 3;
+                if(value.Contains("gravity") || value.Contains("server") || value.Contains("fire") || value.Contains("melee")) return 2;
+                return 1;
+            }
+
+            public static void Record(string playerid, Dictionary<string, string> details)
+            {
+                if(config?.AutoDetect == null || !config.AutoDetect.Enabled || details == null) return;
+
+                ulong userid;
+                if(!ulong.TryParse(playerid, out userid) || !userid.IsSteamId()) return;
+                string category;
+                if(!details.TryGetValue("category", out category) || category != Text.GetPlain(Key.AntiCheat)) return;
+
+                var now = DateTime.UtcNow;
+                DateTime lastAction;
+                if(actions.TryGetValue(userid, out lastAction) && (now - lastAction).TotalSeconds < config.AutoDetect.CooldownSeconds) return;
+
+                List<Signal> history;
+                if(!signals.TryGetValue(userid, out history)) signals[userid] = history = new List<Signal>();
+                history.RemoveAll(x => (now - x.Time).TotalSeconds > config.AutoDetect.WindowSeconds);
+
+                string type;
+                if(!details.TryGetValue("type", out type)) type = "unknown";
+                history.Add(new Signal { Time = now, Type = type, Weight = Weight(type) });
+
+                var score = 0;
+                var distinct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach(var signal in history)
+                {
+                    score += signal.Weight;
+                    distinct.Add(signal.Type);
+                }
+
+                if(score < config.AutoDetect.ScoreThreshold || distinct.Count < config.AutoDetect.DistinctSignals) return;
+
+                actions[userid] = now;
+                var player = BasePlayer.FindByID(userid);
+                var summary = $"Guardian AutoDetect: {User.Name(userid)} ({userid}) reached score {score} from {distinct.Count} independent signals in {config.AutoDetect.WindowSeconds}s: {string.Join(", ", distinct)}";
+                _instance.PrintWarning(summary);
+
+                foreach(var admin in BasePlayer.activePlayerList)
+                {
+                    if(Permissions.Admin(admin.userID)) admin.ChatMessage(summary);
+                }
+
+                Interface.CallHook("OnGuardianAutoDetect", userid, score, new List<string>(distinct));
+
+                if(config.AutoDetect.Kick && player != null && player.IsConnected)
+                {
+                    player.Kick("Guardian: multiple independent anti-cheat signals detected. An administrator will review the evidence.");
+                }
+            }
+        }
+
+        #endregion _auto_detect_
+
         #region _configuration_
 
         private static Configuration config;
@@ -3824,6 +3900,7 @@ namespace Oxide.Plugins
             public Admin.Settings     Admin;
             public AntiCheat.Settings AntiCheat;
             public AntiFlood.Settings AntiFlood;
+            public AutoDetect.Settings AutoDetect;
             public Ban.Settings       Ban;
             public Cripple.Settings   Cripple;
             public Discord.Settings   Discord;
@@ -3916,6 +3993,7 @@ namespace Oxide.Plugins
                 Validate(ref config.Admin,     () => new Admin.Settings());
                 Validate(ref config.AntiCheat, () => new AntiCheat.Settings(), () => config.AntiCheat.Validate());
                 Validate(ref config.AntiFlood, () => new AntiFlood.Settings(), () => config.AntiFlood.Validate());
+                Validate(ref config.AutoDetect, () => new AutoDetect.Settings(), () => config.AutoDetect.Validate());
                 Validate(ref config.Ban,       () => new Ban.Settings(),       () => config.Ban.Validate());
                 Validate(ref config.Cripple,   () => new Cripple.Settings());
                 Validate(ref config.Discord,   () => new Discord.Settings(),   () => config.Discord.Validate());
@@ -4974,6 +5052,7 @@ namespace Oxide.Plugins
 
             AntiFlood.Unload();
             AntiCheat.Unload();
+            AutoDetect.Unload();
 
             Weapon.Unload();
             VPN.Unload();
@@ -5229,6 +5308,8 @@ namespace Oxide.Plugins
                     }
                 }
             });
+
+            AutoDetect.Record(playerid, details);
         }
 
         private void OnItemDropped(Item item, BaseEntity entity)

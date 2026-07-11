@@ -332,6 +332,16 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Safe Zone Spawn Buffer Distance": 75.0
   },
 
+  "Ambient Squad Respawn Rejoin": {
+    "Enabled": true,
+    "Minimum Teammate Health Fraction": 0.98,
+    "Teammate Recent Damage Window Seconds": 15.0,
+    "Direct Teammate Teleport Radius": 2.25,
+    "Teleport Position Attempts": 10,
+    "Wakeup Equip Delay Seconds": 4.0,
+    "Fallback To Normal Spawn": true
+  },
+
   "Prefab Candidates In Order": [
     "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_roam.prefab",
     "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_full_any.prefab",
@@ -347,11 +357,11 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Vision Fov Degrees": 220.0,
     "Close Awareness Radius": 22.0,
     "Minimum Exposed Target Fraction": 0.25,
-    "Minimum Exposed Target Fraction To Shoot": 0.25,
+    "Minimum Exposed Target Fraction To Shoot": 0.34,
     "Foliage Blocks Vision": true,
-    "Foliage Vision Check Radius": 0.65,
-    "Maximum Clear Vision Through Foliage": 24.0,
-    "Foliage Hits To Block Vision": 2,
+    "Foliage Vision Check Radius": 0.9,
+    "Maximum Clear Vision Through Foliage": 14.0,
+    "Foliage Hits To Block Vision": 1,
     "Foliage Terrain Sampling": true,
     "Foliage Terrain Sample Step": 6.0,
     "Foliage Terrain Samples To Block Vision": 4,
@@ -434,6 +444,10 @@ This example reflects the canonical plugin defaults as of `RaidlandsRoamBots` v0
     "Grenade Ally Avoid Radius": 10.0,
     "Grenade Avoidance Seconds": 5.0,
     "Smoke Screen Distance": 8.0,
+    "Smoke Blocks Vision": true,
+    "Smoke Vision Radius": 7.5,
+    "Smoke Vision Height": 5.0,
+    "Smoke Vision Lifetime Seconds": 30.0,
     "Maximum Active Bot Utility Projectiles": 8,
 
     "Barricade Cooldown Seconds": 12.0,
@@ -653,7 +667,7 @@ remove Gen2/naval prefabs
 replace prefab candidates with legacy scientist bodies
 turn generated near-player positions on
 turn random land fallback on
-normalize older visibility, foliage, hearing, defensive-healing, protection-damage, utility, health, damage, aim-warmup, stuck-memory, squad-reservation, medical-item, bot-clan-war, killfeed, quiet-console, barricade-anchor, and physics-surface spawn settings to the current v0.3.40 defaults
+clamp invalid visibility, foliage, hearing, defensive-healing, protection-damage, utility, health, damage, aim-warmup, stuck-memory, squad-reservation, medical-item, bot-clan-war, killfeed, quiet-console, barricade-anchor, and physics-surface spawn settings to the current defaults without resetting stricter operator tuning
 pin barricade prefab to the double Wooden Barricade Cover prefab
 pin grenade and smoke grenade prefabs to the current deployed F1/smoke prefab paths
 preserve kits, bot profiles, population, skill weights, team weights, and stats
@@ -2953,7 +2967,7 @@ This lets the bots become believable Rust roamers now, while leaving a clean, sa
 
 # Implementation Progress
 
-## Current Progress Through v0.3.71 Native Scientist Audio Muting
+## Current Progress Through v0.3.76 Ambient Squad Respawn Rejoin
 
 ### Files updated
 
@@ -2967,15 +2981,20 @@ Docs/RaidlandsRoamBots_Tactical_Rewrite_Plan_v2_LLM.md
 UPDATED_FILES_FOR_UPLOAD.txt
 UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_INVISIBLE_ADMINS_2026-07-07.md
 UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_SCIENTIST_AUDIO_2026-07-08.md
+UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_FOLIAGE_LOS_2026-07-09.md
+UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_SQUAD_REJOIN_2026-07-10.md
 ```
 
 ### Current code and config snapshot
 
 ```text
-Plugin version: RaidlandsRoamBots v0.3.71
+Plugin version: RaidlandsRoamBots v0.3.76
 Brain mode: playerlike_tactical_brain
-Current checked-in config: disabled by default, target=50, min=0, max=200
-Current checked-in release profile: near-player spawning around any active non-safe-zone player, no hardcoded tester anchor, random land fallback disabled, debug UI disabled, debug console logs disabled, bot clan wars enabled
+Current checked-in config: enabled, target=50, min=0, max=200
+Current checked-in release profile: random-land spawning, no hardcoded tester anchor, debug console logs disabled, bot clan wars enabled
+Current checked-in config source: refreshed from the attached live server JSON on 2026-07-10, preserving live smoke LOS tuning, expanded kit/profile lists, observed SteamIDs, and learned profile weights including fireclan=25, then layering in the new ambient squad rejoin block.
+Current ambient squad respawn rejoin: enabled for ambient RoamBots only. After an ambient bot dies, its replacement keeps the dead bot's internal team id and first tries to spawn directly beside a living teammate with at least 0.98 health fraction and no damage taken in the last 15 seconds. The rejoined bot holds perception and tactical decisions for 4 seconds so it has a stand/equip window before acting. If no healthy teammate/position is available, normal population maintenance runs, which follows the current random-land spawn mode.
+Current foliage LOS profile: foliage blocking enabled, terrain foliage sampling enabled, line-of-sight required to shoot, shoot exposure threshold 0.34, foliage sphere radius 0.9m, clear-through foliage distance 14m, and one foliage blocker hides an individual target probe.
 Current decision advisor config: openai_compatible shadow mode with `${OPENAI_ROAM_BOT_API_KEY}` indirection, active real-player engagement required before any HTTP advisor request, a current real-player fight target/candidate gate after engagement, a 350m real-player proximity safety cap after that, and deterministic heuristic actions still executing
 Current bot chat config: master chat enabled, AI replies enabled, deterministic kill banter enabled, existing OpenAI-compatible advisor endpoint/key/model reused for chat replies, 30 bot-chat OpenAI calls per hour, one concurrent chat request, clan-or-player conversation contexts idle out after 180s, each context stops AI replies after a randomized 10-15 total player/bot messages, and live trigger odds are reduced to half of the first pass: normal AI replies 22.5%, mention replies 45%, recent-fight replies 22.5%, and deterministic kill-banter chances 17.5%/22.5%/20%.
 Current bot corpse loot config: enabled under `Kit Selection -> Corpse Loot`; each bot snapshots its actual live inventory after `Kits.GiveKit` and medical grants, then death/corpse/loot hooks copy that live belt/wear/main inventory into the visible corpse grid as belt/hotbar first, worn armor/clothes second, and main inventory last. Corpses can still roll default-access utility kits (`build`, `scuba`) plus capped low-tier bonus kits (`mp5`, `m16`) for up to three bots per team. RoamBots owns recent bot corpse population, forces a player-corpse style panel/name where Rust allows it, and asks BetterLoot to skip those corpses so they keep player-like inventories.
@@ -3002,7 +3021,7 @@ Current training run path: oxide/data/RaidlandsRoamBots/training_runs.jsonl
 Required admin permission: raidlandsroambots.admin
 ```
 
-The checked-in config is now a staged live-release profile. Reloading the plugin will not spawn bots until `raidbots.enable` is run, but once enabled it targets a normal fifty-bot population with a hard cap of two hundred, uses all eligible active players as near-player anchors, avoids safe zones and player-base positions, and will not fall back to arbitrary random land spawns if no valid player-adjacent location is found.
+The checked-in config is now a staged live-release profile. Reloading the plugin will not spawn bots until `raidbots.enable` is run, but once enabled it targets a normal fifty-bot population with a hard cap of two hundred, uses the current random-land spawn mode for the low-pop setup, and avoids safe zones and player-base positions.
 
 ### Current admin command surface
 
@@ -3033,7 +3052,7 @@ raidbots.goto <player-name-or-steamid> [bot-number]
 raidbots.killall
 ```
 
-Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, native map marker state/count, bot-chat enable/AI/quota state, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, aim warmup/error, learned model/profile keys, learned score deltas, cover/flank points, active barricade count, utility status, protection trigger/source, barricade-anchor state, medical source/fire lock, crouch state, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Learning`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Crouch`, `Protect`, `Anchor`, `Formation`, and `Bad spots` details.
+Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, native map marker state/count, bot-chat enable/AI/quota state, clan tag, squad role, base-restricted state, LOS/exposure probes, weapon/ammo class, aim warmup/error, wake/action-hold state, learned model/profile keys, learned score deltas, cover/flank points, active barricade count, utility status, protection trigger/source, barricade-anchor state, medical source/fire lock, crouch state, formation-reservation status, stuck/nav details, remembered bad destination counts, spawn physical-surface checks, and target status. The debug UI is split into a compact overhead line plus a right-side closest-bot panel with `Signal`, `Action`, `Learning`, `Cover`, `Wall`, `Utility`, `Sight`, `Fire`, `Heal`, `Crouch`, `Protect`, `Anchor`, `Formation`, and `Bad spots` details.
 
 ### Implemented
 
@@ -3246,6 +3265,10 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, na
   - v0.3.69 fixes the visible NPC corpse layout after live screenshot review. Rust exposes the RoamBot corpse as one `Scientist` loot grid, so death prep now flattens the full kit into the main visible grid in player-readable order: belt/hotbar, worn gear, then main inventory.
   - v0.3.70 fixes the remaining planned-kit mismatch. RoamBots now snapshots each bot's actual live inventory after kit application and medical grants, refreshes that snapshot on death, uses it before kit-data fallback, applies it again in `CanLootEntity`, extends recent corpse loot memory to ten minutes, and sets corpse identity toward a player-corpse panel/title instead of generic `Scientist`.
   - v0.3.71 mutes native legacy-scientist body chatter. `PrepareNpcBody` now suppresses `ScientistNPC` radio chatter and death chatter by clearing the native radio/death effect arrays and cancelling any queued `PlayRadioChatter` action, without changing RoamBots sound investigation, bot chat, weapon fire, or tactical AI.
+  - v0.3.72 tightens dense-bush and forest LOS fairness. Shooting now requires 0.34 exposed target fraction, foliage probes use a 0.9m sphere cast, clear-through foliage allowance is 14m, one foliage blocker hides a probe, and config validation now clamps invalid values without resetting stricter operator tuning on reload.
+  - v0.3.73 adds smoke-aware LOS fairness. RoamBots tracks active player-thrown and bot-thrown smoke sources, treats the configured smoke volume as an opaque sight blocker during target probe checks, exposes `Smoke LOS` and `Smoke rad` controls in `/raidbots admin`, and reports smoke blocks through `Sight: smoke ...` while the fire gate remains `Fire: no_los`.
+  - v0.3.74 fixes corpse-loot duplication. `OnCorpsePopulate` and the `CanLootEntity` fallback now share a per-corpse populate-once guard, so access checks and reopening a partially looted RoamBot corpse cannot rebuild its original saved inventory. The guard is removed when the corpse entity is killed.
+  - v0.3.76 adds ambient-only squad respawn rejoin. Dead ambient bots capture their internal team id and, after the normal respawn delay, try to respawn directly beside a healthy living teammate from that team. Teammates below the configured health fraction or damaged inside the recent-damage window are skipped. Rejoined bots hold perception and tactical decisions during the wake/equip delay, with `wake=squad_rejoin:Ns` visible in `raidbots.list`; managed/event bots keep their existing owner-driven lifecycle.
 
 - Bot kill integration:
   - v0.3.31 adds player-like roam bot kill chat, tracked-bot DeathNotes suppression, and optional ServerRewards RP payout for real players who kill roam bots.
@@ -3258,7 +3281,11 @@ Current diagnostics intentionally expose `brain`, anchor/debug-viewer counts, na
 ### Verified locally
 
 ```text
-Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.71 native scientist audio muting.
+Roslyn compile check against RustDedicated_Data/Managed completed with no errors through v0.3.76 ambient squad respawn rejoin.
+
+v0.3.75 adds `/lastbotinfo` for every player, with `/raidbots showlastinfo` retained as an alias. After a player kills a Raidlands bot or is killed by one, the command shows that opponent's name, fight result, learned/default profile, training source, difficulty/skill tier, kit, clan, and lifetime K/D snapshot. No permission is required; the existing `/raidbots admin` surface remains admin-only.
+v0.3.76 adds the ambient squad respawn rejoin path and the `Ambient Squad Respawn Rejoin` config block. Local verification covered JSON parsing and Roslyn compile only; live death/respawn timing still needs an in-game smoke test.
+The v0.3.76 checked-in config was refreshed from the attached live JSON first, so live smoke LOS settings, expanded kit/profile lists, observed SteamIDs, and learned profile weights such as `fireclan=25` are preserved alongside the new rejoin block.
 Compile used the local duplicate-reference workaround: include `Newtonsoft.Json.dll` and exclude `Oxide.References.dll` plus the duplicate Newtonsoft provider.
 Remaining warnings are expected future-phase fields and Oxide plugin references populated at runtime.
 ```
@@ -3272,12 +3299,12 @@ Remaining warnings are expected future-phase fields and Oxide plugin references 
 - raidbots.enable 1 spawned a tracked bot after the first two legacy body prefabs failed navigator placement and the known-working scientistnpc_junkpile_pistol prefab was accepted.
 - Follow-up body preparation showed the Raidlands kit weapon applied: weapon=rifle:rifle.ak, ammo=1.00, held=rifle.ak:BaseProjectile.
 - raidbots.list showed the new diagnostics surface: exposure=0.00(0/0), weapon=rifle:rifle.ak, cover=none, stuck=False, navPath=True, navDisabled=False.
-- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, v0.3.30 advisor adapter commands, v0.3.31 kill chat/RP integration, v0.3.32 release defaults, v0.3.33 admin panel/high-cap defaults, v0.3.34 enhanced killfeed/quiet-console/clan-war behavior, v0.3.35 protection/healing/barricade-anchor polish, v0.3.40 sharper aim tuning, v0.3.42 learned skill/profile behavior, v0.3.43 advisor proximity gate and hard-stuck timer, v0.3.44 decision trace retention, v0.3.45 active player engagement advisor gate, v0.3.47/v0.3.49 native death-screen identity, v0.3.48 NPC weapon damage normalization, v0.3.50 victim-linked observation context, v0.3.51/v0.3.55/v0.3.56 native map markers, v0.3.57 clan-war damage floor, v0.3.58 advisor real-player fight gate, v0.3.59 bot-vs-bot damage diagnostics, v0.3.62 bot bullet damage attribution, v0.3.63 bot bullet hit bridge, v0.3.64 bot-vs-bot tactical bullet resolver, v0.3.52 BGrade API integration, v0.3.53 crouch posture, v0.3.54 managed event bot API, foliage, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
+- This confirms early reload/spawn/kit/nav/diagnostics smoke only. The v0.3.29 terrain-layer spawn guard, v0.3.30 advisor adapter commands, v0.3.31 kill chat/RP integration, v0.3.32 release defaults, v0.3.33 admin panel/high-cap defaults, v0.3.34 enhanced killfeed/quiet-console/clan-war behavior, v0.3.35 protection/healing/barricade-anchor polish, v0.3.40 sharper aim tuning, v0.3.42 learned skill/profile behavior, v0.3.43 advisor proximity gate and hard-stuck timer, v0.3.44 decision trace retention, v0.3.45 active player engagement advisor gate, v0.3.47/v0.3.49 native death-screen identity, v0.3.48 NPC weapon damage normalization, v0.3.50 victim-linked observation context, v0.3.51/v0.3.55/v0.3.56 native map markers, v0.3.57 clan-war damage floor, v0.3.58 advisor real-player fight gate, v0.3.59 bot-vs-bot damage diagnostics, v0.3.62 bot bullet damage attribution, v0.3.63 bot bullet hit bridge, v0.3.64 bot-vs-bot tactical bullet resolver, v0.3.52 BGrade API integration, v0.3.53 crouch posture, v0.3.54 managed event bot API, v0.3.72 stricter foliage LOS, v0.3.73 all-smoke LOS blocking, v0.3.76 ambient squad respawn rejoin, wall-hold, squad, formation reservation, cover, inventory-backed medical item use, auto-reload, hard-stuck, stuck-memory, grenade, smoke, grenade danger-zone, player-like health, and normal-damage behavior still need in-game combat/pathing retests after upload/reload.
 ```
 
 ### Stop point for in-game testing
 
-Please live-test v0.3.71 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, adds toggleable bot chat with OpenAI chat quota controls and deterministic no-AI kill banter, cuts bot chat trigger odds to half of the first live pass, adds player-like corpse loot based on the bot's live Kits inventory with optional utility/low-tier extras, flattens that loot into the visible corpse grid, mutes native legacy-scientist radio/death chatter on RoamBot bodies, keeps external tactical-advisor HTTP calls gated first by active real-player engagement, then by current real-player fight target/candidate validation, then by the 350m safety cap, keeps learned behavior controlled by explicit apply modes and profile percentages, bounds the decision trace JSONL file, adds opt-in globally broadcast native bot map markers with calibrated display-size scaling, exposes the BGrade RoamBot identity API, adds deterministic crouch posture for shooting and cover-healing, adds the RaidlandsEvents managed bot lending API, keeps the close-range different-clan bot damage floor limited to real hit events, fixes bullet damage attribution into that hit-event path, adds a real-hit bridge for enemy-bot projectile hits when native NPC-vs-NPC bullet damage never reaches `OnEntityTakeDamage`, adds a tactical bullet resolver when native NPC-vs-NPC bullet hooks never happen at all, polishes the `/raidbots admin` CUI with guided help and destructive-action confirmations, and still needs live validation for native scientist body audio muting, bot corpse inventory layout/BetterLoot skipping, bot chat tone/quota/context expiry, managed spawn/despawn/owner lookup, learned observation/profile loop, squad/clan coordination, different-clan bot combat, terrain-layer spawn rejection, foliage LOS gating, bot-placed cover, medical behavior, utility behavior, normal damage, native death-screen bot identity, native map marker cleanup/follow behavior, persistent BGrade PvP lockout with RoamBot attribution, quiet-console behavior, and decision trace pruning.
+Please live-test v0.3.76 before I implement advisor-selected action execution, base assault logic, full leader/follower pathing, or full native medical animation/effect parity. This pass preserves the deterministic tactical brain, adds toggleable bot chat with OpenAI chat quota controls and deterministic no-AI kill banter, cuts bot chat trigger odds to half of the first live pass, keeps player-like bot corpse loot one-time populated per corpse, mutes native legacy-scientist radio/death chatter on RoamBot bodies, tightens dense-bush/forest/smoke LOS fairness, and adds ambient squad respawn rejoin beside healthy teammates with a wake/equip delay. Live validation is still required for the rejoin timing/teammate-skip behavior and the broader combat/pathing smoke ladder.
 
 Recommended first test ladder:
 
@@ -3337,11 +3364,39 @@ Additional retest after the 2026-07-05 visibility fix:
 ```text
 1. Reload the plugin.
 2. Spawn one bot with the same near-player test setup.
-3. Put multiple trees/bushes between player and bot at 80m-150m.
-4. Expected: raidbots.list should show target=none, heard, or memory, not target=visible.
-5. Expected: the bot may investigate or reposition, but should not keep firing through foliage without a clean LOS.
-6. Step into open ground at similar distance.
-7. Expected: the bot can reacquire and shoot after reaction delay.
+3. Put multiple trees/bushes between player and bot at 40m-120m.
+4. Expected: dense foliage shows `Sight: foliage ...` or exposure below 0.34, with `Fire: no_los` if the bot has a remembered target.
+5. Expected: raidbots.list should show target=none, heard, or memory, not target=visible with high exposure.
+6. Expected: the bot may investigate or reposition, but should not keep firing through foliage without a clean LOS.
+7. Step into open ground or a genuinely clear lane at similar distance.
+8. Expected: the bot can reacquire and shoot after reaction delay.
+```
+
+Additional retest after the 2026-07-09 smoke LOS fix:
+
+```text
+1. Reload the plugin.
+2. Spawn one bot with the same near-player test setup and confirm clean-lane shooting still works.
+3. Throw a smoke grenade between the player and bot while the bot has or recently had target memory.
+4. Expected: the bot stops firing within the next perception/fire check, `Sight: smoke ...` appears, and `Fire: no_los` appears if the bot still remembers the target.
+5. Expected: the bot may search, flank, retreat, or reposition using memory/hearing, but it should not keep shooting through the smoke volume.
+6. Step out of the smoke into a clear lane.
+7. Expected: the bot reacquires after reaction delay and can shoot normally.
+8. Hurt a bot until it throws smoke; expected bot-thrown smoke also blocks RoamBot shooting through that screen.
+```
+
+Additional retest after the 2026-07-10 ambient squad respawn rejoin:
+
+```text
+1. Upload oxide/plugins/RaidlandsRoamBots.cs and oxide/config/RaidlandsRoamBots.json, then run oxide.reload RaidlandsRoamBots.
+2. Set a low test target with duo/trio teams, for example raidbots.squadtest <tester> followed by raidbots.enable 3, or use the live random-land mode and locate a same-team pair with raidbots.list.
+3. Kill one bot from a team while at least one teammate from the same internal TeamId is still alive, full or near-full health, and not recently damaged.
+4. After Respawn Delay Seconds, expected: the replacement spawns directly beside the healthy teammate, keeps the same internal team id, and raidbots.list briefly shows wake=squad_rejoin:Ns.
+5. During the wake/equip delay, expected: the new bot does not acquire targets, move to a tactical destination, or fire.
+6. Damage the surviving teammate, then kill another bot from that team before the Teammate Recent Damage Window Seconds expires.
+7. Expected: the damaged/recently damaged teammate is skipped; if no other healthy teammate is available, normal population maintenance runs and the replacement follows the current random-land spawn mode.
+8. Kill the entire squad.
+9. Expected: no teammate rejoin is attempted because no living teammate remains; normal random-land population maintenance restores the missing ambient count.
 ```
 
 Nameplate retest:
@@ -3401,7 +3456,7 @@ v0.3.35 clan/foliage/base/barricade/protection/healing/ammo/utility/health/damag
 17. Expected: after placing the wall, `anchor=` / `Anchor:` should show an active anchor. The bot should hold/peek/strafe from behind the wall and only push after the configured damage-dealt hitmarker count, target death, compromised cover, or no-action timer.
 18. If the bot moves near cover but remains exposed, expected: the side panel should show `Cover: compromised` and the bot should re-plan cover/wall instead of standing still to heal.
 19. Put bushes/trees between you and the bots at 40m-120m.
-20. Expected: `raidbots.list` / the side panel should not show `LOS: Y` with high exposure while the bot is visually hidden by dense foliage. It may search or reposition, but should not keep firing through the bush.
+20. Expected: `raidbots.list` / the side panel should not show `LOS: Y` with exposure at or above 0.34 while the bot is visually hidden by dense foliage. It may search or reposition, but should not keep firing through the bush.
 21. Break LOS around 150m-190m after contact.
 22. Expected: clan members should keep searching/pushing the last-known or damage position during the fresh-contact window instead of immediately scattering back to a neutral regroup. When two bots would choose the same shared destination, later decisions should show `formation=...offset...` or the side panel should show `Formation: ...offset...`, and bots should spread instead of stacking directly on one point.
 23. If a bot stands in place with `stuck=Y`, watch the panel and `raidbots.list`. Expected: it should select stuck recovery; if it remains latched as stuck for `AI -> Hard Stuck Despawn Seconds` (180s default) or failed paths continue past the hard-stuck threshold, the tracked bot despawns and queues a replacement check after the configured respawn delay.
@@ -3410,13 +3465,13 @@ v0.3.35 clan/foliage/base/barricade/protection/healing/ammo/utility/health/damag
 26. If `Shooting: N` appears while the bot has a target, check `Fire:`. Expected blockers are concrete reasons such as `no_ammo`, `no_los`, `out_of_range`, `syringe_lock`, `target_in_base`, `no_attack_interface`, or `start_failed`.
 27. If a bot's held gun starts empty, expected: `Auto Reload Bot Weapons` refills the active projectile magazine so it does not stay trapped at `Ammo: 0.00`.
 28. Fight in sparse forest cover at 40m-120m.
-29. Expected: a clearly visible player should no longer be hidden by one branch or a wide near-miss sphere cast, but multiple foliage hits should now suppress fire more often than v0.3.18. If the bot still does not shoot, capture `Sight:` and `Fire:` together.
+29. Expected: a clearly visible player should still be targetable in a clean lane or light brush, but dense brush should now suppress fire more often than the v0.3.71 release profile. If behavior looks wrong either way, capture `Sight:`, `Fire:`, and `Exposure:` together.
 30. Force a wall on uneven terrain or across elevation.
 31. Expected: the bot should only use the wall if a close behind-wall hold point exists. If not, the panel should show `Wall: hold_failed_slope` and it should re-plan instead of running to fake cover far away.
 32. Break LOS or hold near cover around 12m-42m after contact.
 33. Expected: a bot may choose `throw_grenade`, spawn a real F1, enter `GrenadeFlush`, and then move away or back to cover. Squadmates inside the danger radius should choose an escape move instead of standing in the blast lane.
 34. Hurt a bot while exposed around 10m-55m.
-35. Expected: a bot may choose `throw_smoke`, spawn a real smoke grenade, enter `Retreat`, and move away through the screen.
+35. Expected: a bot may choose `throw_smoke`, spawn a real smoke grenade, enter `Retreat`, move away through the screen, and treat that smoke as LOS-blocking cover for RoamBot shooting.
 36. If utility does not happen, expected `Utility:` blockers include `utility_cd`, `team_cd`, `grenade_range`, `grenade_ally_close`, `grenade_bystander_close`, `utility_base_blocked`, or `utility_cap`.
 ```
 

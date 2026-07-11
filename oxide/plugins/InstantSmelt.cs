@@ -6,7 +6,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("Instant Smelt" , "Krungh Crow" , "2.1.2")]
+    [Info("Instant Smelt" , "Krungh Crow/Updated" , "2.1.4-gather-compatible")]
     [Description("Smelt resources as soon as they are mined")]
     public class InstantSmelt : RustPlugin
     {
@@ -186,6 +186,7 @@ namespace Oxide.Plugins
         private object OnGather(BasePlayer player , Item item , bool bonus = false , bool pickup = false)
         {
             if (!HasPermission(player)) return null;
+            if (player == null || item == null || item.info == null) return null;
 
             var shortname = item.info.shortname;
 
@@ -199,6 +200,28 @@ namespace Oxide.Plugins
             if (overrideSmelt is bool result && result == false)
                 return null;
 
+            // Delay the smelt until the next server tick so gather-rate plugins
+            // such as Gather Manager can finish multiplying item.amount first.
+            NextTick(() => SmeltGatheredItem(player , item));
+            return null;
+        }
+
+        private void SmeltGatheredItem(BasePlayer player , Item item)
+        {
+            if (player == null || item == null || item.info == null || item.amount <= 0) return;
+
+            var shortname = item.info.shortname;
+
+            if (!configData.autoSmeltEnabled.GetValueOrDefault(shortname , false))
+                return;
+
+            if (data.Contains(player.userID))
+                return;
+
+            object overrideSmelt = Interface.CallHook("CanSmelt" , player , item);
+            if (overrideSmelt is bool result && result == false)
+                return;
+
             Item newItem;
             if (shortname == woodItemName)
             {
@@ -207,15 +230,17 @@ namespace Oxide.Plugins
             else
             {
                 var cookable = item.info.GetComponent<ItemModCookable>();
-                if (cookable == null) return null;
+                if (cookable == null) return;
                 newItem = ItemManager.Create(cookable.becomeOnCooked , item.amount);
             }
 
+            if (newItem == null) return;
+
             Interface.CallHook("OnSmelted" , player , item , newItem);
 
+            item.RemoveFromContainer();
             item.Remove();
             player.GiveItem(newItem , BaseEntity.GiveItemReason.ResourceHarvested);
-            return null;
         }
 
         private bool HasPermission(BasePlayer player)

@@ -1,3 +1,4 @@
+
 {
   "EnableTurretTargeting": true,
   "EnablePlayerSAMTargeting": true,
@@ -40,7 +41,7 @@
   "DefaultSharingSettings": {
     "Team": false,
     "Friends": false,
-    "Clan": false,
+    "Clan": true,
     "Allies": false
   }
 }

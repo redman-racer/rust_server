@@ -1,0 +1,19 @@
+{
+  "ApiBaseUrl": "https://raidlands.net",
+  "ServerId": "raidlands-main",
+  "SharedSecret": "${RAIDLANDS_BRIDGE_SHARED_SECRET}",
+  "VisualProfilesDataFile": "PortableAirstrikes/VisualProfiles",
+  "SyncOnServerInitialized": true,
+  "StartupSyncDelaySeconds": 8,
+  "EnableRecurringSync": false,
+  "RecurringSyncIntervalSeconds": 21600,
+  "AutoUploadLocalSaves": true,
+  "BootstrapUploadIfWebsiteEmpty": true,
+  "ProtectUnsyncedLocalChanges": true,
+  "BackupCount": 20,
+  "RequestTimeoutMilliseconds": 20000,
+  "MaxBundleBytes": 20971520,
+  "OpenPanelCommand": "airanimsync",
+  "LogSuccessfulNoUpdateChecks": false,
+  "AllowInsecureHttpForDevelopment": false
+}

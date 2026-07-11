@@ -1,3 +1,760 @@
+Portable Airstrikes animation editor preview rides and pause fixes - 2026-07-11
+
+What changed:
+- PortableAirstrikesAnimationEditor is now v0.2.8.
+- Active `/airanim preview` sessions now support a third-person chase ride behind the selected profile vehicle.
+- Admins can queue a rider before preview starts with `/airanim ride <playerNameOrSteamId>`.
+- Admins can move the queued or named rider to the profile start chase point before preview starts with `/airanim ride stage [playerNameOrSteamId]`.
+- Admins can ride themselves with `/airanim ride` or the preview bar `RIDE` button.
+- Admins can put another online player on the ride with `/airanim ride <playerNameOrSteamId>`.
+- `/airanim ride stop [player]` or the preview bar `EXIT` detaches riders and returns them to where the ride started.
+- Ride mode now hides the editor and preview CUI while the rider is attached, so riders keep normal camera/look control while their position follows the preview vehicle.
+- Ride mode now uses a close 5m back / 2.5m up chase offset instead of the original distant 18m / 7m observer offset.
+- Non-admin riders can detach themselves with `/airanim ride stop`.
+- Cargo-plane previews now use manual waypoint playback, so pause/resume freezes the visible cargo plane instead of only pausing the UI clock.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_RIDES_2026-07-11.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.2.8 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in preview movement helpers.
+- Live Oxide reload and in-game ride/pause smoke testing are still required.
+
+Older upload notes follow.
+
+---
+
+WebsiteVipBridge heatmap aggregates - 2026-07-11
+
+What changed:
+- WebsiteVipBridge is now v1.6.1.
+- Added disabled-by-default heatmap config for sync interval, bucket size, metric allow-list, retention hours, and opt-in connected-player position sampling.
+- Death hooks aggregate player deaths, PvP kills, NPC deaths, deaths by NPC, and coarse RoamBots activity into server-side x/z buckets.
+- The bridge posts aggregate buckets to `/api/server/heatmap-snapshot.php`; it does not send raw event lists.
+- Added `websitevip.heatmap.sync`, `websitevip.heatmap.status`, and `websitevip.heatmap.clearwipe`.
+
+Rust server files to upload:
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/config/WebsiteVipBridge.json
+
+Website source file to keep in sync:
+- server-plugins/WebsiteVipBridge.cs
+
+Reload after upload:
+- oxide.reload WebsiteVipBridge
+
+Detailed WebsiteVipBridge handoff:
+- UPDATED_FILES_FOR_UPLOAD_WEBSITEVIPBRIDGE_HEATMAP_2026-07-11.md
+
+Local verification:
+- JSON parse passed for oxide/config/WebsiteVipBridge.json.
+- git diff --check passed for the changed Rust files.
+- Roslyn compile check passed for oxide/plugins/WebsiteVipBridge.cs against RustDedicated_Data/Managed with Oxide.References.dll excluded; warnings were existing DTO/plugin-reference assignment warnings.
+- Live Oxide reload and website endpoint ingest are still required.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes animation editor playback pause - 2026-07-11
+
+What changed:
+- `PortableAirstrikesAnimationEditor` preview sessions now track paused elapsed time instead of letting the preview clock keep advancing.
+- `/airanim pause`, `/airanim resume`, and the new `airanim.ui.pause` CUI command pause/resume active previews.
+- The preview bar is now clickable and exposes `PAUSE`/`RESUME`, `STOP`, and `OPEN`; the main editor action bars also switch to `PAUSE`/`RESUME` while preview playback is active.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_WAYPOINT_MARKERS_2026-07-09.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in the preview movement helpers.
+- Live Oxide reload and in-game editor click testing are still required.
+
+Older upload notes follow.
+
+---
+
+Website map terrain viewer, clean texture render, and monument primitives - 2026-07-11
+
+What changed:
+- WebsiteMapBridge is now v1.0.5.
+- Map publishes keep the icon-stamped RustMapApi top-down render for the Latest wipe map.
+- Map publishes also include a clean `TextureRenderName` render, defaulting to RustMapApi `Default`, for the 3D terrain texture without monument icons.
+- v1.0.5 fixes the failed `TextureRenderName=Map` publish path by trying the configured render and then RustMapApi `Default` before falling back to the icon render.
+- Terrain JSON now carries sanitized monument metadata from TerrainMeta.Path.Monuments.
+- The website stores/exposes current-texture.jpg/png and current-terrain.json, then renders a view-only 3D terrain viewer on the Server Status page.
+- The 3D viewer no longer uses the icon-stamped 2D map texture or the full-map translucent water plane after the next v1.0.4 publish.
+- The 3D viewer renders small primitive monument silhouettes from the exported metadata after the next publish.
+
+Rust server files to upload:
+- oxide/plugins/WebsiteMapBridge.cs
+- oxide/config/WebsiteMapBridge.json
+
+Website files/database step:
+- Upload the website files listed in UPDATED_FILES_FOR_UPLOAD_WEBSITE_MAP_TERRAIN_VIEWER_2026-07-11.md.
+- Run database/migrations/050_server_map_terrain.sql.
+
+Reload after upload:
+- oxide.reload WebsiteMapBridge
+- Check loaded state: rl_map_status
+- Optional forced publish: rl_map_publish
+
+Detailed handoff:
+- UPDATED_FILES_FOR_UPLOAD_WEBSITE_MAP_TERRAIN_VIEWER_2026-07-11.md
+
+Local verification:
+- Website PHP lint/typecheck/build checks passed for this clean-texture follow-up.
+- Rust-side Roslyn compile check passed locally against RustDedicated_Data/Managed after excluding duplicate Newtonsoft references; only expected DTO/plugin-reference assignment warnings remained.
+- Live Oxide reload/status still required.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes admin help and commands - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.52.
+- `/strike admin` Give Items, Strikes, and Balance received layout fixes for the screenshot overlap/clipping issues.
+- Page-level and field/toggle `?` buttons now show explanations in the admin status line.
+- The sidebar now includes Commands and Help tabs.
+- Commands is split between `/strike` chat commands and console commands, with category tabs inside each scope.
+- Help outlines the item grant, target capture/default, validation, execution, profile, safety, loot/audit, and admin-edit workflows.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ADMIN_HELP_COMMANDS_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.52 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in visual movement/carrier velocity helpers.
+- Live Oxide reload and in-game admin panel smoke testing are still required.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes admin strike profiles - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.51.
+- `/strike admin` now treats Strikes as economy/eligibility wrappers and Strike Profiles as the authored payload/timing/spread source.
+- Strikes no longer edit delivery/payload fields; they now expose wrapper fields, accepted target toggles, included profile count, and wrapper-only delete.
+- Strike wrappers support `AcceptedTargetTypes`, `StrikeProfiles`, per-profile start delay/count limit, and positive wrapper multipliers.
+- Runtime starts every enabled included profile compatible with the target; homing profiles require `vehicle_ping`, and profile payload counts remain authoritative.
+- Deleting an admin strike clears saved defaults for that wrapper but never deletes `VisualProfiles.json` profiles.
+- The checked-in PortableAirstrikes config is now ConfigVersion 36 with the new fields and legacy fields kept readable.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/config/PortableAirstrikes.json
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ADMIN_STRIKE_PROFILES_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.51 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in visual movement/carrier velocity helpers.
+- oxide/config/PortableAirstrikes.json parsed successfully and reports ConfigVersion 36.
+- Targeted git diff --check passed for the tracked PortableAirstrikes plugin/config/doc/upload-note files; the new detailed upload note passed a separate trailing-whitespace check.
+- Live Oxide reload and in-game admin panel smoke testing are still required.
+
+Older upload notes follow.
+
+---
+
+Raidlands RoamBots ambient squad respawn rejoin - 2026-07-10
+
+What changed:
+- RaidlandsRoamBots is now v0.3.76.
+- Dead ambient RoamBots first try to respawn beside a healthy living teammate from the same internal RoamBot team.
+- Damaged or recently damaged teammates are skipped.
+- Rejoined bots hold perception and tactical decisions during the wake/equip delay and show `wake=squad_rejoin:Ns` in `raidbots.list`.
+- Managed/event RoamBots are unchanged.
+- If no healthy teammate is available, normal random-land population maintenance restores the missing ambient count.
+- The checked-in JSON was rebased onto the attached live config, preserving live smoke settings, expanded kit/profile lists, observed SteamIDs, and `fireclan=25` profile weight.
+
+Rust server files to upload:
+- oxide/plugins/RaidlandsRoamBots.cs
+- oxide/config/RaidlandsRoamBots.json
+
+Reload after upload:
+- oxide.reload RaidlandsRoamBots
+
+Detailed RoamBots handoff:
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_SQUAD_REJOIN_2026-07-10.md
+
+Local verification:
+- oxide/config/RaidlandsRoamBots.json parsed successfully.
+- oxide/config/RaidlandsRoamBots.json was structurally compared against the attached live file and matches it except for the added `Ambient Squad Respawn Rejoin` block.
+- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.76 against RustDedicated_Data/Managed.
+- Live Oxide reload and in-game squad death/respawn smoke testing are still required.
+
+Older upload notes follow.
+
+---
+
+VIP Kit PNG Images - 2026-07-10
+
+What changed:
+- The six VIP-family in-game Kits cards now use PNG image URLs instead of WebP.
+- WebsiteVipBridge canonical kit image repair/sync now keeps those VIP kit permissions on PNG.
+- The website kit helper/store aliases were aligned to PNG, and a new website migration queues the published kit sync revision.
+
+Rust server files to upload:
+- oxide/plugins/WebsiteVipBridge.cs
+- oxide/data/Kits/kits_data.json
+
+Website files to upload:
+- C:\wamp64\www\raidlands\includes\kits.php
+- C:\wamp64\www\raidlands\pages\store.php
+- C:\wamp64\www\raidlands\server-plugins\WebsiteVipBridge.cs
+- C:\wamp64\www\raidlands\database\migrations\048_fix_vip_kit_png_image_urls.sql
+
+Reload after upload:
+- oxide.reload WebsiteVipBridge
+- oxide.reload Kits
+
+Optional stale-image repair:
+- websitevip.kits.repairimages
+
+Detailed handoff:
+- UPDATED_FILES_FOR_UPLOAD_VIP_KIT_PNG_IMAGES_2026-07-10.md
+
+Local verification:
+- Pending; see detailed handoff after validation.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes admin panel polish - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.50.
+- `/strike admin` Give Items now uses a paginated, sortable, filterable online/sleeping player table.
+- Give search now uses the same single-line keyboard CUI input setup as the animation editor.
+- Admin numeric fields now use a keypad exact-value modal instead of direct number text inputs.
+- Visuals now keeps runtime visual toggles plus a scrollable compatible-profile selector with highlighted selected rows and explicit Select buttons.
+- Editor-owned visual timing/height/distance controls were removed from the PortableAirstrikes Visuals tab.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Reference files updated:
+- Docs/AirStrikes/portable_airstrikes_development_log.md
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ADMIN_PANEL_POLISH_2026-07-10.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ADMIN_PANEL_POLISH_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.50 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in visual movement/carrier velocity helpers.
+- oxide/config/PortableAirstrikes.json parsed successfully and still reports ConfigVersion 35.
+- Targeted git diff --check passed for oxide/plugins/PortableAirstrikes.cs; Git only warned that LF will be normalized to CRLF when it next touches the plugin file.
+- Live Oxide reload and in-game admin panel smoke testing are still required.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes website animation bridge - 2026-07-10
+
+What changed:
+- Added WebsiteAirstrikeAnimationBridge v1.0.3.
+- The Rust server can now pull signed website-published animation bundles into oxide/data/PortableAirstrikes/VisualProfiles.json.
+- The bridge posts sync receipts, uploads bootstrap/local-save/conflict snapshots, backs up local files before installs, protects unsynced local edits, and exposes /airanimsync plus console/RCON commands.
+- Config prefers ${RAIDLANDS_BRIDGE_SHARED_SECRET} and falls back to the existing WebsiteVipBridge shared-secret path for first-upload compatibility.
+- The Raidlands website importer now mirrors Rust generated-release timing: ReleaseTemplate.Time <= 0 falls back to FirstPayloadDelaySeconds, fixing bootstrap snapshot validation for a10_strafe_run.
+- Bridge installs now check that the loaded PortableAirstrikes plugin exposes the visual-profile reload API before replacing VisualProfiles.json.
+- Added airanimsync.status and immediate started replies for async check/sync commands.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+- oxide/plugins/WebsiteAirstrikeAnimationBridge.cs
+- oxide/config/WebsiteAirstrikeAnimationBridge.json
+
+Website file to upload:
+- C:\wamp64\www\raidlands\includes\airstrike-animations.php
+
+Reference files updated:
+- oxide/config/Secrets.example.json
+- Docs/AirStrikes/portable_airstrikes_development_log.md
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WEBSITE_ANIMATION_BRIDGE_2026-07-10.md
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+- oxide.reload PortableAirstrikesAnimationEditor
+- oxide.reload WebsiteAirstrikeAnimationBridge
+
+Expected reload banners:
+- PortableAirstrikes v0.1.50
+- PortableAirstrikesAnimationEditor v0.2.3
+- WebsiteAirstrikeAnimationBridge v1.0.3
+
+Optional admin permission:
+- oxide.grant group admin websiteairstrikeanimationbridge.admin
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WEBSITE_ANIMATION_BRIDGE_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/WebsiteAirstrikeAnimationBridge.cs v1.0.3 against RustDedicated_Data/Managed.
+- Remaining warnings were expected unassigned PluginReference fields.
+- PHP lint passed for C:\wamp64\www\raidlands\includes\airstrike-animations.php.
+- Website importer validation passed for all 5 live VisualProfiles, including a10_strafe_run.
+- Live Oxide reload and signed website endpoint smoke are still required.
+
+Older upload notes follow.
+
+---
+
+Raidlands RoamBots public last-bot info - 2026-07-10
+
+What changed:
+- RaidlandsRoamBots is now v0.3.75.
+- Every player can run `/lastbotinfo` after killing a Raidlands bot or being killed by one.
+- The reply shows the last bot's fight result, profile/training source, difficulty, kit, clan, and lifetime K/D snapshot.
+- `/raidbots showlastinfo` remains available as an alias; all management commands remain admin-only.
+
+Rust server file to upload:
+- oxide/plugins/RaidlandsRoamBots.cs
+
+Reload after upload:
+- oxide.reload RaidlandsRoamBots
+
+Detailed RoamBots handoff:
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_LAST_BOT_INFO_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/RaidlandsRoamBots.cs v0.3.75 against RustDedicated_Data/Managed.
+- Live Oxide reload and in-game player smoke testing are still required.
+
+Portable Airstrikes editor payload-release flares - 2026-07-10
+
+What changed:
+- PortableAirstrikesAnimationEditor is now v0.1.29.
+- Editor previews pop a harmless aircraft flare burst at every legacy first-payload cue and authored payload event.
+- Flare effects originate from the visible preview carrier's live transform, including the native cargo-plane preview.
+- All carriers now use the attack-helicopter flare burst from autoloaded AssetScene-prefabs; the F-15 and patrol-helicopter flare prefabs were removed because they require non-autoloaded AssetScene-props.other.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+
+Quick live smoke:
+- Preview one legacy profile and confirm a flare burst appears at FirstPayloadDelaySeconds.
+- Preview a profile with multiple P1/P2/... release events and confirm one flare burst appears at the visible carrier for every event.
+- Smoke a patrol-heli and a cargo/F-15 profile to confirm the shared autoloaded flare effect renders without an asset-scene error and no damaging payload is spawned by the editor.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_EDITOR_RELEASE_FLARES_2026-07-10.md
+
+Local verification:
+- Rust AssetSceneManifest confirms the selected attack-helicopter flare effect is in AssetScene-prefabs with AutoLoad=true and CanUnload=false.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.1.29 against RustDedicated_Data/Managed.
+- Targeted git diff --check and trailing-whitespace checks passed for the editor, development log, and upload notes.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings.
+
+Local source hash:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs SHA256: 7CD1CFAC0914156939CDEA87E7937E43071678B8DB0FC5B13CC4A416BFB810AF
+
+Raidlands RoamBots corpse loot duplication fix - 2026-07-10
+
+What changed:
+- RaidlandsRoamBots is now v0.3.74.
+- RoamBot corpse loot is populated only once per corpse. Repeated `CanLootEntity` access checks and reopening the corpse no longer rebuild removed items from the saved death snapshot.
+- The one-time guard is released when the corpse entity is destroyed.
+
+Rust server files to upload:
+- oxide/plugins/RaidlandsRoamBots.cs
+
+Reload after upload:
+- oxide.reload RaidlandsRoamBots
+
+Quick live smoke:
+- Kill a RoamBot and note the corpse inventory.
+- Remove one item, close the corpse, and reopen it. The removed item must stay removed.
+- Move several items out while the corpse remains open. No removed item should reappear.
+- Have a second player open the same corpse. They must see only the remaining items.
+
+Detailed RoamBots handoff:
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_CORPSE_LOOT_DUPLICATION_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.74 against `RustDedicated_Data/Managed`.
+- Remaining warnings were expected Oxide plugin-reference/future-field warnings.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes editor-parity playback repair - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.48.
+- Live scripted delivery vehicles now consume and interpolate the editor profile's per-waypoint RotationX/RotationY/RotationZ values.
+- Runtime playback now preserves the editor profile's exact duration, waypoint times, first-payload time, stop/blend mode, rotation smoothing, and terrain clearance.
+- The live call remains active through at least the authored animation duration instead of cutting the final segment short when executor finish padding ends first.
+- Attack-heli rolls/rollovers are no longer flattened into travel-direction-only flight during a real strike.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Keep live data:
+- Do not overwrite oxide/data/PortableAirstrikes/VisualProfiles.json for this code-only fix; keep the live authored rollover profile.
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Compare /airanim preview against a real strike assigned to the same attack-heli profile.
+- Confirm path, roll/rollover, rocket-release point, and total duration match.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_EDITOR_PARITY_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.48 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings.
+- Targeted JSON parse and git diff --check checks passed.
+
+Local source hash:
+- oxide/plugins/PortableAirstrikes.cs SHA256: FF7C7D6D5D0AA5EAF35CD917B3F21413B23D8CF065F634E7F1DEE6640576C63F
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes carrier-tied release events - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.47.
+- PortableAirstrikesAnimationEditor is now v0.1.27.
+- VisualProfiles.json now supports PayloadReleaseMode, MaxPayloadCount, PayloadReleaseIntervalSeconds, ReleaseTemplate, and rich PayloadEvents.
+- /airanim timeline supports ADD RELEASE plus clickable P1/P2/... markers; waypoint PAY adds a release at that waypoint time.
+- The release popup edits payload type, count, offsets, spread, launch/fuse, damage/splash/tracking, and per-target damage scales.
+- Carrier-backed strikes now release configured payload events from the live delivery carrier transform and can mix supported payload IDs per profile.
+- Homing release profiles require a vehicle-backed target before RP/item charge.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+- oxide/data/PortableAirstrikes/VisualProfiles.json
+
+Important ignored data file:
+- oxide/data/PortableAirstrikes/VisualProfiles.json is ignored by Git via /oxide/*, but it changed and must be copied to the live server data folder.
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Open /airanim edit <profileId>, click ADD RELEASE, then click P1 and edit details in the popup.
+- Use DUP, DEL, NEXT/PREV, SAVE, and PREVIEW; confirm marker renumbering and save/reload persistence.
+- Test /airanim payload mode generated, max, and interval; confirm generated schedules stop before DurationSeconds ends.
+- Run cargo/heli/F-15 mixed-payload profiles and confirm payloads originate from the live carrier.
+- Confirm homing-in-profile rejects non-vehicle targets before charge.
+- Destroy the carrier before first release and mid-run to confirm unreleased payloads stop while released payloads continue.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_RELEASE_EVENTS_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.47 against RustDedicated_Data/Managed.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.1.27 against RustDedicated_Data/Managed.
+- oxide/data/PortableAirstrikes/VisualProfiles.json and oxide/config/PortableAirstrikes.json parsed successfully.
+- Targeted git diff --check passed for the tracked plugin/doc/upload-note changes; VisualProfiles.json is ignored by Git and was verified with JSON parse/hash.
+- Remaining warnings were Unity Rigidbody.velocity deprecation warnings.
+
+Local source hashes:
+- oxide/plugins/PortableAirstrikes.cs SHA256: 8E7B396DD17EAE205F4219353CA882B83CBCF64305A6D270D2C985B5D790D75E
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs SHA256: D9335559293B125B935D416FB90422D8811D23ED1E3619E9E351CF2A93A47CE7
+- oxide/data/PortableAirstrikes/VisualProfiles.json SHA256: A9936B79E1999F703D131784593BA40476B1380404908CC0A7FB93D57C8F68B7
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes waypoint stop/rotation toggle - 2026-07-10
+
+What changed:
+- PortableAirstrikesAnimationEditor is now v0.1.26.
+- PortableAirstrikes is now v0.1.46.
+- VisualProfiles.json now persists per-profile StopAtWaypoints.
+- Existing profiles keep StopAtWaypoints=true so current waypoint stop/ease behavior is preserved.
+- /airanim stopwaypoints <on|off|toggle> and the STOP WP ON/OFF editor button toggle blended-through waypoint motion per profile.
+- When StopAtWaypoints=false, editor preview and live runtime waypoint visuals blend velocity through waypoint timestamps instead of slowing to zero at each waypoint.
+- Marker arrows, silent waypoint object outlines, editor previews, and live visuals also use blended velocity for heading, so the plane rotates through waypoint turns instead of snapping to the next segment direction.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/data/PortableAirstrikes/VisualProfiles.json
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Open /airanim edit <profileId> and confirm STOP WP ON appears.
+- Toggle /airanim stopwaypoints off, save, and run /airanim preview.
+- Expected: the preview vehicle passes through waypoints smoothly without easing to a stop, and its nose rotates through turns instead of pointing perfectly at the next node.
+- Confirm waypoint bubble arrows and silent object outlines show the blended through-turn direction while StopAtWaypoints=false.
+- Toggle stopwaypoints back on and confirm the old stop/ease behavior returns.
+- Trigger a matching live strike profile and confirm live visual speed and rotation match the editor preview mode.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_WAYPOINT_STOP_MOTION_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.1.26 against RustDedicated_Data/Managed.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.46 against RustDedicated_Data/Managed.
+- oxide/data/PortableAirstrikes/VisualProfiles.json parsed successfully.
+- Targeted git diff --check passed for both plugins and VisualProfiles.json.
+- Remaining warnings were existing Unity Rigidbody.velocity deprecation warnings.
+
+Local source hashes:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs SHA256: 655A36C9A89571DA12541B4094A828ABA81DEA4637D4759690AB8EDB3BF82D53
+- oxide/plugins/PortableAirstrikes.cs SHA256: 68A3AFFA2CB9AB15C59881223660C25EFE199BAB35E435FE4D5190EEC4B0C170
+- oxide/data/PortableAirstrikes/VisualProfiles.json SHA256: 38C41DCBE8F7EF823E5835F8766E81D1123B953E2E67FCF02B29F8DD7506CC20
+
+Older upload notes follow.
+
+---
+
+PortableAirstrikesAnimationEditor waypoint duration edit - 2026-07-10
+
+What changed:
+- PortableAirstrikesAnimationEditor is now v0.1.24.
+- Waypoint segment duration is editable from the same focused keypad modal used for exact position and rotation edits.
+- The waypoint popup and full editor now show a `DUR` value for the selected waypoint; timeline nodes expose clickable `dur`/`tail` duration badges.
+- `/airanim wp duration <index> <seconds>` was added as the chat equivalent. The profile JSON schema stays compatible: waypoint `Time` and profile `DurationSeconds` are recomputed rather than adding a new field.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+
+Quick live smoke:
+- Open `/airanim edit <profileId>`, select a waypoint, click `DUR`, enter a new value with the keypad, and click `APPLY`.
+- Confirm the selected waypoint's segment duration updates in the popup/full editor and the bottom timeline without changing its position or rotation values.
+- Open `/airanim timeline`, click a node's `dur` or final node's `tail` badge, apply a new value, and confirm the timeline spacing/total duration updates.
+- Run `/airanim wp duration <index> <seconds>` and confirm it produces the same timing behavior.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_WAYPOINT_MARKERS_2026-07-09.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.1.24 against RustDedicated_Data/Managed.
+- Targeted git diff --check passed for the animation editor plugin and upload notes.
+- Remaining warnings were existing Unity Rigidbody.velocity deprecation warnings.
+
+Local source hash:
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs SHA256: EA00DF60D8F9B3FB5B14D802983D32EB2264B13E64D7ECC47E911B3C72A2B649
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes admin layout cleanup - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.44.
+- Code-only CUI layout fix; ConfigVersion stays 35.
+- Fixed the Dashboard tab/header-summary overlap, Dashboard card/title overlap, Strikes detail fields drawing over the list, Safety toggle/provider overlap, Visuals toggle/input overlap, and Loot/Audit toggle/rules-title overlap.
+- Existing admin actions, config persistence, profile assignment, item grants, and strike execution behavior were left unchanged.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Confirm the reload banner reports PortableAirstrikes v0.1.44.
+- Open `/strike admin`.
+- Check Dashboard, Give Items, Strikes, Balance, Safety, Visuals, Loot/Audit, and Activity for no visible text/control overlap at the tested viewport.
+- Confirm Give Items and Strikes controls still click and save as before.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ADMIN_LAYOUT_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.44 against RustDedicated_Data/Managed.
+- oxide/config/PortableAirstrikes.json parsed successfully.
+- Targeted git diff --check passed for the Portable Airstrikes admin layout files.
+- Remaining warnings were existing Unity Rigidbody.velocity deprecation warnings.
+
+Local source hash:
+- oxide/plugins/PortableAirstrikes.cs SHA256: 3DDDBC4DDED50660E2D76A202F04B0910F4F2D29D1ADBD68D3C9E869233D65B1
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes admin panel - 2026-07-10
+
+What changed:
+- PortableAirstrikes is now v0.1.43.
+- ConfigVersion is now 35.
+- Added `/strike admin` with Dashboard, Give Items, Strikes, Balance, Safety, Visuals, Loot/Audit, and Activity tabs.
+- Admins can grant charged Airstrike Targeting Binoculars, edit strike availability/pricing/balance, adjust global safety/visual/loot/audit settings, and assign compatible animation profiles when PortableAirstrikesAnimationEditor is loaded.
+- Delivery/payload compatibility is enforced in the admin UI and runtime validation so bad hand-edited strike definitions cannot start.
+- PortableAirstrikesAnimationEditor now exposes small profile API hooks for the admin panel.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs
+- oxide/config/PortableAirstrikes.json
+
+Runtime dependencies to keep from earlier passes:
+- oxide/plugins/CustomItemDefinitions.cs
+- oxide/plugins/StackSizeController.cs
+- oxide/config/StackSizeController.json
+- oxide/data/PortableAirstrikes/airstrike-targeting-binoculars.png
+- oxide/data/PortableAirstrikes/VisualProfiles.json only if local animation profile data should replace live profile data.
+
+Reload after upload:
+- oxide.reload PortableAirstrikesAnimationEditor
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Confirm non-admins cannot open `/strike admin`; admins can.
+- Give an online player Airstrike Targeting Binoculars from the panel.
+- Edit a strike cost/toggle, reload PortableAirstrikes, and confirm the values persist.
+- Confirm invalid delivery/payload combinations are blocked and compatible animation profiles can be assigned when the editor is loaded.
+- Confirm existing `/strike`, `/strike giveitem`, `/strike debug`, default-strike, cancel/status, and active call behavior still work.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ADMIN_PANEL_2026-07-10.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.43 against RustDedicated_Data/Managed.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.1.23 with the API hooks against RustDedicated_Data/Managed.
+- oxide/config/PortableAirstrikes.json parsed successfully.
+- Targeted git diff --check passed for the Portable Airstrikes admin panel files.
+- Remaining warnings were existing Unity Rigidbody.velocity deprecation warnings.
+
+Local source hashes:
+- oxide/plugins/PortableAirstrikes.cs SHA256: 257236583C517D2F1DCBBC5C6BFD42F942B0EADE65A8733BD3872125B7507C9E
+- oxide/plugins/PortableAirstrikesAnimationEditor.cs SHA256: 1E71FAA63507129F4FA06ABDB1586CA9C12DAC73E7E38C8E6BF6F86FA7D30348
+- oxide/config/PortableAirstrikes.json SHA256: BEC0BBA0F400D8A6A9FF589DC8BF7BC24740201FE35388F1F04D81673BC60F80
+
+Older upload notes follow.
+
+---
+
+Raidlands RoamBots smoke LOS blocking - 2026-07-09
+
+What changed:
+- RaidlandsRoamBots is now v0.3.73.
+- Active smoke sources now block RoamBot vision, including player-thrown smoke and bot-thrown smoke.
+- Visibility probes count smoke as an LOS blocker, with diagnostics showing `Sight: smoke ...` and firing blocked as `Fire: no_los`.
+- `/raidbots admin` AI tab now includes `Smoke LOS` and `Smoke rad`.
+- Added config defaults for `Smoke Blocks Vision`, `Smoke Vision Radius`, `Smoke Vision Height`, and `Smoke Vision Lifetime Seconds`.
+
+Rust server files to upload:
+- oxide/plugins/RaidlandsRoamBots.cs
+- oxide/config/RaidlandsRoamBots.json
+
+Reload after upload:
+- oxide.reload RaidlandsRoamBots
+
+Quick live smoke:
+- Spawn or locate one test bot and confirm clean-lane shooting still works.
+- Throw smoke between the player and bot while it has or recently had target memory.
+- Expected: `Sight: smoke ...`; if the target is remembered, `Fire: no_los`; no continued shooting through the smoke.
+- Step out of the smoke into a clear lane.
+- Expected: reacquisition after reaction delay and normal shooting.
+- Hurt a bot until it throws smoke.
+- Expected: bot-thrown smoke also blocks RoamBot shooting through that screen.
+
+Detailed RoamBots handoff:
+- UPDATED_FILES_FOR_UPLOAD_ROAMBOTS_SMOKE_LOS_2026-07-09.md
+
+Local verification:
+- `oxide/config/RaidlandsRoamBots.json` parsed successfully.
+- Roslyn compile check passed for `oxide/plugins/RaidlandsRoamBots.cs` v0.3.73 against `RustDedicated_Data/Managed`.
+- Remaining warnings were expected Oxide plugin-reference/future-field warnings.
+- `git diff --check` passed for the RoamBots smoke LOS files.
+
+Local source hashes:
+- oxide/plugins/RaidlandsRoamBots.cs SHA256: 1A5869ECE76C151B523648C01DE02CA936B28124483552F34E647ACAB13A03C6
+- oxide/config/RaidlandsRoamBots.json SHA256: 5195F6FF4D6E3D60E90B05B4A0DE5ACF780BEFB266FBE33C631ED1851D9FFDB8
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes minicopter ping recovery - 2026-07-09
+
+What changed:
+- PortableAirstrikes is now v0.1.42.
+- Airstrike binocular pings now include Vehicle Detailed colliders when resolving the aimed target.
+- Pings associated to a mounted pilot/passenger now normalize back to the mounted vehicle before storing the target.
+- Tool pings now try a small vehicle-only sphere cast along the player's aim before accepting ground fallback.
+- Nearby vehicle recovery is widened to 16m, and line-of-sight validation normalizes child/seat collider hits back to the stored vehicle.
+
+Rust server files to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Quick live smoke:
+- Confirm the reload banner reports v0.1.42.
+- Enable/keep enabled homing_heli or homing_jet and make sure the tester has the matching permission.
+- Hold Airstrike Targeting Binoculars, aim directly at a minicopter, and ping it.
+- Run /strike.
+- Expected: the stored target is a vehicle ping and enabled homing rows appear instead of only ground rows.
+- Run /strike homing_heli or /strike homing_jet.
+- Expected: the command starts the homing strike instead of failing with a ground-target mismatch.
+
+Detailed Airstrikes handoff:
+- UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_MINICOPTER_PING_2026-07-09.md
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.42 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in visual movement helpers.
+
+Local source hash:
+- oxide/plugins/PortableAirstrikes.cs SHA256: 79730B40D41EAD560D9AD8625B2CAEF7527A2DFD6F1F480910DAD8E66A73A41C
+
+Older upload notes follow.
+
+---
+
 Raidlands vehicle token failed drop-spawn fallback - 2026-07-08
 
 What changed:
