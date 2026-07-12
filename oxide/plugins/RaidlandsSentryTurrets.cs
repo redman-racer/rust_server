@@ -7,10 +7,11 @@ using Oxide.Core;
 using Oxide.Core.Plugins;
 using Rust;
 using UnityEngine;
+using RaycastHit = UnityEngine.RaycastHit;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.11")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.12")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
@@ -30,6 +31,8 @@ namespace Oxide.Plugins
         private Configuration config;
         private readonly HashSet<ulong> handledTurretIds = new HashSet<ulong>();
         private readonly HashSet<ulong> eventManagedSentryIds = new HashSet<ulong>();
+        private readonly Dictionary<ulong, ulong> sentrySupportEntityIds = new Dictionary<ulong, ulong>();
+        private readonly HashSet<ulong> pendingSupportDropSentryIds = new HashSet<ulong>();
         private string resolvedSentryPrefab;
 
         private class Configuration
@@ -97,6 +100,9 @@ namespace Oxide.Plugins
             [JsonProperty("Return Item When RemoverTool Refunds")]
             public bool ReturnItemWhenRemoverToolRefunds = true;
 
+            [JsonProperty("Support Loss Drop")]
+            public SupportLossDropSettings SupportLossDrop = new SupportLossDropSettings();
+
             [JsonProperty("Replacement Delay Seconds")]
             public float ReplacementDelaySeconds = 0.1f;
 
@@ -153,6 +159,27 @@ namespace Oxide.Plugins
 
             [JsonProperty("Log Damage Events")]
             public bool LogDamageEvents = false;
+        }
+
+        private class SupportLossDropSettings
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Drop Delay Seconds")]
+            public float DropDelaySeconds = 300f;
+
+            [JsonProperty("Check Interval Seconds")]
+            public float CheckIntervalSeconds = 10f;
+
+            [JsonProperty("Support Raycast Distance Metres")]
+            public float SupportRaycastDistanceMetres = 2f;
+
+            [JsonProperty("Drop Item On Support Loss")]
+            public bool DropItemOnSupportLoss = true;
+
+            [JsonProperty("Log Support Loss Drops")]
+            public bool LogSupportLossDrops = true;
         }
 
         protected override void LoadDefaultConfig()
@@ -217,6 +244,13 @@ namespace Oxide.Plugins
 
             ValidateSentryTuning(config.SentryTuning);
 
+            if (config.SupportLossDrop == null)
+            {
+                config.SupportLossDrop = new SupportLossDropSettings();
+            }
+
+            ValidateSupportLossDropSettings(config.SupportLossDrop);
+
             if (config.UseNormalTurretAuthorization)
             {
                 config.ClearAuthorizedPlayersOnSpawnedNpcSentries = false;
@@ -269,6 +303,7 @@ namespace Oxide.Plugins
                 ApplySentryRuntimeState(entity, authIds);
                 ScheduleSentryRuntimeStateReapply(entity, authIds);
                 ConfigurePickup(entity);
+                TrackSentrySupport(entity);
             }
 
             var restoredEventSentries = ManagePersistedRaidlandsEventSentries();
@@ -294,6 +329,8 @@ namespace Oxide.Plugins
                     Puts($"Repaired {repairedOwnerlessSentries} unmanaged ownerless sentry turret(s) back to native peacekeeper behavior.");
                 }
             }
+
+            StartSupportLossMonitor();
         }
 
         [ConsoleCommand("raidlands.sentry.give")]
@@ -379,7 +416,7 @@ namespace Oxide.Plugins
             var includeAll = arg.Args != null && arg.Args.Length > 0 && string.Equals(arg.GetString(0), "all", StringComparison.OrdinalIgnoreCase);
             var lines = new List<string>
             {
-                $"RaidlandsSentryTurrets scan v1.0.11 hp={config.SentryTuning?.EffectiveMaxHealth:0.##} rangeMultiplier={config.SentryTuning?.RangeMultiplier:0.##} autoOwnerlessFallback={config.AllowAutomaticOwnerlessCopyPasteSentryFallback}"
+                $"RaidlandsSentryTurrets scan v1.0.12 hp={config.SentryTuning?.EffectiveMaxHealth:0.##} rangeMultiplier={config.SentryTuning?.RangeMultiplier:0.##} autoOwnerlessFallback={config.AllowAutomaticOwnerlessCopyPasteSentryFallback}"
             };
 
             var total = 0;
@@ -761,6 +798,7 @@ namespace Oxide.Plugins
             }
 
             original.Kill();
+            TrackSentrySupport(replacement);
             WarnOwner(ownerId, "Outpost Sentry Turret deployed.");
         }
 
@@ -774,6 +812,8 @@ namespace Oxide.Plugins
 
             handledTurretIds.Remove(entity.net.ID.Value);
             eventManagedSentryIds.Remove(entity.net.ID.Value);
+            sentrySupportEntityIds.Remove(entity.net.ID.Value);
+            pendingSupportDropSentryIds.Remove(entity.net.ID.Value);
         }
 
         private void OnRaidlandsTrackedPasteFinished(string trackingId, string filename, List<ulong> pastedEntityIds, object player, Vector3 startPos)
@@ -821,6 +861,7 @@ namespace Oxide.Plugins
             var authIds = BuildAuthorizationSet(entity as AutoTurret, entity.OwnerID);
             ApplySentryRuntimeState(entity, authIds);
             ScheduleSentryRuntimeStateReapply(entity, authIds);
+            TrackSentrySupport(entity);
             return true;
         }
 
@@ -970,6 +1011,173 @@ namespace Oxide.Plugins
 
             entity.SendNetworkUpdate();
             return true;
+        }
+
+        private void StartSupportLossMonitor()
+        {
+            var settings = config.SupportLossDrop;
+            if (settings == null || !settings.Enabled)
+            {
+                return;
+            }
+
+            timer.Every(settings.CheckIntervalSeconds, CheckTrackedSentrySupports);
+        }
+
+        private void CheckTrackedSentrySupports()
+        {
+            if (config == null || !config.Enabled || config.SupportLossDrop == null || !config.SupportLossDrop.Enabled)
+            {
+                return;
+            }
+
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                var entity = serverEntity as BaseEntity;
+                if (!IsManagedNpcSentry(entity))
+                {
+                    continue;
+                }
+
+                TrackSentrySupport(entity);
+                if (HasTrackedSupport(entity) && !IsTrackedSupportPresent(entity))
+                {
+                    ScheduleSupportLossDrop(entity);
+                }
+            }
+        }
+
+        private void TrackSentrySupport(BaseEntity entity)
+        {
+            if (entity?.net == null || config.SupportLossDrop == null || !config.SupportLossDrop.Enabled)
+            {
+                return;
+            }
+
+            var sentryId = entity.net.ID.Value;
+            if (sentrySupportEntityIds.ContainsKey(sentryId))
+            {
+                return;
+            }
+
+            var support = FindSupportEntityBelow(entity);
+            if (support?.net == null)
+            {
+                return;
+            }
+
+            sentrySupportEntityIds[sentryId] = support.net.ID.Value;
+        }
+
+        private bool HasTrackedSupport(BaseEntity entity)
+        {
+            return entity?.net != null && sentrySupportEntityIds.ContainsKey(entity.net.ID.Value);
+        }
+
+        private bool IsTrackedSupportPresent(BaseEntity entity)
+        {
+            if (entity?.net == null)
+            {
+                return false;
+            }
+
+            ulong supportId;
+            if (!sentrySupportEntityIds.TryGetValue(entity.net.ID.Value, out supportId) || supportId == 0)
+            {
+                return false;
+            }
+
+            var currentSupport = FindSupportEntityBelow(entity);
+            return currentSupport?.net != null && currentSupport.net.ID.Value == supportId;
+        }
+
+        private BaseEntity FindSupportEntityBelow(BaseEntity entity)
+        {
+            if (entity == null || entity.transform == null || config.SupportLossDrop == null)
+            {
+                return null;
+            }
+
+            var origin = entity.transform.position + Vector3.up * 0.35f;
+            var hits = Physics.RaycastAll(origin, Vector3.down, config.SupportLossDrop.SupportRaycastDistanceMetres);
+            if (hits == null || hits.Length == 0)
+            {
+                return null;
+            }
+
+            Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+            foreach (var hit in hits)
+            {
+                var hitEntity = GetEntityFromHit(hit);
+                if (hitEntity == null || hitEntity == entity || hitEntity.IsDestroyed || hitEntity.net == null)
+                {
+                    continue;
+                }
+
+                if (hitEntity.GetParentEntity() == entity || entity.children != null && entity.children.Contains(hitEntity))
+                {
+                    continue;
+                }
+
+                return hitEntity;
+            }
+
+            return null;
+        }
+
+        private BaseEntity GetEntityFromHit(RaycastHit hit)
+        {
+            var hitEntity = hit.GetEntity();
+            if (hitEntity != null)
+            {
+                return hitEntity;
+            }
+
+            return hit.collider == null ? null : hit.collider.GetComponentInParent<BaseEntity>();
+        }
+
+        private void ScheduleSupportLossDrop(BaseEntity entity)
+        {
+            if (entity?.net == null)
+            {
+                return;
+            }
+
+            var sentryId = entity.net.ID.Value;
+            if (!pendingSupportDropSentryIds.Add(sentryId))
+            {
+                return;
+            }
+
+            var delay = config.SupportLossDrop.DropDelaySeconds;
+            timer.Once(delay, () => DropSentryIfSupportStillMissing(sentryId));
+        }
+
+        private void DropSentryIfSupportStillMissing(ulong sentryId)
+        {
+            pendingSupportDropSentryIds.Remove(sentryId);
+
+            var entity = FindServerEntity(sentryId);
+            if (!IsManagedNpcSentry(entity) || !HasTrackedSupport(entity) || IsTrackedSupportPresent(entity))
+            {
+                return;
+            }
+
+            if (config.SupportLossDrop.DropItemOnSupportLoss)
+            {
+                var item = CreateSentryItem();
+                if (item != null)
+                {
+                    item.Drop(entity.transform.position + Vector3.up * 0.5f, Vector3.up * 0.25f);
+                }
+            }
+
+            if (config.SupportLossDrop.LogSupportLossDrops)
+            {
+                Puts($"Dropped unsupported Outpost Sentry Turret entity {sentryId} after {config.SupportLossDrop.DropDelaySeconds:0.##} second support-loss delay.");
+            }
+
+            entity.Kill(BaseNetworkable.DestroyMode.None);
         }
 
         private List<ulong> NormalizeEntityIds(object rawEntityIds)
@@ -1688,6 +1896,24 @@ namespace Oxide.Plugins
             if (tuning.IncomingDamageMultiplier < 0f)
             {
                 tuning.IncomingDamageMultiplier = 0f;
+            }
+        }
+
+        private void ValidateSupportLossDropSettings(SupportLossDropSettings settings)
+        {
+            if (settings.DropDelaySeconds < 0f)
+            {
+                settings.DropDelaySeconds = 0f;
+            }
+
+            if (settings.CheckIntervalSeconds <= 0f)
+            {
+                settings.CheckIntervalSeconds = 10f;
+            }
+
+            if (settings.SupportRaycastDistanceMetres <= 0f)
+            {
+                settings.SupportRaycastDistanceMetres = 2f;
             }
         }
 

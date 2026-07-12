@@ -23,13 +23,13 @@ Plugin file:
 
 Current plugin version:
 
-- `PortableAirstrikes` v0.1.51
+- `PortableAirstrikes` v0.1.53
 - `PortableAirstrikesAnimationEditor` v0.2.8
 - `WebsiteAirstrikeAnimationBridge` v1.0.1
 
 Current upload note:
 
-- `UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_RIDES_2026-07-11.md`
+- `UPDATED_FILES_FOR_UPLOAD.txt`
 
 Current state:
 
@@ -61,6 +61,7 @@ Current state:
 - The admin workbench layout now keeps the sidebar below the header, separates dashboard cards from the title text, keeps selected-strike fields out of the strike list, and spaces toggle grids away from form fields on the Safety, Visuals, and Loot/Audit tabs.
 - `PortableAirstrikes` v0.1.50 polishes the admin workbench with a paginated/sortable/filterable Give table, fixes Give search text input by using the same single-line keyboard setup as the animation editor, ports the animation editor's keypad-style exact number entry to admin numeric fields, removes editor-owned visual timing/height controls from the Visuals tab, and replaces profile cycling with a scrollable compatible-profile list where the selected profile is highlighted and changed only through explicit Select buttons.
 - `PortableAirstrikes` v0.1.51 refactors `/strike admin` around strike wrappers plus included Strike Profiles: strike definitions now carry `AcceptedTargetTypes`, `StrikeProfiles`, per-profile start delays/count caps, and positive runtime multipliers, while payload/delivery authoring moves out of the Strikes tab and into `VisualProfiles.json` profiles. Deleting a strike from the admin panel removes only the wrapper and clears saved player defaults; it never deletes a visual/profile definition.
+- `PortableAirstrikes` v0.1.53 prevents duplicate permission warnings on reload by trimming and de-duping permission registration per pass and skipping permissions Oxide already has registered. Shared family permissions such as `portableairstrikes.use.rocket` remain valid across multiple strike wrappers without repeated registration calls.
 - Strike definitions now include optional `VisualProfileId`; runtime lookup tries the explicit compatible profile first, then name-based candidates, then vehicle defaults. Missing or incompatible explicit profiles warn and fall back instead of forcing the wrong visual.
 - Strike wrappers can accept multiple target types. Runtime validation now accepts any configured target type, and bundled profile execution starts every enabled included profile that can run for the current target. Homing profiles are skipped unless the target came from a vehicle ping, and profile payload counts remain capped by the profile's own event/max contract with wrapper limits only able to reduce the count.
 - Delivery/payload compatibility is centralized for config normalization, admin UI choices, and runtime validation. Unsupported hand-edited strike definitions show in the admin panel and are rejected before a strike starts.

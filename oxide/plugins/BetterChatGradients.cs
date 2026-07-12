@@ -10,7 +10,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("Better Chat Gradients", "Raidlands", "1.1.2")]
+    [Info("Better Chat Gradients", "Raidlands", "1.2.1")]
     [Description("Adds Better Chat gradients and admin-only chat rank previews.")]
     public class BetterChatGradients : RustPlugin
     {
@@ -21,7 +21,7 @@ namespace Oxide.Plugins
         private const string AdminGroup = "admin";
 
         private const string PreviewUsername = "RaidlandsPlayer";
-        private const string PreviewMessage = "This is how this rank will appear in global chat.";
+        private const string PreviewMessage = "Raidlands chat preview.";
 
         private readonly Dictionary<string, GradientColor[]> _paletteCache =
             new Dictionary<string, GradientColor[]>(StringComparer.OrdinalIgnoreCase);
@@ -65,7 +65,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Puts("Better Chat detected. /chatpreview is registered.");
+            Puts("Better Chat detected. /chatpreview is registered (v1.2.1).");
         }
 
         [ChatCommand("chatpreview")]
@@ -85,27 +85,6 @@ namespace Oxide.Plugins
             RunPreview(player, args);
         }
 
-        [ConsoleCommand("bcg.preview")]
-        private void ConsolePreviewCommand(ConsoleSystem.Arg arg)
-        {
-            BasePlayer player = arg.Connection != null
-                ? arg.Connection.player as BasePlayer
-                : null;
-
-            if (player == null)
-            {
-                Puts("bcg.preview is an in-game player console command. Use /chatpreview in chat.");
-                return;
-            }
-
-            if (!CanUsePreview(player))
-            {
-                SendReply(player, "You must be in the admin group to use this command.");
-                return;
-            }
-
-            RunPreview(player, arg.Args ?? new string[0]);
-        }
 
         private bool CanUsePreview(BasePlayer player)
         {
@@ -145,52 +124,171 @@ namespace Oxide.Plugins
                 return;
             }
 
-            string filter = args != null && args.Length > 0
-                ? args[0].Trim()
-                : string.Empty;
+            string[] suppliedArgs = args ?? new string[0];
 
-            if (!string.IsNullOrEmpty(filter) &&
-                !filter.Equals("all", StringComparison.OrdinalIgnoreCase) &&
-                !filter.Equals("stacks", StringComparison.OrdinalIgnoreCase))
+            if (suppliedArgs.Length == 0 ||
+                suppliedArgs[0].Equals("all", StringComparison.OrdinalIgnoreCase))
             {
-                PreviewGroup selected = groups.FirstOrDefault(
-                    group => group.GroupName.Equals(filter, StringComparison.OrdinalIgnoreCase));
+                SendSimpleRankStack(player, groups);
+                return;
+            }
+
+            if (suppliedArgs[0].Equals("combos", StringComparison.OrdinalIgnoreCase) ||
+                suppliedArgs[0].Equals("stacks", StringComparison.OrdinalIgnoreCase))
+            {
+                SendPreviewHeader(player, "Combined rank examples");
+                SendStackExamples(player, groups);
+                SendPreviewFooter(player);
+                return;
+            }
+
+            List<PreviewGroup> selectedGroups = new List<PreviewGroup>();
+
+            foreach (string requestedName in suppliedArgs)
+            {
+                PreviewGroup selected = FindGroupByAlias(groups, requestedName);
 
                 if (selected == null)
                 {
                     SendReply(
                         player,
                         "<color=#E35A43>Unknown Better Chat group:</color> " +
-                        EscapeRichText(filter));
+                        EscapeRichText(requestedName));
                     return;
                 }
 
-                SendPreviewHeader(player, "Single-group preview");
-                SendPreviewLine(
-                    player,
-                    selected.GroupName + " · priority " +
-                    selected.Priority.ToString(CultureInfo.InvariantCulture),
-                    new List<PreviewGroup> { selected });
-                SendPreviewFooter(player);
-                return;
-            }
-
-            SendPreviewHeader(player, "Raidlands Better Chat rank preview");
-
-            if (!filter.Equals("stacks", StringComparison.OrdinalIgnoreCase))
-            {
-                foreach (PreviewGroup group in groups.OrderBy(group => group.Priority))
+                if (!selectedGroups.Contains(selected))
                 {
-                    SendPreviewLine(
-                        player,
-                        group.GroupName + " · priority " +
-                        group.Priority.ToString(CultureInfo.InvariantCulture),
-                        new List<PreviewGroup> { group });
+                    selectedGroups.Add(selected);
                 }
             }
 
-            SendStackExamples(player, groups);
+            string heading = selectedGroups.Count == 1
+                ? GetDisplayName(selectedGroups[0])
+                : "Custom group combination";
+
+            SendPreviewHeader(player, heading);
+            SendReply(player, BuildPreviewMessage(selectedGroups));
             SendPreviewFooter(player);
+        }
+
+        private void SendSimpleRankStack(
+            BasePlayer player,
+            List<PreviewGroup> groups)
+        {
+            SendPreviewHeader(player, "Raidlands chat rank preview");
+
+            foreach (PreviewGroup group in groups
+                .OrderBy(candidate => candidate.Priority)
+                .ThenBy(candidate => candidate.GroupName))
+            {
+                if (group.GroupName.Equals("default", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string preview = BuildPreviewMessage(
+                    new List<PreviewGroup> { group });
+
+                if (!string.IsNullOrEmpty(preview))
+                {
+                    SendReply(player, preview);
+                }
+            }
+
+            PreviewGroup defaultGroup = groups.FirstOrDefault(
+                group => group.GroupName.Equals(
+                    "default",
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (defaultGroup != null)
+            {
+                string preview = BuildPreviewMessage(
+                    new List<PreviewGroup> { defaultGroup });
+
+                if (!string.IsNullOrEmpty(preview))
+                {
+                    SendReply(player, preview);
+                }
+            }
+
+            SendPreviewFooter(player);
+        }
+
+        private static PreviewGroup FindGroupByAlias(
+            List<PreviewGroup> groups,
+            string requestedName)
+        {
+            if (groups == null || string.IsNullOrWhiteSpace(requestedName))
+            {
+                return null;
+            }
+
+            string normalizedRequest = NormalizeGroupAlias(requestedName);
+
+            return groups.FirstOrDefault(group =>
+                NormalizeGroupAlias(group.GroupName)
+                    .Equals(normalizedRequest, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string NormalizeGroupAlias(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            string normalized = value
+                .Trim()
+                .ToLowerInvariant()
+                .Replace(" ", string.Empty)
+                .Replace("-", string.Empty)
+                .Replace("_", string.Empty);
+
+            if (normalized.StartsWith("rank", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(4);
+            }
+
+            if (normalized.EndsWith("vip", StringComparison.Ordinal) &&
+                normalized != "vip" &&
+                normalized != "vipplus")
+            {
+                normalized = normalized.Substring(
+                    0,
+                    normalized.Length - 3);
+            }
+
+            if (normalized == "gold")
+            {
+                normalized = "golden";
+            }
+
+            if (normalized == "supporterbadge")
+            {
+                normalized = "perksupporterbadge";
+            }
+
+            if (normalized == "supporter")
+            {
+                normalized = "perksupporterbadge";
+            }
+
+            return normalized;
+        }
+
+        private static string GetDisplayName(PreviewGroup group)
+        {
+            if (group == null)
+            {
+                return "Rank preview";
+            }
+
+            string title = StripFormatting(group.TitleText);
+
+            return string.IsNullOrWhiteSpace(title)
+                ? group.GroupName
+                : title.Trim('[', ']');
         }
 
         private List<PreviewGroup> GetBetterChatGroups()
@@ -290,10 +388,6 @@ namespace Oxide.Plugins
 
         private void SendStackExamples(BasePlayer player, List<PreviewGroup> allGroups)
         {
-            SendReply(
-                player,
-                "\n<size=14><color=#D29A52><b>STACKED GROUP EXAMPLES</b></color></size>");
-
             SendNamedStack(player, allGroups, "Titan + Admin",
                 "rank_titan_vip", "admin");
 
@@ -347,8 +441,8 @@ namespace Oxide.Plugins
 
             SendReply(
                 player,
-                "<size=12><color=#9D9188>" +
-                "Only you can see these examples. Styles are read from the live BetterChat groups." +
+                "<size=11><color=#9D9188>" +
+                "Private preview — only you can see these lines." +
                 "</color></size>");
         }
 
@@ -356,8 +450,8 @@ namespace Oxide.Plugins
         {
             SendReply(
                 player,
-                "<size=12><color=#9D9188>" +
-                "Usage: /chatpreview, /chatpreview stacks, or /chatpreview &lt;group_name&gt;" +
+                "<size=11><color=#9D9188>" +
+                "/chatpreview | /chatpreview diamond | /chatpreview titan admin supporter | /chatpreview combos" +
                 "</color></size>\n");
         }
 
@@ -375,10 +469,11 @@ namespace Oxide.Plugins
 
             SendReply(
                 player,
-                "<size=11><color=#776D66>" +
+                "<size=11><color=#887D75>" +
                 EscapeRichText(label) +
-                "</color></size>\n" +
-                preview);
+                "</color></size>");
+
+            SendReply(player, preview);
         }
 
         private string BuildPreviewMessage(List<PreviewGroup> memberships)
@@ -444,7 +539,41 @@ namespace Oxide.Plugins
             result = result.Replace("{Date}", DateTime.Now.ToString("yyyy-MM-dd"));
             result = result.Replace("{Time}", DateTime.Now.ToString("HH:mm"));
 
+            result = ConvertBetterChatFormatting(result);
+
             return NormalizePreviewSpacing(result);
+        }
+
+        private static string ConvertBetterChatFormatting(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
+            string converted = Regex.Replace(
+                text,
+                @"\[#(?<color>[0-9A-Fa-f]{6,8})\](?<content>.*?)\[/#\]",
+                match =>
+                    "<color=#" +
+                    match.Groups["color"].Value.Substring(0, 6) +
+                    ">" +
+                    match.Groups["content"].Value +
+                    "</color>",
+                RegexOptions.Singleline);
+
+            converted = Regex.Replace(
+                converted,
+                @"\[\+(?<size>\d+)\](?<content>.*?)\[/\+\]",
+                match =>
+                    "<size=" +
+                    match.Groups["size"].Value +
+                    ">" +
+                    match.Groups["content"].Value +
+                    "</size>",
+                RegexOptions.Singleline);
+
+            return converted;
         }
 
         private string BuildStyledText(string text, string rawColor, int size)

@@ -15,7 +15,7 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikes", "Raidlands", "0.1.52")]
+    [Info("PortableAirstrikes", "Raidlands", "0.1.53")]
     [Description("Configurable single-use CID binocular airstrike selection, automatic targeting pings, persisted manual default strikes, validation, terrain-aware, more believable multi-phase visual delivery flyovers with autoload-safe repeated sound cues, direct-command execution, audit logging, webhooks, warning markers, in-game warnings, and warning diagnostics.")]
     public class PortableAirstrikes : RustPlugin
     {
@@ -1233,6 +1233,7 @@ namespace Oxide.Plugins
             public float RotationSmoothTimeSeconds;
             public float TerrainClearance = -1f;
             public bool UsesCompiledTrack;
+            public bool UseAuthoritativeRotation;
             public readonly List<CompiledRuntimeFrame> CompiledFrames = new List<CompiledRuntimeFrame>();
             public readonly List<FlightWaypoint> Waypoints = new List<FlightWaypoint>();
         }
@@ -11343,6 +11344,7 @@ namespace Oxide.Plugins
             var payloadDelay = Mathf.Clamp(profile.FirstPayloadDelaySeconds, 0f, duration);
             var plan = CreateEmptyFlightPlan(Vector3.zero, Vector3.zero, Vector3.zero, approach, duration, payloadDelay);
             plan.UsesCompiledTrack = true;
+            plan.UseAuthoritativeRotation = string.Equals(vehicle, "f15", StringComparison.OrdinalIgnoreCase);
             plan.StopAtWaypoints = false;
             plan.RotationSmoothTimeSeconds = 0f;
             var clearance = GetVisualProfileTerrainClearance(profile, vehicle);
@@ -11922,11 +11924,35 @@ namespace Oxide.Plugins
                 return;
             }
 
-            PrepareVisualVehicleEntity(visual, velocity);
+            var useAuthoritativeRotation = ShouldUseAuthoritativeVisualRotation(prefab, plan);
+            PrepareVisualVehicleEntity(visual, velocity, useAuthoritativeRotation);
             RegisterDeliveryCarrier(context, visual, label);
-            MoveVisualEntity(visual, startPosition, rotation, velocity, true);
+            MoveVisualEntity(visual, startPosition, rotation, velocity, true, useAuthoritativeRotation);
             RunFlyoverSoundCues(context, prefab, plan, label);
             ScheduleVisualFlyoverStep(context, visual, plan, GetPreciseNow(), GetVisualMoveIntervalSeconds(), label);
+        }
+
+        private bool ShouldUseAuthoritativeVisualRotation(string prefab, DeliveryFlightPlan plan)
+        {
+            return plan != null
+                && plan.UseAuthoritativeRotation
+                && IsF15VisualPrefab(prefab);
+        }
+
+        private bool ShouldUseAuthoritativeVisualRotation(BaseEntity entity, DeliveryFlightPlan plan)
+        {
+            if (entity == null)
+            {
+                return false;
+            }
+
+            return ShouldUseAuthoritativeVisualRotation(entity.PrefabName ?? entity.ShortPrefabName, plan);
+        }
+
+        private bool IsF15VisualPrefab(string prefab)
+        {
+            return string.Equals(prefab, F15VisualPrefab, StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrWhiteSpace(prefab) && prefab.IndexOf("f15", StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private BaseEntity SpawnTrackedVisualEntity(AirstrikeCallContext context, string prefab, Vector3 position, Quaternion rotation, string label, out string error)
@@ -12018,7 +12044,7 @@ namespace Oxide.Plugins
                     ? targetRotation
                     : GetSmoothedVisualRotation(visual, targetRotation, interval, plan.RotationSmoothTimeSeconds);
 
-                MoveVisualEntity(visual, position, rotation, velocity, progress >= 1f);
+                MoveVisualEntity(visual, position, rotation, velocity, progress >= 1f, ShouldUseAuthoritativeVisualRotation(visual, plan));
 
                 if (progress >= 1f)
                 {
@@ -12030,7 +12056,7 @@ namespace Oxide.Plugins
             });
         }
 
-        private void MoveVisualEntity(BaseEntity entity, Vector3 position, Quaternion rotation, Vector3 velocity, bool immediate = false)
+        private void MoveVisualEntity(BaseEntity entity, Vector3 position, Quaternion rotation, Vector3 velocity, bool immediate = false, bool authoritativeRotation = false)
         {
             if (entity == null || entity.IsDestroyed)
             {
@@ -12051,6 +12077,12 @@ namespace Oxide.Plugins
                     }
 
                     rigidbody.isKinematic = true;
+                    if (authoritativeRotation)
+                    {
+                        rigidbody.MoveRotation(rotation);
+                        rigidbody.rotation = rotation;
+                    }
+
                     usesKinematicRigidbody = true;
                 }
             }
@@ -12062,6 +12094,12 @@ namespace Oxide.Plugins
             try
             {
                 entity.transform.SetPositionAndRotation(position, rotation);
+                if (authoritativeRotation)
+                {
+                    entity.transform.rotation = rotation;
+                    entity.transform.hasChanged = true;
+                }
+
                 if (!usesKinematicRigidbody)
                 {
                     entity.SetVelocity(velocity);
@@ -12087,7 +12125,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private void PrepareVisualVehicleEntity(BaseEntity entity, Vector3 velocity)
+        private void PrepareVisualVehicleEntity(BaseEntity entity, Vector3 velocity, bool authoritativeRotation = false)
         {
             if (entity == null || entity.IsDestroyed)
             {
@@ -12115,6 +12153,12 @@ namespace Oxide.Plugins
                     }
 
                     rigidbody.isKinematic = true;
+                    if (authoritativeRotation)
+                    {
+                        rigidbody.detectCollisions = false;
+                        rigidbody.angularVelocity = Vector3.zero;
+                        rigidbody.rotation = entity.transform.rotation;
+                    }
                 }
 
                 var cargoPlane = entity as CargoPlane;
@@ -18373,17 +18417,26 @@ namespace Oxide.Plugins
 
         private void RegisterPermissions()
         {
-            permission.RegisterPermission(AdminPermission, this);
-            permission.RegisterPermission(UsePermission, this);
+            var registeredThisPass = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Action<string> registerPermission = perm =>
+            {
+                var normalized = (perm ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(normalized) || !registeredThisPass.Add(normalized) || permission.PermissionExists(normalized))
+                {
+                    return;
+                }
+
+                permission.RegisterPermission(normalized, this);
+            };
+
+            registerPermission(AdminPermission);
+            registerPermission(UsePermission);
 
             if (config?.Currency?.VipDiscountsByPermission != null)
             {
                 foreach (var entry in config.Currency.VipDiscountsByPermission)
                 {
-                    if (!string.IsNullOrWhiteSpace(entry.Key))
-                    {
-                        permission.RegisterPermission(entry.Key, this);
-                    }
+                    registerPermission(entry.Key);
                 }
             }
 
@@ -18394,10 +18447,7 @@ namespace Oxide.Plugins
 
             foreach (var strike in config.StrikeDefinitions.Values)
             {
-                if (strike != null && !string.IsNullOrWhiteSpace(strike.PermissionRequired))
-                {
-                    permission.RegisterPermission(strike.PermissionRequired, this);
-                }
+                registerPermission(strike?.PermissionRequired);
             }
         }
 

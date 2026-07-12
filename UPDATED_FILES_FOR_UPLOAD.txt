@@ -1,13 +1,37 @@
-Portable Airstrikes animation editor preview rides and pause fixes - 2026-07-11
+Portable Airstrikes duplicate permission reload fix - 2026-07-11
 
 What changed:
-- PortableAirstrikesAnimationEditor is now v0.2.8.
+- PortableAirstrikes is now v0.1.53.
+- Permission registration now trims and de-dupes permissions during each registration pass.
+- Existing Oxide permissions are skipped instead of being registered again, preventing duplicate permission warnings when multiple strikes share a family permission such as portableairstrikes.use.rocket or when the admin reload path re-runs permission registration.
+
+Rust server file to upload:
+- oxide/plugins/PortableAirstrikes.cs
+
+Reload after upload:
+- oxide.reload PortableAirstrikes
+
+Local verification:
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikes.cs v0.1.53 against RustDedicated_Data/Managed.
+- Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in visual movement/carrier velocity helpers.
+- Live Oxide reload should show PortableAirstrikes v0.1.53 and should not print duplicate portableairstrikes.use.* permission warnings.
+
+Older upload notes follow.
+
+---
+
+Portable Airstrikes animation editor look-safe preview HUD - 2026-07-11
+
+What changed:
+- PortableAirstrikesAnimationEditor is now v0.2.9.
+- The hidden-editor preview HUD no longer requests the cursor, so admins keep normal mouse-look while watching `/airanim preview`.
+- The preview HUD now shows chat-command controls for ride, pause/resume, stop, and reopen instead of clickable buttons that force the mouse cursor up.
 - Active `/airanim preview` sessions now support a third-person chase ride behind the selected profile vehicle.
 - Admins can queue a rider before preview starts with `/airanim ride <playerNameOrSteamId>`.
 - Admins can move the queued or named rider to the profile start chase point before preview starts with `/airanim ride stage [playerNameOrSteamId]`.
-- Admins can ride themselves with `/airanim ride` or the preview bar `RIDE` button.
+- Admins can ride themselves with `/airanim ride`.
 - Admins can put another online player on the ride with `/airanim ride <playerNameOrSteamId>`.
-- `/airanim ride stop [player]` or the preview bar `EXIT` detaches riders and returns them to where the ride started.
+- `/airanim ride stop [player]` detaches riders and returns them to where the ride started.
 - Ride mode now hides the editor and preview CUI while the rider is attached, so riders keep normal camera/look control while their position follows the preview vehicle.
 - Ride mode now uses a close 5m back / 2.5m up chase offset instead of the original distant 18m / 7m observer offset.
 - Non-admin riders can detach themselves with `/airanim ride stop`.
@@ -23,9 +47,9 @@ Detailed Airstrikes handoff:
 - UPDATED_FILES_FOR_UPLOAD_PORTABLE_AIRSTRIKES_ANIMATION_EDITOR_RIDES_2026-07-11.md
 
 Local verification:
-- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.2.8 against RustDedicated_Data/Managed.
+- Roslyn compile check passed for oxide/plugins/PortableAirstrikesAnimationEditor.cs v0.2.9 against RustDedicated_Data/Managed.
 - Remaining warnings were the existing Unity Rigidbody.velocity deprecation warnings in preview movement helpers.
-- Live Oxide reload and in-game ride/pause smoke testing are still required.
+- Live Oxide reload and in-game preview mouse-look smoke testing are still required.
 
 Older upload notes follow.
 
@@ -68,7 +92,7 @@ Portable Airstrikes animation editor playback pause - 2026-07-11
 What changed:
 - `PortableAirstrikesAnimationEditor` preview sessions now track paused elapsed time instead of letting the preview clock keep advancing.
 - `/airanim pause`, `/airanim resume`, and the new `airanim.ui.pause` CUI command pause/resume active previews.
-- The preview bar is now clickable and exposes `PAUSE`/`RESUME`, `STOP`, and `OPEN`; the main editor action bars also switch to `PAUSE`/`RESUME` while preview playback is active.
+- The main editor action bars switch to `PAUSE`/`RESUME` while preview playback is active. The hidden-editor preview HUD was later changed to a non-clickable, look-safe command reminder in v0.2.9.
 
 Rust server file to upload:
 - oxide/plugins/PortableAirstrikesAnimationEditor.cs

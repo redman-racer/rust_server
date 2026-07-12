@@ -14,7 +14,7 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikesAnimationEditor", "Raidlands", "0.2.8")]
+    [Info("PortableAirstrikesAnimationEditor", "Raidlands", "0.2.9")]
     [Description("Admin CUI editor for PortableAirstrikes flight paths and manual or repeated-pattern payload releases, with schema-2 preservation and save notifications for website sync.")]
     public class PortableAirstrikesAnimationEditor : RustPlugin
     {
@@ -2819,7 +2819,6 @@ namespace Oxide.Plugins
             var container = new CuiElementContainer();
             var root = container.Add(new CuiPanel
             {
-                CursorEnabled = true,
                 Image = { Color = "0.030 0.035 0.045 0.94" },
                 RectTransform = { AnchorMin = "0.225 0.012", AnchorMax = "0.775 0.090" }
             }, "Overlay", PreviewUiName);
@@ -2829,10 +2828,7 @@ namespace Oxide.Plugins
             AddLabel(container, root, (session.PreviewPaused ? "Paused " : "Previewing ") + session.ProfileId, 9, TextAnchor.MiddleLeft, "0.025 0.35", "0.360 0.88", "0.82 0.90 0.96 1");
             AddLabel(container, root, FormatSeconds(Mathf.Min(elapsed, duration)) + " / " + FormatSeconds(duration), 9, TextAnchor.MiddleCenter, "0.390 0.35", "0.560 0.88", "0.66 0.76 0.82 1");
             var riding = session.PreviewRiders.ContainsKey(player.userID);
-            AddButton(container, root, riding ? "EXIT" : "RIDE", riding ? "airanim.ui.ridestop" : "airanim.ui.ride", "0.575 0.34", "0.655 0.88", riding ? "0.28 0.13 0.10 0.95" : "0.12 0.29 0.34 0.95", 8);
-            AddButton(container, root, session.PreviewPaused ? "RESUME" : "PAUSE", "airanim.ui.pause", "0.665 0.34", "0.795 0.88", session.PreviewPaused ? "0.14 0.32 0.22 0.95" : "0.34 0.21 0.10 0.95", 8);
-            AddButton(container, root, "STOP", "airanim.ui.stop", "0.805 0.34", "0.915 0.88", "0.46 0.13 0.10 0.95", 8);
-            AddButton(container, root, "OPEN", "airanim.previewui.open", "0.925 0.34", "0.975 0.88", "0.14 0.22 0.30 0.95", 7);
+            AddLabel(container, root, (riding ? "/airanim ride stop" : "/airanim ride") + "   /airanim " + (session.PreviewPaused ? "resume" : "pause") + "   /airanim stop   /airanim", 8, TextAnchor.MiddleRight, "0.575 0.35", "0.975 0.88", "0.52 0.62 0.70 1");
             AddPanel(container, root, "0.025 0.10", "0.975 0.18", "0.08 0.09 0.11 0.95");
             AddPanel(container, root, "0.025 0.10", FormatAnchor(0.025f + 0.950f * progress, 0.18f), "0.82 0.38 0.12 0.92");
             CuiHelper.AddUi(player, container);
