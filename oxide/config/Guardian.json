@@ -1,4 +1,5 @@
 
+
 {
   "Admin": {
     "Broadcast": true,
@@ -193,7 +194,7 @@
       "Connect": true
     },
     "VPN": {
-      "Check": true
+      "Check": false
     }
   },
   "Steam": {

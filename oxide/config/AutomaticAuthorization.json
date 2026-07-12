@@ -58,6 +58,11 @@
       "Share Other Locked Entities": true
     }
   },
+  "Raidlands Scientist Sentry Settings": {
+    "Include Friends For Scientist Sentries": false,
+    "Include Clans For Scientist Sentries": false,
+    "Synchronize Authorized Players Mirror": true
+  },
   "Default Share Settings": {
     "Teams": {
       "Enabled": true,

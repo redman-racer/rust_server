@@ -1,0 +1,11 @@
+{
+  "Disable minicopter gibs": true,
+  "Disable minicopter fire": true,
+  "Disable minicopter explosion sound": false,
+  "Disable scraphelicopter gibs": true,
+  "Disable scraphelicopter explosion sound": false,
+  "Disable scraphelicopter fire ": true,
+  "Disable attackhelicopter gibs": true,
+  "Disable attackhelicopter explosion sound": true,
+  "Disable attackhelicopter fire ": true
+}

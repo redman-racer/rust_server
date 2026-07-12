@@ -74,6 +74,7 @@ private readonly Dictionary<string, DateTime> rateLimits = new Dictionary<string
 private Process currentProcess;
 private DateTime lastResourceSampleAt = DateTime.MinValue;
 private TimeSpan lastCpuTime = TimeSpan.Zero;
+private DateTime lastDashboardRefreshAt = DateTime.MinValue;
 private string activeWipeSeed;
 private DateTime lastDiskSampleAt = DateTime.MinValue;
 private float cachedDiskGiB;
@@ -86,6 +87,7 @@ public string SubTab = "plugins";
 public string StaffSubTab = "info";
 public string ChatSubTab = "monitor";
 public string StaffInventoryTab = "main";
+public bool StaffInventoryDetailOpen;
 public int StaffInventorySlot = -1;
 public int StaffInventoryPage;
 public int PlayerPage;
@@ -423,6 +425,7 @@ public int Columns;
 public int Rows;
 public int MaxSlots;
 public double GridBottom;
+public double GridRight;
 }
 protected override void LoadDefaultConfig()
 {
@@ -803,15 +806,17 @@ SaveData();
 private void OnPlayerDisconnected(BasePlayer player, string reason)
 {
 UpdatePlayerProfile(player, false);
-Log(player, "PlayerLeave", player?.UserIDString ?? string.Empty, string.IsNullOrEmpty(reason) ? "Disconnected" : reason);
+LogPlayerActivity(player, "PlayerLeave", string.IsNullOrEmpty(reason) ? "Disconnected" : reason);
 SaveData();
+RefreshOpenPanels("dashboard");
 ClearRuntimePlayerState(player);
 }
 private void OnPlayerConnected(BasePlayer player)
 {
 UpdatePlayerProfile(player, true);
-Log(player, "PlayerJoin", player?.UserIDString ?? string.Empty, GetPlayerAddress(player));
+LogPlayerActivity(player, "PlayerJoin", GetPlayerAddress(player));
 SaveData();
+RefreshOpenPanels("dashboard");
 ClearRuntimePlayerState(player);
 }
 private object OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
@@ -905,6 +910,7 @@ return "n/a";
 }
 private void RegisterPermissions()
 {
+var added = 0;
 foreach (var perm in AllPermissionNames())
 {
 if (registeredPermissions.Contains(perm) || permission.PermissionExists(perm, this))
@@ -914,8 +920,9 @@ continue;
 }
 permission.RegisterPermission(perm, this);
 registeredPermissions.Add(perm);
+added++;
 }
-Puts($"Registered {registeredPermissions.Count} LiveAdmin permissions.");
+if (added > 0) Puts($"Registered {added} new LiveAdmin permissions ({registeredPermissions.Count} total).");
 }
 private IEnumerable<string> AllPermissionNames()
 {
@@ -967,7 +974,7 @@ private void StartResourceMonitor()
 currentProcess = Process.GetCurrentProcess();
 lastResourceSampleAt = DateTime.UtcNow;
 lastCpuTime = currentProcess.TotalProcessorTime;
-timer.Every(1f, SampleResources);
+timer.Every(1f, () => SampleResources());
 }
 private void StartAutoWipeTimer()
 {
@@ -1145,14 +1152,15 @@ Reply(player, "Invalid group or permission name.");
 LogFailed(player, "Permission", "GrantGroupPermission", args[0], string.Empty, args[1]);
 return;
 }
-if (IsDangerousPermission(args[1]) && !Can(player, PermOwner))
+if (IsDangerousPermission(args[1]) && !Can(player, PermOwner) && !IsAuthLevel2(player))
 {
-Reply(player, "Only owners can grant wildcard or high-risk permissions.");
+Reply(player, "Only owners or auth level 2 users can grant wildcard or high-risk permissions.");
 return;
 }
 RunServerCommand(player, $"oxide.grant group {ConsoleArg(args[0])} {ConsoleArg(args[1])}", $"grant {args[1]} to {args[0]}");
 Log(player, "GrantGroupPermission", args[0], args[1]);
 SaveData();
+RefreshOpenPanels("manage");
 Reply(player, $"Granted {args[1]} to {args[0]}.");
 }
 [ChatCommand("larevokegroup")]
@@ -1177,6 +1185,7 @@ return;
 RunServerCommand(player, $"oxide.revoke group {ConsoleArg(args[0])} {ConsoleArg(args[1])}", $"revoke {args[1]} from {args[0]}");
 Log(player, "RevokeGroupPermission", args[0], args[1]);
 SaveData();
+RefreshOpenPanels("manage");
 Reply(player, $"Revoked {args[1]} from {args[0]}.");
 }
 [ChatCommand("lafilter")]
@@ -1252,6 +1261,7 @@ state.SelectedConfigPlugin = null;
 break;
 case "staffsubtab":
 state.StaffSubTab = Get(args, 1, "info").ToLowerInvariant();
+if (state.StaffSubTab == "inventory") state.StaffInventoryDetailOpen = false;
 break;
 case "chatsubtab":
 state.ChatSubTab = Get(args, 1, "monitor").ToLowerInvariant();
@@ -1272,17 +1282,26 @@ break;
 case "staffinv":
 state.StaffSubTab = "inventory";
 state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, "main"));
+state.StaffInventoryDetailOpen = true;
+state.StaffInventorySlot = -1;
+state.StaffInventoryPage = 0;
+break;
+case "staffinvback":
+state.StaffSubTab = "inventory";
+state.StaffInventoryDetailOpen = false;
 state.StaffInventorySlot = -1;
 state.StaffInventoryPage = 0;
 break;
 case "staffinvslot":
 state.StaffSubTab = "inventory";
 state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, state.StaffInventoryTab));
+state.StaffInventoryDetailOpen = true;
 state.StaffInventorySlot = ToInt(Get(args, 2, "-1"), -1);
 break;
 case "staffinvpage":
 state.StaffSubTab = "inventory";
 state.StaffInventoryTab = CleanInventoryTab(Get(args, 1, state.StaffInventoryTab));
+state.StaffInventoryDetailOpen = true;
 state.StaffInventoryPage = Math.Max(0, state.StaffInventoryPage + ToInt(Get(args, 2, "0")));
 state.StaffInventorySlot = -1;
 break;
@@ -1333,7 +1352,8 @@ case "groupdropdownpage":
 state.GroupDropdownPage = Math.Max(0, state.GroupDropdownPage + ToInt(Get(args, 1, "0")));
 break;
 case "config":
-state.SelectedConfigPlugin = Get(args, 1, null);
+var requestedPlugin = Get(args, 1, null);
+state.SelectedConfigPlugin = KnownPluginName(requestedPlugin);
 state.Tab = "manage";
 state.SubTab = "plugins";
 state.ConfigPage = 0;
@@ -1551,6 +1571,12 @@ storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yy
 }
 else if (field == "seed")
 {
+if (!IsSafeWipeSeed(value))
+{
+Reply(player, "Seed must be random or a numeric seed.");
+LogFailed(player, "Wipe", "WipeField", field, string.Empty, value);
+return;
+}
 config.AutoWipeSeed = string.IsNullOrEmpty(value) ? "random" : value;
 }
 else if (field == "size")
@@ -1593,18 +1619,32 @@ config.ForceWipeCommands = SplitConfigList(value, "say Force wipe command list i
 }
 else if (field == "mappaths")
 {
-config.MapWipeDeletePathText = value;
-config.MapWipeDeletePaths = SplitConfigList(value, "server/{identity}/save/*.sav");
+var paths = SplitConfigList(value, "server/{identity}/save/*.sav");
+if (paths.Any(p => !IsSafeWipePattern(p)))
+{
+Reply(player, "Map delete paths must stay under server/{identity}/ and cannot use rooted or parent paths.");
+LogFailed(player, "Wipe", "WipeField", field, string.Empty, value);
+return;
+}
+config.MapWipeDeletePaths = paths;
+config.MapWipeDeletePathText = string.Join("||", paths);
 }
 else if (field == "bppaths")
 {
-config.BlueprintWipeDeletePathText = value;
-config.BlueprintWipeDeletePaths = SplitConfigList(value, "server/{identity}/player.blueprints*.db");
+var paths = SplitConfigList(value, "server/{identity}/player.blueprints*.db");
+if (paths.Any(p => !IsSafeWipePattern(p)))
+{
+Reply(player, "Blueprint delete paths must stay under server/{identity}/ and cannot use rooted or parent paths.");
+LogFailed(player, "Wipe", "WipeField", field, string.Empty, value);
+return;
+}
+config.BlueprintWipeDeletePaths = paths;
+config.BlueprintWipeDeletePathText = string.Join("||", paths);
 }
 NormalizeConfigLists();
 SaveConfig();
 SaveData();
-Draw(player);
+RefreshWipeViews(player);
 }
 [ConsoleCommand("liveadmin.registerperms")]
 private void RegisterPermsCommand(ConsoleSystem.Arg arg)
@@ -1789,16 +1829,19 @@ case "wipetoggle":
 if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipetoggle", "Wipe")) return;
 config.AutoWipeEnabled = !config.AutoWipeEnabled;
 SaveConfig();
+RefreshWipeViews(player);
 break;
 case "wipemap":
 if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipemap", "Wipe")) return;
 config.AutoWipeMap = !config.AutoWipeMap;
 SaveConfig();
+RefreshWipeViews(player);
 break;
 case "wipebp":
 if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipebp", "Wipe")) return;
 config.AutoWipeBlueprints = !config.AutoWipeBlueprints;
 SaveConfig();
+RefreshWipeViews(player);
 break;
 case "wipeschedule":
 if (!CanManageWipe(player) || BlockedBySafeMode(player, "wipeschedule", "Wipe")) return;
@@ -1806,6 +1849,7 @@ config.AutoWipeUseWeeklySchedule = !config.AutoWipeUseWeeklySchedule;
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveConfig();
 SaveData();
+RefreshWipeViews(player);
 break;
 case "wipefirstforce":
 if (!CanForceWipe(player) || BlockedBySafeMode(player, "wipefirstforce", "Wipe")) return;
@@ -1813,21 +1857,25 @@ config.AutoWipeForceFirstWeekday = !config.AutoWipeForceFirstWeekday;
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveConfig();
 SaveData();
+RefreshWipeViews(player);
 break;
 case "wipedryrun":
 if (!CanForceWipe(player) || BlockedBySafeMode(player, "wipedryrun", "Wipe")) return;
 config.ForceWipeDryRunDefault = !config.ForceWipeDryRunDefault;
 SaveConfig();
+RefreshWipeViews(player);
 break;
 case "wipedelete":
 if (!CanForceWipe(player) || BlockedBySafeMode(player, "wipedelete", "Wipe")) return;
 config.ForceWipeDeletesFiles = !config.ForceWipeDeletesFiles;
 SaveConfig();
+RefreshWipeViews(player);
 break;
 case "wipereset":
 if (!CanManageWipe(player)) return;
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
+RefreshWipeViews(player);
 break;
 case "forcewipe":
 if (!CanForceWipe(player) || BlockedBySafeMode(player, "forcewipe", "Wipe") || IsRateLimited(player, "forcewipe", 5.0)) return;
@@ -1837,6 +1885,7 @@ case "wipepreview":
 if (!CanViewWipe(player)) return;
 if (target == "files") PreviewWipeFilesOnly(player);
 else PreviewWipe(player, target == "force" || target == "forcecommands" ? "ForceWipe" : "AutoWipe");
+RefreshWipeViews(player);
 break;
 case "mute":
 if (!CanMute(player) || IsRateLimited(player, "mute:" + target, 2.0) || !CanTargetPlayer(player, target, "mute")) return;
@@ -1902,6 +1951,8 @@ else if (action.StartsWith("plugin:") && CanReloadPlugins(player) && !BlockedByS
 {
 var verb = action.Substring("plugin:".Length);
 RunServerCommand(player, $"oxide.{verb} {target}", $"{verb} plugin {target}");
+RefreshOpenPanels("manage");
+RefreshOpenPanels("dashboard");
 }
 else if (action == "groupadd" && CanManageStaffGroups(player) && !BlockedBySafeMode(player, "groupadd", "Group") && CanTargetPlayer(player, target, "groupadd"))
 {
@@ -1915,18 +1966,32 @@ Log(player, "GroupRemove", target, value);
 }
 else if (action == "grantgroup" && Can(player, PermPermissionsManage) && !BlockedBySafeMode(player, "grantgroup", "Permission"))
 {
-if (IsDangerousPermission(value) && !Can(player, PermOwner))
+if (!IsValidGroupName(target) || !IsValidPermissionName(value))
 {
-Reply(player, "Only owners can grant wildcard or high-risk permissions.");
+Reply(player, "Invalid group or permission name.");
+LogFailed(player, "Permission", "GrantGroupPermission", target, string.Empty, value);
+return;
+}
+if (IsDangerousPermission(value) && !Can(player, PermOwner) && !IsAuthLevel2(player))
+{
+Reply(player, "Only owners or auth level 2 users can grant wildcard or high-risk permissions.");
 return;
 }
 RunServerCommand(player, $"oxide.grant group {ConsoleArg(target)} {ConsoleArg(value)}", $"grant {value} to {target}");
 Log(player, "GrantGroupPermission", target, value);
+RefreshOpenPanels("manage");
 }
 else if (action == "revokegroup" && Can(player, PermPermissionsManage) && !BlockedBySafeMode(player, "revokegroup", "Permission"))
 {
+if (!IsValidGroupName(target) || !IsValidPermissionName(value))
+{
+Reply(player, "Invalid group or permission name.");
+LogFailed(player, "Permission", "RevokeGroupPermission", target, string.Empty, value);
+return;
+}
 RunServerCommand(player, $"oxide.revoke group {ConsoleArg(target)} {ConsoleArg(value)}", $"revoke {value} from {target}");
 Log(player, "RevokeGroupPermission", target, value);
+RefreshOpenPanels("manage");
 }
 else if (action == "applypreset" && Can(player, PermPermissionsManage) && !BlockedBySafeMode(player, "applypreset", "Permission"))
 {
@@ -1959,10 +2024,15 @@ RunServerCommand(player, target, target);
 else if (action == "forcewipe" && CanForceWipe(player) && !BlockedBySafeMode(player, "forcewipe", "Wipe"))
 {
 RunWipeCommands(player, "ForceWipe", config.ForceWipeCommands);
-if (config.ForceWipeDryRunDefault) return;
+if (config.ForceWipeDryRunDefault)
+{
+RefreshWipeViews(player);
+return;
+}
 storedData.LastWipeUtc = Now();
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
+RefreshWipeViews(player);
 }
 else if (action == "deleteticket" && CanManageTickets(player))
 {
@@ -2115,25 +2185,51 @@ Panel(container, $"{UiRoot}.Body.Activity", $"{UiRoot}.Body", "0.075 0.08 0.09 1
 Label(container, $"{UiRoot}.Body.Activity.Title", $"{UiRoot}.Body.Activity", "Live Player Activity", 15, "0.04 0.82", "0.55 0.98", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.Activity.Counts", $"{UiRoot}.Body.Activity", $"Joining data: {BasePlayer.activePlayerList.Count} active / {BasePlayer.sleepingPlayerList.Count} sleepers", 8, "0.58 0.84", "0.96 0.96", TextAnchor.MiddleRight);
 var entries = storedData.Logs
-.Where(l => l != null && (l.Action == "PlayerJoin" || l.Action == "PlayerLeave"))
+.Where(l => l != null && (l.Category == "Connection" || l.Action == "PlayerJoin" || l.Action == "PlayerLeave"))
 .OrderByDescending(l => l.Time)
 .Take(5)
 .ToList();
 var y = 0.66;
 if (entries.Count == 0)
 {
+var online = BasePlayer.activePlayerList.Where(p => p != null).Take(5).ToList();
+if (online.Count == 0)
+{
 Label(container, $"{UiRoot}.Body.Activity.Empty", $"{UiRoot}.Body.Activity", "No join or leave events recorded since the panel loaded.", 10, "0.04 0.38", "0.96 0.54", TextAnchor.MiddleCenter);
+return;
+}
+foreach (var player in online)
+{
+DrawActivityTextRow(container, $"Online.{player.userID}", "0.09 0.15 0.10 0.88", "ONLINE", player.displayName, $"{player.UserIDString} currently connected", y);
+y -= 0.105;
+}
 return;
 }
 foreach (var entry in entries)
 {
-var joined = entry.Action == "PlayerJoin";
-var row = $"{UiRoot}.Body.Activity.Row.{SafeName(entry.Time + entry.Target)}";
-Panel(container, row, $"{UiRoot}.Body.Activity", joined ? "0.09 0.15 0.10 0.88" : "0.16 0.10 0.08 0.88", $"0.04 {y}", $"0.96 {y + 0.09}");
-Label(container, $"{row}.Name", row, $"{(joined ? "JOIN" : "LEFT")}  {Shorten(entry.ActorName, 22)}", 9, "0.03 0.42", "0.55 0.94", TextAnchor.MiddleLeft);
-Label(container, $"{row}.Meta", row, $"{entry.Time}  {Shorten(entry.Details, 44)}", 7, "0.03 0.06", "0.94 0.42", TextAnchor.MiddleLeft);
+var joined = entry.Action == "PlayerJoin" || (entry.Action ?? string.Empty).IndexOf("connect", StringComparison.OrdinalIgnoreCase) >= 0;
+var left = entry.Action == "PlayerLeave" || (entry.Action ?? string.Empty).IndexOf("disconnect", StringComparison.OrdinalIgnoreCase) >= 0;
+var targetId = string.IsNullOrEmpty(entry.Target) ? entry.ActorId : entry.Target;
+var profile = GetPlayerProfile(targetId);
+var name = !string.IsNullOrEmpty(entry.TargetName) ? entry.TargetName : profile?.Name;
+if (string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(entry.ActorName) && entry.ActorName != "Server") name = entry.ActorName;
+if (string.IsNullOrEmpty(name)) name = targetId;
+var detail = joined ? "Connected" : "Disconnected";
+if (!string.IsNullOrEmpty(entry.Details)) detail = entry.Details;
+var when = string.IsNullOrEmpty(entry.Time) ? "now" : entry.Time;
+DrawActivityTextRow(container, entry.Action + entry.Time + entry.Target, joined ? "0.09 0.15 0.10 0.88" : "0.16 0.10 0.08 0.88", joined ? "JOIN" : left ? "LEFT" : "CONN", name, $"{when}  {detail}", y);
 y -= 0.105;
 }
+}
+private void DrawActivityTextRow(CuiElementContainer container, string id, string color, string state, string name, string details, double y)
+{
+var text = $"{state}    {Shorten(name, 24)}    {Shorten(details, 62)}";
+container.Add(new CuiButton
+{
+Button = { Command = string.Empty, Color = ThemedColor(color) },
+Text = { Text = text, FontSize = 8, Align = TextAnchor.MiddleLeft, Color = Skin().HeaderText },
+RectTransform = { AnchorMin = $"0.04 {y}", AnchorMax = $"0.96 {y + 0.09}" }
+}, $"{UiRoot}.Body.Activity", $"{UiRoot}.Body.Activity.Row.{SafeName(id)}");
 }
 private void DrawDashboardServerSnapshot(CuiElementContainer container, BasePlayer player)
 {
@@ -2197,9 +2293,15 @@ private void DrawConsoleLine(CuiElementContainer container, string parent, Conso
 {
 var color = line.Kind == "errors" ? "0.26 0.08 0.06 0.88" : line.Kind == "connections" ? "0.09 0.15 0.10 0.88" : line.Kind == "chat" ? "0.08 0.10 0.13 0.88" : "0.075 0.08 0.09 0.88";
 var row = $"{parent}.Line.{SafeName(line.Id)}";
-Panel(container, row, parent, color, $"0.025 {y}", $"0.975 {y + (wrap ? 0.085 : 0.058)}");
-Label(container, $"{row}.Meta", row, $"{line.Time}  {line.Kind.ToUpperInvariant()}  {Shorten(line.Source, 20)}", 7, "0.02 0.50", "0.38 0.96", TextAnchor.MiddleLeft);
-Label(container, $"{row}.Text", row, wrap ? Shorten(line.Text, 110) : Shorten(line.Text, 150), 8, wrap ? "0.02 0.04" : "0.40 0.02", "0.98 0.54", TextAnchor.MiddleLeft);
+var text = wrap
+? $"{line.Time}  [{line.Kind.ToUpperInvariant()}]  {Shorten(line.Source, 18)}\n{Shorten(line.Text, 118)}"
+: $"{line.Time}  [{line.Kind.ToUpperInvariant()}]  {Shorten(line.Source, 18)}  {Shorten(line.Text, 128)}";
+container.Add(new CuiButton
+{
+Button = { Command = string.Empty, Color = ThemedColor(color) },
+Text = { Text = text, FontSize = 7, Align = TextAnchor.MiddleLeft, Color = Skin().HeaderText },
+RectTransform = { AnchorMin = $"0.025 {y}", AnchorMax = $"0.975 {y + (wrap ? 0.085 : 0.058)}" }
+}, parent, row);
 }
 private void DrawMiniConsole(CuiElementContainer container, PanelState state)
 {
@@ -2211,7 +2313,12 @@ Button(container, $"{UiRoot}.MiniConsole.Close", $"{UiRoot}.MiniConsole", "X", "
 var y = 0.68;
 foreach (var line in GetConsoleLines("all", string.Empty).Take(4))
 {
-Label(container, $"{UiRoot}.MiniConsole.Line.{SafeName(line.Id)}", $"{UiRoot}.MiniConsole", $"{line.Time} {Shorten(line.Text, 46)}", 7, $"0.04 {y}", $"0.96 {y + 0.13}", TextAnchor.MiddleLeft);
+container.Add(new CuiButton
+{
+Button = { Command = string.Empty, Color = "0 0 0 0" },
+Text = { Text = $"{line.Time} {Shorten(line.Text, 46)}", FontSize = 7, Align = TextAnchor.MiddleLeft, Color = Skin().HeaderText },
+RectTransform = { AnchorMin = $"0.04 {y}", AnchorMax = $"0.96 {y + 0.13}" }
+}, $"{UiRoot}.MiniConsole", $"{UiRoot}.MiniConsole.Line.{SafeName(line.Id)}");
 y -= 0.16;
 }
 }
@@ -2261,7 +2368,7 @@ Id = "log:" + log.Time + ":" + log.Action + ":" + log.Target,
 Time = log.Time,
 Kind = ConsoleKind(log),
 Source = string.IsNullOrEmpty(log.ActorName) ? "Server" : log.ActorName,
-Text = $"{log.Result}/{log.Category} {log.Action} {log.Target} {log.Details}"
+Text = ConsoleLogText(log)
 });
 }
 }
@@ -2270,6 +2377,14 @@ return lines
 .Where(l => ConsoleTextMatches(l, filter))
 .OrderByDescending(l => l.Time)
 .ToList();
+}
+private string ConsoleLogText(ActionLog log)
+{
+var result = string.IsNullOrEmpty(log.Result) ? "Success" : log.Result;
+var category = string.IsNullOrEmpty(log.Category) ? CategorizeAction(log.Action) : log.Category;
+var target = !string.IsNullOrEmpty(log.TargetName) ? log.TargetName : log.Target;
+var detail = string.IsNullOrEmpty(log.Details) ? string.Empty : " - " + log.Details;
+return $"{result}/{category} {log.Action} {target}{detail}";
 }
 private string ConsoleKind(ActionLog log)
 {
@@ -2408,6 +2523,12 @@ var list = BasePlayer.activePlayerList
 .Where(p => MatchesFilter(p.displayName, state.PlayerFilter) || MatchesFilter(p.UserIDString, state.PlayerFilter))
 .OrderBy(p => p.displayName)
 .ToList();
+if (selected != null && state.StaffSubTab == "inventory" && state.StaffInventoryDetailOpen)
+{
+Panel(container, $"{UiRoot}.Body.StaffDetail", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.08", "0.96 0.82");
+DrawStaffInventoryTab(container, player, state, selected);
+return;
+}
 var pageSize = 9;
 var page = list.Skip(state.PlayerPage * pageSize).Take(pageSize).ToList();
 Panel(container, $"{UiRoot}.Body.StaffList", $"{UiRoot}.Body", "0.06 0.065 0.075 1", "0.04 0.08", "0.35 0.82");
@@ -2501,41 +2622,68 @@ Label(container, $"{UiRoot}.Body.StaffDetail.FunHint", $"{UiRoot}.Body.StaffDeta
 private void DrawStaffInventoryTab(CuiElementContainer container, BasePlayer player, PanelState state, BasePlayer selected)
 {
 state.StaffInventoryTab = CleanInventoryTab(state.StaffInventoryTab);
+if (!state.StaffInventoryDetailOpen)
+{
+DrawStaffInventorySelector(container, player, selected);
+return;
+}
 var view = GetInventoryView(selected, state.StaffInventoryTab);
 var pageSize = view.Columns * view.Rows;
 var itemCount = view.Container == null ? 0 : view.Container.itemList.Count;
 var maxInventoryPage = Math.Max(0, (itemCount - 1) / Math.Max(1, pageSize));
 state.StaffInventoryPage = Math.Min(state.StaffInventoryPage, maxInventoryPage);
 var selectedInventoryItem = GetInventoryItemAt(view.Container, state.StaffInventorySlot);
-var visibleRows = 1;
-var gridTop = 0.68;
-var gridBottom = InventoryGridBottom(gridTop, visibleRows);
-var gridRight = InventoryGridRight(view.Columns);
+var visibleRows = view.Rows;
+var gridTop = 0.655;
+var gridBottom = view.GridBottom;
+var gridRight = view.GridRight;
 var visibleSlots = Math.Min(pageSize, Math.Max(pageSize, itemCount - state.StaffInventoryPage * pageSize));
 Label(container, $"{UiRoot}.Body.StaffDetail.InventoryTitle", $"{UiRoot}.Body.StaffDetail", "INVENTORY", 17, "0.04 0.90", "0.36 0.985", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.StaffDetail.InventoryPlayer", $"{UiRoot}.Body.StaffDetail", Shorten(selected.displayName, 28), 10, "0.38 0.91", "0.64 0.97", TextAnchor.MiddleLeft);
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryOpen", $"{UiRoot}.Body.StaffDetail", "Open Viewer", CanViewInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} openinv" : string.Empty, config.AccentColor, "0.70 0.91", "0.86 0.975", 8);
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRefresh", $"{UiRoot}.Body.StaffDetail", "Refresh", $"liveadmin.ui staffsubtab inventory", "0.12 0.13 0.14 1", "0.88 0.91", "0.96 0.975", 8);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryBack", $"{UiRoot}.Body.StaffDetail", "Back", "liveadmin.ui staffinvback", "0.12 0.13 0.14 1", "0.61 0.915", "0.68 0.975", 8);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRefresh", $"{UiRoot}.Body.StaffDetail", "Refresh", $"liveadmin.ui staffinv {view.Key}", "0.12 0.13 0.14 1", "0.875 0.915", "0.96 0.975", 8);
 DrawInventoryTabButton(container, state, "main", "Main", 0.04, selected.inventory?.containerMain);
 DrawInventoryTabButton(container, state, "belt", "Belt", 0.18, selected.inventory?.containerBelt);
 DrawInventoryTabButton(container, state, "wear", "Wear", 0.32, selected.inventory?.containerWear);
 DrawInventoryTabButton(container, state, "backpack", "Backpack", 0.46, GetBackpackContainer(selected));
-Panel(container, $"{UiRoot}.Body.StaffDetail.InventoryGivePanel", $"{UiRoot}.Body.StaffDetail", "0.045 0.05 0.055 0.94", "0.04 0.715", "0.96 0.825");
-DrawStaffField(container, "Item", "item", state.StaffItemShortname, 0.748, 0.065, 0.31);
-DrawStaffField(container, "Amount", "amount", state.StaffItemAmount, 0.748, 0.33, 0.45);
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryGiveCurrent", $"{UiRoot}.Body.StaffDetail", $"Add To {view.Title}", CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} give{view.Key}" : string.Empty, config.SuccessColor, "0.47 0.75", "0.62 0.805", 8);
-Label(container, $"{UiRoot}.Body.StaffDetail.InventorySelected", $"{UiRoot}.Body.StaffDetail", SelectedInventoryText(selectedInventoryItem, state.StaffInventorySlot), 8, "0.64 0.75", "0.78 0.805", TextAnchor.MiddleLeft);
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRemoveOne", $"{UiRoot}.Body.StaffDetail", "Remove 1", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} removeinv:{view.Key}:{state.StaffInventorySlot}:1" : string.Empty, selectedInventoryItem != null ? config.WarningColor : "0.12 0.12 0.12 0.65", "0.80 0.75", "0.88 0.805", 7);
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRemoveStack", $"{UiRoot}.Body.StaffDetail", "Stack", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} removeinv:{view.Key}:{state.StaffInventorySlot}:stack" : string.Empty, selectedInventoryItem != null ? config.DangerColor : "0.12 0.12 0.12 0.65", "0.895 0.75", "0.955 0.805", 7);
-Label(container, $"{UiRoot}.Body.StaffDetail.InventoryCount", $"{UiRoot}.Body.StaffDetail", $"{view.Title}: {itemCount} items", 10, "0.73 0.822", "0.95 0.872", TextAnchor.MiddleRight);
+Panel(container, $"{UiRoot}.Body.StaffDetail.InventoryGivePanel", $"{UiRoot}.Body.StaffDetail", "0.045 0.05 0.055 0.94", "0.04 0.695", "0.96 0.820");
+DrawStaffField(container, "Item", "item", state.StaffItemShortname, 0.740, 0.065, 0.31);
+DrawStaffField(container, "Amount", "amount", state.StaffItemAmount, 0.740, 0.33, 0.45);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryGiveCurrent", $"{UiRoot}.Body.StaffDetail", $"Add To {view.Title}", CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} give{view.Key}" : string.Empty, config.SuccessColor, "0.47 0.735", "0.62 0.795", 8);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventorySelected", $"{UiRoot}.Body.StaffDetail", SelectedInventoryText(selectedInventoryItem, state.StaffInventorySlot), 8, "0.64 0.735", "0.75 0.795", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventorySetStack", $"{UiRoot}.Body.StaffDetail", "Set Stack", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} setstack:{view.Key}:{state.StaffInventorySlot}" : string.Empty, selectedInventoryItem != null ? config.AccentColor : "0.12 0.12 0.12 0.65", "0.755 0.735", "0.835 0.795", 7);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRemoveOne", $"{UiRoot}.Body.StaffDetail", "Remove 1", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} removeinv:{view.Key}:{state.StaffInventorySlot}:1" : string.Empty, selectedInventoryItem != null ? config.WarningColor : "0.12 0.12 0.12 0.65", "0.845 0.735", "0.915 0.795", 7);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryRemoveStack", $"{UiRoot}.Body.StaffDetail", "Stack", selectedInventoryItem != null && CanModifyInventory(player) ? $"liveadmin.ui act staffact {selected.UserIDString} removeinv:{view.Key}:{state.StaffInventorySlot}:stack" : string.Empty, selectedInventoryItem != null ? config.DangerColor : "0.12 0.12 0.12 0.65", "0.925 0.735", "0.975 0.795", 7);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventoryCount", $"{UiRoot}.Body.StaffDetail", $"{view.Title}: {itemCount} items", 10, "0.73 0.835", "0.95 0.890", TextAnchor.MiddleRight);
 DrawInventoryContainer(container, player, state, selected, view.Key, view.Title, view.Container, state.StaffInventoryPage * pageSize, 0.04, gridBottom, gridRight, gridTop, view.Columns, visibleRows, visibleSlots);
 if (maxInventoryPage > 0)
 {
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryPagePrev", $"{UiRoot}.Body.StaffDetail", "<", $"liveadmin.ui staffinvpage {view.Key} -1", "0.12 0.13 0.14 1", "0.80 0.62", "0.84 0.67", 8);
-Label(container, $"{UiRoot}.Body.StaffDetail.InventoryPageLabel", $"{UiRoot}.Body.StaffDetail", $"Page {state.StaffInventoryPage + 1}/{maxInventoryPage + 1}", 8, "0.845 0.62", "0.91 0.67", TextAnchor.MiddleCenter);
-Button(container, $"{UiRoot}.Body.StaffDetail.InventoryPageNext", $"{UiRoot}.Body.StaffDetail", ">", $"liveadmin.ui staffinvpage {view.Key} 1", "0.12 0.13 0.14 1", "0.915 0.62", "0.955 0.67", 8);
+var pagerY = Math.Max(0.155, gridBottom - 0.075);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryPagePrev", $"{UiRoot}.Body.StaffDetail", "<", $"liveadmin.ui staffinvpage {view.Key} -1", "0.12 0.13 0.14 1", $"{0.04:0.###} {pagerY:0.###}", $"{0.09:0.###} {pagerY + 0.055:0.###}", 8);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventoryPageLabel", $"{UiRoot}.Body.StaffDetail", $"Page {state.StaffInventoryPage + 1}/{maxInventoryPage + 1}", 8, $"{0.10:0.###} {pagerY:0.###}", $"{Math.Min(gridRight - 0.07, 0.36):0.###} {pagerY + 0.055:0.###}", TextAnchor.MiddleCenter);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventoryPageNext", $"{UiRoot}.Body.StaffDetail", ">", $"liveadmin.ui staffinvpage {view.Key} 1", "0.12 0.13 0.14 1", $"{Math.Min(gridRight - 0.06, 0.37):0.###} {pagerY:0.###}", $"{Math.Min(gridRight, 0.42):0.###} {pagerY + 0.055:0.###}", 8);
 }
-Label(container, $"{UiRoot}.Body.StaffDetail.InventoryHint", $"{UiRoot}.Body.StaffDetail", "Click an item to select it, then use Remove 1 or Stack. Open Viewer uses Inventory Viewer; this grid is the quick-edit fallback.", 8, "0.04 0.08", "0.96 0.13", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventoryHint", $"{UiRoot}.Body.StaffDetail", "Click an item to select it, then use Set Stack, Remove 1, or Stack. Amount controls added items and stack edits.", 8, "0.04 0.08", "0.96 0.13", TextAnchor.MiddleLeft);
+}
+private void DrawStaffInventorySelector(CuiElementContainer container, BasePlayer player, BasePlayer selected)
+{
+Label(container, $"{UiRoot}.Body.StaffDetail.InventorySelectTitle", $"{UiRoot}.Body.StaffDetail", "INVENTORY", 17, "0.04 0.90", "0.36 0.985", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventorySelectPlayer", $"{UiRoot}.Body.StaffDetail", Shorten(selected.displayName, 28), 10, "0.38 0.91", "0.64 0.97", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.StaffDetail.InventorySelectRefresh", $"{UiRoot}.Body.StaffDetail", "Refresh", "liveadmin.ui staffsubtab inventory", "0.12 0.13 0.14 1", "0.875 0.915", "0.96 0.975", 8);
+DrawInventoryContainerCard(container, player, selected, "main", "Main Inventory", selected.inventory?.containerMain, 0.04, 0.60, 0.47, 0.82);
+DrawInventoryContainerCard(container, player, selected, "belt", "Belt", selected.inventory?.containerBelt, 0.53, 0.60, 0.96, 0.82);
+DrawInventoryContainerCard(container, player, selected, "wear", "Wear / Armour", selected.inventory?.containerWear, 0.04, 0.32, 0.47, 0.54);
+DrawInventoryContainerCard(container, player, selected, "backpack", "Backpack", GetBackpackContainer(selected), 0.53, 0.32, 0.96, 0.54);
+Label(container, $"{UiRoot}.Body.StaffDetail.InventorySelectHint", $"{UiRoot}.Body.StaffDetail", "Select a container to open the full quick-action inventory page.", 9, "0.04 0.18", "0.96 0.25", TextAnchor.MiddleLeft);
+}
+private void DrawInventoryContainerCard(CuiElementContainer container, BasePlayer player, BasePlayer selected, string key, string title, ItemContainer itemContainer, double x1, double y1, double x2, double y2)
+{
+var count = itemContainer == null ? 0 : itemContainer.itemList.Count;
+var card = $"{UiRoot}.Body.StaffDetail.InventoryCard.{key}";
+Panel(container, card, $"{UiRoot}.Body.StaffDetail", "0.055 0.060 0.055 0.96", $"{x1} {y1}", $"{x2} {y2}");
+Label(container, $"{card}.Title", card, title, 13, "0.06 0.66", "0.66 0.94", TextAnchor.MiddleLeft);
+Label(container, $"{card}.Count", card, $"{count} items", 11, "0.06 0.40", "0.66 0.64", TextAnchor.MiddleLeft);
+Button(container, $"{card}.OpenPage", card, "Open", $"liveadmin.ui staffinv {key}", config.AccentColor, "0.67 0.28", "0.94 0.78", 8);
 }
 private void DrawInventoryTabButton(CuiElementContainer container, PanelState state, string key, string title, double x, ItemContainer itemContainer)
 {
@@ -2586,27 +2734,16 @@ Button(container, $"{slotName}.Select", slotName, string.Empty, $"liveadmin.ui s
 private InventoryView GetInventoryView(BasePlayer selected, string key)
 {
 key = CleanInventoryTab(key);
-if (key == "belt") return new InventoryView { Key = "belt", Title = "Belt", Container = selected.inventory?.containerBelt, Columns = 6, Rows = 1, MaxSlots = 6, GridBottom = 0.43 };
-if (key == "wear") return new InventoryView { Key = "wear", Title = "Wear", Container = selected.inventory?.containerWear, Columns = 6, Rows = 1, MaxSlots = 8, GridBottom = 0.43 };
-if (key == "backpack") return new InventoryView { Key = "backpack", Title = "Backpack", Container = GetBackpackContainer(selected), Columns = 6, Rows = 1, MaxSlots = 36, GridBottom = 0.43 };
-return new InventoryView { Key = "main", Title = "Main", Container = selected.inventory?.containerMain, Columns = 6, Rows = 1, MaxSlots = 24, GridBottom = 0.43 };
+if (key == "belt") return new InventoryView { Key = "belt", Title = "Belt", Container = selected.inventory?.containerBelt, Columns = 6, Rows = 1, MaxSlots = 6, GridBottom = 0.47, GridRight = 0.48 };
+if (key == "wear") return new InventoryView { Key = "wear", Title = "Wear", Container = selected.inventory?.containerWear, Columns = 4, Rows = 2, MaxSlots = 8, GridBottom = 0.36, GridRight = 0.38 };
+if (key == "backpack") return new InventoryView { Key = "backpack", Title = "Backpack", Container = GetBackpackContainer(selected), Columns = 10, Rows = 1, MaxSlots = 10, GridBottom = 0.47, GridRight = 0.72 };
+return new InventoryView { Key = "main", Title = "Main", Container = selected.inventory?.containerMain, Columns = 10, Rows = 1, MaxSlots = 10, GridBottom = 0.47, GridRight = 0.72 };
 }
 private int InventoryVisibleRows(InventoryView view)
 {
 var count = view?.Container == null ? 0 : view.Container.itemList.Count;
 var rowsNeeded = Math.Max(1, (int)Math.Ceiling(count / (double)Math.Max(1, view.Columns)));
 return Math.Max(1, Math.Min(view.Rows, rowsNeeded));
-}
-private double InventoryGridBottom(double top, int rows)
-{
-var safeRows = Math.Max(1, rows);
-if (safeRows >= 5) return 0.13;
-var height = 0.09 + safeRows * 0.115;
-return Math.Max(0.16, top - height);
-}
-private double InventoryGridRight(int columns)
-{
-return Math.Min(0.88, 0.04 + Math.Max(1, columns) * 0.12 + 0.02);
 }
 private string CleanInventoryTab(string key)
 {
@@ -2664,6 +2801,12 @@ return int.TryParse(parts[0], out var hour) && int.TryParse(parts[1], out var mi
 private bool IsSafeNameToken(string value)
 {
 return !string.IsNullOrEmpty(value) && value.Length <= 80 && value.All(c => char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-' || c == ':' || c == '/');
+}
+private bool IsSafeWipeSeed(string value)
+{
+if (string.IsNullOrEmpty(value)) return true;
+if (value.Equals("random", StringComparison.OrdinalIgnoreCase)) return true;
+return value.Length <= 12 && value.All(char.IsDigit);
 }
 private bool IsValidGroupName(string value)
 {
@@ -2814,10 +2957,13 @@ private void DrawTicketRow(CuiElementContainer container, string parent, ReportE
 {
 var color = report.Status == "Resolved" ? "0.10 0.18 0.12 1" : report.Status == "Claimed" || report.Status == "Investigating" ? "0.13 0.18 0.28 1" : "0.25 0.18 0.09 1";
 var height = compact ? 0.075 : 0.08;
-Panel(container, $"{parent}.Ticket.{report.Id}", parent, color, $"0.04 {y}", $"0.96 {y + height}");
-Label(container, $"{parent}.Ticket.{report.Id}.Text", $"{parent}.Ticket.{report.Id}", $"#{report.Id} [{report.Priority}] {report.ReporterName} -> {report.TargetName}", 8, "0.025 0.48", "0.78 0.98", TextAnchor.MiddleLeft);
-Label(container, $"{parent}.Ticket.{report.Id}.Reason", $"{parent}.Ticket.{report.Id}", Shorten(report.Reason, compact ? 54 : 62), 8, "0.025 0.02", "0.78 0.52", TextAnchor.MiddleLeft);
-Button(container, $"{parent}.Ticket.{report.Id}.Open", $"{parent}.Ticket.{report.Id}", "Open", $"liveadmin.ui selectreport {report.Id}", config.AccentColor, "0.80 0.18", "0.97 0.82", 8);
+var text = $"#{report.Id} [{report.Priority}/{report.Status}] {Shorten(report.ReporterName, 16)} -> {Shorten(report.TargetName, 16)}    {Shorten(report.Reason, compact ? 46 : 58)}";
+container.Add(new CuiButton
+{
+Button = { Command = $"liveadmin.ui selectreport {report.Id}", Color = ThemedColor(color) },
+Text = { Text = text, FontSize = 8, Align = TextAnchor.MiddleLeft, Color = Skin().HeaderText },
+RectTransform = { AnchorMin = $"0.04 {y}", AnchorMax = $"0.96 {y + height}" }
+}, parent, $"{parent}.Ticket.{report.Id}");
 }
 private void DrawTicketDetail(CuiElementContainer container, BasePlayer player, PanelState state, ReportEntry report)
 {
@@ -2879,10 +3025,13 @@ foreach (var entry in page)
 var selected = state.SelectedChatId == entry.Id;
 var color = entry.Blocked ? "0.26 0.08 0.06 0.86" : selected ? config.AccentColor : "0.075 0.080 0.072 0.86";
 var row = $"{UiRoot}.Body.Chat.Row.{SafeName(entry.Id)}";
-Panel(container, row, $"{UiRoot}.Body.Chat.List", color, $"0.025 {y}", $"0.975 {y + 0.075}");
-Label(container, $"{row}.Meta", row, $"{entry.Time}  {Shorten(entry.PlayerName, 18)}  {entry.Channel}", 7, "0.02 0.52", "0.42 0.98", TextAnchor.MiddleLeft);
-Label(container, $"{row}.Msg", row, Shorten(entry.Message, 82), 8, "0.02 0.02", "0.78 0.52", TextAnchor.MiddleLeft);
-Button(container, $"{row}.Open", row, selected ? "Selected" : "Open", $"liveadmin.ui selectchat {entry.Id}", selected ? config.WarningColor : config.AccentColor, "0.80 0.18", "0.97 0.82", 8);
+var text = $"{entry.Time}  {Shorten(entry.PlayerName, 18)}  [{entry.Channel}]    {Shorten(entry.Message, 76)}";
+container.Add(new CuiButton
+{
+Button = { Command = $"liveadmin.ui selectchat {entry.Id}", Color = ThemedColor(color) },
+Text = { Text = text, FontSize = 8, Align = TextAnchor.MiddleLeft, Color = Skin().HeaderText },
+RectTransform = { AnchorMin = $"0.025 {y}", AnchorMax = $"0.975 {y + 0.075}" }
+}, $"{UiRoot}.Body.Chat.List", row);
 y -= 0.084;
 }
 Pager(container, state.ChatPage, messages.Count, pageSize, "chat");
@@ -2986,12 +3135,13 @@ var y = 0.67;
 DrawFilterStatus(container, $"{UiRoot}.Body", "Plugins", state.PluginFilter, "plugins", "0.04 0.76", "0.94 0.81");
 foreach (var pluginName in page)
 {
-Panel(container, $"{UiRoot}.Body.Plugin.{pluginName}", $"{UiRoot}.Body", "0.075 0.08 0.09 1", $"0.04 {y}", $"0.94 {y + 0.06}");
-Label(container, $"{UiRoot}.Body.Plugin.{pluginName}.Name", $"{UiRoot}.Body.Plugin.{pluginName}", pluginName, 12, "0.02 0", "0.46 1", TextAnchor.MiddleLeft);
-Button(container, $"{UiRoot}.Body.Plugin.{pluginName}.Config", $"{UiRoot}.Body.Plugin.{pluginName}", "Config", CanViewPluginConfig(player) ? $"liveadmin.ui config {pluginName}" : string.Empty, "0.15 0.16 0.18 1", "0.46 0.18", "0.58 0.82", 10);
-Button(container, $"{UiRoot}.Body.Plugin.{pluginName}.Reload", $"{UiRoot}.Body.Plugin.{pluginName}", "Reload", CanReloadPlugins(player) ? $"liveadmin.ui act plugin {pluginName} reload" : string.Empty, config.AccentColor, "0.60 0.18", "0.72 0.82", 10);
-Button(container, $"{UiRoot}.Body.Plugin.{pluginName}.Unload", $"{UiRoot}.Body.Plugin.{pluginName}", "Unload", CanReloadPlugins(player) ? $"liveadmin.ui act plugin {pluginName} unload" : string.Empty, config.WarningColor, "0.74 0.18", "0.85 0.82", 10);
-Button(container, $"{UiRoot}.Body.Plugin.{pluginName}.Load", $"{UiRoot}.Body.Plugin.{pluginName}", "Load", CanReloadPlugins(player) ? $"liveadmin.ui act plugin {pluginName} load" : string.Empty, config.SuccessColor, "0.87 0.18", "0.98 0.82", 10);
+var rowName = $"{UiRoot}.Body.Plugin.{SafeName(pluginName)}";
+Panel(container, rowName, $"{UiRoot}.Body", "0.075 0.08 0.09 1", $"0.04 {y}", $"0.94 {y + 0.06}");
+Label(container, $"{rowName}.Name", rowName, pluginName, 12, "0.02 0", "0.46 1", TextAnchor.MiddleLeft);
+Button(container, $"{rowName}.Config", rowName, "Config", CanViewPluginConfig(player) ? $"liveadmin.ui config {pluginName}" : string.Empty, "0.15 0.16 0.18 1", "0.46 0.18", "0.58 0.82", 10);
+Button(container, $"{rowName}.Reload", rowName, "Reload", CanReloadPlugins(player) ? $"liveadmin.ui act plugin {pluginName} reload" : string.Empty, config.AccentColor, "0.60 0.18", "0.72 0.82", 10);
+Button(container, $"{rowName}.Unload", rowName, "Unload", CanReloadPlugins(player) ? $"liveadmin.ui act plugin {pluginName} unload" : string.Empty, config.WarningColor, "0.74 0.18", "0.85 0.82", 10);
+Button(container, $"{rowName}.Load", rowName, "Load", CanReloadPlugins(player) ? $"liveadmin.ui act plugin {pluginName} load" : string.Empty, config.SuccessColor, "0.87 0.18", "0.98 0.82", 10);
 y -= 0.07;
 }
 Pager(container, state.PluginPage, pluginNames.Count, pageSize, "plugins");
@@ -3093,7 +3243,7 @@ var pluginPageSize = 8;
 foreach (var pluginName in pluginsForPerms.Skip(state.PermissionPluginPage * pluginPageSize).Take(pluginPageSize))
 {
 var pluginLabel = pluginName == "all" ? "All permissions" : Shorten(pluginName, 26);
-Button(container, $"{UiRoot}.Body.Perms.Side.Plugin.{pluginName}", $"{UiRoot}.Body.Perms.Side", pluginLabel, $"liveadmin.ui selectplugin {pluginName}", pluginName == state.SelectedPlugin ? config.AccentColor : "0.12 0.13 0.14 1", $"0.08 {pluginY}", $"0.92 {pluginY + 0.075}", 10);
+Button(container, $"{UiRoot}.Body.Perms.Side.Plugin.{SafeName(pluginName)}", $"{UiRoot}.Body.Perms.Side", pluginLabel, $"liveadmin.ui selectplugin {pluginName}", pluginName == state.SelectedPlugin ? config.AccentColor : "0.12 0.13 0.14 1", $"0.08 {pluginY}", $"0.92 {pluginY + 0.075}", 10);
 pluginY -= 0.09;
 }
 Panel(container, $"{UiRoot}.Body.Perms.Detail", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.31 0.08", "0.94 0.76");
@@ -3125,10 +3275,11 @@ var y = 0.46;
 foreach (var permName in permPage)
 {
 var hasPerm = currentPerms.Contains(permName);
-Panel(container, $"{UiRoot}.Body.Perms.Detail.Row.{permName}", $"{UiRoot}.Body.Perms.Detail", hasPerm ? "0.10 0.18 0.12 1" : "0.11 0.12 0.13 1", $"0.04 {y}", $"0.96 {y + 0.065}");
-Label(container, $"{UiRoot}.Body.Perms.Detail.Row.{permName}.Text", $"{UiRoot}.Body.Perms.Detail.Row.{permName}", permName, 10, "0.02 0", "0.58 1", TextAnchor.MiddleLeft);
-Button(container, $"{UiRoot}.Body.Perms.Detail.Row.{permName}.Grant", $"{UiRoot}.Body.Perms.Detail.Row.{permName}", "Grant", $"liveadmin.ui act grantgroup {state.SelectedGroup} {permName}", config.SuccessColor, "0.64 0.18", "0.78 0.82", 10);
-Button(container, $"{UiRoot}.Body.Perms.Detail.Row.{permName}.Revoke", $"{UiRoot}.Body.Perms.Detail.Row.{permName}", "Revoke", $"liveadmin.ui act revokegroup {state.SelectedGroup} {permName}", config.DangerColor, "0.80 0.18", "0.96 0.82", 10);
+var rowName = $"{UiRoot}.Body.Perms.Detail.Row.{SafeName(permName)}";
+Panel(container, rowName, $"{UiRoot}.Body.Perms.Detail", hasPerm ? "0.10 0.18 0.12 1" : "0.11 0.12 0.13 1", $"0.04 {y}", $"0.96 {y + 0.065}");
+Label(container, $"{rowName}.Text", rowName, permName, 10, "0.02 0", "0.58 1", TextAnchor.MiddleLeft);
+Button(container, $"{rowName}.Grant", rowName, "Grant", $"liveadmin.ui act grantgroup {state.SelectedGroup} {permName}", config.SuccessColor, "0.64 0.18", "0.78 0.82", 10);
+Button(container, $"{rowName}.Revoke", rowName, "Revoke", $"liveadmin.ui act revokegroup {state.SelectedGroup} {permName}", config.DangerColor, "0.80 0.18", "0.96 0.82", 10);
 y -= 0.078;
 }
 MiniPager(container, $"{UiRoot}.Body.Perms.Side.Pager", $"{UiRoot}.Body.Perms.Side", state.PermissionPluginPage, pluginsForPerms.Count, pluginPageSize, "permissionplugins", "0.08 0.02", "0.92 0.09");
@@ -3223,7 +3374,7 @@ Label(container, $"{UiRoot}.Body.Stat.{index}.Value", $"{UiRoot}.Body.Stat.{inde
 }
 private void DrawResourceMonitor(CuiElementContainer container)
 {
-SampleResources();
+SampleResources(false);
 var latest = resourceHistory.LastOrDefault() ?? new ResourceSnapshot();
 var cpuLimit = GetCpuLimitPercent();
 var memoryLimit = GetMemoryLimitMiB();
@@ -4057,6 +4208,13 @@ var state = GetState(player);
 if (state.Tab == "console" || state.ConsoleMiniOpen) Draw(player);
 }
 }
+private void RefreshWipeViews(BasePlayer actor = null)
+{
+if (actor != null && openPanels.Contains(actor.userID)) Draw(actor);
+RefreshOpenPanels("wipe");
+RefreshOpenPanels("dashboard");
+RefreshConsoleViews();
+}
 private ChatEntry FindChatEntry(string id)
 {
 return storedData.Chat?.FirstOrDefault(c => c != null && c.Id == id);
@@ -4076,6 +4234,7 @@ RunChatDeleteCommand(actor, entry);
 Log(actor, "ChatDelete", entry.PlayerId, entry.Message);
 SaveData();
 RefreshOpenPanels("chat");
+RefreshConsoleViews();
 }
 private void RunChatDeleteCommand(BasePlayer actor, ChatEntry entry)
 {
@@ -4110,6 +4269,8 @@ if (entry == null || target == null) return;
 var warning = string.IsNullOrEmpty(message) ? "Please keep chat respectful." : message;
 target.ChatMessage($"<color=#d14a3c>Staff warning:</color> {warning}");
 Log(actor, "ChatWarn", entry.PlayerId, warning);
+RefreshOpenPanels("chat");
+RefreshConsoleViews();
 }
 private void TimeoutChatPlayer(BasePlayer actor, string id)
 {
@@ -4133,6 +4294,8 @@ RunMuteAction(actor, entry.PlayerId);
 state.MuteDuration = oldDuration;
 state.MuteReason = oldReason;
 Log(actor, "ChatTimeout", entry.PlayerId, $"{duration} {config.ChatTimeoutReason}");
+RefreshOpenPanels("chat");
+RefreshConsoleViews();
 }
 private void ReplyToChatPlayer(BasePlayer actor, string id, string message)
 {
@@ -4143,6 +4306,8 @@ var reply = string.IsNullOrEmpty(message) ? GetState(actor).ChatReplyText : mess
 if (string.IsNullOrEmpty(reply)) return;
 target.ChatMessage($"<color=#1faaa4>Staff reply:</color> {reply}");
 Log(actor, "ChatReply", entry.PlayerId, reply);
+RefreshOpenPanels("chat");
+RefreshConsoleViews();
 }
 private void AddChatBlacklistWord(BasePlayer actor, string word)
 {
@@ -4155,6 +4320,8 @@ config.ChatWordBlacklist.Add(word);
 config.ChatWordBlacklist = UniqueList(config.ChatWordBlacklist);
 SaveConfig();
 Log(actor, "ChatBlacklistAdd", word, string.Empty);
+RefreshOpenPanels("chat");
+RefreshConsoleViews();
 }
 }
 private void RemoveChatBlacklistWord(BasePlayer actor, string word)
@@ -4163,6 +4330,8 @@ if (string.IsNullOrEmpty(word) || config.ChatWordBlacklist == null) return;
 config.ChatWordBlacklist.RemoveAll(w => w.Equals(word, StringComparison.OrdinalIgnoreCase));
 SaveConfig();
 Log(actor, "ChatBlacklistRemove", word, string.Empty);
+RefreshOpenPanels("chat");
+RefreshConsoleViews();
 }
 private void ApplyRolePresetToGroup(BasePlayer actor, string group, string presetName)
 {
@@ -4187,6 +4356,7 @@ granted++;
 }
 Reply(actor, $"Applied {granted} permissions from {preset.Name} to {group}.");
 Log(actor, "ApplyRolePreset", group, $"{preset.Name} {granted}");
+RefreshOpenPanels("manage");
 }
 private void ToggleVanish(BasePlayer actor)
 {
@@ -4276,7 +4446,7 @@ RunServerCommand(player, "server.writecfg", "write server config");
 Log(player, "ConVarsApply", "server", $"maxplayers {maxPlayers}, saveinterval {saveInterval}");
 Reply(player, "ConVars applied.");
 }
-private void SampleResources()
+private void SampleResources(bool refreshDashboard = true)
 {
 try
 {
@@ -4296,6 +4466,11 @@ var memory = currentProcess.WorkingSet64 / 1024f / 1024f;
 var disk = GetServerFolderSizeGiB();
 resourceHistory.Add(new ResourceSnapshot { Cpu = cpu, MemoryMb = memory, StorageUsed = disk, DiskGiB = disk, Time = Now() });
 if (resourceHistory.Count > 60) resourceHistory.RemoveRange(0, resourceHistory.Count - 60);
+if (refreshDashboard && (now - lastDashboardRefreshAt).TotalSeconds >= 30)
+{
+lastDashboardRefreshAt = now;
+RefreshOpenPanels("dashboard");
+}
 }
 catch
 {
@@ -4502,6 +4677,7 @@ RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : con
 storedData.LastWipeUtc = Now();
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
+RefreshWipeViews();
 }
 private void RunWipeCommands(BasePlayer actor, string action, List<string> commands)
 {
@@ -4535,6 +4711,7 @@ ConsoleSystem.Run(ConsoleSystem.Option.Server, formatted);
 }
 Log(actor, action, "server", $"map={config.AutoWipeMap} bp={config.AutoWipeBlueprints} seed={config.AutoWipeSeed} size={config.AutoWipeMapSize}");
 activeWipeSeed = null;
+RefreshConsoleViews();
 }
 private void RunWipeSetupCommands(List<string> commands)
 {
@@ -4680,8 +4857,8 @@ if (string.IsNullOrEmpty(action)) return false;
 if (action == "save" || action == "broadcast") return CanUseQuickActions(actor);
 if (action == "vanishself" || action == "godself" || action == "noclipself") return CanAny(actor, PermOwner, PermStaffToolsModerate, PermStaffToolsActions);
 if (action == "launch" || action == "spin" || action == "randomtp" || action == "passive" || action == "timeout" || action == "fake") return Can(actor, PermStaffToolsFun);
-if (action == "openinv") return CanViewInventory(actor);
-if (action == "give" || action == "givemain" || action == "givebackpack" || action == "givebelt" || action == "givewear" || action.StartsWith("removeinv:", StringComparison.OrdinalIgnoreCase)) return CanModifyInventory(actor);
+if (action == "openinv" || action.StartsWith("openinv:", StringComparison.OrdinalIgnoreCase)) return CanViewInventory(actor);
+if (action == "give" || action == "givemain" || action == "givebackpack" || action == "givebelt" || action == "givewear" || action.StartsWith("removeinv:", StringComparison.OrdinalIgnoreCase) || action.StartsWith("setstack:", StringComparison.OrdinalIgnoreCase)) return CanModifyInventory(actor);
 if (action == "kick") return CanKick(actor);
 if (action == "ban") return Can(actor, PermStaffToolsDangerous) && CanBan(actor);
 if (action == "kill" || action == "strip") return Can(actor, PermStaffToolsDangerous);
@@ -4698,7 +4875,7 @@ return action == "kick" || action == "ban" || action == "kill";
 private bool IsDisruptiveStaffAction(string action)
 {
 if (string.IsNullOrEmpty(action)) return false;
-return action == "kick" || action == "ban" || action == "mute" || action == "freeze" || action == "kill" || action == "strip" || action == "randomtp" || action == "timeout" || action == "fake" || action == "launch" || action.StartsWith("removeinv:", StringComparison.OrdinalIgnoreCase) || action.StartsWith("give", StringComparison.OrdinalIgnoreCase);
+return action == "kick" || action == "ban" || action == "mute" || action == "freeze" || action == "kill" || action == "strip" || action == "randomtp" || action == "timeout" || action == "fake" || action == "launch" || action.StartsWith("removeinv:", StringComparison.OrdinalIgnoreCase) || action.StartsWith("setstack:", StringComparison.OrdinalIgnoreCase) || action.StartsWith("give", StringComparison.OrdinalIgnoreCase);
 }
 private void RunStaffAction(BasePlayer actor, string targetId, string action)
 {
@@ -4771,13 +4948,14 @@ else if (action == "give")
 if (BlockedBySafeMode(actor, action, "Inventory") || IsRateLimited(actor, action + ":" + target.UserIDString, 0.75)) return;
 GiveStaffItem(actor, target, state.StaffItemShortname, ToInt(state.StaffItemAmount, 1));
 }
-else if (action == "openinv")
+else if (action == "openinv" || action.StartsWith("openinv:", StringComparison.OrdinalIgnoreCase))
 {
-if (!TryOpenPlayerInventoryLoot(actor, target))
+var containerKey = action.StartsWith("openinv:", StringComparison.OrdinalIgnoreCase) ? CleanInventoryTab(action.Substring("openinv:".Length)) : string.Empty;
+if (!TryOpenPlayerInventoryLoot(actor, target, containerKey))
 {
 Reply(actor, "Could not open Rust loot view for that player on this build. Use the Inventory rows as fallback.");
 }
-Log(actor, "StaffOpenInventory", target.UserIDString, target.displayName);
+Log(actor, "StaffOpenInventory", target.UserIDString, string.IsNullOrEmpty(containerKey) ? target.displayName : $"{target.displayName} {containerKey}");
 }
 else if (action == "givemain" || action == "givebackpack" || action == "givebelt" || action == "givewear")
 {
@@ -4789,6 +4967,11 @@ else if (action.StartsWith("removeinv:", StringComparison.OrdinalIgnoreCase))
 {
 if (BlockedBySafeMode(actor, action, "Inventory") || IsRateLimited(actor, action + ":" + target.UserIDString, 0.75)) return;
 RemoveInventoryItem(actor, target, action);
+}
+else if (action.StartsWith("setstack:", StringComparison.OrdinalIgnoreCase))
+{
+if (BlockedBySafeMode(actor, action, "Inventory") || IsRateLimited(actor, action + ":" + target.UserIDString, 0.75)) return;
+SetInventoryItemStack(actor, target, action, ToInt(state.StaffItemAmount, 1));
 }
 else if (action == "launch")
 {
@@ -4865,6 +5048,8 @@ target.Kick(reason);
 Log(actor, "StaffBan", target.UserIDString, reason);
 }
 SaveData();
+RefreshOpenPanels("staff");
+RefreshOpenPanels("dashboard");
 }
 private void GiveStaffItem(BasePlayer actor, BasePlayer target, string shortname, int amount)
 {
@@ -4884,6 +5069,7 @@ return;
 }
 target.GiveItem(item);
 Log(actor, "StaffGiveItem", target.UserIDString, $"{shortname} x{amount}");
+RefreshOpenPanels("staff");
 }
 private void GiveStaffItem(BasePlayer actor, BasePlayer target, string shortname, int amount, string containerKey)
 {
@@ -4906,10 +5092,12 @@ if (itemContainer != null && item.MoveToContainer(itemContainer))
 {
 target.inventory.SendSnapshot();
 Log(actor, "StaffGiveItem", target.UserIDString, $"{shortname} x{amount} -> {containerKey}");
+RefreshOpenPanels("staff");
 return;
 }
 target.GiveItem(item);
 Log(actor, "StaffGiveItem", target.UserIDString, $"{shortname} x{amount} -> fallback");
+RefreshOpenPanels("staff");
 }
 private ItemContainer GetInventoryContainer(BasePlayer target, string key)
 {
@@ -4992,12 +5180,48 @@ item.MarkDirty();
 }
 target.inventory.SendSnapshot();
 Log(actor, "StaffRemoveInventoryItem", target.UserIDString, $"{parts[1]} {item.info?.shortname} x{removed}");
+RefreshOpenPanels("staff");
 }
-private bool TryOpenPlayerInventoryLoot(BasePlayer actor, BasePlayer target)
+private void SetInventoryItemStack(BasePlayer actor, BasePlayer target, string action, int newAmount)
+{
+var parts = action.Split(':');
+if (parts.Length < 3) return;
+var itemContainer = GetInventoryContainer(target, parts[1]);
+var index = ToInt(parts[2], -1);
+var item = GetInventoryItemAt(itemContainer, index);
+if (itemContainer == null || index < 0 || item == null)
+{
+Reply(actor, "That inventory item is no longer available.");
+return;
+}
+newAmount = ClampItemAmount(newAmount);
+var oldAmount = item.amount;
+item.amount = newAmount;
+item.MarkDirty();
+target.inventory.SendSnapshot();
+Log(actor, "StaffSetInventoryStack", target.UserIDString, $"{parts[1]} {item.info?.shortname} {oldAmount}->{newAmount}");
+RefreshOpenPanels("staff");
+}
+private bool TryOpenPlayerInventoryLoot(BasePlayer actor, BasePlayer target, string containerKey = "")
 {
 try
 {
 if (actor == null || target == null || actor.inventory == null || target.inventory == null) return false;
+containerKey = string.IsNullOrEmpty(containerKey) ? string.Empty : CleanInventoryTab(containerKey);
+if (!string.IsNullOrEmpty(containerKey) && !string.IsNullOrEmpty(config.InventoryViewerCommand) && config.InventoryViewerCommand.Contains("{container}"))
+{
+var command = FormatPlayerCommand(config.InventoryViewerCommand, target).Replace("{container}", containerKey);
+if (!string.IsNullOrEmpty(command) && IsCommandAllowed(actor, command, "Inventory"))
+{
+ConsoleSystem.Run(ConsoleSystem.Option.Server, command);
+Log(actor, "StaffInventoryViewerCommand", target.UserIDString, command);
+return true;
+}
+}
+if (!string.IsNullOrEmpty(containerKey) && !string.IsNullOrEmpty(config.InventoryViewerCommand) && !config.InventoryViewerCommand.Contains("{container}"))
+{
+return RunPluginCommand(actor, target, config.InventoryViewerCommand, "StaffInventoryViewerCommand");
+}
 if (config.UseInventoryViewerPlugin && InventoryViewer != null)
 {
 try
@@ -5010,6 +5234,7 @@ catch
 return RunPluginCommand(actor, target, config.InventoryViewerCommand, "StaffInventoryViewerCommand");
 }
 }
+if (!string.IsNullOrEmpty(containerKey)) return false;
 var loot = actor.inventory.loot;
 if (loot == null) return false;
 loot.Clear();
@@ -5160,6 +5385,8 @@ var count = 0;
 if (player.inventory.containerMain != null) count += player.inventory.containerMain.itemList.Count;
 if (player.inventory.containerBelt != null) count += player.inventory.containerBelt.itemList.Count;
 if (player.inventory.containerWear != null) count += player.inventory.containerWear.itemList.Count;
+var backpack = GetBackpackContainer(player);
+if (backpack != null) count += backpack.itemList.Count;
 return count;
 }
 catch
@@ -5196,6 +5423,8 @@ if (action == null || !CanTargetPlayer(actor, targetId, action.Label)) return;
 if (IsRateLimited(actor, "playercmd:" + action.Label + ":" + targetId, action.Confirm ? 2.0 : 0.75)) return;
 if (RunBuiltInPlayerAction(actor, targetId, targetName, action))
 {
+RefreshOpenPanels("staff");
+RefreshOpenPanels("dashboard");
 return;
 }
 var command = action.Command
@@ -5210,6 +5439,8 @@ if (IsUnmuteAction(action))
 {
 ClearTrackedMute(targetId, targetName);
 }
+RefreshOpenPanels("staff");
+RefreshOpenPanels("dashboard");
 }
 private bool RunBuiltInPlayerAction(BasePlayer actor, string targetId, string targetName, PlayerActionCommand action)
 {
@@ -5382,6 +5613,8 @@ report.Status = status;
 if (status == "Claimed" || status == "Investigating") report.ClaimedBy = staffName;
 report.UpdatedAt = Now();
 SaveData();
+RefreshOpenPanels("reports");
+RefreshOpenPanels("staff");
 }
 private void SetReportPriority(BasePlayer staff, int id, string priority)
 {
@@ -5393,6 +5626,8 @@ report.Priority = priority;
 report.UpdatedAt = Now();
 Log(staff, "ReportPriority", id.ToString(), priority);
 SaveData();
+RefreshOpenPanels("reports");
+RefreshOpenPanels("staff");
 }
 private void ApplyReportEscalation(ReportEntry newEntry)
 {
@@ -5455,6 +5690,8 @@ report.Notes.RemoveRange(0, report.Notes.Count - 30);
 report.UpdatedAt = Now();
 Log(staff, "TicketNote", id.ToString(), text);
 SaveData();
+RefreshOpenPanels("reports");
+RefreshOpenPanels("staff");
 }
 private void DeleteTicket(BasePlayer staff, int id)
 {
@@ -5463,10 +5700,18 @@ if (report == null) return;
 storedData.Reports.Remove(report);
 Log(staff, "TicketDeleted", id.ToString(), report.Reason);
 SaveData();
+RefreshOpenPanels("reports");
+RefreshOpenPanels("staff");
 }
 private void Log(BasePlayer actor, string action, string target, string details)
 {
 LogSuccess(actor, CategorizeAction(action), action, target, string.Empty, details);
+}
+private void LogPlayerActivity(BasePlayer player, string action, string details)
+{
+var id = player?.UserIDString ?? string.Empty;
+var name = player?.displayName ?? id;
+WriteAudit(player, "Success", "Connection", action, id, name, details);
 }
 private void LogSuccess(BasePlayer actor, string category, string action, string target, string targetName, string details)
 {
@@ -5658,6 +5903,7 @@ if (!BackupPluginConfig(state.SelectedConfigPlugin)) LogFailed(player, "Config",
 prop.Value = !(bool)prop.Value;
 File.WriteAllText(PluginConfigPath(state.SelectedConfigPlugin), obj.ToString(Formatting.Indented));
 Log(player, "ConfigToggle", state.SelectedConfigPlugin, prop.Name);
+RefreshOpenPanels("manage");
 }
 private void SetConfigValue(BasePlayer player, int index, string value)
 {
@@ -5686,6 +5932,7 @@ prop.Value = value;
 }
 File.WriteAllText(PluginConfigPath(state.SelectedConfigPlugin), obj.ToString(Formatting.Indented));
 Log(player, "ConfigSet", state.SelectedConfigPlugin, prop.Name);
+RefreshOpenPanels("manage");
 }
 private List<string> GetKnownPlugins()
 {
@@ -5701,6 +5948,11 @@ AddLoadedPluginNames(names);
 AddInstalledPluginFileNames(names);
 AddPermissionPluginNames(names);
 return names.Where(n => !string.IsNullOrEmpty(n)).ToList();
+}
+private string KnownPluginName(string pluginName)
+{
+if (string.IsNullOrEmpty(pluginName)) return null;
+return GetKnownPlugins().FirstOrDefault(p => p.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
 }
 private void AddLoadedPluginNames(HashSet<string> names)
 {

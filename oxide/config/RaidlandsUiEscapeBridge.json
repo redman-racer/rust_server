@@ -1,0 +1,11 @@
+{
+  "Dummy storage prefab": "assets/prefabs/deployable/woodenbox/woodbox_deployed.prefab",
+  "Native loot panel name": "generic",
+  "Old loot hook drain delay seconds": 0.15,
+  "Native loot verification delay seconds": 0.2,
+  "Close existing native loot when a registered UI opens": true,
+  "Refuse to open while real native loot is active when close-existing is disabled": true,
+  "Add transparent click shield behind registered modal UIs": true,
+  "Notify player when the bridge cannot arm": true,
+  "Debug logging": false
+}

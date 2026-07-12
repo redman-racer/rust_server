@@ -1,0 +1,16 @@
+{
+  "General Settings": {
+    "Allow console status outputs": true,
+    "Allow custom sell list for Compound vending machines (see in data)": true,
+    "Disallow Bandit NPC": false,
+    "Disallow Compound NPC": false,
+    "Disable Compound Turrets": false,
+    "Disable Compound SafeZone trigger": false,
+    "Disable Compound Vending Machines": false
+  },
+  "Version": {
+    "Major": 1,
+    "Minor": 2,
+    "Patch": 6
+  }
+}

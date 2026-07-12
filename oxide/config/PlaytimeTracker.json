@@ -8,7 +8,7 @@
     "Reward plugin (ServerRewards, Economics)": "ServerRewards",
     "Playtime rewards": {
       "Issue rewards for playtime": true,
-      "Reward interval (seconds)": 900,
+      "Reward interval (seconds)": 600,
       "Reward amount": 100
     },
     "Referral rewards": {
@@ -17,13 +17,18 @@
       "Referee reward amount": 300
     },
     "Custom reward multipliers (permission / multiplier)": {
-      "playtimetracker.examplevip1": 1.0,
-      "playtimetracker.examplevip2": 2.0
+      "playtimetracker.vip": 1.05,
+      "playtimetracker.vip_plus": 1.07,
+      "playtimetracker.mvp": 1.09,
+      "playtimetracker.golden_vip": 1.12,
+      "playtimetracker.diamond_vip": 1.16,
+      "playtimetracker.ultimate_vip": 1.22,
+      "playtimetracker.titan_vip": 1.29
     }
   },
   "Version": {
     "Major": 0,
     "Minor": 2,
-    "Patch": 2
+    "Patch": 3
   }
 }

@@ -1,5 +1,5 @@
 {
-  "Discord Bot Token": "${DISCORD_BOT_TOKEN}",
+  "Discord Bot Token": "MTUyMTEwNTg3OTQ3NzI1NjIzNA.Gh7o5s.X0ehUFqJItK8oLhtzsOlZchD_Ozq1hUGcLFoCw",
   "Discord Server ID (Optional if bot only in 1 guild)": "",
   "Sync Nicknames": false,
   "Sync Clan Tag": false,
@@ -36,8 +36,8 @@
   },
   "Sync Data": [
     {
-      "Server Group": "discord",
-      "Discord Role ID": "1519824312285134882",
+      "Server Group": "rank_vip",
+      "Discord Role ID": "1519824312285134883",
       "Sync Source (Server or Discord)": "Server",
       "Sync Notification Settings": {
         "Send message to Server": false,
@@ -52,9 +52,105 @@
       }
     },
     {
-      "Server Group": "VIP",
-      "Discord Role ID": "",
-      "Sync Source (Server or Discord)": "Discord",
+      "Server Group": "rank_vip_plus",
+      "Discord Role ID": "1519824312285134884",
+      "Sync Source (Server or Discord)": "Server",
+      "Sync Notification Settings": {
+        "Send message to Server": false,
+        "Send Message To Discord": false,
+        "Discord Message Channel ID": "",
+        "Send Message When Added": false,
+        "Send Message When Removed": false,
+        "Server Message Added Override Message": "",
+        "Server Message Removed Override Message": "",
+        "Discord Message Added Override Message": "",
+        "Discord Message Removed Override Message": ""
+      }
+    },
+    {
+      "Server Group": "rank_mvp",
+      "Discord Role ID": "1519824312285134885",
+      "Sync Source (Server or Discord)": "Server",
+      "Sync Notification Settings": {
+        "Send message to Server": false,
+        "Send Message To Discord": false,
+        "Discord Message Channel ID": "",
+        "Send Message When Added": false,
+        "Send Message When Removed": false,
+        "Server Message Added Override Message": "",
+        "Server Message Removed Override Message": "",
+        "Discord Message Added Override Message": "",
+        "Discord Message Removed Override Message": ""
+      }
+    },
+    {
+      "Server Group": "rank_golden_vip",
+      "Discord Role ID": "1525582854585585785",
+      "Sync Source (Server or Discord)": "Server",
+      "Sync Notification Settings": {
+        "Send message to Server": false,
+        "Send Message To Discord": false,
+        "Discord Message Channel ID": "",
+        "Send Message When Added": false,
+        "Send Message When Removed": false,
+        "Server Message Added Override Message": "",
+        "Server Message Removed Override Message": "",
+        "Discord Message Added Override Message": "",
+        "Discord Message Removed Override Message": ""
+      }
+    },
+    {
+      "Server Group": "rank_diamond_vip",
+      "Discord Role ID": "1519824312285134880",
+      "Sync Source (Server or Discord)": "Server",
+      "Sync Notification Settings": {
+        "Send message to Server": false,
+        "Send Message To Discord": false,
+        "Discord Message Channel ID": "",
+        "Send Message When Added": false,
+        "Send Message When Removed": false,
+        "Server Message Added Override Message": "",
+        "Server Message Removed Override Message": "",
+        "Discord Message Added Override Message": "",
+        "Discord Message Removed Override Message": ""
+      }
+    },
+    {
+      "Server Group": "rank_titan_vip",
+      "Discord Role ID": "1525583130524782703",
+      "Sync Source (Server or Discord)": "Server",
+      "Sync Notification Settings": {
+        "Send message to Server": false,
+        "Send Message To Discord": false,
+        "Discord Message Channel ID": "",
+        "Send Message When Added": false,
+        "Send Message When Removed": false,
+        "Server Message Added Override Message": "",
+        "Server Message Removed Override Message": "",
+        "Discord Message Added Override Message": "",
+        "Discord Message Removed Override Message": ""
+      }
+    },
+    {
+      "Server Group": "rank_ultimate_vip",
+      "Discord Role ID": "1525663998983536660",
+      "Sync Source (Server or Discord)": "Server",
+      "Sync Notification Settings": {
+        "Send message to Server": false,
+        "Send Message To Discord": false,
+        "Discord Message Channel ID": "",
+        "Send Message When Added": false,
+        "Send Message When Removed": false,
+        "Server Message Added Override Message": "",
+        "Server Message Removed Override Message": "",
+        "Discord Message Added Override Message": "",
+        "Discord Message Removed Override Message": ""
+      }
+    },
+    {
+      "Server Group": "admin",
+      "Discord Role ID": "1519824312297586761",
+      "Sync Source (Server or Discord)": "Server",
       "Sync Notification Settings": {
         "Send message to Server": false,
         "Send Message To Discord": false,

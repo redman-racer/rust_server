@@ -277,5 +277,10 @@
   "Underwater Lab": "Underwater Lab",
   "Water Treatment Plant": "Water Treatment Plant",
   "Water Well": "Water Well",
-  "Wild Swamp": "Wild Swamp"
+  "Wild Swamp": "Wild Swamp",
+  "HomeSteeringWheelRequired": "You must deploy a steering wheel first.",
+  "TPTargetInsideEntity": "You can't teleport into another entity!",
+  "DM_TownTPNotOpened": "<color=yellow>{0}</color> is currently not open!",
+  "CantTeleportPlayerToYourself": "You can't teleport a player to yourself!",
+  "NotUseable": "You must wait another {0}after the wipe to use this command."
 }

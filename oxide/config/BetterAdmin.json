@@ -1,0 +1,10 @@
+{
+  "Admin Spawns without starter items": true,
+  "Disable Admin From Dropping Loot (if true, loot that admin drops gets deleted instead)": true,
+  "Disable admin hostile (if true, admins can't be hostile to safezone sentries)": true,
+  "Disable Admin Team Invites (if true, admins can't invite players to their team)": true,
+  "Disable anti-hack violations for admins": true,
+  "Disable npc/turret/environment targeting admins": true,
+  "Disabled Admin Corpses": true,
+  "Kill Admins on Disconnect (if true, admins get killed without corpse when they disconnect)": true
+}
