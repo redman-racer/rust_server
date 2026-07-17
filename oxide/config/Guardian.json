@@ -274,7 +274,7 @@
       "Hours": 72
     },
     "Check": {
-      "Enabled": true,
+      "Enabled": false,
       "Strict": false
     },
     "Violation": {

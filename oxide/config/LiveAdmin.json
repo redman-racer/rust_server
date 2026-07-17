@@ -1,5 +1,5 @@
 {
-  "ConfigVersion": 2,
+  "ConfigVersion": 3,
   "Title": "LiveAdmin",
   "AccentColor": "0.12 0.58 0.55 1",
   "WarningColor": "0.96 0.62 0.18 1",
@@ -59,7 +59,10 @@
     "liveadmin.audit.view",
     "liveadmin.audit.manage",
     "liveadmin.chat.view",
-    "liveadmin.chat.manage"
+    "liveadmin.chat.manage",
+    "liveadmin.server.maintenance",
+    "liveadmin.server.maintenance.bypass",
+    "liveadmin.server.restart"
   ],
   "ProtectedGroups": [
     "admin",
@@ -91,6 +94,11 @@
   "SafeMode": false,
   "EnableCommandSafety": true,
   "AllowOwnerCommandSafetyBypass": false,
+  "MaintenanceKickMessage": "Server maintenance is currently in progress. Please try again shortly.",
+  "KickPlayersWhenMaintenanceStarts": true,
+  "RestartDefaultReason": "Scheduled server maintenance",
+  "RestartDefaultMinutes": 5,
+  "WarningsStoredPerPlayer": 50,
   "ForceWipeDryRunDefault": false,
   "BlockedCommandPrefixes": [
     "quit",
@@ -112,7 +120,9 @@
   ],
   "AutoWipeEnabled": true,
   "AutoWipeUseWeeklySchedule": true,
+  "AutoWipeCadence": "Weekly",
   "AutoWipeWeekday": "Thursday",
+  "AutoWipeSecondWeekday": "Monday",
   "AutoWipeForceFirstWeekday": true,
   "AutoWipeIntervalDays": 7,
   "AutoWipeTimeUtc": "18:00",
@@ -215,6 +225,9 @@
         "liveadmin.stafftools.tickets",
         "liveadmin.server.info",
         "liveadmin.server.quickactions",
+        "liveadmin.server.maintenance",
+        "liveadmin.server.maintenance.bypass",
+        "liveadmin.server.restart",
         "liveadmin.server.wipe.view",
         "liveadmin.server.wipe.manage",
         "liveadmin.server.wipe.force",
@@ -249,6 +262,7 @@
         "liveadmin.plugins.view",
         "liveadmin.plugins.reload",
         "liveadmin.server.quickactions",
+        "liveadmin.server.maintenance.bypass",
         "liveadmin.audit.view"
       ]
     },
@@ -267,7 +281,8 @@
         "liveadmin.reports.manage",
         "liveadmin.stafftools.view",
         "liveadmin.stafftools.actions",
-        "liveadmin.stafftools.tickets"
+        "liveadmin.stafftools.tickets",
+        "liveadmin.server.maintenance.bypass"
       ]
     },
     {
@@ -321,6 +336,9 @@
         "liveadmin.plugins.reload",
         "liveadmin.server.info",
         "liveadmin.server.quickactions",
+        "liveadmin.server.maintenance",
+        "liveadmin.server.maintenance.bypass",
+        "liveadmin.server.restart",
         "liveadmin.server.wipe.view",
         "liveadmin.audit.view",
         "liveadmin.chat.view",
@@ -343,6 +361,7 @@
         "liveadmin.stafftools.view",
         "liveadmin.stafftools.actions",
         "liveadmin.stafftools.tickets",
+        "liveadmin.server.maintenance.bypass",
         "liveadmin.chat.view",
         "liveadmin.chat.manage"
       ]

@@ -33,7 +33,7 @@
     },
     "Users that have been banned on rusthackreport": false,
     "VPN": {
-      "Enabled": true,
+      "Enabled": false,
       "Ignore nVidia Cloud Gaming": true
     }
   },
