@@ -11,7 +11,7 @@ using RaycastHit = UnityEngine.RaycastHit;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.12")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.14")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
@@ -26,7 +26,7 @@ namespace Oxide.Plugins
         private const string OwnerlessManageConfirmation = "confirm";
 
         [PluginReference]
-        private Plugin Clans, Friends, RemoverTool, TurretSwitches;
+        private Plugin Clans, Friends, RemoverTool, TurretSwitches, Vanish;
 
         private Configuration config;
         private readonly HashSet<ulong> handledTurretIds = new HashSet<ulong>();
@@ -34,6 +34,7 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, ulong> sentrySupportEntityIds = new Dictionary<ulong, ulong>();
         private readonly HashSet<ulong> pendingSupportDropSentryIds = new HashSet<ulong>();
         private string resolvedSentryPrefab;
+        private static readonly int TargetLineOfSightMask = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed", "Default");
 
         private class Configuration
         {
@@ -78,6 +79,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Sentry Tuning")]
             public SentryTuning SentryTuning = new SentryTuning();
+
+            [JsonProperty("Targeting")]
+            public TargetingSettings Targeting = new TargetingSettings();
 
             [JsonProperty("Remove TurretSwitches Child Entities From Spawned NPC Sentries")]
             public bool RemoveTurretSwitchChildEntities = false;
@@ -159,6 +163,24 @@ namespace Oxide.Plugins
 
             [JsonProperty("Log Damage Events")]
             public bool LogDamageEvents = false;
+        }
+
+        private class TargetingSettings
+        {
+            [JsonProperty("Ignore Vanished Players")]
+            public bool IgnoreVanishedPlayers = true;
+
+            [JsonProperty("Require Clear Line Of Sight")]
+            public bool RequireClearLineOfSight = true;
+
+            [JsonProperty("Line Of Sight Target Points Required")]
+            public int LineOfSightTargetPointsRequired = 1;
+
+            [JsonProperty("Cancel Damage Without Clear Line Of Sight")]
+            public bool CancelDamageWithoutClearLineOfSight = true;
+
+            [JsonProperty("Log Blocked Targeting")]
+            public bool LogBlockedTargeting = false;
         }
 
         private class SupportLossDropSettings
@@ -243,6 +265,13 @@ namespace Oxide.Plugins
             }
 
             ValidateSentryTuning(config.SentryTuning);
+
+            if (config.Targeting == null)
+            {
+                config.Targeting = new TargetingSettings();
+            }
+
+            ValidateTargetingSettings(config.Targeting);
 
             if (config.SupportLossDrop == null)
             {
@@ -416,7 +445,7 @@ namespace Oxide.Plugins
             var includeAll = arg.Args != null && arg.Args.Length > 0 && string.Equals(arg.GetString(0), "all", StringComparison.OrdinalIgnoreCase);
             var lines = new List<string>
             {
-                $"RaidlandsSentryTurrets scan v1.0.12 hp={config.SentryTuning?.EffectiveMaxHealth:0.##} rangeMultiplier={config.SentryTuning?.RangeMultiplier:0.##} autoOwnerlessFallback={config.AllowAutomaticOwnerlessCopyPasteSentryFallback}"
+                $"RaidlandsSentryTurrets scan v1.0.14 hp={config.SentryTuning?.EffectiveMaxHealth:0.##} rangeMultiplier={config.SentryTuning?.RangeMultiplier:0.##} autoOwnerlessFallback={config.AllowAutomaticOwnerlessCopyPasteSentryFallback}"
             };
 
             var total = 0;
@@ -633,6 +662,7 @@ namespace Oxide.Plugins
 
         private object CanPickupEntity(BasePlayer player, BaseEntity entity)
         {
+            entity = GetManagedSentryPickupTarget(entity);
             if (!config.EnableHammerPickup || !IsPlayerOwnedManagedNpcSentry(entity))
             {
                 return null;
@@ -649,7 +679,7 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            var entity = info.HitEntity as BaseEntity;
+            var entity = GetManagedSentryPickupTarget(info.HitEntity as BaseEntity);
             if (!IsPlayerOwnedManagedNpcSentry(entity) || !IsHammer(player.GetActiveItem()) || IsRemoverToolActive(player))
             {
                 return null;
@@ -659,12 +689,41 @@ namespace Oxide.Plugins
             return false;
         }
 
+        private object OnTurretTarget(AutoTurret turret, BaseCombatEntity entity)
+        {
+            return CheckManagedSentryTarget(turret, entity, "OnTurretTarget");
+        }
+
+        private object CanBeTargeted(BasePlayer player, BaseCombatEntity entity)
+        {
+            return CheckManagedSentryTarget(entity as AutoTurret, player, "CanBeTargeted");
+        }
+
+        private void OnVanishDisappear(BasePlayer player)
+        {
+            ClearManagedSentryTargets(player);
+        }
+
         private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
         {
+            var playerVictim = entity as BasePlayer;
+            var attackingSentry = info?.Initiator as BaseEntity;
+            if (playerVictim != null && IsManagedNpcSentry(attackingSentry) && ShouldBlockManagedSentryTarget(attackingSentry as AutoTurret, playerVictim, "damage"))
+            {
+                if (info?.damageTypes != null)
+                {
+                    info.damageTypes.ScaleAll(0f);
+                }
+
+                return true;
+            }
+
             if (!config.Enabled || entity == null || info?.damageTypes == null || !IsManagedNpcSentry(entity))
             {
                 return null;
             }
+
+            GuardManagedSentryRetaliationTarget(entity as AutoTurret, info);
 
             var tuning = config.SentryTuning;
             if (tuning == null || !tuning.EnableDurabilityTuning || !tuning.UseManualDamageHandling)
@@ -709,6 +768,229 @@ namespace Oxide.Plugins
             entity.SetHealth(newHealth);
             entity.SendNetworkUpdate();
             return true;
+        }
+
+        private void GuardManagedSentryRetaliationTarget(AutoTurret turret, HitInfo info)
+        {
+            var attacker = info?.Initiator as BasePlayer;
+            if (turret == null || attacker == null || !ShouldBlockManagedSentryTarget(turret, attacker, "retaliation"))
+            {
+                return;
+            }
+
+            timer.Once(0f, () => ClearTurretTargetIfTargeting(turret, attacker));
+            timer.Once(0.1f, () => ClearTurretTargetIfTargeting(turret, attacker));
+        }
+
+        private object CheckManagedSentryTarget(AutoTurret turret, BaseCombatEntity target, string source)
+        {
+            if (ShouldBlockManagedSentryTarget(turret, target as BasePlayer, source))
+            {
+                return false;
+            }
+
+            return null;
+        }
+
+        private bool ShouldBlockManagedSentryTarget(AutoTurret turret, BasePlayer player, string source)
+        {
+            if (!config.Enabled || turret == null || player == null || !IsManagedNpcSentry(turret))
+            {
+                return false;
+            }
+
+            if (config.Targeting == null)
+            {
+                config.Targeting = new TargetingSettings();
+                ValidateTargetingSettings(config.Targeting);
+            }
+
+            if (config.Targeting.IgnoreVanishedPlayers && IsPlayerVanished(player))
+            {
+                ClearTurretTarget(turret);
+                LogBlockedTarget(turret, player, source, "vanished");
+                return true;
+            }
+
+            var enforceLos = config.Targeting.RequireClearLineOfSight
+                && (!string.Equals(source, "damage", StringComparison.OrdinalIgnoreCase) || config.Targeting.CancelDamageWithoutClearLineOfSight);
+
+            if (enforceLos && !HasClearSentryLineOfSight(turret, player))
+            {
+                ClearTurretTarget(turret);
+                LogBlockedTarget(turret, player, source, "line_of_sight");
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsPlayerVanished(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return false;
+            }
+
+            if (player._limitedNetworking || player.isInvisible)
+            {
+                return true;
+            }
+
+            if (Vanish == null || !Vanish.IsLoaded)
+            {
+                return false;
+            }
+
+            try
+            {
+                var result = Vanish.Call("IsInvisible", player);
+                return result is bool && (bool)result;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool HasClearSentryLineOfSight(AutoTurret turret, BasePlayer player)
+        {
+            var from = GetSentrySightOrigin(turret);
+            var visiblePoints = 0;
+            foreach (var point in GetPlayerTargetProbePoints(player))
+            {
+                if (!IsSentrySightLineBlocked(turret, player, from, point))
+                {
+                    visiblePoints++;
+                    if (visiblePoints >= config.Targeting.LineOfSightTargetPointsRequired)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private Vector3 GetSentrySightOrigin(AutoTurret turret)
+        {
+            if (turret == null)
+            {
+                return Vector3.zero;
+            }
+
+            var eyePoint = turret.CenterPoint();
+            if (eyePoint != Vector3.zero)
+            {
+                return eyePoint;
+            }
+
+            return turret.transform.position + Vector3.up * 1.35f;
+        }
+
+        private List<Vector3> GetPlayerTargetProbePoints(BasePlayer player)
+        {
+            var origin = player.transform.position;
+            return new List<Vector3>
+            {
+                player.eyes == null ? player.CenterPoint() : player.eyes.position,
+                origin + Vector3.up * 1.35f,
+                origin + Vector3.up * 0.95f
+            };
+        }
+
+        private bool IsSentrySightLineBlocked(AutoTurret turret, BasePlayer player, Vector3 from, Vector3 to)
+        {
+            if (from == Vector3.zero || to == Vector3.zero)
+            {
+                return true;
+            }
+
+            RaycastHit hit;
+            if (!Physics.Linecast(from, to, out hit, TargetLineOfSightMask, QueryTriggerInteraction.Ignore))
+            {
+                return false;
+            }
+
+            var hitEntity = hit.GetEntity();
+            return !IsEntityOrChildOf(hitEntity, turret) && !IsEntityOrChildOf(hitEntity, player);
+        }
+
+        private bool IsEntityOrChildOf(BaseEntity entity, BaseEntity parent)
+        {
+            if (entity == null || parent == null)
+            {
+                return false;
+            }
+
+            if (entity == parent)
+            {
+                return true;
+            }
+
+            var current = entity.GetParentEntity();
+            while (current != null)
+            {
+                if (current == parent)
+                {
+                    return true;
+                }
+
+                current = current.GetParentEntity();
+            }
+
+            return false;
+        }
+
+        private void ClearManagedSentryTargets(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                var turret = serverEntity as AutoTurret;
+                if (turret == null || !IsManagedNpcSentry(turret) || turret.target != player)
+                {
+                    continue;
+                }
+
+                ClearTurretTarget(turret);
+            }
+        }
+
+        private void ClearTurretTarget(AutoTurret turret)
+        {
+            if (turret == null || turret.IsDestroyed)
+            {
+                return;
+            }
+
+            turret.target = null;
+            turret.SendNetworkUpdate();
+        }
+
+        private void ClearTurretTargetIfTargeting(AutoTurret turret, BasePlayer player)
+        {
+            if (turret == null || turret.IsDestroyed || player == null || turret.target != player)
+            {
+                return;
+            }
+
+            ClearTurretTarget(turret);
+        }
+
+        private void LogBlockedTarget(AutoTurret turret, BasePlayer player, string source, string reason)
+        {
+            if (config.Targeting == null || !config.Targeting.LogBlockedTargeting)
+            {
+                return;
+            }
+
+            var turretId = turret?.net == null ? 0UL : turret.net.ID.Value;
+            Puts($"Blocked managed sentry target: sentry={turretId} player={player.UserIDString} source={source} reason={reason}");
         }
 
         private object OnRemovableEntityGiveRefund(BaseEntity targetEntity, BasePlayer player, string itemName, int amount, long skinId)
@@ -1493,6 +1775,22 @@ namespace Oxide.Plugins
             return IsNpcSentryPrefab(entity) && entity.OwnerID.IsSteamId();
         }
 
+        private BaseEntity GetManagedSentryPickupTarget(BaseEntity entity)
+        {
+            var current = entity;
+            while (current != null)
+            {
+                if (IsPlayerOwnedManagedNpcSentry(current))
+                {
+                    return current;
+                }
+
+                current = current.GetParentEntity();
+            }
+
+            return entity;
+        }
+
         private bool IsOwnerlessConfiguredSentry(BaseEntity entity)
         {
             return IsNpcSentryPrefab(entity) && entity.net != null && !entity.OwnerID.IsSteamId();
@@ -1914,6 +2212,19 @@ namespace Oxide.Plugins
             if (settings.SupportRaycastDistanceMetres <= 0f)
             {
                 settings.SupportRaycastDistanceMetres = 2f;
+            }
+        }
+
+        private void ValidateTargetingSettings(TargetingSettings settings)
+        {
+            if (settings.LineOfSightTargetPointsRequired < 1)
+            {
+                settings.LineOfSightTargetPointsRequired = 1;
+            }
+
+            if (settings.LineOfSightTargetPointsRequired > 3)
+            {
+                settings.LineOfSightTargetPointsRequired = 3;
             }
         }
 

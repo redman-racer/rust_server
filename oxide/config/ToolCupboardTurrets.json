@@ -4,5 +4,6 @@
   "flame traps affected": true,
   "Sam sites affected": true,
   "Launch site sams affected": false,
+  "Ignore empty vehicles": true,
   "Outpost turrets affected": false
 }

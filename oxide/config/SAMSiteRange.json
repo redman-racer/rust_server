@@ -1,0 +1,16 @@
+{
+  "Static SamSite Vehicle Scan Range": 150.0,
+  "Static SamSite Missile Scan Range": 150.0,
+  "Permissions": {
+    "samsiterange.use": {
+      "Priority": 0,
+      "Vehicle Scan Radius": 150.0,
+      "Missile Scan Radius": 150.0
+    },
+    "samsiterange.vip": {
+      "Priority": 1,
+      "Vehicle Scan Radius": 0.0,
+      "Missile Scan Radius": 0.0
+    }
+  }
+}

@@ -2,15 +2,42 @@
   "General Settings": {
     "Allow console status outputs": true,
     "Allow custom sell list for Compound vending machines (see in data)": true,
+    "Allow custom sell list for Apartment Complex NPC vending machines (see in data)": true,
     "Disallow Bandit NPC": false,
     "Disallow Compound NPC": false,
+    "Disallow Apartment Complex NPCs": false,
     "Disable Compound Turrets": false,
+    "Disable Apartment Complex Turrets": false,
     "Disable Compound SafeZone trigger": false,
-    "Disable Compound Vending Machines": false
+    "Disable Apartment Complex SafeZone trigger": false,
+    "Disable Compound Vending Machines": false,
+    "Disable Apartment Complex NPC Vending Machines": false
+  },
+  "Apartment Complex Pricing": {
+    "Enable Apartment Complex price overrides": true,
+    "Room prices in scrap (-1 keeps vanilla)": {
+      "Small": {
+        "Initial rental price": 2500,
+        "Daily upkeep": 1000
+      },
+      "Medium": {
+        "Initial rental price": 15000,
+        "Daily upkeep": 5000
+      },
+      "Large": {
+        "Initial rental price": 35000,
+        "Daily upkeep": 10000
+      }
+    },
+    "Rentable shop prices in scrap (-1 keeps vanilla)": {
+      "Upfront rental price": 2600,
+      "Hourly upkeep": 100
+    },
+    "Basement NPC master key price in scrap (-1 keeps vanilla)": 10000000
   },
   "Version": {
     "Major": 1,
-    "Minor": 2,
-    "Patch": 6
+    "Minor": 4,
+    "Patch": 5
   }
 }

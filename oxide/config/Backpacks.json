@@ -1,4 +1,5 @@
 
+
 {
   "Backpack size": {
     "Default size": 6,
@@ -19,7 +20,7 @@
     "Dynamic Size (EXPERIMENTAL)": {
       "Enabled": false,
       "Reset dynamic size on wipe": {
-        "Enabled": true
+        "Enabled": false
       },
       "Size profiles": [
         {
@@ -92,7 +93,7 @@
     ]
   },
   "Clear on wipe": {
-    "Enabled": true,
+    "Enabled": false,
     "Enable legacy keeponwipe permission": false,
     "Default ruleset": {
       "Max slots to keep": 0,

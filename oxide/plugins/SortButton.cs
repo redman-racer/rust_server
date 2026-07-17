@@ -13,7 +13,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Sort Button", "WhiteThunder, MON@H", "2.7.0")]
+    [Info("Sort Button", "WhiteThunder, MON@H, Raidlands", "2.7.1")]
     [Description("Adds a sort button to storage boxes, allowing you to sort items by name or category")]
     internal class SortButton : CovalencePlugin
     {
@@ -22,7 +22,7 @@ namespace Oxide.Plugins
         private Configuration _config;
 
         [PluginReference]
-        private readonly Plugin Clans, Friends;
+        private readonly Plugin Clans, Friends, RaidlandsUiEscapeBridge;
 
         private const string PermissionUse = "sortbutton.use";
         private const string GUIPanelName = "UISortButton";
@@ -377,6 +377,12 @@ namespace Oxide.Plugins
 
         private void HandleOnLootEntityDelayed(BasePlayer basePlayer, BaseEntity entity, string offsetXString, bool sortByCategory)
         {
+            if (IsRaidlandsBridgeLoot(basePlayer, entity))
+            {
+                DestroyUi(basePlayer);
+                return;
+            }
+
             // Sorting loot panels with multiple containers is not supported at this time.
             if (basePlayer.inventory.loot.containers.Count != 1)
                 return;
@@ -404,6 +410,12 @@ namespace Oxide.Plugins
             if (basePlayer == null
                 || !permission.UserHasPermission(basePlayer.UserIDString, PermissionUse))
                 return;
+
+            if (IsRaidlandsBridgeLoot(basePlayer, entity))
+            {
+                DestroyUi(basePlayer);
+                return;
+            }
 
             // Verify the container is supported.
             var containerConfiguration = _config.GetContainerConfiguration(entity);
@@ -462,6 +474,14 @@ namespace Oxide.Plugins
                 return false;
 
             return true;
+        }
+
+        private bool IsRaidlandsBridgeLoot(BasePlayer player, BaseEntity entity)
+        {
+            if (RaidlandsUiEscapeBridge == null || player == null || entity == null)
+                return false;
+
+            return RaidlandsUiEscapeBridge.Call("IsBridgeLootEntity", player, entity) as bool? == true;
         }
 
         private bool CanPlayerSortEntity(BasePlayer basePlayer, BaseEntity entity)

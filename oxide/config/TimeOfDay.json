@@ -9,14 +9,20 @@
     "authLevelCmds": 1,
     "authLevelFreeze": 2,
     "autoSkipDay": false,
-    "autoSkipNight": false,
+    "autoSkipNight": true,
     "dayLength": 30,
-    "freezeDate": false,
+    "daysBetweenNightCycles": 3,
+    "enableNightCycleSchedule": true,
+    "freezeDate": true,
     "logAutoSkipConsole": true,
-    "nightLength": 30
+    "nightLength": 30,
+    "scheduledNightLength": 2,
+    "skipUnscheduledNights": true,
+    "skippedNightCutoffHour": 17.0,
+    "dayStartHour": 9.0
   },
   "TimeFreeze": {
-    "freezeTimeOnload": true,
+    "freezeTimeOnload": false,
     "timeToFreeze": 12.0
   }
 }

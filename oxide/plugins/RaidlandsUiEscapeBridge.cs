@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Raidlands UI Escape Bridge", "Raidlands", "1.0.0")]
+    [Info("Raidlands UI Escape Bridge", "Raidlands", "1.0.9")]
     [Description("Provides server-visible ESC/TAB closing for registered modal CUI by maintaining a private native loot session.")]
     public class RaidlandsUiEscapeBridge : RustPlugin
     {
@@ -17,9 +17,11 @@ namespace Oxide.Plugins
 
         private Configuration _config;
         private int _nextGeneration;
+        private int _nextSessionId;
 
         private enum BridgeState
         {
+            WaitingForReady,
             DrainingOldLoot,
             OpeningNativeLoot,
             Armed,
@@ -36,6 +38,7 @@ namespace Oxide.Plugins
 
         private sealed class BridgeSession
         {
+            public int SessionId;
             public ulong UserId;
             public BasePlayer Player;
             public StorageContainer Container;
@@ -65,8 +68,14 @@ namespace Oxide.Plugins
             [JsonProperty(PropertyName = "Refuse to open while real native loot is active when close-existing is disabled")]
             public bool RefuseWhileRealLootIsActive = true;
 
-            [JsonProperty(PropertyName = "Add transparent click shield behind registered modal UIs")]
+            [JsonProperty(PropertyName = "Add interaction backdrop behind registered modal UIs")]
             public bool AddInteractionShield = true;
+
+            [JsonProperty(PropertyName = "Interaction backdrop parent layer")]
+            public string InteractionShieldParent = "Hud.Menu";
+
+            [JsonProperty(PropertyName = "Interaction backdrop color")]
+            public string InteractionShieldColor = "0.015 0.018 0.024 0.86";
 
             [JsonProperty(PropertyName = "Notify player when the bridge cannot arm")]
             public bool NotifyPlayerOnFailure = true;
@@ -125,6 +134,12 @@ namespace Oxide.Plugins
 
             if (string.IsNullOrWhiteSpace(_config.NativeLootPanel))
                 _config.NativeLootPanel = "generic";
+
+            if (string.IsNullOrWhiteSpace(_config.InteractionShieldParent))
+                _config.InteractionShieldParent = "Hud.Menu";
+
+            if (string.IsNullOrWhiteSpace(_config.InteractionShieldColor))
+                _config.InteractionShieldColor = "0.015 0.018 0.024 0.86";
 
             SaveConfig();
         }
@@ -195,7 +210,67 @@ namespace Oxide.Plugins
 
         private object RegisterUi(BasePlayer player, Plugin owner, string rootName, string closeHook)
         {
-            return RegisterUiInternal(player, owner, rootName, closeHook);
+            return RegisterUiInternal(player, owner, rootName, closeHook, false);
+        }
+
+        private object RegisterUi(BasePlayer player, Plugin owner, string rootName, string closeHook, bool waitForReady)
+        {
+            return RegisterUiInternal(player, owner, rootName, closeHook, waitForReady);
+        }
+
+        private object ArmUi(BasePlayer player, Plugin owner, string rootName)
+        {
+            if (player == null || owner == null || string.IsNullOrWhiteSpace(rootName))
+            {
+                DebugLog($"ArmUi rejected: invalid arguments. player={player?.userID.ToString() ?? "null"}, owner={owner?.Name ?? "null"}, root={rootName ?? "null"}.");
+                return false;
+            }
+
+            BridgeSession session;
+            if (!_sessions.TryGetValue(player.userID, out session) ||
+                session == null ||
+                session.State == BridgeState.Closing)
+            {
+                DebugLog($"ArmUi rejected for {owner.Name}:{rootName}, player={player.userID}; no active bridge session.");
+                return false;
+            }
+
+            bool registered = false;
+            foreach (UiRegistration registration in session.Registrations)
+            {
+                if (registration == null)
+                    continue;
+
+                if (ReferenceEquals(registration.Owner, owner) &&
+                    string.Equals(registration.RootName, rootName, StringComparison.Ordinal))
+                {
+                    registered = true;
+                    break;
+                }
+            }
+
+            if (!registered)
+            {
+                Trace(session, $"ArmUi rejected: {owner.Name}:{rootName} is not registered to this session.");
+                return false;
+            }
+
+            session.Player = player;
+
+            if (session.State == BridgeState.WaitingForReady)
+            {
+                session.State = BridgeState.DrainingOldLoot;
+                session.Generation = ++_nextGeneration;
+
+                QueueNativeBridgeOpen(session);
+                Trace(session, $"Deferred registration armed by {owner.Name}:{rootName}.");
+            }
+            else
+            {
+                Trace(session, $"ArmUi acknowledged for {owner.Name}:{rootName}; state is already {session.State}.");
+            }
+
+            return true;
         }
 
         private object UnregisterUi(BasePlayer player, Plugin owner, string rootName)
@@ -224,9 +299,12 @@ namespace Oxide.Plugins
             }
 
             if (!removed)
+            {
+                Trace(session, $"UnregisterUi ignored: {owner.Name}:{rootName} was not registered.");
                 return false;
+            }
 
-            DebugLog($"Unregistered {owner.Name}:{rootName} for {player.displayName} ({player.userID}).");
+            Trace(session, $"Unregistered {owner.Name}:{rootName}; roots remaining={session.Registrations.Count}.");
 
             if (session.Registrations.Count == 0)
             {
@@ -248,8 +326,12 @@ namespace Oxide.Plugins
 
             BridgeSession session;
             if (!_sessions.TryGetValue(player.userID, out session) || session == null)
+            {
+                DebugLog($"ClosePlayerUis ignored for {player.userID}; no active session. reason='{reason}'.");
                 return false;
+            }
 
+            Trace(session, $"ClosePlayerUis requested. reason='{reason}'.");
             CloseSession(
                 session,
                 string.IsNullOrWhiteSpace(reason) ? "external close request" : reason,
@@ -287,11 +369,26 @@ namespace Oxide.Plugins
             return CloseCommand;
         }
 
+        private object IsBridgeLootEntity(BasePlayer player, BaseEntity entity)
+        {
+            if (player == null || entity == null)
+                return false;
+
+            StorageContainer container = entity as StorageContainer;
+            if (container == null)
+                return false;
+
+            BridgeSession session;
+            return _sessions.TryGetValue(player.userID, out session) &&
+                   session != null &&
+                   session.Container == container;
+        }
+
         #endregion
 
         #region Registration and bridge opening
 
-        private bool RegisterUiInternal(BasePlayer player, Plugin owner, string rootName, string closeHook)
+        private bool RegisterUiInternal(BasePlayer player, Plugin owner, string rootName, string closeHook, bool waitForReady)
         {
             if (player == null || !player.IsConnected)
             {
@@ -324,27 +421,34 @@ namespace Oxide.Plugins
 
                 session = new BridgeSession
                 {
+                    SessionId = ++_nextSessionId,
                     UserId = player.userID,
                     Player = player,
-                    State = BridgeState.DrainingOldLoot,
+                    State = waitForReady ? BridgeState.WaitingForReady : BridgeState.DrainingOldLoot,
                     Generation = ++_nextGeneration,
                     CreatedAt = Time.realtimeSinceStartup
                 };
 
                 _sessions[player.userID] = session;
 
-                if (_config.AddInteractionShield)
+                Trace(session, $"Created session from {owner.Name}:{rootName}; deferred={waitForReady}, closeExistingLoot={_config.CloseExistingNativeLoot}.");
+
+                if (!waitForReady && _config.AddInteractionShield)
                     AddShield(player);
 
                 AddOrUpdateRegistration(session, owner, rootName, closeHook);
-                QueueNativeBridgeOpen(session);
+
+                if (!waitForReady)
+                    QueueNativeBridgeOpen(session);
+
                 return true;
             }
 
             session.Player = player;
             AddOrUpdateRegistration(session, owner, rootName, closeHook);
+            Trace(session, $"Updated session from {owner.Name}:{rootName}; deferred={waitForReady}.");
 
-            if (_config.AddInteractionShield)
+            if (_config.AddInteractionShield && session.State != BridgeState.WaitingForReady)
                 AddShieldIfMissing(player, session);
 
             return true;
@@ -378,7 +482,7 @@ namespace Oxide.Plugins
                 CloseHook = closeHook
             });
 
-            DebugLog($"Registered {owner.Name}:{rootName} for player {session.UserId}.");
+            Trace(session, $"Registered {owner.Name}:{rootName}; roots={session.Registrations.Count}.");
         }
 
         private void QueueNativeBridgeOpen(BridgeSession session)
@@ -388,10 +492,8 @@ namespace Oxide.Plugins
 
             BasePlayer player = session.Player;
 
-            if (_config.CloseExistingNativeLoot)
-                ForceCloseNativeLoot(player, "preparing UI Escape bridge");
-
             int generation = session.Generation;
+            Trace(session, $"Queued native loot open; delay={_config.OldLootDrainDelaySeconds:0.000}s, generation={generation}.");
 
             timer.Once(_config.OldLootDrainDelaySeconds, () =>
             {
@@ -401,6 +503,7 @@ namespace Oxide.Plugins
                     current.Generation != generation ||
                     !IsCurrentSession(current))
                 {
+                    Trace(session, "Skipped queued native open because the session was replaced, closed, or generation changed.");
                     return;
                 }
 
@@ -408,6 +511,14 @@ namespace Oxide.Plugins
                 {
                     CloseSession(current, "no UI registrations remained before native open", false, false, false);
                     return;
+                }
+
+                if (_config.CloseExistingNativeLoot)
+                {
+                    Trace(current, "Closing current native loot before bridge container creation.");
+                    // Do not send client inventory-close RPCs here. They can arrive
+                    // after PlayerOpenLoot and immediately close this new bridge.
+                    ForceCloseNativeLoot(player, "preparing UI Escape bridge", false);
                 }
 
                 CreateNativeLootContainer(current);
@@ -437,10 +548,12 @@ namespace Oxide.Plugins
 
             session.Container = container;
             session.State = BridgeState.OpeningNativeLoot;
+            Trace(session, $"Created private StorageContainer at {spawnPosition}; spawning now.");
 
             // Register before Spawn so CanNetworkTo can isolate its first snapshot.
             _containerOwners[container] = player.userID;
             container.Spawn();
+            Trace(session, $"Private StorageContainer spawned; netId={container.net?.ID}.");
 
             int generation = session.Generation;
             NextTick(() =>
@@ -451,6 +564,7 @@ namespace Oxide.Plugins
                     current.Generation != generation ||
                     !IsCurrentSession(current))
                 {
+                    Trace(session, "Skipped PlayerOpenLoot because the session was replaced, closed, or generation changed.");
                     KillContainer(container);
                     return;
                 }
@@ -465,6 +579,7 @@ namespace Oxide.Plugins
                 return;
 
             BasePlayer player = session.Player;
+            Trace(session, $"Calling PlayerOpenLoot with panel='{_config.NativeLootPanel}'.");
 
             bool opened;
             try
@@ -484,6 +599,7 @@ namespace Oxide.Plugins
             }
 
             int generation = session.Generation;
+            Trace(session, $"PlayerOpenLoot returned true; verification in {_config.NativeLootVerificationDelaySeconds:0.000}s.");
 
             timer.Once(_config.NativeLootVerificationDelaySeconds, () =>
             {
@@ -493,6 +609,7 @@ namespace Oxide.Plugins
                     current.Generation != generation ||
                     !IsCurrentSession(current))
                 {
+                    Trace(session, "Skipped native loot verification because the session was replaced, closed, or generation changed.");
                     return;
                 }
 
@@ -507,6 +624,7 @@ namespace Oxide.Plugins
 
             PlayerLoot loot = session.Player.inventory?.loot;
             bool entityMatched = loot != null && loot.entitySource == session.Container;
+            Trace(session, $"Verification: lootPresent={loot != null}, entityMatched={entityMatched}, source={DescribeLootSource(loot)}.");
 
             if (!entityMatched)
             {
@@ -516,9 +634,7 @@ namespace Oxide.Plugins
 
             session.State = BridgeState.Armed;
 
-            DebugLog(
-                $"Bridge armed for {session.Player.displayName} ({session.UserId}); " +
-                $"roots={session.Registrations.Count}, container={session.Container.net?.ID}.");
+            Trace(session, $"Bridge armed; roots={session.Registrations.Count}, container={session.Container.net?.ID}.");
         }
 
         private bool IsCurrentSession(BridgeSession session)
@@ -553,16 +669,16 @@ namespace Oxide.Plugins
             if (session == null)
                 return;
 
-            PrintWarning($"Escape bridge failed for {session.Player?.displayName ?? session.UserId.ToString()}: {reason}");
+            PrintWarning($"[RLUIB] Escape bridge failed for {session.Player?.displayName ?? session.UserId.ToString()}: {reason}. {DescribeSession(session)}");
 
             BasePlayer player = session.Player;
-            CloseSession(session, $"bridge failed: {reason}", true, true, true);
+            CloseSession(session, $"bridge failed: {reason}", true, false, false);
 
             if (_config.NotifyPlayerOnFailure && player != null && player.IsConnected)
             {
                 player.ChatMessage(
-                    "<color=#ff7666>UI ESCAPE BRIDGE FAILED:</color> The menu was closed safely. " +
-                    "Check the server console for the reason.");
+                    "<color=#ff7666>UI ESCAPE BRIDGE FAILED:</color> Escape/Tab close support is unavailable for this menu. " +
+                    "Use the menu close button.");
             }
         }
 
@@ -584,6 +700,7 @@ namespace Oxide.Plugins
                 return;
 
             bool entityMatched = loot.entitySource == session.Container;
+            Trace(session, $"OnPlayerLootEnd received; entityMatched={entityMatched}, source={DescribeLootSource(loot)}.");
 
             if (session.State != BridgeState.Armed)
             {
@@ -613,6 +730,8 @@ namespace Oxide.Plugins
 
             if (entity != session.Container)
                 return;
+
+            Trace(session, $"OnLootEntityEnd received for private container; entity={entity.net?.ID}.");
 
             if (session.State != BridgeState.Armed)
             {
@@ -645,6 +764,7 @@ namespace Oxide.Plugins
             if (!_sessions.TryGetValue(player.userID, out session) || session == null)
                 return;
 
+            Trace(session, "Central bridge close console command received.");
             CloseSession(session, "central UI close button", true, true, true);
         }
 
@@ -658,6 +778,7 @@ namespace Oxide.Plugins
             if (session == null || session.State == BridgeState.Closing)
                 return;
 
+            Trace(session, $"Closing session. reason='{reason}', endLoot={endNativeLoot}, callbacks={invokeCallbacks}, destroyRoots={destroyRegisteredRoots}.");
             session.State = BridgeState.Closing;
 
             // Copy registrations before removing state. Owner callbacks may call back
@@ -686,7 +807,10 @@ namespace Oxide.Plugins
             KillContainer(container);
 
             if (invokeCallbacks && player != null)
+            {
+                DebugLog($"[RLUIB] S{session.SessionId} invoking {registrations.Count} registered close callback(s).");
                 InvokeCloseCallbacks(player, registrations, reason);
+            }
 
             if (destroyRegisteredRoots && player != null)
             {
@@ -697,9 +821,7 @@ namespace Oxide.Plugins
                 }
             }
 
-            DebugLog(
-                $"Closed bridge for {session.UserId}. reason='{reason}', " +
-                $"registrations={registrations.Count}.");
+            DebugLog($"[RLUIB] S{session.SessionId} closed. reason='{reason}', registrations={registrations.Count}.");
         }
 
         private void InvokeCloseCallbacks(
@@ -724,6 +846,7 @@ namespace Oxide.Plugins
 
                 try
                 {
+                    DebugLog($"[RLUIB] S{GetSessionId(player)} invoking {ownerName}.{registration.CloseHook}; reason='{reason}'.");
                     registration.Owner.Call(registration.CloseHook, player, reason);
                 }
                 catch (Exception exception)
@@ -735,32 +858,86 @@ namespace Oxide.Plugins
             }
         }
 
-        private void ForceCloseNativeLoot(BasePlayer player, string reason)
+        private void ForceCloseNativeLoot(BasePlayer player, string reason, bool closeClientInventory = true)
         {
-            if (player == null || player.inventory?.loot == null)
+            if (player == null)
                 return;
 
-            try
+            DebugLog($"[RLUIB] S{GetSessionId(player)} ForceCloseNativeLoot. reason='{reason}', closeClient={closeClientInventory}, source={DescribeLootSource(player.inventory?.loot)}.");
+
+            if (player.inventory?.loot != null)
             {
-                player.EndLooting();
+                try
+                {
+                    player.EndLooting();
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning(
+                        $"EndLooting failed for {player.displayName} ({player.userID}) while closing '{reason}': " +
+                        exception.Message);
+                }
+
+                try
+                {
+                    player.inventory.loot.Clear();
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning(
+                        $"PlayerLoot.Clear failed for {player.displayName} ({player.userID}) while closing '{reason}': " +
+                        exception.Message);
+                }
+
+                try
+                {
+                    player.inventory.loot.MarkDirty();
+                    player.inventory.loot.SendImmediate();
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning(
+                        $"PlayerLoot.SendImmediate failed for {player.displayName} ({player.userID}) while closing '{reason}': " +
+                        exception.Message);
+                }
             }
-            catch (Exception exception)
-            {
-                PrintWarning(
-                    $"EndLooting failed for {player.displayName} ({player.userID}) while closing '{reason}': " +
-                    exception.Message);
-            }
+
+            if (!closeClientInventory)
+                return;
+
+            ForceCloseClientInventory(player, reason);
+            NextTick(() => ForceCloseClientInventory(player, reason + " follow-up"));
+        }
+
+        private void ForceCloseClientInventory(BasePlayer player, string reason)
+        {
+            if (player == null || !player.IsConnected)
+                return;
+
+            // PlayerOpenLoot creates native CUI roots. EndLooting alone can clear the
+            // server state while leaving those roots visible on some Rust clients.
+            CloseNativeLootPanels(player);
 
             try
             {
-                player.inventory.loot.Clear();
+                player.SendConsoleCommand("inventory.endloot", null);
             }
             catch (Exception exception)
             {
                 PrintWarning(
-                    $"PlayerLoot.Clear failed for {player.displayName} ({player.userID}) while closing '{reason}': " +
+                    $"inventory.endloot failed for {player.displayName} ({player.userID}) while closing '{reason}': " +
                     exception.Message);
             }
+
+        }
+
+        private void CloseNativeLootPanels(BasePlayer player)
+        {
+            if (player == null)
+                return;
+
+            CuiHelper.DestroyUi(player, _config.NativeLootPanel);
+            CuiHelper.DestroyUi(player, "LootPanel");
         }
 
         #endregion
@@ -785,9 +962,9 @@ namespace Oxide.Plugins
             {
                 Image =
                 {
-                    // Almost transparent but still raycastable, preventing accidental
-                    // interaction with the dummy native storage slots behind the modal.
-                    Color = "0 0 0 0.001"
+                    // Visible and raycastable, so native loot is obscured while the
+                    // registered modal remains clickable above it on the same layer.
+                    Color = _config.InteractionShieldColor
                 },
                 RectTransform =
                 {
@@ -795,7 +972,7 @@ namespace Oxide.Plugins
                     AnchorMax = "1 1"
                 },
                 CursorEnabled = false
-            }, "Overlay", root);
+            }, _config.InteractionShieldParent, root);
 
             CuiHelper.AddUi(player, elements);
         }
@@ -854,6 +1031,7 @@ namespace Oxide.Plugins
             }
 
             // Intentional Kill during CloseSession occurs after session state was removed.
+            Trace(session, $"Private bridge container was destroyed unexpectedly; netId={container.net?.ID}.");
             CloseSession(session, "private bridge container was destroyed", true, true, true);
         }
 
@@ -973,7 +1151,8 @@ namespace Oxide.Plugins
                 player,
                 this,
                 TestUiRoot,
-                nameof(OnBridgeTestClosed));
+                nameof(OnBridgeTestClosed),
+                false);
 
             if (!registered)
             {
@@ -1021,7 +1200,7 @@ namespace Oxide.Plugins
                     AnchorMax = "1 1"
                 },
                 CursorEnabled = true
-            }, "Overlay", TestUiRoot);
+            }, _config.InteractionShieldParent, TestUiRoot);
 
             elements.Add(new CuiPanel
             {
@@ -1105,7 +1284,49 @@ namespace Oxide.Plugins
         private void DebugLog(string message)
         {
             if (_config != null && _config.DebugLogging)
-                Puts("[DEBUG] " + message);
+                Puts(message);
+        }
+
+        private void Trace(BridgeSession session, string message)
+        {
+            if (_config == null || !_config.DebugLogging)
+                return;
+
+            Puts($"[RLUIB] {DescribeSession(session)} {message}");
+        }
+
+        private int GetSessionId(BasePlayer player)
+        {
+            BridgeSession session;
+            return player != null && _sessions.TryGetValue(player.userID, out session) && session != null
+                ? session.SessionId
+                : 0;
+        }
+
+        private string DescribeSession(BridgeSession session)
+        {
+            if (session == null)
+                return "session=null";
+
+            List<string> roots = new List<string>();
+            foreach (UiRegistration registration in session.Registrations)
+            {
+                if (registration != null)
+                    roots.Add($"{registration.OwnerName}:{registration.RootName}");
+            }
+
+            return $"S{session.SessionId} player={session.UserId} state={session.State} generation={session.Generation} roots=[{string.Join(",", roots.ToArray())}]";
+        }
+
+        private string DescribeLootSource(PlayerLoot loot)
+        {
+            if (loot == null)
+                return "loot=null";
+
+            BaseEntity source = loot.entitySource;
+            return source == null
+                ? "source=null"
+                : $"source={source.ShortPrefabName}:{source.net?.ID}";
         }
 
         #endregion

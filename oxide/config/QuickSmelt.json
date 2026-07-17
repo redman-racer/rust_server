@@ -1,44 +1,122 @@
+
+
+
+
+
 {
   "Use Permission": true,
   "Speed Multipliers": {
-    "global": 100.0,
-    "furnace.shortname": 1.0
+    "global": 10000.0,
+    "furnace": 10000.0,
+    "furnace.large": 10000.0,
+    "electric.furnace": 100000.0,
+    "campfire": 10000.0,
+    "bbq": 10000.0,
+    "small.oil.refinery": 10000.0,
+    "cooking.bench": 10000.0,
+    "pie.bench": 10000.0,
+    "mixingtable": 10000.0,
+    "mixingtable.deployed": 10000.0
   },
   "Fuel Usage Speed Multipliers": {
     "global": 1.0,
-    "furnace.shortname": 1.0
+    "furnace": 1.0,
+    "furnace.large": 1.0,
+    "electric.furnace": 1.0,
+    "campfire": 1.0,
+    "bbq": 1.0,
+    "small.oil.refinery": 1.0,
+    "cooking.bench": 1.0,
+    "pie.bench": 1.0,
+    "mixingtable": 1.0,
+    "mixingtable.deployed": 1.0
   },
   "Fuel Usage Multipliers": {
     "global": 1,
-    "furnace.shortname": 1
+    "furnace": 1,
+    "furnace.large": 1,
+    "electric.furnace": 1,
+    "campfire": 1,
+    "bbq": 1,
+    "small.oil.refinery": 1,
+    "cooking.bench": 1,
+    "pie.bench": 1,
+    "mixingtable": 1,
+    "mixingtable.deployed": 1
   },
   "Output Multipliers": {
     "global": {
       "global": 1.0
     },
-    "furnace.shortname": {
-      "item.shortname": 1.0
+    "furnace": {
+      "global": 1.0
+    },
+    "furnace.large": {
+      "global": 1.0
+    },
+    "electric.furnace": {
+      "global": 1.0
+    },
+    "campfire": {
+      "global": 1.0
+    },
+    "bbq": {
+      "global": 1.0
+    },
+    "small.oil.refinery": {
+      "global": 1.0
+    },
+    "cooking.bench": {
+      "global": 1.0
+    },
+    "pie.bench": {
+      "global": 1.0
+    },
+    "mixingtable": {
+      "global": 1.0
+    },
+    "mixingtable.deployed": {
+      "global": 1.0
     }
   },
   "Whitelist": {
-    "global": [
-      "item.shortname"
-    ],
-    "furnace.shortname": [
-      "item.shortname"
-    ]
+    "global": [],
+    "furnace": [],
+    "furnace.large": [],
+    "electric.furnace": [],
+    "campfire": [],
+    "bbq": [],
+    "small.oil.refinery": [],
+    "cooking.bench": [],
+    "pie.bench": [],
+    "mixingtable": [],
+    "mixingtable.deployed": []
   },
   "Blacklist": {
-    "global": [
-      "item.shortname"
-    ],
-    "furnace.shortname": [
-      "item.shortname"
-    ]
+    "global": [],
+    "furnace": [],
+    "furnace.large": [],
+    "electric.furnace": [],
+    "campfire": [],
+    "bbq": [],
+    "small.oil.refinery": [],
+    "cooking.bench": [],
+    "pie.bench": [],
+    "mixingtable": [],
+    "mixingtable.deployed": []
   },
   "Smelting Frequencies (Smelt items every N smelting ticks)": {
     "global": 1,
-    "furnace.shortname": 1
+    "furnace": 1,
+    "furnace.large": 1,
+    "electric.furnace": 1,
+    "campfire": 1,
+    "bbq": 1,
+    "small.oil.refinery": 1,
+    "cooking.bench": 1,
+    "pie.bench": 1,
+    "mixingtable": 1,
+    "mixingtable.deployed": 1
   },
   "Debug": false
 }

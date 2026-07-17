@@ -11,7 +11,7 @@ using Oxide.Game.Rust.Cui;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-[Info("LiveAdmin", "Codex", "0.8.3")]
+[Info("LiveAdmin", "Codex", "0.8.6")]
 [Description("A live in-game staff admin panel for Rust/uMod servers.")]
 public class LiveAdmin : RustPlugin
 {
@@ -19,6 +19,7 @@ public class LiveAdmin : RustPlugin
 [PluginReference] private Plugin Godmode;
 [PluginReference] private Plugin Vanish;
 [PluginReference] private Plugin InventoryViewer;
+[PluginReference] private Plugin RaidlandsUiEscapeBridge;
 private const string UiRoot = "LiveAdmin.Root";
 private const string PermUse = "liveadmin.use";
 private const string PermOwner = "liveadmin.owner";
@@ -184,6 +185,7 @@ public int ChatMessagesStored = 120;
 public string ChatTimeoutDuration = "10m";
 public string ChatTimeoutReason = "Chat moderation";
 public string ChatDeleteCommand = string.Empty;
+[JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
 public List<string> ChatQuickReplies = new List<string>
 {
 "Please keep chat respectful.",
@@ -301,6 +303,11 @@ public Dictionary<string, string> UserSkins = new Dictionary<string, string>();
 public Dictionary<string, PlayerProfile> PlayerProfiles = new Dictionary<string, PlayerProfile>();
 public string NextAutoWipeUtc;
 public string LastWipeUtc;
+public string PendingWipeMode;
+public string PendingWipeStartedUtc;
+public int PendingWipeSeed;
+public int PendingWipeMapSize;
+public string PendingWipeLevelUrl;
 public int NextReportId = 1;
 }
 private class PlayerProfile
@@ -448,6 +455,17 @@ protected override void SaveConfig()
 {
 Config.WriteObject(config, true);
 }
+private static List<string> DistinctConfigValues(IEnumerable<string> values)
+{
+var result = new List<string>();
+var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+foreach (var value in values ?? Enumerable.Empty<string>())
+{
+var normalized = (value ?? string.Empty).Trim();
+if (normalized.Length > 0 && seen.Add(normalized)) result.Add(normalized);
+}
+return result;
+}
 private void EnsureConfigDefaults()
 {
 if (config.ConfigVersion < 2)
@@ -531,6 +549,7 @@ if (config.ChatQuickReplies == null || config.ChatQuickReplies.Count == 0)
 {
 config.ChatQuickReplies = new List<string> { "Please keep chat respectful.", "Take this to a ticket if you need staff help.", "Stop spamming chat.", "That language is not allowed here." };
 }
+config.ChatQuickReplies = DistinctConfigValues(config.ChatQuickReplies);
 if (config.ChatWordBlacklist == null)
 {
 config.ChatWordBlacklist = new List<string>();
@@ -787,6 +806,7 @@ RegisterPermissions();
 ProcessExpiredMutes();
 SampleResources();
 EnsureNextAutoWipe();
+VerifyPendingWipe();
 foreach (var player in BasePlayer.activePlayerList)
 {
 UpdatePlayerProfile(player, true);
@@ -2079,6 +2099,7 @@ else if (state.Tab == "appearance") DrawAppearance(container, player);
 else if (state.Tab == "settings") DrawSettings(container, player);
 else if (state.Tab == "logs") DrawLogs(container, player, state);
 if (state.ConsoleMiniOpen && CanUseQuickActions(player)) DrawMiniConsole(container, state);
+RegisterUiBridge(player);
 CuiHelper.AddUi(player, container);
 }
 private void DrawNav(CuiElementContainer container, BasePlayer player, PanelState state)
@@ -4058,6 +4079,23 @@ private void Close(BasePlayer player)
 {
 openPanels.Remove(player.userID);
 CuiHelper.DestroyUi(player, UiRoot);
+UnregisterUiBridge(player);
+}
+private void RegisterUiBridge(BasePlayer player)
+{
+if (player == null) return;
+RaidlandsUiEscapeBridge?.Call("RegisterUi", player, this, UiRoot, nameof(OnRaidlandsUiBridgeClosed));
+}
+private void UnregisterUiBridge(BasePlayer player)
+{
+if (player == null) return;
+RaidlandsUiEscapeBridge?.Call("UnregisterUi", player, this, UiRoot);
+}
+private void OnRaidlandsUiBridgeClosed(BasePlayer player, string reason)
+{
+if (player == null) return;
+openPanels.Remove(player.userID);
+CuiHelper.DestroyUi(player, UiRoot);
 }
 private void RequireConfirm(BasePlayer player, string action, string target, string value, string message)
 {
@@ -4674,7 +4712,6 @@ if (!DateTime.TryParse(storedData.NextAutoWipeUtc, out var next)) return;
 if (DateTime.UtcNow < next) return;
 var mode = ScheduledWipeMode(next);
 RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : config.AutoWipeCommands);
-storedData.LastWipeUtc = Now();
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
 RefreshWipeViews();
@@ -4699,6 +4736,7 @@ PrintToChat(FormatWipeText(config.AutoWipeAnnouncement));
 }
 activeWipeSeed = wipeSeed;
 RunWipeSetupCommands(action == "ForceWipe" ? config.ForceWipeDiscordCommands : config.AutoWipeDiscordCommands);
+PrepareNextWorld(action, wipeSeed);
 if (action == "ForceWipe" && config.ForceWipeDeletesFiles)
 {
 DeleteForceWipeFiles(actor);
@@ -4709,9 +4747,101 @@ var formatted = FormatWipeText(command);
 if (!IsCommandAllowed(actor, formatted, "Wipe")) continue;
 ConsoleSystem.Run(ConsoleSystem.Option.Server, formatted);
 }
-Log(actor, action, "server", $"map={config.AutoWipeMap} bp={config.AutoWipeBlueprints} seed={config.AutoWipeSeed} size={config.AutoWipeMapSize}");
+WriteAudit(actor, "Pending", "Wipe", action, "server", string.Empty, $"map={config.AutoWipeMap} bp={config.AutoWipeBlueprints} seed={wipeSeed} size={config.AutoWipeMapSize}; awaiting restart verification");
 activeWipeSeed = null;
 RefreshConsoleViews();
+}
+
+private void PrepareNextWorld(string action, string wipeSeed)
+{
+if (!config.AutoWipeMap) return;
+if (!int.TryParse(wipeSeed, out var seed) || seed <= 0)
+{
+LogFailed(null, "Wipe", action, "server", string.Empty, "Could not resolve a valid numeric map seed.");
+return;
+}
+
+var size = Math.Max(1000, Math.Min(6000, config.AutoWipeMapSize));
+var levelUrl = config.AutoWipeCustomMapUrl ?? string.Empty;
+ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.seed " + seed);
+ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.worldsize " + size);
+ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.levelurl " + ConsoleArg(levelUrl));
+ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.writecfg");
+if (!WriteNextWorldServerConfig(seed, size, levelUrl))
+{
+LogFailed(null, "Wipe", action, "server", string.Empty, "Could not persist the next world settings to cfg/server.cfg.");
+return;
+}
+
+storedData.PendingWipeMode = action;
+storedData.PendingWipeStartedUtc = Now();
+storedData.PendingWipeSeed = seed;
+storedData.PendingWipeMapSize = size;
+storedData.PendingWipeLevelUrl = levelUrl;
+SaveData();
+Puts($"{action} prepared: next world seed={seed}, size={size}. Waiting for restart verification.");
+}
+
+private bool WriteNextWorldServerConfig(int seed, int size, string levelUrl)
+{
+try
+{
+var cfgDirectory = Path.Combine(GetWipeRoot(), "cfg");
+Directory.CreateDirectory(cfgDirectory);
+var cfgPath = Path.Combine(cfgDirectory, "server.cfg");
+var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+{
+{ "server.seed", "server.seed " + seed },
+{ "server.worldsize", "server.worldsize " + size },
+{ "server.levelurl", "server.levelurl " + ConsoleArg(levelUrl ?? string.Empty) }
+};
+var lines = File.Exists(cfgPath) ? File.ReadAllLines(cfgPath).ToList() : new List<string>();
+for (var i = lines.Count - 1; i >= 0; i--)
+{
+var trimmed = (lines[i] ?? string.Empty).TrimStart();
+var key = replacements.Keys.FirstOrDefault(k => trimmed.Equals(k, StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith(k + " ", StringComparison.OrdinalIgnoreCase));
+if (key == null) continue;
+lines.RemoveAt(i);
+}
+lines.AddRange(replacements.Values);
+File.WriteAllLines(cfgPath, lines.ToArray());
+return true;
+}
+catch (Exception ex)
+{
+Puts("Failed to persist next-world server.cfg settings: " + ex.Message);
+return false;
+}
+}
+
+private void VerifyPendingWipe()
+{
+if (storedData == null || string.IsNullOrEmpty(storedData.PendingWipeMode)) return;
+
+var seedMatches = ConVar.Server.seed == storedData.PendingWipeSeed;
+var sizeMatches = ConVar.Server.worldsize == storedData.PendingWipeMapSize;
+var expectedUrl = storedData.PendingWipeLevelUrl ?? string.Empty;
+var urlMatches = string.Equals(ConVar.Server.levelurl ?? string.Empty, expectedUrl, StringComparison.OrdinalIgnoreCase);
+var details = $"expected seed={storedData.PendingWipeSeed} size={storedData.PendingWipeMapSize}; running seed={ConVar.Server.seed} size={ConVar.Server.worldsize}";
+
+if (seedMatches && sizeMatches && urlMatches)
+{
+storedData.LastWipeUtc = Now();
+LogSuccess(null, "Wipe", storedData.PendingWipeMode + "Verified", "server", string.Empty, details);
+Puts($"{storedData.PendingWipeMode} completed successfully and was verified after restart: {details}.");
+}
+else
+{
+LogFailed(null, "Wipe", storedData.PendingWipeMode + "Verification", "server", string.Empty, details);
+Puts($"{storedData.PendingWipeMode} did not complete successfully: {details}.");
+}
+
+storedData.PendingWipeMode = null;
+storedData.PendingWipeStartedUtc = null;
+storedData.PendingWipeSeed = 0;
+storedData.PendingWipeMapSize = 0;
+storedData.PendingWipeLevelUrl = null;
+SaveData();
 }
 private void RunWipeSetupCommands(List<string> commands)
 {
@@ -5464,7 +5594,6 @@ return false;
 private object OnPlayerInput(BasePlayer player, InputState input)
 {
 if (player == null) return null;
-if (openPanels.Contains(player.userID) && !player.IsSleeping() && !player.IsWounded()) return true;
 if (!frozenPositions.TryGetValue(player.userID, out var position)) return null;
 if (Vector3.Distance(player.transform.position, position) > 0.1f)
 {

@@ -6,7 +6,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("Turret Switches", "ziptie/Raidlands", 1.8)]
+    [Info("Turret Switches", "ziptie/Raidlands", 1.9)]
     [Description("Spawns switches on turrets and SAM sites for players with permission.")]
     public class TurretSwitches : CovalencePlugin
     {
@@ -48,6 +48,7 @@ namespace Oxide.Plugins
             TurretSwitches.config = Config.ReadObject<TurretSwitchesConfig>();
             RegisterPermissions();
             AddSwitchesToAllTurrets();
+            timer.Every(1f, SyncAllSwitchStates);
         }
         #endregion
 
@@ -202,6 +203,8 @@ namespace Oxide.Plugins
                     PositionTurretSwitch(entity, existingSwitch, preferredWorldPosition);
                 if (!switches.Contains(existingSwitch))
                     switches.Add(existingSwitch);
+                ConfigureSwitchEntity(existingSwitch);
+                SyncSwitchState(existingSwitch);
                 return;
             }
 
@@ -216,6 +219,7 @@ namespace Oxide.Plugins
             PositionTurretSwitch(entity, s, preferredWorldPosition);
             ConfigureSwitchEntity(s);
             switches.Add(s);
+            SyncSwitchState(s);
         }
 
         public void AddSwitchToSam(SamSite entity)
@@ -248,6 +252,8 @@ namespace Oxide.Plugins
                     PositionSamSwitch(entity, existingSwitch, preferredWorldPosition);
                 if (!switches.Contains(existingSwitch))
                     switches.Add(existingSwitch);
+                ConfigureSwitchEntity(existingSwitch);
+                SyncSwitchState(existingSwitch);
                 return;
             }
 
@@ -262,6 +268,7 @@ namespace Oxide.Plugins
             PositionSamSwitch(entity, s, preferredWorldPosition);
             ConfigureSwitchEntity(s);
             switches.Add(s);
+            SyncSwitchState(s);
         }
 
         public void API_RepositionTurretSwitch(BaseEntity entity, Vector3 preferredWorldPosition)
@@ -438,6 +445,53 @@ namespace Oxide.Plugins
             switchEntity.InitializeHealth(float.MaxValue, float.MaxValue);
             GameObject.Destroy(switchEntity.GetComponent<GroundWatch>());
             GameObject.Destroy(switchEntity.GetComponent<DestroyOnGroundMissing>());
+            switchEntity.SendNetworkUpdate();
+        }
+
+        private void SyncAllSwitchStates()
+        {
+            foreach (var switchEntity in switches.ToList())
+            {
+                if (switchEntity == null || switchEntity.IsDestroyed)
+                {
+                    switches.Remove(switchEntity);
+                    continue;
+                }
+
+                SyncSwitchState(switchEntity);
+            }
+        }
+
+        private void SyncSwitchState(ElectricSwitch switchEntity)
+        {
+            if (switchEntity == null || switchEntity.IsDestroyed)
+                return;
+
+            bool shouldBeOn;
+            var turretSwitch = switchEntity.GetComponent<TurretSwitch>();
+            if (turretSwitch != null && turretSwitch.Turret != null && !turretSwitch.Turret.IsDestroyed)
+            {
+                var turret = turretSwitch.Turret;
+                shouldBeOn = turret.IsOnline()
+                    || turret.IsPowered()
+                    || turret.HasFlag(BaseEntity.Flags.Reserved8);
+            }
+            else
+            {
+                var samSwitch = switchEntity.GetComponent<SAMSwitch>();
+                if (samSwitch == null || samSwitch.SamSite == null || samSwitch.SamSite.IsDestroyed)
+                    return;
+
+                var samSite = samSwitch.SamSite;
+                shouldBeOn = samSite.IsPowered()
+                    || samSite.HasFlag(IOEntity.Flag_HasPower)
+                    || samSite.HasFlag(BaseEntity.Flags.Reserved8);
+            }
+
+            if (switchEntity.IsOn() == shouldBeOn)
+                return;
+
+            switchEntity.SetFlag(BaseEntity.Flags.On, shouldBeOn);
             switchEntity.SendNetworkUpdate();
         }
 

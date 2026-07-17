@@ -1,0 +1,23 @@
+{
+  "Enabled": true,
+  "WatchAllConfigJson": true,
+  "SnapshotIntervalMinutes": 30,
+  "SnapshotOnServerSave": true,
+  "SnapshotOnUnload": true,
+  "WatchedConfigFiles": [
+    "WebsiteVipBridge.json",
+    "LiveAdmin.json",
+    "RaidlandsRoamBots.json",
+    "ServerInfo.json",
+    "RustReportDiscord.json",
+    "SmartChatBot.json",
+    "SimpleLogo.json",
+    "ServerPop.json",
+    "Kits.json",
+    "DiscordWipe.json",
+    "Scoreboards.json"
+  ],
+  "ExcludedConfigFiles": [
+    "Secrets.local.json"
+  ]
+}

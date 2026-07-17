@@ -25,12 +25,13 @@ class ServerRewards : RustPlugin
     #region Fields
 
     [PluginReference]
-    private Plugin Economics, HumanNPC, ImageLibrary, Kits, PlayerDLCAPI, PlaytimeTracker;
+    private Plugin Economics, HumanNPC, ImageLibrary, Kits, PlayerDLCAPI, PlaytimeTracker, RaidlandsUiEscapeBridge;
 
     private List<ItemDefinition> _sortedItemDefinitions;
     
     private readonly StringBuilder _stringBuilder = new StringBuilder();
 
+    private static ServerRewards _plugin;
     private static Func<string, string, string> _getMessage;
 
     private const string ADMIN_PERMISSION = "serverrewards.admin";
@@ -41,6 +42,7 @@ class ServerRewards : RustPlugin
 
     private void Loaded()
     {
+        _plugin = this;
         LoadData();
         CreateCommonFilters();
 
@@ -90,6 +92,7 @@ class ServerRewards : RustPlugin
         _cooldowns.Save();
 
         UIUser.OnUnload();
+        _plugin = null;
     }
 
     #endregion
@@ -831,6 +834,39 @@ class ServerRewards : RustPlugin
 
     private const string UI_MENU = "sr.menu";
     private const string UI_TOAST = "sr.toast";
+    // Rust ends the private native-loot session after ServerRewards finishes drawing
+    // on this server build. Keep the shop usable while the bridge remains opt-in.
+    private static bool UI_ESCAPE_BRIDGE_ENABLED = false;
+    private const float UI_BRIDGE_ARM_DELAY_SECONDS = 0.5f;
+
+    private static void RegisterUiBridge(BasePlayer player, string rootName, bool waitForReady = false)
+    {
+        if (player == null || string.IsNullOrWhiteSpace(rootName))
+            return;
+
+        _plugin?.RaidlandsUiEscapeBridge?.Call("RegisterUi", player, _plugin, rootName, nameof(OnRaidlandsUiBridgeClosed), waitForReady);
+    }
+
+    private static void ArmUiBridge(BasePlayer player, string rootName)
+    {
+        if (player == null || string.IsNullOrWhiteSpace(rootName))
+            return;
+
+        _plugin?.RaidlandsUiEscapeBridge?.Call("ArmUi", player, _plugin, rootName);
+    }
+
+    private static void UnregisterUiBridge(BasePlayer player, string rootName)
+    {
+        if (player == null || string.IsNullOrWhiteSpace(rootName))
+            return;
+
+        _plugin?.RaidlandsUiEscapeBridge?.Call("UnregisterUi", player, _plugin, rootName);
+    }
+
+    private void OnRaidlandsUiBridgeClosed(BasePlayer player, string reason)
+    {
+        UIUser.Get(player)?.CloseMenu();
+    }
 
     private void OpenStore(BasePlayer player)
     {
@@ -872,7 +908,7 @@ class ServerRewards : RustPlugin
 
         NormalizeStoreCategory(user, navigation, products);
 
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
         CreateHeader(container, user);
 
         switch (user.Category)
@@ -1442,7 +1478,7 @@ class ServerRewards : RustPlugin
     {
         BasePlayer to = user.TransferTarget;
         
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
 
         // Header
         const string HEADER = "sr.transfer.header";
@@ -1519,7 +1555,7 @@ class ServerRewards : RustPlugin
     private enum ExchangeType { None, RP, Economics}
     private void CreateExchangeMenu(UIUser user, int rp = 0, int economics = 0)
     {
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
 
         // Header
         const string HEADER = "sr.exchange.header";
@@ -1750,7 +1786,7 @@ class ServerRewards : RustPlugin
 
     private void CreateSellItemConfirmation(UIUser user, Item item, int amount, float price)
     {
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
 
         // Header
         const string HEADER = "sr.sellitem.header";
@@ -1813,7 +1849,7 @@ class ServerRewards : RustPlugin
         
         float halfHeight = (70f + (fieldCount * (FieldHeight + FieldSpacing)) + FieldSpacing) * 0.5f;
         
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
         
         const string CONTAINER = "sr.addedit.container";
         UI.Panel(container, UI_MENU, Colors.Clear, Anchor.Center, new Offset(-200f, -halfHeight, 200, halfHeight), CONTAINER);
@@ -2078,7 +2114,7 @@ class ServerRewards : RustPlugin
 
     private void CreateConfirmDeleteMenu(UIUser user, ProductType productType, int productId)
     {
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
 
         const string HEADER = "sr.delete.header";
         UI.Panel(container, UI_MENU, Configuration.UI.PanelPrimary, Anchor.Center, new Offset(-150f, 2.5f, 150f, 32.5f), HEADER);
@@ -2163,7 +2199,7 @@ class ServerRewards : RustPlugin
     
     private void CreateSelector<T>(UIUser user, string title, ReturnType returnType, List<T> list, Func<CuiElementContainer, string, UIUser, float, float, int, T, bool> draw)
     {
-        CuiElementContainer container = UI.Container(Layer.Overlay, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
+        CuiElementContainer container = UI.Container(Layer.HudMenu, UI_MENU, Configuration.UI.Background, Anchor.FullStretch, Offset.zero);
         
         const string CONTAINER = "sr.selector.container";
         UI.Panel(container, UI_MENU, Colors.Clear, Anchor.Center, new Offset(-150f, -300, 150, 300), CONTAINER);
@@ -2383,7 +2419,16 @@ class ServerRewards : RustPlugin
         {
             CloseToast();
             
+            if (UI_ESCAPE_BRIDGE_ENABLED)
+                RegisterUiBridge(Player, UI_MENU, true);
             CuiHelper.AddUi(Player, container);
+
+            if (UI_ESCAPE_BRIDGE_ENABLED)
+            {
+                BasePlayer player = Player;
+                _plugin?.timer.Once(UI_BRIDGE_ARM_DELAY_SECONDS, () => ArmUiBridge(player, UI_MENU));
+            }
+
             UIPool.Free(ref container);
         }
 
@@ -2395,7 +2440,10 @@ class ServerRewards : RustPlugin
             CloseToast();
             
             if (Player)
+            {
                 CuiHelper.DestroyUi(Player, UI_MENU);
+                UnregisterUiBridge(Player, UI_MENU);
+            }
         }
 
         public int SendToast(CuiElementContainer container)
@@ -2441,6 +2489,7 @@ class ServerRewards : RustPlugin
             {
                 CuiHelper.DestroyUi(player, UI_MENU);
                 CuiHelper.DestroyUi(player, UI_TOAST);
+                UnregisterUiBridge(player, UI_MENU);
             }
 
             UIUsers.Clear();
@@ -3377,7 +3426,7 @@ class ServerRewards : RustPlugin
             
             CuiElement element = Pool.Get<CuiElement>();
             element.Name = string.IsNullOrEmpty(name) ? CuiHelper.GetGuid() : name;
-            element.Parent = layer.ToString();
+            element.Parent = GetLayerParent(layer);
             element.DestroyUi = name;
             element.Components.Add(image);
             element.Components.Add(rect);
@@ -3413,6 +3462,11 @@ class ServerRewards : RustPlugin
             element.Components.Add(rect);
             
             container.Add(element);
+        }
+
+        private static string GetLayerParent(Layer layer)
+        {
+            return layer == Layer.HudMenu ? "Hud.Menu" : layer.ToString();
         }
         
         public static CuiRectTransformComponent ScrollView(CuiElementContainer container, string parent, Anchor anchor, Offset offset, 

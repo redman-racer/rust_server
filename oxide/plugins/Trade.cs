@@ -218,7 +218,7 @@ namespace Oxide.Plugins
 
             box = GetConfig ("Settings", "box", "assets/prefabs/deployable/woodenbox/woodbox_deployed.prefab");
             slots = GetConfig ("Settings", "slots", 30);
-            cooldownMinutes = GetConfig ("Settings", "cooldownMinutes", 5f);
+            cooldownMinutes = GetConfig ("Settings", "cooldownMinutes", 1f);
             maxRadius = GetConfig ("Settings", "maxRadius", 5000f);
             pendingSeconds = GetConfig ("Settings", "pendingSeconds", 25f);
             radiationMax = GetConfig ("Settings", "radiationMax", 1f);
@@ -243,7 +243,7 @@ namespace Oxide.Plugins
         {
             Config ["Settings", "box"] = "assets/prefabs/deployable/woodenbox/woodbox_deployed.prefab";
             Config ["Settings", "slots"] = 30;
-            Config ["Settings", "cooldownMinutes"] = 5;
+            Config ["Settings", "cooldownMinutes"] = 1;
             Config ["Settings", "maxRadius"] = 5000f;
             Config ["Settings", "pendingSeconds"] = 25f;
             Config ["Settings", "radiationMax"] = 1;

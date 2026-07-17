@@ -1,8 +1,9 @@
+
 {
   "Kit chat command": "kit",
   "Currency used for purchase costs (Scrap, Economics, ServerRewards)": "ServerRewards",
   "Log kits given": false,
-  "Wipe player data when the server is wiped": false,
+  "Wipe player data when the server is wiped": true,
   "Use the Kits UI menu": true,
   "Only show/give players skins that they are allowed to use (requires PlayerDLCAPI)": true,
   "Allow NPCs to use skins in kits": true,

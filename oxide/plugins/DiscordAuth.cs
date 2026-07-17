@@ -9,6 +9,7 @@ using Newtonsoft.Json.Converters;
 using Oxide.Core;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
+using Oxide.Ext.Discord.Attributes;
 using Oxide.Ext.Discord.Builders;
 using Oxide.Ext.Discord.Clients;
 using Oxide.Ext.Discord.Connections;
@@ -22,7 +23,7 @@ using Random = Oxide.Core.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("Discord Auth", "OuTSMoKE", "1.4.1")]
+    [Info("Discord Auth", "OuTSMoKE", "1.5.1")]
     [Description("Allows players to connect their discord account with steam")]
     public class DiscordAuth : CovalencePlugin, IDiscordPlugin, IDiscordLink
     {
@@ -43,6 +44,7 @@ namespace Oxide.Plugins
         
         private string _groupNames;
         private string _roleNames;
+        private bool _authCommandRegistered;
 
         private readonly List<DiscordRole> _roles = new List<DiscordRole>();
         private readonly StringBuilder _builder = new StringBuilder();
@@ -54,6 +56,8 @@ namespace Oxide.Plugins
         
         private const string AuthPerm = "discordauth.auth";
         private const string DeauthPerm = "discordauth.deauth";
+        private const string DiscordAuthCommand = "auth";
+        private const string DiscordAuthCodeOption = "code";
         private const string SecretsConfigName = "Secrets.local";
         private const string SecretsConfigPath = "oxide/config/Secrets.local.json";
         private Dictionary<string, string> _secrets;
@@ -78,7 +82,8 @@ namespace Oxide.Plugins
             lang.RegisterMessages(new Dictionary<string, string>
             {
                 ["Chat Format"] = "[#1874CD](Auth)[/#]: {0}",
-                ["Code Generation"] = "Here is your code: [#1874CD]{0}[/#]\nJoin our [#EE3B3B]Discord[/#] and PM the code to the Discord Bot",
+                ["Code Generation"] = "Here is your code: [#1874CD]{0}[/#]\nJoin our [#EE3B3B]Discord[/#] and use /auth code:{0}",
+                ["Code Generation Slash"] = "Here is your code: [#1874CD]{0}[/#]\nIn our [#EE3B3B]Discord server[/#], use /auth code:{0}",
                 ["Code Expired"] = "Your code has [#EE3B3B]Expired![/#]",
                 ["Authenticated"] = "Thank you for authenticating your account",
                 ["Game-Deauthenticated"] = "Successfully deauthenticated your account",
@@ -116,14 +121,14 @@ namespace Oxide.Plugins
             // Sends the code if already exist to prevent duplication
             if (_codes.ContainsKey(player.Id))
             {
-                Message(player, "Code Generation", _codes[player.Id]);
+                Message(player, "Code Generation Slash", _codes[player.Id]);
                 return;
             }
 
             // Adds a random code and send it to the player if doesn't already exist
-            string code = GenerateCode();
+            string code = GenerateUniqueCode();
             _codes.Add(player.Id, code);
-            Message(player, "Code Generation", code);
+            Message(player, "Code Generation Slash", code);
 
             // Code Expiration Function
             timer.In(_pluginConfig.Code.CodeLifetime * 60, () =>
@@ -347,7 +352,122 @@ namespace Oxide.Plugins
             }
             
             _guild = guild;
+            RegisterDiscordAuthCommand();
             Puts($"Connected to bot: {Client.Bot.BotUser.Username}");
+        }
+
+        private void RegisterDiscordAuthCommand()
+        {
+            if (_authCommandRegistered || _guild == null)
+            {
+                return;
+            }
+
+            ApplicationCommandBuilder builder = new ApplicationCommandBuilder(
+                DiscordAuthCommand,
+                "Link your Discord account to your game account",
+                ApplicationCommandType.ChatInput)
+                .AllowInDirectMessages(false);
+
+            builder.AddOption(
+                CommandOptionType.String,
+                DiscordAuthCodeOption,
+                "The authentication code generated in-game",
+                option => option.Required()
+                    .MinLength(_pluginConfig.Code.CodeLength)
+                    .MaxLength(_pluginConfig.Code.CodeLength));
+
+            Client.Bot.Application.CreateGuildCommand(Client, _guild.Id, builder.Build()).Then(command =>
+            {
+                _authCommandRegistered = true;
+                Puts($"Registered Discord /{DiscordAuthCommand} command in {_guild.Name}.");
+            });
+        }
+
+        [DiscordApplicationCommand(DiscordAuthCommand)]
+        private void HandleDiscordAuthCommand(DiscordInteraction interaction, InteractionDataParsed parsed)
+        {
+            if (!interaction.GuildId.HasValue || _guild == null || interaction.GuildId.Value != _guild.Id)
+            {
+                RespondToAuthInteraction(interaction, "This command can only be used in the configured Discord server.", true);
+                return;
+            }
+
+            DiscordUser discordUser = interaction.User;
+            if (discordUser == null || discordUser.Bot == true)
+            {
+                RespondToAuthInteraction(interaction, "Unable to identify your Discord account.", true);
+                return;
+            }
+
+            if (_link.IsLinked(discordUser.Id))
+            {
+                RespondToAuthInteraction(interaction, Formatter.ToPlaintext(Lang("Already Authenticated", discordUser.Player)), true);
+                return;
+            }
+
+            string code = parsed.Args.GetString(DiscordAuthCodeOption)?.Trim();
+            string playerId = FindPlayerIdByCode(code);
+            if (string.IsNullOrEmpty(playerId))
+            {
+                RespondToAuthInteraction(interaction, Formatter.ToPlaintext(Lang("Unable to find code")), true);
+                return;
+            }
+
+            IPlayer player = covalence.Players.FindPlayerById(playerId);
+            if (player == null)
+            {
+                RespondToAuthInteraction(interaction, "The game account for this code could not be found. Generate a new code in-game and try again.", true);
+                return;
+            }
+
+            if (_link.IsLinked(player.Id))
+            {
+                _codes.Remove(playerId);
+                RespondToAuthInteraction(interaction, Formatter.ToPlaintext(Lang("Already Authenticated", player)), true);
+                return;
+            }
+
+            _codes.Remove(playerId);
+            Authenticate(player, discordUser);
+            Message(player, "Authenticated");
+
+            string response = Formatter.ToPlaintext(Lang("Authenticated", player)) + "\n"
+                + Formatter.ToPlaintext(Lang("Join Granted", player, _groupNames, _roleNames));
+            RespondToAuthInteraction(interaction, response, false);
+        }
+
+        private string FindPlayerIdByCode(string submittedCode)
+        {
+            if (string.IsNullOrWhiteSpace(submittedCode)
+                || submittedCode.Length != _pluginConfig.Code.CodeLength)
+            {
+                return null;
+            }
+
+            StringComparison comparison = _pluginConfig.Code.CaseInsensitiveMatch
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+
+            foreach (KeyValuePair<string, string> code in _codes)
+            {
+                if (code.Value.Equals(submittedCode, comparison))
+                {
+                    return code.Key;
+                }
+            }
+
+            return null;
+        }
+
+        private void RespondToAuthInteraction(DiscordInteraction interaction, string content, bool error)
+        {
+            interaction.CreateResponse(Client, InteractionResponseType.ChannelMessageWithSource, new InteractionCallbackData
+            {
+                Content = (error ? "❌ " : "✅ ") + content,
+                Flags = MessageFlags.Ephemeral,
+                AllowedMentions = AllowedMentions.None
+            });
         }
 
         [HookMethod(DiscordExtHooks.OnDiscordGuildMembersLoaded)]
@@ -706,6 +826,23 @@ namespace Oxide.Plugins
             }
 
             return _builder.ToString();
+        }
+
+        private string GenerateUniqueCode()
+        {
+            StringComparer comparer = _pluginConfig.Code.CaseInsensitiveMatch
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal;
+
+            HashSet<string> existingCodes = new HashSet<string>(_codes.Values, comparer);
+            string code;
+            do
+            {
+                code = GenerateCode();
+            }
+            while (existingCodes.Contains(code));
+
+            return code;
         }
 
         public DiscordEmbed GetEmbed(string text, uint color)

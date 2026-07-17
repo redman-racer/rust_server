@@ -8,6 +8,7 @@
   "FileType (Jpg, Png)": "Jpg",
   "ImageResolutionScale": 0.5,
   "AutoPublishOnRustMapApiReady": true,
+  "AutoPublishOnServerInitialized": false,
   "AutoPublishDelaySeconds": 10,
   "WebRequestTimeoutMilliseconds": 60000,
   "PublishTerrain": true,
@@ -17,5 +18,8 @@
   "PublishSkybox": true,
   "SkyboxImagePath": "oxide/data/WebsiteMapBridge/current-skybox.png",
   "PublishPlayerLocations": true,
-  "PlayerLocationIntervalSeconds": 15
+  "PlayerLocationIntervalSeconds": 15,
+  "PublishReplayEvents": true,
+  "PublishEnvironment": true,
+  "EnvironmentIntervalSeconds": 30
 }

@@ -37,6 +37,13 @@
     "Ignore Pure Decay Damage": true,
     "Log Damage Events": false
   },
+  "Targeting": {
+    "Ignore Vanished Players": true,
+    "Require Clear Line Of Sight": true,
+    "Line Of Sight Target Points Required": 1,
+    "Cancel Damage Without Clear Line Of Sight": true,
+    "Log Blocked Targeting": false
+  },
   "Remove TurretSwitches Child Entities From Spawned NPC Sentries": false,
   "Enable TurretSwitches Compatibility": true,
   "Default New Sentries Online": false,

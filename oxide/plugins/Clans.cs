@@ -15,7 +15,7 @@ namespace Oxide.Plugins
 {
     using ClansEx;
 
-    [Info("Clans", "k1lly0u", "0.2.10")]
+    [Info("Clans", "k1lly0u", "0.2.11")]
     public class Clans : CovalencePlugin
     {
         #region Fields        
@@ -74,6 +74,23 @@ namespace Oxide.Plugins
 
         private void OnUserDisconnected(IPlayer player) => storedData?.FindClanByID(player.Id)?.OnPlayerDisconnected(player);
 
+        private void OnNewSave(string filename)
+        {
+            if (storedData == null || configData?.Options?.ClearClansOnMapWipe != true)
+                return;
+
+            int clanCount = storedData.clans.Count;
+            int inviteCount = storedData.playerInvites.Count;
+
+            foreach (Clan clan in storedData.clans.Values.ToList())
+                OnClanDisbanded(clan.Tag, clan.ClanMembers.Keys);
+
+            storedData = new StoredData();
+            SaveData();
+
+            Puts($"Cleared {clanCount} clans and {inviteCount} pending invite records for new map save '{filename}'.");
+        }
+
         private void Unload()
         {
             SaveData();
@@ -123,12 +140,17 @@ namespace Oxide.Plugins
                     KeyValuePair<string, Clan.MemberInvite> memberInvite = clan.MemberInvites.ElementAt(i);
 
                     if (UnixTimeStampUTC() - memberInvite.Value.ExpiryTime > configData.Clans.Invites.MemberInviteExpireTime)
+                    {
                         clan.MemberInvites.Remove(memberInvite.Key);
+                        storedData.RevokePlayerInvite(memberInvite.Key, clan.Tag);
+                    }
                 }
 
                 foreach (KeyValuePair<string, Clan.Member> member in clan.ClanMembers)
                     storedData.RegisterPlayer(member.Key, clan.Tag);
             }
+
+            int prunedInvites = storedData.PruneInvalidPlayerInvites();
 
             if (purgedClans.Count > 0)
             {
@@ -155,6 +177,12 @@ namespace Oxide.Plugins
                     if (configData.Options.LogChanges)
                         LogToFile(Title, str.ToString(), this);
                 }
+            }
+
+            if (prunedInvites > 0)
+            {
+                Puts($"Pruned {prunedInvites} stale pending clan invite references.");
+                SaveData();
             }
 
             Puts($"Loaded {storedData.clans.Count} clans!");
@@ -1414,6 +1442,7 @@ namespace Oxide.Plugins
                 default:
                     return RaidlandsClanResult(false, action, "Unsupported clan action.", clan.Tag, actorRole, targetId);
             }
+
         }
 
         [HookMethod("RaidlandsClanSnapshot")]
@@ -1498,12 +1527,14 @@ namespace Oxide.Plugins
 
             clan.MemberInvites[targetId] = targetPlayer != null ? new Clan.MemberInvite(targetPlayer) : new Clan.MemberInvite(targetName);
             storedData.AddPlayerInvite(targetId, clan.Tag);
+            SaveData();
 
             if (targetPlayer != null && targetPlayer.IsConnected)
                 targetPlayer.Reply(string.Format(Message("Notification.Invite.SuccesTarget", targetPlayer.Id), clan.Tag, clan.Description, "clan"));
 
             clan.Broadcast("Notification.Invite.SuccessClan", actorName, targetName);
             clan.MarkDirty();
+            Interface.Oxide.CallHook("OnClanMemberInvite", clan.Tag, actorId, targetId);
 
             if (configData.Options.LogChanges)
                 LogToFile(Title, $"{actorName} invited {targetName} to [{clan.Tag}] via Raidlands API", this);
@@ -1825,9 +1856,11 @@ namespace Oxide.Plugins
                 MemberInvites[invitee.Id] = new MemberInvite(invitee);
 
                 Instance.storedData.AddPlayerInvite(invitee.Id, Tag);
+                Instance.SaveData();
 
                 invitee.Reply(string.Format(Message("Notification.Invite.SuccesTarget", invitee.Id), Tag, Description, "clan"));
                 Broadcast("Notification.Invite.SuccessClan", inviter.Name, invitee.Name);
+                Interface.Oxide.CallHook("OnClanMemberInvite", Tag, inviter.Id, invitee.Id);
 
                 if (configData.Options.LogChanges)
                     Instance.LogToFile(Instance.Title, $"{inviter.Name} invited {invitee.Name} to [{Tag}]", Instance);
@@ -1840,9 +1873,11 @@ namespace Oxide.Plugins
                 if (!MemberInvites.ContainsKey(player.Id))
                     return false;
 
-                if ((UnixTimeStampUTC() - MemberInvites[player.Id].ExpiryTime > configData.Clans.Invites.AllianceInviteExpireTime))
+                if ((UnixTimeStampUTC() - MemberInvites[player.Id].ExpiryTime > configData.Clans.Invites.MemberInviteExpireTime))
                 {
                     MemberInvites.Remove(player.Id);
+                    Instance.storedData.RevokePlayerInvite(player.Id, Tag);
+                    Instance.SaveData();
                     player.Reply(string.Format(Message("Notification.Join.ExpiredInvite", player.Id), Tag));
                     return false;
                 }
@@ -1960,7 +1995,7 @@ namespace Oxide.Plugins
 
                 Broadcast("Notification.Kick.Reply", player.Name, member.DisplayName);
 
-                OnClanMemberGone(Tag, player.Id, ClanMembers.Keys);
+                OnClanMemberGone(Tag, targetId, ClanMembers.Keys);
                 Interface.Oxide.CallHook("OnClanUpdate", Tag);
 
                 if (configData.Options.LogChanges)
@@ -2456,6 +2491,9 @@ namespace Oxide.Plugins
 
                 [JsonProperty(PropertyName = "Data save interval (seconds)")]
                 public int SaveInterval { get; set; }
+
+                [JsonProperty(PropertyName = "Clear clans on map wipe")]
+                public bool ClearClansOnMapWipe { get; set; }
             }
 
             public class Range
@@ -2518,6 +2556,7 @@ namespace Oxide.Plugins
                 },                
                 Options = new ConfigData.OtherOptions
                 {
+                    ClearClansOnMapWipe = true,
                     LogChanges = false,
                     SaveInterval = 900,
                 },               
@@ -2551,6 +2590,9 @@ namespace Oxide.Plugins
 
             if (configData.Version < new VersionNumber(0, 2, 0))
                 configData = baseConfig;
+
+            if (configData.Options == null)
+                configData.Options = baseConfig.Options;
 
             configData.Version = Version;
             PrintWarning("Config update completed!");
@@ -2693,6 +2735,34 @@ namespace Oxide.Plugins
 
                 if (!invites.Contains(tag))
                     invites.Add(tag);
+            }
+
+            internal int PruneInvalidPlayerInvites()
+            {
+                int removed = 0;
+
+                foreach (KeyValuePair<string, List<string>> entry in playerInvites.ToList())
+                {
+                    string target = entry.Key;
+                    List<string> invites = entry.Value;
+
+                    for (int i = invites.Count - 1; i >= 0; i--)
+                    {
+                        string tag = invites[i];
+                        Clan clan = FindClan(tag);
+
+                        if (clan != null && clan.MemberInvites.ContainsKey(target))
+                            continue;
+
+                        invites.RemoveAt(i);
+                        removed++;
+                    }
+
+                    if (invites.Count == 0)
+                        playerInvites.Remove(target);
+                }
+
+                return removed;
             }
 
             internal void RevokePlayerInvite(string target, string tag)

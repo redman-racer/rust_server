@@ -19,7 +19,7 @@ namespace Oxide.Plugins
     {
         #region Fields
         [PluginReference]
-        private Plugin CopyPaste, ImageLibrary, ServerRewards, Economics, PlayerDLCAPI;
+        private Plugin CopyPaste, ImageLibrary, ServerRewards, Economics, PlayerDLCAPI, RaidlandsUiEscapeBridge;
 
         private DateTime _deprecatedHookTime = new DateTime(2021, 12, 31);
 
@@ -127,6 +127,7 @@ namespace Oxide.Plugins
             {
                 CuiHelper.DestroyUi(player, UI_MENU);
                 CuiHelper.DestroyUi(player, UI_POPUP);
+                UnregisterUiBridge(player, UI_MENU);
             }
 
             Configuration = null;
@@ -645,10 +646,114 @@ namespace Oxide.Plugins
         private const string DEFAULT_ICON = "kits.defaultkiticon";
         private const string MAGNIFY_ICON = "kits.magnifyicon";
 
+        private void RegisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("RegisterUi", player, this, rootName, nameof(OnRaidlandsUiBridgeClosed));
+        }
+
+        private void UnregisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("UnregisterUi", player, this, rootName);
+        }
+
+        private void OnRaidlandsUiBridgeClosed(BasePlayer player, string reason)
+        {
+            if (player == null)
+                return;
+
+            _kitCreators.Remove(player.userID);
+            CuiHelper.DestroyUi(player, UI_MENU);
+            CuiHelper.DestroyUi(player, UI_POPUP);
+        }
+
+        private void CloseKitUi(BasePlayer player, string reason)
+        {
+            if (player == null)
+                return;
+
+            bool bridgeClosed = (bool)(RaidlandsUiEscapeBridge?.Call("ClosePlayerUis", player, reason) ?? false);
+            if (bridgeClosed)
+                return;
+
+            OnRaidlandsUiBridgeClosed(player, reason);
+            UnregisterUiBridge(player, UI_MENU);
+            ForceCloseNativeLoot(player, reason);
+        }
+
+        private void ForceCloseNativeLoot(BasePlayer player, string reason)
+        {
+            if (player == null)
+                return;
+
+            if (player.inventory?.loot != null)
+            {
+                try
+                {
+                    player.EndLooting();
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning($"EndLooting failed for {player.displayName} ({player.userID}) while closing kit UI '{reason}': {exception.Message}");
+                }
+
+                try
+                {
+                    player.inventory.loot.Clear();
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning($"PlayerLoot.Clear failed for {player.displayName} ({player.userID}) while closing kit UI '{reason}': {exception.Message}");
+                }
+
+                try
+                {
+                    player.inventory.loot.MarkDirty();
+                    player.inventory.loot.SendImmediate();
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning($"PlayerLoot.SendImmediate failed for {player.displayName} ({player.userID}) while closing kit UI '{reason}': {exception.Message}");
+                }
+            }
+
+            ForceCloseClientInventory(player, reason);
+            NextTick(() => ForceCloseClientInventory(player, reason + " follow-up"));
+        }
+
+        private void ForceCloseClientInventory(BasePlayer player, string reason)
+        {
+            if (player == null || !player.IsConnected)
+                return;
+
+            try
+            {
+                player.SendConsoleCommand("inventory.endloot", null);
+            }
+            catch (Exception exception)
+            {
+                PrintWarning($"inventory.endloot failed for {player.displayName} ({player.userID}) while closing kit UI '{reason}': {exception.Message}");
+            }
+
+            try
+            {
+                player.ClientRPC(RpcTarget.Player("OnRespawnInformation", player));
+            }
+            catch (Exception exception)
+            {
+                PrintWarning($"Inventory close RPC failed for {player.displayName} ({player.userID}) while closing kit UI '{reason}': {exception.Message}");
+            }
+        }
+
         #region Kit Grid View
         private void OpenKitGrid(BasePlayer player, int page = 0, ulong npcId = 0UL)
         {
-            CuiElementContainer container = UI.Container(UI_MENU, "0 0 0 0.9", new UI4(0.2f, 0.15f, 0.8f, 0.85f), true, "Hud");
+            CuiElementContainer container = UI.Container(UI_MENU, "0 0 0 0.9", new UI4(0.2f, 0.15f, 0.8f, 0.85f), true, "Hud.Menu");
 
             UI.Panel(container, UI_MENU, Configuration.Menu.Panel.Get, new UI4(0.005f, 0.93f, 0.995f, 0.99f));
 
@@ -662,6 +767,7 @@ namespace Oxide.Plugins
             CreateGridView(player, container, page, npcId);
 
             CuiHelper.DestroyUi(player, UI_MENU);
+            RegisterUiBridge(player, UI_MENU);
             CuiHelper.AddUi(player, container);
         }
 
@@ -775,7 +881,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            CuiElementContainer container = UI.Container(UI_MENU, "0 0 0 0.9", new UI4(0.2f, 0.15f, 0.8f, 0.85f), true, "Hud");
+            CuiElementContainer container = UI.Container(UI_MENU, "0 0 0 0.9", new UI4(0.2f, 0.15f, 0.8f, 0.85f), true, "Hud.Menu");
 
             UI.Panel(container, UI_MENU, Configuration.Menu.Panel.Get, new UI4(0.005f, 0.93f, 0.995f, 0.99f));
 
@@ -882,6 +988,7 @@ namespace Oxide.Plugins
             UI.Button(container, UI_MENU, buttonColor, buttonText, 14, new UI4(0.005f, 0.005f, 0.495f, 0.045f), buttonCommand);
 
             CuiHelper.DestroyUi(player, UI_MENU);
+            RegisterUiBridge(player, UI_MENU);
             CuiHelper.AddUi(player, container);
         }
         #endregion
@@ -947,7 +1054,7 @@ namespace Oxide.Plugins
             if (!_kitCreators.TryGetValue(player.userID, out KitData.Kit kit))
                 return;
 
-            CuiElementContainer container = UI.Container(UI_MENU, "0 0 0 0.9", new UI4(0.2f, 0.15f, 0.8f, 0.85f), true, "Hud");
+            CuiElementContainer container = UI.Container(UI_MENU, "0 0 0 0.9", new UI4(0.2f, 0.15f, 0.8f, 0.85f), true, "Hud.Menu");
 
             UI.Panel(container, UI_MENU, Configuration.Menu.Panel.Get, new UI4(0.005f, 0.93f, 0.995f, 0.99f));
 
@@ -987,6 +1094,7 @@ namespace Oxide.Plugins
             UI.Button(container, UI_MENU, Configuration.Menu.Color2.Get, Message("UI.CopyInv", player.userID), 14, new UI4(0.7525f, 0.005f, 0.995f, 0.045f), $"kits.copyinv {overwrite}");
 
             CuiHelper.DestroyUi(player, UI_MENU);
+            RegisterUiBridge(player, UI_MENU);
             CuiHelper.AddUi(player, container);
         }
 
@@ -1137,10 +1245,7 @@ namespace Oxide.Plugins
             if (!player)
                 return;
 
-            _kitCreators.Remove(player.userID);
-
-            CuiHelper.DestroyUi(player, UI_MENU);
-            CuiHelper.DestroyUi(player, UI_POPUP);
+            CloseKitUi(player, "kits close button");
         }
 
         [ConsoleCommand("kits.gridview")]
@@ -1163,8 +1268,7 @@ namespace Oxide.Plugins
                         string kit = CommandSafe(arg.GetString(1), true);
                         if (TryClaimKit(player, kit, true))
                         {
-                            CuiHelper.DestroyUi(player, UI_MENU);
-                            CuiHelper.DestroyUi(player, UI_POPUP);
+                            CloseKitUi(player, "kit redeemed");
                             player.ChatMessage(string.Format(Message("Notification.KitReceived", player.userID), kit));
                         }
                         else OpenKitGrid(player, arg.GetInt(2), arg.GetULong(3));

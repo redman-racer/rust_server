@@ -39,12 +39,13 @@ namespace Oxide.Plugins
             // spawn process, so apply our values on the next server tick.
             NextTick(() =>
             {
-                if (sleepingBag == null || sleepingBag.IsDestroyed || sleepingBag.OwnerID == 0)
+                ulong ownerId = GetSleepingBagOwnerId(sleepingBag);
+                if (sleepingBag == null || sleepingBag.IsDestroyed || ownerId == 0)
                 {
                     return;
                 }
 
-                ApplySettings(sleepingBag, GetSettings(sleepingBag.OwnerID.ToString()));
+                ApplySettings(sleepingBag, GetSettings(ownerId.ToString()));
             });
         }
 
@@ -120,11 +121,21 @@ namespace Oxide.Plugins
             SleepingBag[] bags = SleepingBag.sleepingBags.ToArray();
             foreach (SleepingBag sleepingBag in bags)
             {
-                if (sleepingBag != null && !sleepingBag.IsDestroyed && sleepingBag.OwnerID == playerId)
+                if (sleepingBag != null && !sleepingBag.IsDestroyed && GetSleepingBagOwnerId(sleepingBag) == playerId)
                 {
                     ApplySettings(sleepingBag, settings);
                 }
             }
+        }
+
+        private ulong GetSleepingBagOwnerId(SleepingBag sleepingBag)
+        {
+            if (sleepingBag == null)
+            {
+                return 0;
+            }
+
+            return sleepingBag.deployerUserID != 0 ? sleepingBag.deployerUserID : sleepingBag.OwnerID;
         }
 
         private void ApplySettings(SleepingBag sleepingBag, SettingsEntry settings)

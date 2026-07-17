@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Facepunch.Utility;
@@ -15,7 +17,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteMapBridge", "Raidlands", "1.0.7")]
+    [Info("WebsiteMapBridge", "Raidlands", "1.0.13")]
     [Description("Publishes the current RustMapApi map image and sampled terrain to the Raidlands website.")]
     public class WebsiteMapBridge : CovalencePlugin
     {
@@ -30,11 +32,17 @@ namespace Oxide.Plugins
         private Configuration config;
         private Timer autoPublishTimer;
         private Timer playerLocationTimer;
+        private Timer environmentTimer;
         private Dictionary<string, string> secrets;
         private string secretsConfigSource;
         private JObject vipBridgeConfig;
         private bool publishInFlight;
         private string lastPublishedWipeKey = "";
+        private string lastEnvironmentSyncAt = "";
+        private string lastEnvironmentDiagnosticSummary = "awaiting first environment sample";
+        private long lastEnvironmentSampleMilliseconds;
+        private string lastWeatherOverrideSignature = "";
+        private readonly Dictionary<string, MemberInfo> weatherConVarMemberCache = new Dictionary<string, MemberInfo>(StringComparer.OrdinalIgnoreCase);
 
         private class Configuration
         {
@@ -48,6 +56,7 @@ namespace Oxide.Plugins
             public string FileType = "Jpg";
             public float ImageResolutionScale = 0.5f;
             public bool AutoPublishOnRustMapApiReady = true;
+            public bool AutoPublishOnServerInitialized = false;
             public int AutoPublishDelaySeconds = 10;
             public int WebRequestTimeoutMilliseconds = 60000;
             public bool PublishTerrain = true;
@@ -58,6 +67,9 @@ namespace Oxide.Plugins
             public string SkyboxImagePath = "oxide/data/WebsiteMapBridge/current-skybox.png";
             public bool PublishPlayerLocations = true;
             public int PlayerLocationIntervalSeconds = 15;
+            public bool PublishReplayEvents = true;
+            public bool PublishEnvironment = true;
+            public int EnvironmentIntervalSeconds = 30;
         }
 
         private class MapUploadPayload
@@ -82,6 +94,113 @@ namespace Oxide.Plugins
             public int protocol;
             public string generated_at;
             public TerrainUploadPayload terrain;
+        }
+
+        private class EnvironmentSnapshotPayload
+        {
+            public string server_id;
+            public string wipe_key;
+            public string sampled_at;
+            public float rust_time;
+            public float day_fraction;
+            public EnvironmentVectorPayload sun_direction;
+            public float sun_intensity;
+            public string sun_color;
+            public float ambient_intensity;
+            public string ambient_color;
+            public float? cloud_coverage;
+            public float? rain_intensity;
+            public float? fog_intensity;
+            public string weather_sample_summary;
+            public WeatherSnapshotPayload weather;
+        }
+
+        private class WeatherSnapshotPayload
+        {
+            public Dictionary<string, WeatherParameterPayload> parameters;
+            public WeatherStateDiagnosticsPayload state;
+            public string override_mode;
+            public int override_count;
+            public int parameter_count;
+        }
+
+        private class WeatherStateDiagnosticsPayload
+        {
+            public string previous;
+            public string current;
+            public string target;
+            public string next;
+            public float? blend;
+            public string seed_previous;
+            public string seed_target;
+            public string seed_next;
+            public bool? rain_grace_active;
+            public string source;
+        }
+
+        private class WeatherParameterPayload
+        {
+            public string key;
+            public float? value;
+            public float? raw;
+            public bool is_dynamic;
+            public string source;
+        }
+
+        private class WeatherParameterDefinition
+        {
+            public string name;
+            public string key;
+            public string member;
+            public string[] effectivePath;
+
+            public WeatherParameterDefinition(string name, string key, string member, params string[] effectivePath)
+            {
+                this.name = name;
+                this.key = key;
+                this.member = member;
+                this.effectivePath = effectivePath ?? new string[0];
+            }
+        }
+
+        private static readonly WeatherParameterDefinition[] WeatherParameterDefinitions =
+        {
+            new WeatherParameterDefinition("rain", "weather.rain", "rain", "Rain"),
+            new WeatherParameterDefinition("thunder", "weather.thunder", "thunder", "Thunder"),
+            new WeatherParameterDefinition("rainbow", "weather.rainbow", "rainbow", "Rainbow"),
+            new WeatherParameterDefinition("fog", "weather.fog", "fog", "Atmosphere", "Fogginess"),
+            new WeatherParameterDefinition("atmosphereRayleigh", "weather.atmosphere_rayleigh", "atmosphere_rayleigh", "Atmosphere", "RayleighMultiplier"),
+            new WeatherParameterDefinition("atmosphereMie", "weather.atmosphere_mie", "atmosphere_mie", "Atmosphere", "MieMultiplier"),
+            new WeatherParameterDefinition("atmosphereBrightness", "weather.atmosphere_brightness", "atmosphere_brightness", "Atmosphere", "Brightness"),
+            new WeatherParameterDefinition("atmosphereContrast", "weather.atmosphere_contrast", "atmosphere_contrast", "Atmosphere", "Contrast"),
+            new WeatherParameterDefinition("atmosphereDirectionality", "weather.atmosphere_directionality", "atmosphere_directionality", "Atmosphere", "Directionality"),
+            new WeatherParameterDefinition("cloudSize", "weather.cloud_size", "cloud_size", "Clouds", "Size"),
+            new WeatherParameterDefinition("cloudOpacity", "weather.cloud_opacity", "cloud_opacity", "Clouds", "Opacity"),
+            new WeatherParameterDefinition("cloudCoverage", "weather.cloud_coverage", "cloud_coverage", "Clouds", "Coverage"),
+            new WeatherParameterDefinition("cloudSharpness", "weather.cloud_sharpness", "cloud_sharpness", "Clouds", "Sharpness"),
+            new WeatherParameterDefinition("cloudColoring", "weather.cloud_coloring", "cloud_coloring", "Clouds", "Coloring"),
+            new WeatherParameterDefinition("cloudAttenuation", "weather.cloud_attenuation", "cloud_attenuation", "Clouds", "Attenuation"),
+            new WeatherParameterDefinition("cloudScattering", "weather.cloud_scattering", "cloud_scattering", "Clouds", "Scattering"),
+            new WeatherParameterDefinition("cloudBrightness", "weather.cloud_brightness", "cloud_brightness", "Clouds", "Brightness")
+        };
+
+        private class EnvironmentVectorPayload
+        {
+            public float x;
+            public float y;
+            public float z;
+        }
+
+        private class EnvironmentSnapshotResponse
+        {
+            public bool ok;
+            public string error;
+            public EnvironmentSnapshotResult environment;
+        }
+
+        private class EnvironmentSnapshotResult
+        {
+            public string sampledAt;
         }
 
         private class TerrainUploadPayload
@@ -166,6 +285,25 @@ namespace Oxide.Plugins
             public string sampledAt;
         }
 
+        private class ReplayEventSnapshotPayload
+        {
+            public string server_id;
+            public string wipe_key;
+            public List<ReplayEventPayload> events;
+        }
+
+        private class ReplayEventPayload
+        {
+            public string event_key;
+            public string event_type;
+            public string occurred_at;
+            public float x;
+            public float y;
+            public float z;
+            public string vehicle;
+            public Dictionary<string, object> payload;
+        }
+
         protected override void LoadDefaultConfig()
         {
             PrintWarning("Creating default WebsiteMapBridge config.");
@@ -185,8 +323,29 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             LogBridgeSecretDiagnostics();
-            QueueAutoPublish("server initialized");
+            if (config.AutoPublishOnServerInitialized)
+            {
+                QueueAutoPublish("server initialized");
+            }
             StartPlayerLocationPublisher();
+            StartEnvironmentPublisher();
+        }
+
+        private void OnEntitySpawned(BaseNetworkable entity)
+        {
+            if (!config.PublishReplayEvents || entity == null)
+            {
+                return;
+            }
+
+            var baseEntity = entity as BaseEntity;
+            var prefab = baseEntity == null ? "" : (baseEntity.PrefabName ?? baseEntity.ShortPrefabName ?? "");
+            if (prefab.IndexOf("supply_drop", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return;
+            }
+
+            timer.Once(0.25f, () => PublishAirdropReplayEvent(baseEntity));
         }
 
         private void Unload()
@@ -195,6 +354,8 @@ namespace Oxide.Plugins
             autoPublishTimer = null;
             playerLocationTimer?.Destroy();
             playerLocationTimer = null;
+            environmentTimer?.Destroy();
+            environmentTimer = null;
         }
 
         private void OnRustMapApiReady()
@@ -240,15 +401,24 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var secretState = string.IsNullOrWhiteSpace(ResolveBridgeSharedSecret()) ? "missing" : "configured";
-            var apiState = RustMapApi == null ? "missing" : RustMapApi.IsLoaded ? "loaded" : "not loaded";
-            var readyState = RustMapApi != null && RustMapApi.IsLoaded ? RustMapApi.Call<bool>("IsReady").ToString() : "false";
-            var heightMapState = TerrainMeta.HeightMap == null ? "missing" : "available";
+            ReplyToCommand(arg, "WebsiteMapBridge v1.0.13 status requested; reading cached diagnostics.");
 
-            ReplyToCommand(
-                arg,
-                $"WebsiteMapBridge v1.0.7 status: server={ResolveServerId()}, api={apiState}, ready={readyState}, secret={secretState}, render={config.RenderName}, textureRender={config.TextureRenderName}, terrainEnabled={config.PublishTerrain}, terrainResolution={config.TerrainSampleResolution}, monumentsEnabled={config.IncludeMonuments}, skybox={config.PublishSkybox}/{config.SkyboxImagePath}, playerLocations={config.PublishPlayerLocations}/{config.PlayerLocationIntervalSeconds}s, heightMap={heightMapState}, lastWipe={lastPublishedWipeKey}."
-            );
+            try
+            {
+                var secretState = string.IsNullOrWhiteSpace(ResolveBridgeSharedSecret()) ? "missing" : "configured";
+                var apiState = RustMapApi == null ? "missing" : RustMapApi.IsLoaded ? "loaded" : "not loaded";
+                var heightMapState = TerrainMeta.HeightMap == null ? "missing" : "available";
+
+                ReplyToCommand(
+                    arg,
+                    $"WebsiteMapBridge v1.0.13 status: server={ResolveServerId()}, api={apiState}, ready=not-probed, secret={secretState}, render={config.RenderName}, textureRender={config.TextureRenderName}, autoPublishReady={config.AutoPublishOnRustMapApiReady}, autoPublishInit={config.AutoPublishOnServerInitialized}, terrainEnabled={config.PublishTerrain}, terrainResolution={config.TerrainSampleResolution}, monumentsEnabled={config.IncludeMonuments}, skybox={config.PublishSkybox}/{config.SkyboxImagePath}, playerLocations={config.PublishPlayerLocations}/{config.PlayerLocationIntervalSeconds}s, environment={config.PublishEnvironment}/{config.EnvironmentIntervalSeconds}s last={FirstNonEmpty(lastEnvironmentSyncAt, "never")}, sampleMs={lastEnvironmentSampleMilliseconds}, sampled=[{lastEnvironmentDiagnosticSummary}], replayEvents={config.PublishReplayEvents}, heightMap={heightMapState}, lastWipe={lastPublishedWipeKey}."
+                );
+            }
+            catch (Exception ex)
+            {
+                PrintError($"rl_map_status failed: {ex}");
+                ReplyToCommand(arg, $"WebsiteMapBridge status failed: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         [ConsoleCommand("rl_map_locations_sync")]
@@ -264,6 +434,27 @@ namespace Oxide.Plugins
             PublishPlayerLocations(message => ReplyToCommand(arg, message), true);
         }
 
+        [ConsoleCommand("rl_map_environment_sync")]
+        private void EnvironmentSyncCommand(ConsoleSystem.Arg arg)
+        {
+            if (!CanUsePublishCommand(arg))
+            {
+                ReplyToCommand(arg, "You must be server console, RCON, or auth level 2 to sync website environment.");
+                return;
+            }
+
+            ReplyToCommand(arg, "Website environment sync requested.");
+            try
+            {
+                PublishEnvironment(message => ReplyToCommand(arg, message), true);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"rl_map_environment_sync failed: {ex}");
+                ReplyToCommand(arg, $"Website environment sync failed before enqueue: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
         private bool CanUsePublishCommand(ConsoleSystem.Arg arg)
         {
             if (arg == null || arg.Connection == null || arg.IsRcon || arg.IsAdmin)
@@ -276,8 +467,25 @@ namespace Oxide.Plugins
 
         private void ReplyToCommand(ConsoleSystem.Arg arg, string message)
         {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
             Puts(message);
-            arg?.ReplyWith(message);
+            if (arg == null)
+            {
+                return;
+            }
+
+            try
+            {
+                arg.ReplyWith(message);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not send console command reply: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         private void QueueAutoPublish(string reason)
@@ -307,6 +515,972 @@ namespace Oxide.Plugins
             var interval = Math.Max(5, config.PlayerLocationIntervalSeconds);
             playerLocationTimer = timer.Every(interval, () => PublishPlayerLocations(message => Puts(message), false));
             timer.Once(Math.Max(3, Math.Min(10, interval)), () => PublishPlayerLocations(message => Puts(message), false));
+        }
+
+        private void StartEnvironmentPublisher()
+        {
+            environmentTimer?.Destroy();
+            environmentTimer = null;
+
+            if (!config.PublishEnvironment)
+            {
+                return;
+            }
+
+            var interval = Math.Max(30, config.EnvironmentIntervalSeconds);
+            environmentTimer = timer.Every(interval, () => PublishEnvironment(message => Puts(message), false));
+            timer.Once(Math.Max(3, Math.Min(10, interval)), () => PublishEnvironment(message => Puts(message), false));
+        }
+
+        private void PublishEnvironment(Action<string> reply, bool verbose)
+        {
+            var secret = ResolveBridgeSharedSecret();
+
+            if (string.IsNullOrWhiteSpace(secret))
+            {
+                if (verbose)
+                {
+                    reply?.Invoke("Cannot sync environment because the bridge SharedSecret is empty after resolving secrets.");
+                }
+                return;
+            }
+
+            EnvironmentSnapshotPayload payload;
+            var sampleTimer = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                payload = CreateEnvironmentPayload();
+                sampleTimer.Stop();
+                lastEnvironmentSampleMilliseconds = sampleTimer.ElapsedMilliseconds;
+                lastEnvironmentDiagnosticSummary = $"TOD {payload.rust_time:0.00}, cloud {FormatSample(payload.cloud_coverage)}, rain {FormatSample(payload.rain_intensity)}, fog {FormatSample(payload.fog_intensity)}; {payload.weather_sample_summary}";
+                ReportWeatherOverrideMode(payload.weather);
+            }
+            catch (Exception ex)
+            {
+                sampleTimer.Stop();
+                lastEnvironmentSampleMilliseconds = sampleTimer.ElapsedMilliseconds;
+                PrintError($"Environment sampling failed after {lastEnvironmentSampleMilliseconds}ms: {ex}");
+                if (verbose)
+                {
+                    reply?.Invoke($"Website environment sampling failed: {ex.GetType().Name}: {ex.Message}");
+                }
+                return;
+            }
+
+            var body = JsonConvert.SerializeObject(payload);
+            var url = $"{TrimSlash(ResolveApiBaseUrl())}/api/server/environment-snapshot.php";
+
+            SendPost(url, body, (code, response) =>
+            {
+                if (!IsSuccess(code, response, out var requestError))
+                {
+                    if (verbose)
+                    {
+                        reply?.Invoke($"Website environment sync failed: {requestError}");
+                    }
+                    return;
+                }
+
+                EnvironmentSnapshotResponse result = null;
+
+                try
+                {
+                    result = JsonConvert.DeserializeObject<EnvironmentSnapshotResponse>(response);
+                }
+                catch (Exception ex)
+                {
+                    if (verbose)
+                    {
+                        reply?.Invoke($"Website environment sync returned invalid JSON: {ex.Message}");
+                    }
+                    return;
+                }
+
+                if (result == null || !result.ok)
+                {
+                    if (verbose)
+                    {
+                        reply?.Invoke($"Website environment sync failed: {result?.error ?? "invalid response"}");
+                    }
+                    return;
+                }
+
+                lastEnvironmentSyncAt = result.environment?.sampledAt ?? payload.sampled_at;
+                if (verbose)
+                {
+                    reply?.Invoke($"Website environment synced: TOD {payload.rust_time:0.00}, sun y {payload.sun_direction.y:0.###}, cloud {FormatSample(payload.cloud_coverage)}, rain {FormatSample(payload.rain_intensity)}, fog {FormatSample(payload.fog_intensity)}; {payload.weather_sample_summary}.");
+                }
+            });
+        }
+
+        private EnvironmentSnapshotPayload CreateEnvironmentPayload()
+        {
+            var rustTime = 12f;
+            var sunDirection = new Vector3(0.5f, 0.78f, 0.36f).normalized;
+            var sunIntensity = 1.65f;
+            var ambientIntensity = 0.38f;
+            var sunColor = "#ffc47a";
+            var ambientColor = "#ffead2";
+            object atmosphere = null;
+            object weather = null;
+
+            var sky = TOD_Sky.Instance;
+            if (sky != null)
+            {
+                rustTime = Mathf.Clamp((float)sky.Cycle.Hour, 0f, 24f);
+                atmosphere = ReadObjectProperty(sky, "Atmosphere");
+                weather = ReadObjectProperty(sky, "Weather");
+                var components = ReadObjectProperty(sky, "Components");
+                var sunTransform = ReadObjectProperty(components, "SunTransform") as Transform;
+                var sunLight = ReadObjectProperty(components, "SunLight") as Light;
+                sunDirection = sunTransform != null ? (-sunTransform.forward).normalized : SunDirectionFromHour(rustTime);
+                sunIntensity = Mathf.Clamp(sunLight != null ? sunLight.intensity : SunIntensityFromDirection(sunDirection), 0f, 4f);
+                ambientIntensity = Mathf.Clamp(Mathf.Lerp(0.14f, 0.48f, Mathf.Clamp01(sunDirection.y)), 0f, 2f);
+                sunColor = ColorToHex(sunLight != null ? sunLight.color : SunColorFromDirection(sunDirection));
+                ambientColor = ColorToHex(RenderSettings.ambientLight == default(Color) ? new Color(1f, 0.92f, 0.82f) : RenderSettings.ambientLight);
+            }
+            else
+            {
+                sunDirection = SunDirectionFromHour(rustTime);
+                sunIntensity = SunIntensityFromDirection(sunDirection);
+                sunColor = ColorToHex(SunColorFromDirection(sunDirection));
+            }
+
+            var samplePositions = EnvironmentSamplePositions();
+            var climate = ReadClimate();
+            var weatherPreset = ReadObjectProperty(climate, "WeatherState");
+            var weatherOverrides = ReadObjectProperty(climate, "WeatherOverrides");
+
+            var cloudSample = FirstValidSample(
+                SampleNativeClimate("Clouds", "Climate.GetClouds", samplePositions),
+                SampleFloat(atmosphere, "Cloudiness", "TOD.Atmosphere.Cloudiness"),
+                SampleFloat(atmosphere, "Clouds", "TOD.Atmosphere.Clouds"),
+                SampleFloat(weather, "Cloudiness", "TOD.Weather.Cloudiness"),
+                SampleFloat(weather, "CloudCoverage", "TOD.Weather.CloudCoverage")
+            );
+            var rainSample = FirstValidSample(
+                SampleNativeClimate("Rain", "Climate.GetRain", samplePositions),
+                SampleFloat(weather, "Rain", "TOD.Weather.Rain"),
+                SampleFloat(weather, "RainIntensity", "TOD.Weather.RainIntensity"),
+                SampleFloat(weather, "Precipitation", "TOD.Weather.Precipitation")
+            );
+            var fogSample = FirstValidSample(
+                SampleNativeClimate("Fog", "Climate.GetFog", samplePositions),
+                SampleRenderFogDensity()
+            );
+
+            var weatherSnapshot = CreateWeatherSnapshot(samplePositions, weatherPreset, weatherOverrides);
+            weatherSnapshot.state = CreateWeatherStateDiagnostics(climate);
+
+            return new EnvironmentSnapshotPayload
+            {
+                server_id = ResolveServerId(),
+                wipe_key = ResolveWipeKey(),
+                sampled_at = DateTime.UtcNow.ToString("o"),
+                rust_time = (float)Math.Round(rustTime, 3),
+                day_fraction = (float)Math.Round(Mathf.Repeat(rustTime / 24f, 1f), 6),
+                sun_direction = new EnvironmentVectorPayload
+                {
+                    x = (float)Math.Round(sunDirection.x, 6),
+                    y = (float)Math.Round(sunDirection.y, 6),
+                    z = (float)Math.Round(sunDirection.z, 6)
+                },
+                sun_intensity = (float)Math.Round(sunIntensity, 4),
+                sun_color = sunColor,
+                ambient_intensity = (float)Math.Round(ambientIntensity, 4),
+                ambient_color = ambientColor,
+                cloud_coverage = cloudSample.value,
+                rain_intensity = rainSample.value,
+                fog_intensity = fogSample.value,
+                weather_sample_summary = $"cloudSource={DescribeSample(cloudSample)}, rainSource={DescribeSample(rainSample)}, fogSource={DescribeSample(fogSample)}; {WeatherParameterSummary(weatherSnapshot)}; {WeatherStateSummary(weatherSnapshot.state)}",
+                weather = weatherSnapshot
+            };
+        }
+
+        private class SampledFloat
+        {
+            public float? value;
+            public string source;
+            public string raw;
+
+            public SampledFloat(float? value, string source, string raw = "")
+            {
+                this.value = value;
+                this.source = source;
+                this.raw = raw;
+            }
+        }
+
+        private WeatherSnapshotPayload CreateWeatherSnapshot(List<Vector3> samplePositions, object weatherPreset, object weatherOverrides)
+        {
+            var payload = new WeatherSnapshotPayload
+            {
+                parameters = new Dictionary<string, WeatherParameterPayload>()
+            };
+
+            foreach (var definition in WeatherParameterDefinitions)
+            {
+                payload.parameters[definition.name] = SampleWeatherParameter(definition, samplePositions, weatherPreset, weatherOverrides);
+            }
+
+            PopulateWeatherOverrideDiagnostics(payload);
+
+            return payload;
+        }
+
+        private WeatherParameterPayload SampleWeatherParameter(WeatherParameterDefinition definition, List<Vector3> samplePositions, object weatherPreset, object weatherOverrides)
+        {
+            var rawValue = ReadWeatherOverrideValue(definition, weatherOverrides, out var rawSource);
+            var effectiveValue = ReadEffectiveWeatherValue(definition, samplePositions, weatherPreset, out var effectiveSource);
+            var sample = new WeatherParameterPayload
+            {
+                key = definition.key,
+                value = null,
+                raw = null,
+                is_dynamic = false,
+                source = FirstNonEmpty(effectiveSource, rawSource)
+            };
+
+            if (rawValue != null)
+            {
+                sample.raw = RoundWeatherValue(rawValue.Value);
+                sample.is_dynamic = rawValue.Value < 0f;
+            }
+
+            if (effectiveValue != null)
+            {
+                sample.value = RoundWeatherValue(effectiveValue.Value);
+                if (!string.IsNullOrWhiteSpace(rawSource) && rawSource != effectiveSource)
+                {
+                    sample.source = effectiveSource + " raw=" + rawSource;
+                }
+                return sample;
+            }
+
+            if (rawValue != null && rawValue.Value >= 0f)
+            {
+                sample.value = RoundWeatherValue(rawValue.Value);
+            }
+
+            return sample;
+        }
+
+        private float? ReadWeatherOverrideValue(WeatherParameterDefinition definition, object weatherOverrides, out string source)
+        {
+            source = "Climate.WeatherOverrides missing";
+            if (definition == null)
+            {
+                return null;
+            }
+
+            if (weatherOverrides == null)
+            {
+                return ReadWeatherConVar(definition.member, out source);
+            }
+
+            try
+            {
+                object current = weatherOverrides;
+                foreach (var memberName in definition.effectivePath)
+                {
+                    current = ReadObjectProperty(current, memberName);
+                    if (current == null)
+                    {
+                        source = "Climate.WeatherOverrides." + string.Join(".", definition.effectivePath) + " missing";
+                        return null;
+                    }
+                }
+
+                if (TryConvertFloat(current, out var value))
+                {
+                    source = "Climate.WeatherOverrides." + string.Join(".", definition.effectivePath);
+                    return value;
+                }
+
+                source = "Climate.WeatherOverrides." + string.Join(".", definition.effectivePath) + " nonnumeric";
+                return null;
+            }
+            catch (Exception ex)
+            {
+                source = "Climate.WeatherOverrides." + definition.name + " error " + ex.GetType().Name;
+                return null;
+            }
+        }
+
+        private void PopulateWeatherOverrideDiagnostics(WeatherSnapshotPayload payload)
+        {
+            if (payload == null || payload.parameters == null)
+            {
+                return;
+            }
+
+            payload.parameter_count = payload.parameters.Count;
+            var knownCount = 0;
+            var overrideCount = 0;
+            foreach (var parameter in payload.parameters.Values)
+            {
+                if (parameter?.raw == null)
+                {
+                    continue;
+                }
+
+                knownCount++;
+                if (parameter.raw.Value >= 0f)
+                {
+                    overrideCount++;
+                }
+            }
+
+            payload.override_count = overrideCount;
+            if (knownCount == 0)
+            {
+                payload.override_mode = "unknown";
+            }
+            else if (overrideCount == 0 && knownCount == payload.parameter_count)
+            {
+                payload.override_mode = "dynamic";
+            }
+            else if (overrideCount == knownCount && knownCount == payload.parameter_count)
+            {
+                payload.override_mode = "forced";
+            }
+            else
+            {
+                payload.override_mode = "partial";
+            }
+        }
+
+        private void ReportWeatherOverrideMode(WeatherSnapshotPayload weather)
+        {
+            if (weather == null)
+            {
+                return;
+            }
+
+            var signature = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}:{1}:{2}",
+                FirstNonEmpty(weather.override_mode, "unknown"),
+                weather.override_count,
+                weather.parameter_count
+            );
+            if (signature == lastWeatherOverrideSignature)
+            {
+                return;
+            }
+
+            lastWeatherOverrideSignature = signature;
+            var message = string.Format(
+                CultureInfo.InvariantCulture,
+                "Rust weather override mode is {0} ({1}/{2} tracked parameters overridden).",
+                FirstNonEmpty(weather.override_mode, "unknown"),
+                weather.override_count,
+                weather.parameter_count
+            );
+
+            if (weather.override_mode == "forced" || weather.override_mode == "partial")
+            {
+                PrintWarning(message + " Run weather.reset from the server console to restore dynamic weather; WebsiteMapBridge does not alter weather.");
+                return;
+            }
+
+            Puts(message);
+        }
+
+        private float? ReadEffectiveWeatherValue(WeatherParameterDefinition definition, List<Vector3> samplePositions, object weatherPreset, out string source)
+        {
+            source = "missing";
+
+            try
+            {
+                switch (definition.name)
+                {
+                    case "rain":
+                        source = "Climate.GetRain";
+                        return SampleNativeClimate("Rain", source, samplePositions).value;
+                    case "thunder":
+                        source = "Climate.GetThunder";
+                        return SampleNativeClimate("Thunder", source, samplePositions).value;
+                    case "rainbow":
+                        source = "Climate.GetRainbow";
+                        return SampleNativeClimate("Rainbow", source, samplePositions).value;
+                    case "fog":
+                        source = "Climate.GetFog";
+                        return SampleNativeClimate("Fog", source, samplePositions).value;
+                }
+
+                if (weatherPreset == null || definition.effectivePath == null || definition.effectivePath.Length == 0)
+                {
+                    source = "Climate.WeatherState missing";
+                    return null;
+                }
+
+                object current = weatherPreset;
+                foreach (var memberName in definition.effectivePath)
+                {
+                    current = ReadObjectProperty(current, memberName);
+                    if (current == null)
+                    {
+                        source = "Climate.WeatherState." + string.Join(".", definition.effectivePath) + " missing";
+                        return null;
+                    }
+                }
+
+                if (TryConvertFloat(current, out var value))
+                {
+                    source = "Climate.WeatherState." + string.Join(".", definition.effectivePath);
+                    return value;
+                }
+
+                source = "Climate.WeatherState." + string.Join(".", definition.effectivePath) + " nonnumeric";
+                return null;
+            }
+            catch (Exception ex)
+            {
+                source = "Climate.WeatherState." + definition.name + " error " + ex.GetType().Name;
+                return null;
+            }
+        }
+
+        private WeatherStateDiagnosticsPayload CreateWeatherStateDiagnostics(object climate)
+        {
+            var diagnostics = new WeatherStateDiagnosticsPayload
+            {
+                source = climate == null ? "Climate missing" : "Climate"
+            };
+
+            if (climate == null)
+            {
+                return diagnostics;
+            }
+
+            diagnostics.previous = WeatherPresetLabel(ReadObjectProperty(climate, "WeatherStatePrevious"));
+            diagnostics.current = WeatherPresetLabel(ReadObjectProperty(climate, "WeatherState"));
+            diagnostics.target = WeatherPresetLabel(ReadObjectProperty(climate, "WeatherStateTarget"));
+            diagnostics.next = WeatherPresetLabel(ReadObjectProperty(climate, "WeatherStateNext"));
+            diagnostics.blend = ReadFloatProperty(climate, "WeatherStateBlend");
+            diagnostics.seed_previous = ReadDiagnosticMemberString(climate, "WeatherSeedPrevious");
+            diagnostics.seed_target = ReadDiagnosticMemberString(climate, "WeatherSeedTarget");
+            diagnostics.seed_next = ReadDiagnosticMemberString(climate, "WeatherSeedNext");
+            diagnostics.rain_grace_active = ReadBoolProperty(typeof(ConVar.Weather), "rain_grace_active");
+
+            return diagnostics;
+        }
+
+        private string WeatherPresetLabel(object preset)
+        {
+            if (preset == null)
+            {
+                return "";
+            }
+
+            var name = Convert.ToString(ReadObjectProperty(preset, "name"), CultureInfo.InvariantCulture);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return name;
+            }
+
+            var type = ReadObjectProperty(preset, "Type");
+            if (type != null)
+            {
+                var typeName = Convert.ToString(ReadObjectProperty(type, "name"), CultureInfo.InvariantCulture);
+                if (!string.IsNullOrWhiteSpace(typeName))
+                {
+                    return typeName;
+                }
+
+                var typeText = type.ToString();
+                if (!string.IsNullOrWhiteSpace(typeText))
+                {
+                    return typeText;
+                }
+            }
+
+            return preset.ToString();
+        }
+
+        private string WeatherStateSummary(WeatherStateDiagnosticsPayload state)
+        {
+            if (state == null)
+            {
+                return "weatherState=unset";
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "weatherState=previous={0},current={1},target={2},next={3},blend={4}",
+                string.IsNullOrWhiteSpace(state.previous) ? "unset" : state.previous,
+                string.IsNullOrWhiteSpace(state.current) ? "unset" : state.current,
+                string.IsNullOrWhiteSpace(state.target) ? "unset" : state.target,
+                string.IsNullOrWhiteSpace(state.next) ? "unset" : state.next,
+                state.blend == null ? "unset" : state.blend.Value.ToString("0.###", CultureInfo.InvariantCulture)
+            );
+        }
+
+        private object ReadClimate()
+        {
+            try
+            {
+                return UnityEngine.Object.FindFirstObjectByType<Climate>();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private float? ReadWeatherConVar(string memberName, out string source)
+        {
+            source = "missing";
+
+            try
+            {
+                var member = GetWeatherConVarMember(memberName);
+                if (member is FieldInfo field && TryConvertFloat(field.GetValue(null), out var fieldValue))
+                {
+                    source = "ConVar.Weather." + field.Name + " getter";
+                    return fieldValue;
+                }
+
+                if (member is PropertyInfo property && TryConvertFloat(property.GetValue(null, null), out var propertyValue))
+                {
+                    source = "ConVar.Weather." + property.Name + " getter";
+                    return propertyValue;
+                }
+
+                source = "ConVar.Weather." + memberName + " missing";
+                return null;
+            }
+            catch (Exception ex)
+            {
+                source = "ConVar.Weather." + memberName + " error " + ex.GetType().Name;
+                return null;
+            }
+        }
+
+        private MemberInfo GetWeatherConVarMember(string memberName)
+        {
+            if (string.IsNullOrWhiteSpace(memberName))
+            {
+                return null;
+            }
+
+            MemberInfo member;
+            if (weatherConVarMemberCache.TryGetValue(memberName, out member))
+            {
+                return member;
+            }
+
+            var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.IgnoreCase;
+            var weatherType = typeof(ConVar.Weather);
+            member = (MemberInfo)weatherType.GetField(memberName, flags) ?? weatherType.GetProperty(memberName, flags);
+            weatherConVarMemberCache[memberName] = member;
+            return member;
+        }
+
+        private string WeatherParameterSummary(WeatherSnapshotPayload payload)
+        {
+            if (payload == null || payload.parameters == null || payload.parameters.Count == 0)
+            {
+                return "weatherParams=unset";
+            }
+
+            string[] names = { "rain", "thunder", "fog", "cloudCoverage", "atmosphereRayleigh", "atmosphereMie" };
+            var parts = new List<string>();
+            foreach (var name in names)
+            {
+                WeatherParameterPayload parameter;
+                if (!payload.parameters.TryGetValue(name, out parameter) || parameter == null)
+                {
+                    continue;
+                }
+
+                if (parameter.raw == null)
+                {
+                    parts.Add(name + "=unset");
+                }
+                else if (parameter.is_dynamic)
+                {
+                    parts.Add(name + "=" + FormatSample(parameter.value) + "(dynamic raw " + parameter.raw.Value.ToString("0.###", CultureInfo.InvariantCulture) + ")");
+                }
+                else
+                {
+                    parts.Add(name + "=" + parameter.value.GetValueOrDefault().ToString("0.###"));
+                }
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "weatherOverrides={0}({1}/{2}); weatherParams={3}",
+                FirstNonEmpty(payload.override_mode, "unknown"),
+                payload.override_count,
+                payload.parameter_count,
+                parts.Count == 0 ? "unset" : string.Join(",", parts.ToArray())
+            );
+        }
+
+        private string FormatSample(float? value)
+        {
+            return value == null ? "unset" : value.Value.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        private string DescribeSample(SampledFloat sample)
+        {
+            if (sample == null)
+            {
+                return "unset";
+            }
+
+            var value = sample.value == null ? "unset" : sample.value.Value.ToString("0.###", CultureInfo.InvariantCulture);
+            return string.IsNullOrWhiteSpace(sample.raw)
+                ? $"{sample.source}:{value}"
+                : $"{sample.source}:{value} {sample.raw}";
+        }
+
+        private float RoundWeatherValue(float value)
+        {
+            return (float)Math.Round(value, 4);
+        }
+
+        private SampledFloat SampleNativeClimate(string sampleName, string source, List<Vector3> samplePositions = null)
+        {
+            try
+            {
+                var values = new List<float>();
+                var rawValues = new List<float>();
+                foreach (var position in samplePositions ?? EnvironmentSamplePositions())
+                {
+                    float value;
+                    switch (sampleName)
+                    {
+                        case "Clouds":
+                            value = Climate.GetClouds(position);
+                            break;
+                        case "Rain":
+                            value = Climate.GetRain(position);
+                            break;
+                        case "Fog":
+                            value = Climate.GetFog(position);
+                            break;
+                        case "Thunder":
+                            value = Climate.GetThunder(position);
+                            break;
+                        case "Rainbow":
+                            value = Climate.GetRainbow(position);
+                            break;
+                        default:
+                            return new SampledFloat(null, source, "unknown sample");
+                    }
+
+                    if (float.IsNaN(value) || float.IsInfinity(value))
+                    {
+                        continue;
+                    }
+
+                    rawValues.Add(value);
+                    if (value < 0f)
+                    {
+                        continue;
+                    }
+
+                    var normalizedValue = Mathf.Clamp01(value);
+                    values.Add(normalizedValue);
+                }
+
+                if (values.Count == 0)
+                {
+                    return rawValues.Count == 0
+                        ? new SampledFloat(null, source, "no numeric samples")
+                        : new SampledFloat(null, source, "dynamic " + FormatRawStats(rawValues));
+                }
+
+                var average = values.Average();
+                return new SampledFloat(RoundWeatherValue(Mathf.Clamp01(average)), source, FormatRawStats(rawValues));
+            }
+            catch (Exception ex)
+            {
+                return new SampledFloat(null, source, "error " + ex.GetType().Name);
+            }
+        }
+
+        private List<Vector3> EnvironmentSamplePositions()
+        {
+            var positions = new List<Vector3>();
+
+            try
+            {
+                foreach (var player in BasePlayer.activePlayerList)
+                {
+                    if (positions.Count >= 24)
+                    {
+                        break;
+                    }
+
+                    if (player == null || !player.IsConnected || player.IsDead())
+                    {
+                        continue;
+                    }
+
+                    positions.Add(player.transform.position);
+                }
+            }
+            catch
+            {
+                positions.Clear();
+            }
+
+            if (positions.Count == 0)
+            {
+                positions.Add(Vector3.zero);
+            }
+
+            return positions;
+        }
+
+        private SampledFloat FirstValidSample(params SampledFloat[] samples)
+        {
+            if (samples == null || samples.Length == 0)
+            {
+                return new SampledFloat(null, "unset");
+            }
+
+            SampledFloat fallback = null;
+            foreach (var sample in samples)
+            {
+                if (sample == null)
+                {
+                    continue;
+                }
+
+                if (fallback == null)
+                {
+                    fallback = sample;
+                }
+
+                if (sample.value != null)
+                {
+                    return sample;
+                }
+            }
+
+            return fallback ?? new SampledFloat(null, "unset");
+        }
+
+        private SampledFloat SampleRenderFogDensity()
+        {
+            try
+            {
+                return NormalizeSample(RenderSettings.fogDensity * 100f, "RenderSettings.fogDensity");
+            }
+            catch (Exception ex)
+            {
+                return new SampledFloat(null, "RenderSettings.fogDensity", "error " + ex.GetType().Name);
+            }
+        }
+
+        private SampledFloat SampleFloat(object instance, string propertyName, string source)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return new SampledFloat(null, source, "missing");
+            }
+
+            try
+            {
+                var rawValue = ReadMemberValue(instance, propertyName);
+                return rawValue == null
+                    ? new SampledFloat(null, source, "missing")
+                    : NormalizeSample(rawValue, source);
+            }
+            catch (Exception ex)
+            {
+                return new SampledFloat(null, source, "error " + ex.GetType().Name);
+            }
+        }
+
+        private SampledFloat NormalizeSample(object rawValue, string source)
+        {
+            if (!TryParseSampleFloat(rawValue, out var value, out var rawText))
+            {
+                return new SampledFloat(null, source, rawText);
+            }
+
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return new SampledFloat(null, source, rawText);
+            }
+
+            if (value < 0f)
+            {
+                return new SampledFloat(null, source, rawText);
+            }
+
+            return new SampledFloat(RoundWeatherValue(Mathf.Clamp01(value)), source, rawText);
+        }
+
+        private bool TryConvertFloat(object value, out float result)
+        {
+            return TryParseSampleFloat(value, out result, out _);
+        }
+
+        private bool TryParseSampleFloat(object value, out float result, out string rawText)
+        {
+            result = 0f;
+            rawText = value == null ? "null" : Convert.ToString(value, CultureInfo.InvariantCulture);
+            try
+            {
+                if (value == null)
+                {
+                    return false;
+                }
+
+                if (value is string stringValue)
+                {
+                    if (!float.TryParse(stringValue, NumberStyles.Float, CultureInfo.InvariantCulture, out result) &&
+                        !float.TryParse(stringValue, NumberStyles.Float, CultureInfo.CurrentCulture, out result))
+                    {
+                        return false;
+                    }
+
+                    return !float.IsNaN(result) && !float.IsInfinity(result);
+                }
+
+                result = Convert.ToSingle(value, CultureInfo.InvariantCulture);
+                return !float.IsNaN(result) && !float.IsInfinity(result);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string FormatRawStats(List<float> rawValues)
+        {
+            if (rawValues == null || rawValues.Count == 0)
+            {
+                return "raw=none";
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "raw=avg={0:0.###} min={1:0.###} max={2:0.###} samples={3}",
+                rawValues.Average(),
+                rawValues.Min(),
+                rawValues.Max(),
+                rawValues.Count
+            );
+        }
+
+        private Vector3 SunDirectionFromHour(float hour)
+        {
+            var angle = Mathf.Repeat((hour - 6f) / 24f, 1f) * Mathf.PI * 2f;
+            return new Vector3(Mathf.Cos(angle) * 0.42f, Mathf.Sin(angle), Mathf.Sin(angle) * 0.58f).normalized;
+        }
+
+        private float SunIntensityFromDirection(Vector3 direction)
+        {
+            return Mathf.Lerp(0.05f, 1.85f, Mathf.Clamp01(direction.y));
+        }
+
+        private Color SunColorFromDirection(Vector3 direction)
+        {
+            return Color.Lerp(new Color(1f, 0.36f, 0.22f), new Color(1f, 0.78f, 0.48f), Mathf.Clamp01(direction.y));
+        }
+
+        private float? ReadFloatProperty(object instance, string propertyName)
+        {
+            var rawValue = ReadMemberValue(instance, propertyName);
+            if (TryConvertFloat(rawValue, out var value))
+            {
+                return RoundWeatherValue(value);
+            }
+
+            return null;
+        }
+
+        private bool? ReadBoolProperty(object instance, string propertyName)
+        {
+            var rawValue = ReadMemberValue(instance, propertyName);
+            if (rawValue == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return Convert.ToBoolean(rawValue, CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private string ReadDiagnosticMemberString(object instance, string propertyName)
+        {
+            var rawValue = ReadMemberValue(instance, propertyName);
+            if (rawValue == null)
+            {
+                return "";
+            }
+
+            try
+            {
+                return Convert.ToString(rawValue, CultureInfo.InvariantCulture) ?? "";
+            }
+            catch
+            {
+                return rawValue.ToString();
+            }
+        }
+
+        private object ReadObjectProperty(object instance, string propertyName)
+        {
+            return ReadMemberValue(instance, propertyName);
+        }
+
+        private object ReadMemberValue(object instance, string propertyName)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return null;
+            }
+
+            try
+            {
+                var isStaticLookup = instance is Type;
+                var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase | BindingFlags.FlattenHierarchy |
+                    (isStaticLookup ? BindingFlags.Static : BindingFlags.Instance);
+                var type = isStaticLookup ? (Type)instance : instance.GetType();
+                var target = isStaticLookup ? null : instance;
+                var property = type.GetProperty(propertyName, flags);
+                if (property != null && property.GetIndexParameters().Length == 0)
+                {
+                    return property.GetValue(target, null);
+                }
+
+                var field = type.GetField(propertyName, flags);
+                if (field != null)
+                {
+                    return field.GetValue(target);
+                }
+
+                var method = type.GetMethod(propertyName, flags, null, Type.EmptyTypes, null)
+                    ?? type.GetMethod("get_" + propertyName, flags, null, Type.EmptyTypes, null);
+                return method == null ? null : method.Invoke(target, null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private string ColorToHex(Color color)
+        {
+            color.r = Mathf.Clamp01(color.r);
+            color.g = Mathf.Clamp01(color.g);
+            color.b = Mathf.Clamp01(color.b);
+            return $"#{ColorUtility.ToHtmlStringRGB(color).ToLowerInvariant()}";
         }
 
         private void PublishPlayerLocations(Action<string> reply, bool verbose)
@@ -341,6 +1515,11 @@ namespace Oxide.Plugins
                     y = (float)Math.Round(position.y, 3),
                     z = (float)Math.Round(position.z, 3)
                 });
+            }
+
+            if (players.Count == 0 && !verbose)
+            {
+                return;
             }
 
             var payload = new PlayerLocationSnapshotPayload
@@ -391,6 +1570,50 @@ namespace Oxide.Plugins
                 if (verbose)
                 {
                     reply?.Invoke($"Website player locations synced: {result.locations?.acceptedPlayers ?? players.Count} connected players.");
+                }
+            });
+        }
+
+        private void PublishAirdropReplayEvent(BaseEntity entity)
+        {
+            var secret = ResolveBridgeSharedSecret();
+            if (entity == null || entity.IsDestroyed || string.IsNullOrWhiteSpace(secret))
+            {
+                return;
+            }
+
+            var position = entity.transform.position;
+            var payload = new ReplayEventSnapshotPayload
+            {
+                server_id = ResolveServerId(),
+                wipe_key = ResolveWipeKey(),
+                events = new List<ReplayEventPayload>
+                {
+                    new ReplayEventPayload
+                    {
+                        event_key = "airdrop:" + entity.net.ID.Value + ":" + DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                        event_type = "airdrop",
+                        occurred_at = DateTime.UtcNow.ToString("o"),
+                        x = (float)Math.Round(position.x, 3),
+                        y = (float)Math.Round(position.y, 3),
+                        z = (float)Math.Round(position.z, 3),
+                        vehicle = "cargo_plane",
+                        payload = new Dictionary<string, object>
+                        {
+                            ["prefab"] = entity.PrefabName ?? entity.ShortPrefabName ?? "",
+                            ["networkId"] = entity.net.ID.Value.ToString()
+                        }
+                    }
+                }
+            };
+            var body = JsonConvert.SerializeObject(payload);
+            var url = $"{TrimSlash(ResolveApiBaseUrl())}/api/server/map-replay-events-snapshot.php";
+
+            SendPost(url, body, (code, response) =>
+            {
+                if (!IsSuccess(code, response, out var requestError))
+                {
+                    PrintWarning("Website airdrop replay event post failed: " + requestError);
                 }
             });
         }
@@ -730,7 +1953,7 @@ namespace Oxide.Plugins
             var colors = config.IncludeTerrainColors ? new List<string>(resolution * resolution) : null;
             var minHeight = float.MaxValue;
             var maxHeight = float.MinValue;
-            var waterLevel = 0f;
+            var waterLevel = EstimateOceanWaterLevel(worldSize, resolution);
 
             for (var row = 0; row < resolution; row++)
             {
@@ -745,7 +1968,6 @@ namespace Oxide.Plugins
                     var height = TerrainMeta.HeightMap.GetHeight(position);
 
                     var sampleWaterLevel = TerrainMeta.WaterMap != null ? TerrainMeta.WaterMap.GetHeight(position) : 0f;
-                    waterLevel = Math.Max(waterLevel, sampleWaterLevel);
 
                     minHeight = Math.Min(minHeight, height);
                     maxHeight = Math.Max(maxHeight, height);
@@ -769,7 +1991,7 @@ namespace Oxide.Plugins
             }
 
             var monuments = CreateMonumentPayloads();
-            summary = $"terrain {resolution}x{resolution}, height {minHeight:0.###}-{maxHeight:0.###}, water {waterLevel:0.###}, monuments {monuments.Count}";
+            summary = $"terrain {resolution}x{resolution}, height {minHeight:0.###}-{maxHeight:0.###}, ocean {waterLevel:0.###}, monuments {monuments.Count}";
 
             return new TerrainUploadPayload
             {
@@ -787,6 +2009,46 @@ namespace Oxide.Plugins
                 colors = colors,
                 monuments = monuments
             };
+        }
+
+        private float EstimateOceanWaterLevel(float worldSize, int resolution)
+        {
+            if (TerrainMeta.WaterMap == null)
+            {
+                return 0f;
+            }
+
+            var half = worldSize * 0.5f;
+            var samples = new List<float>();
+            var edgeSamples = Mathf.Clamp(resolution, 17, 129);
+
+            for (var index = 0; index < edgeSamples; index++)
+            {
+                var t = edgeSamples <= 1 ? 0f : index / (float)(edgeSamples - 1);
+                var coord = -half + (t * worldSize);
+                AddWaterLevelSample(samples, new Vector3(coord, 0f, half));
+                AddWaterLevelSample(samples, new Vector3(coord, 0f, -half));
+                AddWaterLevelSample(samples, new Vector3(-half, 0f, coord));
+                AddWaterLevelSample(samples, new Vector3(half, 0f, coord));
+            }
+
+            if (samples.Count == 0)
+            {
+                return 0f;
+            }
+
+            samples.Sort();
+            return samples[samples.Count / 2];
+        }
+
+        private void AddWaterLevelSample(List<float> samples, Vector3 position)
+        {
+            var waterLevel = TerrainMeta.WaterMap.GetHeight(position);
+
+            if (!float.IsNaN(waterLevel) && !float.IsInfinity(waterLevel))
+            {
+                samples.Add(waterLevel);
+            }
         }
 
         private List<MonumentUploadPayload> CreateMonumentPayloads()
@@ -973,9 +2235,27 @@ namespace Oxide.Plugins
 
         private void SendPost(string url, string body, Action<int, string> callback)
         {
-            var headers = BuildHeaders("POST", url, body);
-            headers["Content-Type"] = "application/json";
-            webrequest.Enqueue(url, body, (code, response) => callback(code, response ?? ""), this, RequestMethod.POST, headers, WebRequestTimeoutMilliseconds());
+            try
+            {
+                var headers = BuildHeaders("POST", url, body);
+                headers["Content-Type"] = "application/json";
+                webrequest.Enqueue(url, body, (code, response) =>
+                {
+                    try
+                    {
+                        callback?.Invoke(code, response ?? "");
+                    }
+                    catch (Exception ex)
+                    {
+                        PrintWarning($"Website POST callback failed for {url}: {ex.GetType().Name}: {ex.Message}");
+                    }
+                }, this, RequestMethod.POST, headers, WebRequestTimeoutMilliseconds());
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Website POST enqueue failed for {url}: {ex.GetType().Name}: {ex.Message}");
+                callback?.Invoke(0, $"enqueue error {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         private float WebRequestTimeoutMilliseconds()
@@ -1248,6 +2528,7 @@ namespace Oxide.Plugins
                 config.PublishSkybox = defaults.PublishSkybox;
             }
             config.PlayerLocationIntervalSeconds = Math.Max(5, config.PlayerLocationIntervalSeconds <= 0 ? defaults.PlayerLocationIntervalSeconds : config.PlayerLocationIntervalSeconds);
+            config.EnvironmentIntervalSeconds = Math.Max(30, config.EnvironmentIntervalSeconds <= 0 ? defaults.EnvironmentIntervalSeconds : config.EnvironmentIntervalSeconds);
         }
 
         private bool ConfigHasProperty(string propertyName)

@@ -14,7 +14,7 @@ using Random = UnityEngine.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("Automatic Authorization", "k1lly0u/Arainrr/ADS", "1.3.9", ResourceId = 2063)]
+    [Info("Automatic Authorization", "k1lly0u/Arainrr/ADS", "1.3.10", ResourceId = 2063)]
     [Description("Shared cupboards, turrets, locks with teams, clans, friends")]
     public class AutomaticAuthorization : RustPlugin
     {
@@ -83,6 +83,7 @@ namespace Oxide.Plugins
             {
                 Unsubscribe(nameof(OnClanUpdate));
                 Unsubscribe(nameof(OnClanDestroy));
+                Unsubscribe(nameof(OnClanMemberJoined));
                 Unsubscribe(nameof(OnClanMemberGone));
             }
         }
@@ -108,6 +109,13 @@ namespace Oxide.Plugins
                 {
                     CheckEntitySpawned(codeLock);
                 }
+            }
+
+            // Reconcile entities that existed before this plugin loaded. This also
+            // repairs stale clan authorization after plugin/server restarts.
+            if (configData.ClansShare.Enabled)
+            {
+                timer.Once(2f, RefreshAllClanAuthorization);
             }
         }
 
@@ -1199,29 +1207,75 @@ namespace Oxide.Plugins
 
         private void OnClanUpdate(string clanName)
         {
-            UpdateClanAuthList(clanName);
+            QueueClanAuthRefresh(clanName);
         }
 
-        #region Clans Reborn Hooks
-
-        private void OnClanMemberGone(string playerId, List<string> memberUserIDs)
+        // Current Clans 0.2.10 hook. The delay ensures the accepted member and
+        // cached clan JObject are committed before cupboards/locks are rebuilt.
+        private void OnClanMemberJoined(string clanName, string playerId, List<string> memberUserIDs)
         {
-            UpdateAuthList(Convert.ToUInt64(playerId), AutoAuthType.All);
+            QueueClanAuthRefresh(clanName);
         }
 
-        #endregion Clans Reborn Hooks
+        private void OnClanMemberGone(string clanName, string playerId, List<string> memberUserIDs)
+        {
+            ulong leavingPlayerId;
+            if (ulong.TryParse(playerId, out leavingPlayerId))
+            {
+                UpdateAuthList(leavingPlayerId, AutoAuthType.All);
+            }
+
+            QueueClanAuthRefresh(clanName);
+        }
 
         #endregion Hooks
 
+        private void QueueClanAuthRefresh(string clanName)
+        {
+            if (string.IsNullOrWhiteSpace(clanName))
+            {
+                return;
+            }
+
+            timer.Once(0.5f, () => UpdateClanAuthList(clanName));
+        }
+
+        private void RefreshAllClanAuthorization()
+        {
+            if (Clans == null || !Clans.IsLoaded)
+            {
+                return;
+            }
+
+            var clans = Clans.Call("GetAllClans") as JArray;
+            if (clans == null)
+            {
+                return;
+            }
+
+            foreach (var clan in clans)
+            {
+                UpdateClanAuthList(clan.ToString());
+            }
+        }
+
+        [HookMethod("RaidlandsRefreshClanAuthorization")]
+        private void RaidlandsRefreshClanAuthorization(string clanName)
+        {
+            QueueClanAuthRefresh(clanName);
+        }
+
         private void UpdateClanAuthList(string clanName)
         {
-            var clanMembers = GetClanMembers(clanName);
-            if (clanMembers != null)
+            var clanMembers = GetClanMembers(clanName)?.Distinct().ToList();
+            if (clanMembers == null)
             {
-                foreach (var member in clanMembers)
-                {
-                    UpdateAuthList(member, AutoAuthType.All);
-                }
+                return;
+            }
+
+            foreach (var member in clanMembers)
+            {
+                UpdateAuthList(member, AutoAuthType.All);
             }
         }
 

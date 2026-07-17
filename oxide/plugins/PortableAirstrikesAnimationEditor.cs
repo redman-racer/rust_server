@@ -156,6 +156,9 @@ namespace Oxide.Plugins
         private string lastPersistedProfileJson = "";
         private readonly Dictionary<ulong, EditorSession> sessions = new Dictionary<ulong, EditorSession>();
 
+        [PluginReference]
+        private Plugin RaidlandsUiEscapeBridge;
+
         /*
          * Standalone integration notes:
          * 1. Profiles are saved to oxide/data/PortableAirstrikes/VisualProfiles.json via DataFileName "PortableAirstrikes/VisualProfiles".
@@ -2909,6 +2912,7 @@ namespace Oxide.Plugins
             }
 
             AddWorkspaceStatusBar(container, root, session, profile);
+            RegisterUiBridge(player, UiName);
             CuiHelper.AddUi(player, container);
             session.UiOpen = true;
             if (showLegacyTimeline)
@@ -3440,6 +3444,7 @@ namespace Oxide.Plugins
             AddButton(container, root, "APPLY ALIGNMENT", "airanim.align.apply", "0.565 0.105", "0.935 0.190", canApply ? "0.42 0.20 0.10 1" : "0.10 0.11 0.13 1", 11);
             AddLabel(container, root, "The selected waypoint remains the reference even when it is also marked.", 8, TextAnchor.MiddleCenter, "0.065 0.035", "0.935 0.085", "0.50 0.59 0.66 1");
 
+            RegisterUiBridge(player, AlignUiName);
             CuiHelper.AddUi(player, container);
         }
 
@@ -3938,6 +3943,7 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, TimelineUiName);
             var container = new CuiElementContainer();
             AddTimelineUi(container, player, session, profile);
+            RegisterUiBridge(player, TimelineUiName);
             CuiHelper.AddUi(player, container);
         }
 
@@ -4012,6 +4018,7 @@ namespace Oxide.Plugins
             var status = string.IsNullOrWhiteSpace(session.LastStatus) ? "Ready." : session.LastStatus;
             AddLabel(container, root, status, 9, TextAnchor.MiddleLeft, "0.055 0.045", "0.945 0.095", "0.58 0.66 0.72 1");
 
+            RegisterUiBridge(player, WaypointUiName);
             CuiHelper.AddUi(player, container);
             session.WaypointUiOpen = true;
         }
@@ -4111,6 +4118,7 @@ namespace Oxide.Plugins
             var status = string.IsNullOrWhiteSpace(session.LastStatus) ? "Ready." : session.LastStatus;
             AddLabel(container, root, status, 9, TextAnchor.MiddleLeft, "0.055 0.045", "0.945 0.095", "0.58 0.66 0.72 1");
 
+            RegisterUiBridge(player, ReleaseUiName);
             CuiHelper.AddUi(player, container);
             session.ReleaseUiOpen = true;
         }
@@ -4194,6 +4202,7 @@ namespace Oxide.Plugins
             AddLabel(container, root, "Use -1 for automatic/default optional values.", 8, TextAnchor.MiddleLeft, "0.050 0.055", "0.600 0.095", "0.50 0.59 0.66 1");
             AddButton(container, root, "DONE", "airanim.pattern.closepopup", "0.760 0.045", "0.950 0.095", "0.18 0.26 0.31 0.96", 9);
 
+            RegisterUiBridge(player, ReleaseUiName);
             CuiHelper.AddUi(player, container);
             session.ReleaseUiOpen = true;
             session.PatternTemplateUiOpen = true;
@@ -4456,6 +4465,7 @@ namespace Oxide.Plugins
             var warning = string.IsNullOrWhiteSpace(session.LastWarning) ? guidance : session.LastWarning;
             AddLabel(container, root, warning, 9, TextAnchor.MiddleLeft, "0.075 0.040", "0.925 0.095", string.IsNullOrWhiteSpace(session.LastWarning) ? "0.58 0.66 0.72 1" : "1 0.66 0.48 1");
 
+            RegisterUiBridge(player, ValueEditUiName);
             CuiHelper.AddUi(player, container);
             session.ValueEditUiOpen = true;
         }
@@ -7516,6 +7526,7 @@ namespace Oxide.Plugins
             }
 
             AddButton(container, root, "CANCEL", "airanim.insert.cancel", "0.065 0.055", "0.935 0.115", "0.18 0.22 0.28 0.95", 10);
+            RegisterUiBridge(player, InsertUiName);
             CuiHelper.AddUi(player, container);
             session.InsertUiOpen = true;
         }
@@ -8100,6 +8111,7 @@ namespace Oxide.Plugins
             AddLabel(container, root, "Reloading replaces all in-memory profile edits with the saved VisualProfiles.json file.", 11, TextAnchor.MiddleLeft, "0.08 0.45", "0.92 0.68", "0.80 0.86 0.90 1");
             AddButton(container, root, "DISCARD & RELOAD", "airanim.ui.reloadconfirm", "0.08 0.15", "0.48 0.34", "0.55 0.10 0.08 0.96", 11);
             AddButton(container, root, "CANCEL", "airanim.ui.reloadcancel", "0.54 0.15", "0.92 0.34", "0.18 0.22 0.28 0.96", 11);
+            RegisterUiBridge(player, ConfirmUiName);
             CuiHelper.AddUi(player, container);
         }
 
@@ -8118,6 +8130,7 @@ namespace Oxide.Plugins
             AddLabel(container, root, "This will remove '" + profileId + "' and immediately save VisualProfiles.json.", 11, TextAnchor.MiddleLeft, "0.08 0.48", "0.92 0.68", "0.80 0.86 0.90 1");
             AddButton(container, root, "DELETE", "airanim.ui.deleteconfirm " + profileId, "0.08 0.16", "0.46 0.34", "0.55 0.10 0.08 0.95", 12);
             AddButton(container, root, "CANCEL", "airanim.ui.deletecancel", "0.54 0.16", "0.92 0.34", "0.18 0.22 0.28 0.95", 12);
+            RegisterUiBridge(player, ConfirmUiName);
             CuiHelper.AddUi(player, container);
         }
 
@@ -8268,6 +8281,7 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, ConfirmUiName);
             CuiHelper.DestroyUi(player, InsertUiName);
             CuiHelper.DestroyUi(player, AlignUiName);
+            UnregisterEditorUiBridge(player, false);
 
             EditorSession session;
             if (sessions.TryGetValue(player.userID, out session) && session != null)
@@ -8296,6 +8310,7 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, TimelineUiName);
             CuiHelper.DestroyUi(player, PreviewUiName);
             CuiHelper.DestroyUi(player, AlignUiName);
+            UnregisterEditorUiBridge(player, true);
 
             EditorSession session;
             if (sessions.TryGetValue(player.userID, out session) && session != null)
@@ -8310,6 +8325,40 @@ namespace Oxide.Plugins
                 session.TimelineOpen = false;
                 session.TimelineScrollOffset = 0f;
             }
+        }
+
+        private void RegisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("RegisterUi", player, this, rootName, nameof(OnRaidlandsUiBridgeClosed));
+        }
+
+        private void UnregisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("UnregisterUi", player, this, rootName);
+        }
+
+        private void UnregisterEditorUiBridge(BasePlayer player, bool includeTimeline)
+        {
+            UnregisterUiBridge(player, UiName);
+            UnregisterUiBridge(player, WaypointUiName);
+            UnregisterUiBridge(player, ReleaseUiName);
+            UnregisterUiBridge(player, ValueEditUiName);
+            UnregisterUiBridge(player, ConfirmUiName);
+            UnregisterUiBridge(player, InsertUiName);
+            UnregisterUiBridge(player, AlignUiName);
+            if (includeTimeline)
+                UnregisterUiBridge(player, TimelineUiName);
+        }
+
+        private void OnRaidlandsUiBridgeClosed(BasePlayer player, string reason)
+        {
+            DestroyUi(player);
         }
 
         private void RebuildMarkers(BasePlayer player, EditorSession session)

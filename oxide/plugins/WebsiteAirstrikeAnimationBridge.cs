@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteAirstrikeAnimationBridge", "Raidlands", "1.0.3")]
+    [Info("WebsiteAirstrikeAnimationBridge", "Raidlands", "1.0.5")]
     [Description("Synchronizes published Raidlands website airstrike animation bundles with PortableAirstrikes visual profiles.")]
     public class WebsiteAirstrikeAnimationBridge : RustPlugin
     {
@@ -437,6 +437,11 @@ namespace Oxide.Plugins
             if (!string.IsNullOrWhiteSpace(currentLocalSha))
             {
                 url += "&local_hash=" + Uri.EscapeDataString(currentLocalSha);
+            }
+            var installedSha = NormalizeSha(state.InstalledSha256);
+            if (!string.IsNullOrWhiteSpace(installedSha))
+            {
+                url += "&installed_hash=" + Uri.EscapeDataString(installedSha);
             }
 
             SendGet(url, (code, response) =>
@@ -1017,7 +1022,14 @@ namespace Oxide.Plugins
 
             if (postResult)
             {
-                PostSyncResult(status, message ?? "");
+                try
+                {
+                    PostSyncResult(status, message ?? "");
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning("Could not queue airstrike animation sync result: " + ex.Message);
+                }
             }
 
             if (reply == null && (status != "checked_no_update" || config.LogSuccessfulNoUpdateChecks))
@@ -1025,7 +1037,17 @@ namespace Oxide.Plugins
                 Puts(message);
             }
 
-            reply?.Invoke(message);
+            if (reply != null)
+            {
+                try
+                {
+                    reply(message);
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning("Could not send airstrike animation command reply: " + ex.Message);
+                }
+            }
         }
 
         private void PostSyncResult(string status, string message)
@@ -1689,7 +1711,14 @@ namespace Oxide.Plugins
         private void ReplyCommand(ConsoleSystem.Arg arg, string message)
         {
             Puts(message);
-            arg?.ReplyWith(message);
+            try
+            {
+                arg?.ReplyWith(message);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning("Could not send airstrike animation console reply: " + ex.Message);
+            }
         }
 
         private string BuildStatusLine()

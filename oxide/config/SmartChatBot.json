@@ -36,7 +36,43 @@
       "Auto Messages": [
         {
           "Is Enabled": true,
-          "Message": "Visit https://raidlands.net/ for store perks, Discord, and live stats."
+          "Message": "Visit https://raidlands.net/ for store perks, Discord, live stats, rewards, and wipe info."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Need help? Use the website links at https://raidlands.net/ or ask staff in Discord with your Steam name."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Earn and spend RP through the Raidlands rewards systems. Check https://raidlands.net/ for current rewards and games."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Track kills, deaths, KDR, playtime, and wipe history on the Raidlands leaderboard at https://raidlands.net/."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Vote for Raidlands to earn RP, then spend it on rewards and RP games through https://raidlands.net/."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "The Raidlands website has RP casino-style games, vote rewards, leaderboards, store perks, and live server tools."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Check the server page on https://raidlands.net/ for the live map, 3D terrain view, heatmap playback, wipe info, and server status."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Clan leaders can manage members on the Raidlands website: invite, promote, demote, kick, and keep clan access organized."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Got a feature idea? Use the website feature board to suggest it and vote on planned Raidlands additions."
+        },
+        {
+          "Is Enabled": true,
+          "Message": "Portable Airstrikes, VIP kits, vehicle tokens, portaforts, sentries, and other perks are listed or supported through https://raidlands.net/."
         }
       ]
     }

@@ -1,142 +1,225 @@
 // Requires: Clans
 
 using Newtonsoft.Json.Linq;
+using Oxide.Core;
 using Oxide.Core.Plugins;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace Oxide.Plugins
 {
-    [Info("Clan Team", "rewritten", "2.0.0")]
+    [Info("Clan Team", "rewritten", "2.1.0")]
     [Description("Modern clan-to-team sync system")]
     class ClanTeam : CovalencePlugin
     {
         [PluginReference]
         private Plugin Clans;
 
-        // clanTag -> teamID
-        private readonly Dictionary<string, ulong> clanTeams = new();
+        [PluginReference]
+        private Plugin AutomaticAuthorization;
 
-        // =========================
-        // CORE HELPERS
-        // =========================
+        // clanTag -> teamID
+        private readonly Dictionary<string, ulong> clanTeams = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Timer> pendingSyncs = new(StringComparer.OrdinalIgnoreCase);
 
         private string GetClanTag(ulong userId)
-            => Clans.Call<string>("GetClanOf", userId);
+            => Clans?.Call<string>("GetClanOf", userId);
 
         private List<ulong> GetClanMembers(string tag)
         {
-            if (string.IsNullOrEmpty(tag))
+            if (Clans == null || string.IsNullOrWhiteSpace(tag))
                 return new List<ulong>();
 
             JObject clan = Clans.Call<JObject>("GetClan", tag);
-            if (clan == null || clan["members"] == null)
+            JArray members = clan?["members"] as JArray;
+            if (members == null)
                 return new List<ulong>();
 
-            return clan["members"].ToObject<List<ulong>>() ?? new List<ulong>();
+            var result = new List<ulong>();
+            foreach (JToken member in members)
+            {
+                ulong userId;
+                if (ulong.TryParse(member.ToString(), out userId))
+                    result.Add(userId);
+            }
+
+            return result.Distinct().ToList();
         }
 
         private BasePlayer FindPlayer(ulong id)
-            => BasePlayer.FindByID(id);
+            => BasePlayer.FindByID(id) ?? BasePlayer.FindSleeping(id);
 
-        // =========================
-        // TEAM CORE
-        // =========================
-
-        private RelationshipManager.PlayerTeam GetOrCreateTeam(string tag)
+        private bool AreClanMembers(ulong firstPlayerId, ulong secondPlayerId)
         {
-            if (clanTeams.TryGetValue(tag, out ulong teamId))
+            if (Clans == null || firstPlayerId == 0UL || secondPlayerId == 0UL)
+                return false;
+
+            object result = Clans.Call("IsClanMember", firstPlayerId.ToString(), secondPlayerId.ToString());
+            return result is bool && (bool)result;
+        }
+
+        private RelationshipManager.PlayerTeam FindExistingClanTeam(List<ulong> members)
+        {
+            foreach (ulong memberId in members)
             {
-                var existing = RelationshipManager.ServerInstance.FindTeam(teamId);
-                if (existing != null)
+                BasePlayer player = FindPlayer(memberId);
+                if (player == null || player.currentTeam == 0UL)
+                    continue;
+
+                RelationshipManager.PlayerTeam existing = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
+                if (existing != null && !clanTeams.Values.Contains(existing.teamID))
                     return existing;
+            }
+
+            return null;
+        }
+
+        private RelationshipManager.PlayerTeam GetOrCreateTeam(string tag, List<ulong> members)
+        {
+            ulong teamId;
+            if (clanTeams.TryGetValue(tag, out teamId))
+            {
+                RelationshipManager.PlayerTeam known = RelationshipManager.ServerInstance.FindTeam(teamId);
+                if (known != null)
+                    return known;
 
                 clanTeams.Remove(tag);
             }
 
-            var newTeam = RelationshipManager.ServerInstance.CreateTeam();
-            clanTeams[tag] = newTeam.teamID;
-            return newTeam;
+            RelationshipManager.PlayerTeam existing = FindExistingClanTeam(members);
+            if (existing != null)
+            {
+                clanTeams[tag] = existing.teamID;
+                return existing;
+            }
+
+            RelationshipManager.PlayerTeam created = RelationshipManager.ServerInstance.CreateTeam();
+            if (created != null)
+                clanTeams[tag] = created.teamID;
+            return created;
+        }
+
+        private void QueueSync(string tag, float delay = 0.5f)
+        {
+            if (string.IsNullOrWhiteSpace(tag) || Clans == null)
+                return;
+
+            Timer pending;
+            if (pendingSyncs.TryGetValue(tag, out pending))
+                pending?.Destroy();
+
+            pendingSyncs[tag] = timer.Once(delay, () =>
+            {
+                pendingSyncs.Remove(tag);
+                SyncClan(tag);
+            });
         }
 
         private void SyncClan(string tag)
         {
-            var members = GetClanMembers(tag);
+            List<ulong> members = GetClanMembers(tag);
             if (members.Count == 0)
                 return;
 
-            var team = GetOrCreateTeam(tag);
+            RelationshipManager.PlayerTeam team = GetOrCreateTeam(tag, members);
             if (team == null)
                 return;
 
-            var validPlayers = new List<BasePlayer>();
+            int changes = 0;
 
-            // Build valid player list
-            foreach (var id in members)
+            foreach (ulong memberId in team.members.ToList())
             {
-                var player = FindPlayer(id);
-                if (player == null || !player.IsConnected)
+                if (members.Contains(memberId))
                     continue;
 
-                validPlayers.Add(player);
+                team.RemovePlayer(memberId);
+                changes++;
             }
 
-            if (validPlayers.Count == 0)
-                return;
-
-            // Remove players not in clan anymore
-            var currentMembers = team.members.ToList();
-            foreach (var memberId in currentMembers)
+            foreach (ulong memberId in members)
             {
-                if (!members.Contains(memberId))
-                    team.RemovePlayer(memberId);
-            }
+                if (team.members.Contains(memberId))
+                    continue;
 
-            // Add missing players
-            foreach (var player in validPlayers)
-            {
-                if (!team.members.Contains(player.userID))
+                BasePlayer player = FindPlayer(memberId);
+                if (player == null)
+                    continue;
+
+                if (player.currentTeam != 0UL && player.currentTeam != team.teamID)
                 {
-                    if (player.currentTeam != 0UL && player.currentTeam != team.teamID)
-                    {
-                        var oldTeam = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
-                        oldTeam?.RemovePlayer(player.userID);
-                    }
-
-                    team.AddPlayer(player);
-                    player.TeamUpdate();
+                    RelationshipManager.PlayerTeam oldTeam = RelationshipManager.ServerInstance.FindTeam(player.currentTeam);
+                    oldTeam?.RemovePlayer(player.userID);
                 }
+
+                team.AddPlayer(player);
+                player.TeamUpdate();
+                changes++;
             }
 
-            // Assign leader (first connected member)
-            var leader = validPlayers.FirstOrDefault();
-            if (leader != null)
+            BasePlayer leader = members.Select(FindPlayer).FirstOrDefault(player => player != null && team.members.Contains(player.userID));
+            if (leader != null && team.teamLeader != leader.userID)
                 team.SetTeamLeader(leader.userID);
+
+            if (changes > 0)
+                Puts($"Synchronized clan [{tag}] with Rust team {team.teamID}: members={members.Count}, changes={changes}.");
+
+            // Run lock/TC/turret reconciliation after the Rust team is final.
+            AutomaticAuthorization?.Call("RaidlandsRefreshClanAuthorization", tag);
         }
 
-        // =========================
-        // HOOKS (EVENT DRIVEN)
-        // =========================
-
-        private void OnClanCreate(string tag)
+        private void SyncAllClans()
         {
-            timer.Once(1f, () => SyncClan(tag));
-        }
-
-        private void OnClanUpdate(string tag)
-        {
-            SyncClan(tag);
-        }
-
-        private void OnClanDestroy(string tag)
-        {
-            if (!clanTeams.TryGetValue(tag, out ulong teamId))
+            if (Clans == null)
                 return;
 
-            var team = RelationshipManager.ServerInstance.FindTeam(teamId);
+            JArray clans = Clans.Call<JArray>("GetAllClans");
+            if (clans == null)
+                return;
+
+            foreach (JToken clan in clans)
+                QueueSync(clan.ToString(), 0.1f);
+        }
+
+        private void OnServerInitialized()
+        {
+            timer.Once(1f, SyncAllClans);
+            timer.Every(300f, SyncAllClans);
+        }
+
+        private void OnPluginLoaded(Plugin plugin)
+        {
+            if (plugin?.Name == "Clans")
+                timer.Once(1f, SyncAllClans);
+        }
+
+        private void OnClanCreate(string tag) => QueueSync(tag);
+
+        private void OnClanUpdate(string tag) => QueueSync(tag);
+
+        // Clans 0.2.10 calls the universal List<string> overload after disbanding.
+        private void OnClanDisbanded(string tag, List<string> members) => DestroyClanTeam(tag);
+
+        // Compatibility with older Clans builds.
+        private void OnClanDestroy(string tag) => DestroyClanTeam(tag);
+
+        private void DestroyClanTeam(string tag)
+        {
+            Timer pending;
+            if (pendingSyncs.TryGetValue(tag, out pending))
+            {
+                pending?.Destroy();
+                pendingSyncs.Remove(tag);
+            }
+
+            ulong teamId;
+            if (!clanTeams.TryGetValue(tag, out teamId))
+                return;
+
+            RelationshipManager.PlayerTeam team = RelationshipManager.ServerInstance.FindTeam(teamId);
             if (team != null)
             {
-                foreach (var member in team.members.ToList())
+                foreach (ulong member in team.members.ToList())
                     team.RemovePlayer(member);
 
                 RelationshipManager.ServerInstance.DisbandTeam(team);
@@ -147,23 +230,41 @@ namespace Oxide.Plugins
 
         private void OnPlayerConnected(BasePlayer player)
         {
-            var tag = GetClanTag(player.userID);
-            if (!string.IsNullOrEmpty(tag))
-                SyncClan(tag);
-        }
-
-        private void OnPlayerDisconnected(BasePlayer player)
-        {
-            var tag = GetClanTag(player.userID);
-            if (!string.IsNullOrEmpty(tag))
-                timer.Once(1f, () => SyncClan(tag));
+            if (player != null)
+                QueueSync(GetClanTag(player.userID));
         }
 
         private void OnPlayerSleepEnded(BasePlayer player)
         {
-            var tag = GetClanTag(player.userID);
-            if (!string.IsNullOrEmpty(tag))
-                SyncClan(tag);
+            if (player != null)
+                QueueSync(GetClanTag(player.userID));
+        }
+
+        private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            BasePlayer victim = entity as BasePlayer;
+            BasePlayer attacker = info?.InitiatorPlayer;
+            if (attacker == null && info?.Initiator is BaseEntity initiator && initiator.OwnerID != 0UL)
+                attacker = FindPlayer(initiator.OwnerID);
+
+            if (victim == null || attacker == null || victim.userID == attacker.userID)
+                return null;
+
+            if (!AreClanMembers(attacker.userID, victim.userID))
+                return null;
+
+            info.damageTypes.ScaleAll(0f);
+            info.DoHitEffects = false;
+            return true;
+        }
+
+        private void Unload()
+        {
+            foreach (Timer pending in pendingSyncs.Values)
+                pending?.Destroy();
+
+            pendingSyncs.Clear();
+            clanTeams.Clear();
         }
     }
 }

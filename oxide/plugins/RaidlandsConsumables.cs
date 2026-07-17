@@ -441,7 +441,17 @@ namespace Oxide.Plugins
 
             try
             {
-                Effect.server.Run(config.ConsumptionEffect.EffectPrefab, player.transform.position);
+                // Attach the native tea-drink effect to the drinker. Positional effects can be
+                // culled before the consuming client's audio is started, which made the serum
+                // look consumed but remain silent.
+                Effect.server.Run(
+                    config.ConsumptionEffect.EffectPrefab,
+                    player,
+                    0,
+                    global::UnityEngine.Vector3.zero,
+                    global::UnityEngine.Vector3.zero,
+                    null,
+                    true);
             }
             catch (Exception ex)
             {

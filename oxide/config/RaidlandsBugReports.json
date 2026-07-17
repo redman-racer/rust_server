@@ -1,0 +1,21 @@
+{
+  "Command name": "bug",
+  "Minimum report characters": 8,
+  "Maximum report characters": 1200,
+  "Save local reports": true,
+  "Website API enabled": true,
+  "Website API base URL": "https://raidlands.net",
+  "Website API bug report path": "/api/server/bug-report.php",
+  "Website API server id": "raidlands-main",
+  "Website API shared secret": "${WEBSITE_VIP_SHARED_SECRET}",
+  "Website API timeout seconds": 15.0,
+  "Website API retry attempts": 2,
+  "Retry delay seconds": 5.0,
+  "Discord webhook enabled": false,
+  "Discord webhook URL": "${DISCORD_DEFAULT_WEBHOOK_URL}",
+  "Discord username": "Raidlands Bug Reports",
+  "Discord avatar URL": "",
+  "Discord mention text (optional)": "",
+  "Admin command name": "bugs",
+  "Admin list size": 10
+}

@@ -15,11 +15,12 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.76")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.3.81")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
         private const string AdminPermission = "raidlandsroambots.admin";
+        private const string IgnorePermission = "raidlandsroambots.ignore";
         private const string SpawnModeNearPlayers = "near_players";
         private const string SpawnModeRandom = "random";
         private const string TacticalBrainName = "playerlike_tactical_brain";
@@ -29,6 +30,10 @@ namespace Oxide.Plugins
         private const string TrainingRunDataFile = "RaidlandsRoamBots/training_runs.jsonl";
         private const string StatsDataFile = "RaidlandsRoamBots/stats";
         private const string BotChatQuotaDataFile = "RaidlandsRoamBots/bot_chat_quota";
+        private const string PluginLogFile = "RaidlandsRoamBots";
+        private const long PluginLogMaximumBytes = 5L * 1024L * 1024L;
+        private const int PluginLogRetainedCharacters = 1024 * 1024;
+        private const int PluginLogRetentionDays = 14;
         private const string KitsDataFile = "Kits/kits_data";
         private const string SecretsConfigName = "Secrets.local";
         private const string OpenAiRoamBotApiKeySecret = "OPENAI_ROAM_BOT_API_KEY";
@@ -166,6 +171,9 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin Clans;
 
+        [PluginReference]
+        private Plugin RaidlandsUiEscapeBridge;
+
         private Configuration config;
         private StoredData data;
         private readonly System.Random random = new System.Random();
@@ -224,6 +232,7 @@ namespace Oxide.Plugins
         private Timer saveTimer;
         private int teamSequence;
         private float spawnRetryBlockedUntil;
+        private float nextPluginLogPruneAt;
         private float lastDecisionTracePruneCheckAt;
         private float lastBotChatSentAt;
         private float nextBotChatCleanupAt;
@@ -354,6 +363,9 @@ namespace Oxide.Plugins
                 "FurnaceBase"
             };
 
+            [JsonProperty("Bot Identities")]
+            public List<BotIdentityConfig> BotIdentities = new List<BotIdentityConfig>();
+
             [JsonProperty("Maintain Interval Seconds")]
             public float MaintainIntervalSeconds = 20f;
 
@@ -387,18 +399,27 @@ namespace Oxide.Plugins
             public bool FallbackToNormalSpawn = true;
         }
 
+        private class BotIdentityConfig
+        {
+            [JsonProperty("Bot Id")]
+            public string BotId = "";
+
+            [JsonProperty("Display Name")]
+            public string DisplayName = "";
+        }
+
         private class KitSelectionConfig
         {
             [JsonProperty("Default Group")]
             public string DefaultGroup = "default";
 
-            [JsonProperty("Eligible Kit Names")]
+            [JsonProperty("Eligible Kit Names", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> EligibleKitNames = new List<string> { "ak", "lr300", "m16", "mp5" };
 
-            [JsonProperty("Rare High Tier Kit Names")]
+            [JsonProperty("Rare High Tier Kit Names", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> RareHighTierKitNames = new List<string> { "raid" };
 
-            [JsonProperty("Weapon Shortnames")]
+            [JsonProperty("Weapon Shortnames", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> WeaponShortnames = new List<string>
             {
                 "rifle.ak",
@@ -2451,9 +2472,28 @@ namespace Oxide.Plugins
             Config.WriteObject(config, true);
         }
 
+        private static List<string> DistinctConfigValues(IEnumerable<string> values)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var value in values ?? Enumerable.Empty<string>())
+            {
+                var normalized = (value ?? "").Trim();
+
+                if (normalized.Length > 0 && seen.Add(normalized))
+                {
+                    result.Add(normalized);
+                }
+            }
+
+            return result;
+        }
+
         private void Init()
         {
             permission.RegisterPermission(AdminPermission, this);
+            permission.RegisterPermission(IgnorePermission, this);
             LoadData();
             LoadBotChatQuota();
             LoadBehaviorModels();
@@ -2471,7 +2511,7 @@ namespace Oxide.Plugins
 
             if (!config.Enabled)
             {
-                Puts("Raidlands roam bots are disabled. Config and data are ready; no bots will spawn until raidbots.enable is run.");
+                BotLog("Raidlands roam bots are disabled. Config and data are ready; no bots will spawn until raidbots.enable is run.");
                 return;
             }
 
@@ -2623,7 +2663,7 @@ namespace Oxide.Plugins
             scoreboardTimer = timer.Every(Math.Max(15f, config.ScoreboardIntervalSeconds), UpdateScoreboards);
             MaintainPopulation();
             UpdateBotMapMarkers();
-            Puts($"Raidlands roam bots enabled. Target population: {TargetPopulation()}.");
+            BotLog($"Raidlands roam bots enabled. Target population: {TargetPopulation()}.");
         }
 
         private void StopRuntime()
@@ -2778,6 +2818,10 @@ namespace Oxide.Plugins
                 config.Kits.WeaponShortnames = defaults.Kits.WeaponShortnames;
             }
 
+            config.Kits.EligibleKitNames = DistinctConfigValues(config.Kits.EligibleKitNames);
+            config.Kits.RareHighTierKitNames = DistinctConfigValues(config.Kits.RareHighTierKitNames);
+            config.Kits.WeaponShortnames = DistinctConfigValues(config.Kits.WeaponShortnames);
+
             if (string.IsNullOrWhiteSpace(config.Kits.DefaultGroup))
             {
                 config.Kits.DefaultGroup = defaults.Kits.DefaultGroup;
@@ -2853,6 +2897,8 @@ namespace Oxide.Plugins
             {
                 config.BotProfiles = defaults.BotProfiles;
             }
+
+            NormalizeBotIdentityConfig(defaults);
 
             config.MaintainIntervalSeconds = Math.Max(5f, config.MaintainIntervalSeconds);
             config.ScoreboardIntervalSeconds = Math.Max(15f, config.ScoreboardIntervalSeconds);
@@ -3456,6 +3502,115 @@ namespace Oxide.Plugins
             return secrets;
         }
 
+        private void NormalizeBotIdentityConfig(Configuration defaults)
+        {
+            var source = new List<BotIdentityConfig>();
+
+            if (config.BotIdentities != null)
+            {
+                source.AddRange(config.BotIdentities.Where(identity => identity != null));
+            }
+
+            if (source.Count == 0)
+            {
+                source.AddRange((config.BotProfiles ?? defaults.BotProfiles ?? new List<string>())
+                    .Select(name => new BotIdentityConfig
+                    {
+                        BotId = BotKey(name),
+                        DisplayName = CleanName(name)
+                    }));
+            }
+
+            var normalized = new List<BotIdentityConfig>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var identity in source)
+            {
+                var displayName = CleanName(identity.DisplayName);
+                var botId = BotKey(identity.BotId);
+
+                if (string.IsNullOrWhiteSpace(displayName))
+                {
+                    displayName = CleanName(identity.BotId);
+                }
+
+                if (string.IsNullOrWhiteSpace(displayName))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(botId) || string.Equals(botId, "roamer", StringComparison.OrdinalIgnoreCase))
+                {
+                    botId = BotKey(displayName);
+                }
+
+                if (string.IsNullOrWhiteSpace(botId) || !seen.Add(botId))
+                {
+                    continue;
+                }
+
+                normalized.Add(new BotIdentityConfig
+                {
+                    BotId = botId,
+                    DisplayName = displayName
+                });
+            }
+
+            if (normalized.Count == 0)
+            {
+                normalized = (defaults.BotProfiles ?? new List<string>())
+                    .Select(name => new BotIdentityConfig
+                    {
+                        BotId = BotKey(name),
+                        DisplayName = CleanName(name)
+                    })
+                    .Where(identity => !string.IsNullOrWhiteSpace(identity.BotId) && !string.IsNullOrWhiteSpace(identity.DisplayName))
+                    .GroupBy(identity => identity.BotId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+            }
+
+            config.BotIdentities = normalized;
+            config.BotProfiles = normalized.Select(identity => identity.DisplayName).ToList();
+        }
+
+        private IEnumerable<BotIdentityConfig> ConfiguredBotIdentities()
+        {
+            return config?.BotIdentities ?? new List<BotIdentityConfig>();
+        }
+
+        private void SeedConfiguredBotIdentityStats()
+        {
+            if (data?.bots == null)
+            {
+                return;
+            }
+
+            foreach (var identity in ConfiguredBotIdentities())
+            {
+                var botKey = BotKey(identity?.BotId);
+                var displayName = CleanName(identity?.DisplayName);
+
+                if (string.IsNullOrWhiteSpace(displayName))
+                {
+                    displayName = CleanName(identity?.BotId);
+                }
+
+                if (string.IsNullOrWhiteSpace(botKey) || string.IsNullOrWhiteSpace(displayName))
+                {
+                    continue;
+                }
+
+                if (!data.bots.TryGetValue(botKey, out var stats) || stats == null)
+                {
+                    stats = new BotStats { bot_key = botKey };
+                    data.bots[botKey] = stats;
+                }
+
+                stats.display_name = displayName;
+            }
+        }
+
         private void LoadData()
         {
             try
@@ -3482,6 +3637,7 @@ namespace Oxide.Plugins
                 data.bot_clans = new Dictionary<string, BotClanStats>(StringComparer.OrdinalIgnoreCase);
             }
 
+            SeedConfiguredBotIdentityStats();
             SaveData();
         }
 
@@ -3489,6 +3645,7 @@ namespace Oxide.Plugins
         {
             saveTimer?.Destroy();
             saveTimer = null;
+            SeedConfiguredBotIdentityStats();
             Interface.Oxide.DataFileSystem.WriteObject(StatsDataFile, data);
         }
 
@@ -5280,7 +5437,7 @@ namespace Oxide.Plugins
 
             if (bots.Count > 0)
             {
-                Puts($"Trimmed {bots.Count} ambient roam bot{(bots.Count == 1 ? "" : "s")} above target population {target} after {reason}.");
+                BotLog($"Trimmed {bots.Count} ambient roam bot{(bots.Count == 1 ? "" : "s")} above target population {target} after {reason}.");
             }
 
             return bots.Count;
@@ -5377,7 +5534,7 @@ namespace Oxide.Plugins
 
             if (manual && spawned > 0)
             {
-                Puts($"Manually spawned {spawned} roam bot{(spawned == 1 ? "" : "s")}.");
+                BotLog($"Manually spawned {spawned} roam bot{(spawned == 1 ? "" : "s")}.");
             }
 
             return spawned;
@@ -5546,8 +5703,9 @@ namespace Oxide.Plugins
             }
 
             var kit = ShouldApplyKit(bot) && (managedContext == null || managedContext.AllowKitSelection) ? ChooseKit() : null;
-            var displayName = ChooseProfileName();
-            var botKey = BotKey(displayName);
+            var identity = ChooseBotIdentity();
+            var displayName = identity.DisplayName;
+            var botKey = identity.BotId;
             var playerBot = bot as BasePlayer;
             var clan = ClanForTeam(teamId);
             var avatar = ChooseBotAvatar(displayName, teamId);
@@ -6545,23 +6703,37 @@ namespace Oxide.Plugins
             {
                 Vector3 nearest;
 
-                if (navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f)))
+                if (!navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f))
+                    || !IsAcceptableNavmeshPlacement(nearest, position))
                 {
-                    bot.transform.position = nearest;
-                    position = nearest;
-                    bot.SendNetworkUpdateImmediate();
+                    BotLog($"Rejected navigator placement for {ShortPrefab(bot.PrefabName)} near {FormatVector(position)} because its nearest agent-specific navmesh point was missing or did not match the land surface ({PositionDiagnostics(nearest)}).", "navmesh-placement-rejected", 30f);
+                    return false;
                 }
 
-                if (navigator.PlaceOnNavMesh(0f))
-                {
-                    position = bot.transform.position;
-                    return !IsBlockedLandPosition(position);
-                }
-
-                return false;
+                // The entity was created directly at a validated Unity navmesh point. Calling
+                // BaseNavigator.PlaceOnNavMesh here performs a second NavMeshAgent.Warp and is
+                // the source of Rust's "Agent still not on navmesh after a warp" console flood.
+                // Validate the agent-specific surface, but let the spawned NPC initialize there.
+                return !IsBlockedLandPosition(position);
             }
 
             return false;
+        }
+
+        private bool IsAcceptableNavmeshPlacement(Vector3 navPosition, Vector3 requestedPosition)
+        {
+            if (navPosition == Vector3.zero || IsBlockedLandPosition(navPosition))
+            {
+                return false;
+            }
+
+            var maximumVerticalMismatch = Math.Max(
+                1f,
+                Math.Max(config.Spawn.MaximumBelowTerrainTolerance, config.Spawn.MaximumPhysicalSurfaceMismatch));
+
+            return Math.Abs(navPosition.y - TerrainHeight(navPosition)) <= maximumVerticalMismatch
+                && Math.Abs(navPosition.y - requestedPosition.y) <= maximumVerticalMismatch + 0.5f
+                && Distance2D(navPosition, requestedPosition) <= Math.Max(6f, config.Spawn.NavmeshSampleDistance);
         }
 
         private void DespawnBot(BaseCombatEntity bot, string reason)
@@ -6742,9 +6914,9 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (ShouldIgnoreInvisiblePlayer(attacker))
+            if (ShouldIgnoreRealPlayerTarget(attacker))
             {
-                ClearIgnoredPlayerTargetMemory(victim, victimRuntime, attacker, "target_invisible", now);
+                ClearIgnoredPlayerTargetMemory(victim, victimRuntime, attacker, PlayerHasRoamBotIgnorePermission(attacker) ? "target_permission_ignored" : "target_invisible", now);
                 return;
             }
 
@@ -10906,24 +11078,33 @@ namespace Oxide.Plugins
             return $"{error.ToString("0.0", CultureInfo.InvariantCulture)}deg/{(AimWarmupProgress(runtime, now) * 100f).ToString("0", CultureInfo.InvariantCulture)}%";
         }
 
-        private string ChooseProfileName()
+        private BotIdentityConfig ChooseBotIdentity()
         {
             var activeKeys = new HashSet<string>(activeBots.Values.Select(runtime => runtime.BotKey), StringComparer.OrdinalIgnoreCase);
-            var candidates = (config.BotProfiles ?? new List<string>())
-                .Select(name => CleanName(name))
-                .Where(name => !string.IsNullOrWhiteSpace(name))
+            var candidates = ConfiguredBotIdentities()
+                .Select(identity => new BotIdentityConfig
+                {
+                    BotId = BotKey(identity?.BotId),
+                    DisplayName = CleanName(identity?.DisplayName)
+                })
+                .Where(identity => !string.IsNullOrWhiteSpace(identity.BotId) && !string.IsNullOrWhiteSpace(identity.DisplayName))
                 .OrderBy(_ => random.Next())
                 .ToList();
 
             foreach (var candidate in candidates)
             {
-                if (!activeKeys.Contains(BotKey(candidate)))
+                if (!activeKeys.Contains(candidate.BotId))
                 {
                     return candidate;
                 }
             }
 
-            return $"Roamer{random.Next(1000, 9999).ToString(CultureInfo.InvariantCulture)}";
+            var fallbackName = $"Roamer{random.Next(1000, 9999).ToString(CultureInfo.InvariantCulture)}";
+            return new BotIdentityConfig
+            {
+                BotId = BotKey(fallbackName),
+                DisplayName = fallbackName
+            };
         }
 
         private string CleanName(string value)
@@ -12307,6 +12488,7 @@ namespace Oxide.Plugins
                 AddAdminHelpOverlay(container, panel, helpTopic, tab);
             }
 
+            RegisterUiBridge(player, AdminPanelUi);
             CuiHelper.AddUi(player, container);
         }
 
@@ -12794,7 +12976,33 @@ namespace Oxide.Plugins
             {
                 adminPanelViewers.Remove(player.userID);
                 CuiHelper.DestroyUi(player, AdminPanelUi);
+                UnregisterUiBridge(player, AdminPanelUi);
             }
+        }
+
+        private void RegisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("RegisterUi", player, this, rootName, nameof(OnRaidlandsUiBridgeClosed));
+        }
+
+        private void UnregisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("UnregisterUi", player, this, rootName);
+        }
+
+        private void OnRaidlandsUiBridgeClosed(BasePlayer player, string reason)
+        {
+            if (player == null)
+                return;
+
+            adminPanelViewers.Remove(player.userID);
+            CuiHelper.DestroyUi(player, AdminPanelUi);
         }
 
         private void DestroyAdminPanels()
@@ -13345,6 +13553,20 @@ namespace Oxide.Plugins
             }
         }
 
+        private void OnUserPermissionGranted(string id, string permName)
+        {
+            ClearPlayerTargetingAfterIgnorePermissionChange(id, permName, "target_permission_ignored");
+        }
+
+        private void OnUserGroupAdded(string id, string groupName)
+        {
+            var player = FindPlayerForPermissionChange(id);
+            if (PlayerHasRoamBotIgnorePermission(player))
+            {
+                ClearTargetingForIgnoredPlayer(player, "target_permission_ignored");
+            }
+        }
+
         private void OnVanishDisappear(BasePlayer player)
         {
             if (player == null || player.userID == 0UL)
@@ -13749,6 +13971,11 @@ namespace Oxide.Plugins
 
         private VisionResult TargetVisibility(BaseCombatEntity bot, BasePlayer player, float requiredExposedFraction)
         {
+            return TargetVisibility(bot, player, requiredExposedFraction, false);
+        }
+
+        private VisionResult TargetVisibility(BaseCombatEntity bot, BasePlayer player, float requiredExposedFraction, bool strictLineOfFire)
+        {
             var result = new VisionResult();
 
             if (bot == null || player == null || IsInvalidRuntimePosition(bot))
@@ -13767,7 +13994,7 @@ namespace Oxide.Plugins
 
             foreach (var point in points)
             {
-                if (!IsTargetSightLineClear(bot, player, from, point, out var blockReason, out var blockerHits))
+                if (!IsTargetSightLineClear(bot, player, from, point, out var blockReason, out var blockerHits, strictLineOfFire))
                 {
                     if (string.Equals(blockReason, "foliage", StringComparison.OrdinalIgnoreCase))
                     {
@@ -13797,7 +14024,9 @@ namespace Oxide.Plugins
 
             result.ExposedFraction = result.TotalProbePoints <= 0 ? 0f : result.VisibleProbePoints / (float)result.TotalProbePoints;
             var distance = Vector3.Distance(bot.transform.position, player.transform.position);
-            var minimum = distance <= config.AI.CloseAwarenessRadius
+            // Close awareness may help bots notice a nearby player, but it must not
+            // weaken the stricter exposure threshold used to authorize gunfire.
+            var minimum = !strictLineOfFire && distance <= config.AI.CloseAwarenessRadius
                 ? Math.Min(requiredExposedFraction, 0.25f)
                 : requiredExposedFraction;
             result.CanSee = result.VisibleProbePoints > 0 && result.ExposedFraction >= minimum;
@@ -13849,6 +14078,11 @@ namespace Oxide.Plugins
 
         private bool IsTargetSightLineClear(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to, out string blockReason, out int blockerHits)
         {
+            return IsTargetSightLineClear(bot, player, from, to, out blockReason, out blockerHits, false);
+        }
+
+        private bool IsTargetSightLineClear(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to, out string blockReason, out int blockerHits, bool strictLineOfFire)
+        {
             blockReason = "clear";
             blockerHits = 0;
             var mask = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed", "Default", "Tree", "Resource");
@@ -13876,7 +14110,7 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (IsVisionConcealedByFoliage(bot, player, from, to, out blockerHits))
+            if (IsVisionConcealedByFoliage(bot, player, from, to, out blockerHits, strictLineOfFire))
             {
                 blockReason = "foliage";
                 return false;
@@ -13887,10 +14121,15 @@ namespace Oxide.Plugins
 
         private bool IsVisionConcealedByFoliage(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to)
         {
-            return IsVisionConcealedByFoliage(bot, player, from, to, out _);
+            return IsVisionConcealedByFoliage(bot, player, from, to, out _, false);
         }
 
         private bool IsVisionConcealedByFoliage(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to, out int blockerHits)
+        {
+            return IsVisionConcealedByFoliage(bot, player, from, to, out blockerHits, false);
+        }
+
+        private bool IsVisionConcealedByFoliage(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to, out int blockerHits, bool strictLineOfFire)
         {
             blockerHits = 0;
 
@@ -13902,17 +14141,34 @@ namespace Oxide.Plugins
             var delta = to - from;
             var distance = delta.magnitude;
 
-            if (distance <= config.AI.MaximumClearVisionThroughFoliage || distance <= 0.1f)
+            if (distance <= 0.1f)
             {
                 return false;
             }
 
+            // Awareness keeps the configured short-range grace for cost and responsiveness.
+            // The final line-of-fire check never gets that bypass.
+            if (!strictLineOfFire && distance <= config.AI.MaximumClearVisionThroughFoliage)
+            {
+                return false;
+            }
+
+            // Strict fire authorization checks physical tree/bush colliders at every distance.
             var blockers = 0;
             var mask = FoliageVisionMask();
+            var checkRadius = strictLineOfFire
+                ? Math.Max(0.9f, config.AI.FoliageVisionCheckRadius)
+                : config.AI.FoliageVisionCheckRadius;
+            var hitsRequired = strictLineOfFire
+                ? 1
+                : Math.Max(1, config.AI.FoliageHitsToBlockVision);
 
             if (mask != 0)
             {
-                var hits = Physics.SphereCastAll(from, config.AI.FoliageVisionCheckRadius, delta.normalized, distance, mask, QueryTriggerInteraction.Ignore);
+                var triggerMode = strictLineOfFire
+                    ? QueryTriggerInteraction.Collide
+                    : QueryTriggerInteraction.Ignore;
+                var hits = Physics.SphereCastAll(from, checkRadius, delta.normalized, distance, mask, triggerMode);
                 var seenColliders = new HashSet<int>();
 
                 foreach (var foliageHit in hits)
@@ -13930,16 +14186,41 @@ namespace Oxide.Plugins
                     blockers++;
                     blockerHits = blockers;
 
-                    if (blockers >= config.AI.FoliageHitsToBlockVision)
+                    if (blockers >= hitsRequired)
                     {
                         return true;
                     }
                 }
             }
 
-            var terrainBlockers = FoliageTerrainSampleHits(from, to, distance);
+            // Terrain splat sampling is a fallback for decorative bushes/forest detail
+            // that has no useful physics collider. Shooting uses a shorter grace distance
+            // and denser sampling than awareness.
+            var terrainGraceDistance = strictLineOfFire
+                ? Math.Min(10f, config.AI.MaximumClearVisionThroughFoliage)
+                : config.AI.MaximumClearVisionThroughFoliage;
+
+            if (distance <= terrainGraceDistance)
+            {
+                return false;
+            }
+
+            var terrainStep = strictLineOfFire
+                ? Math.Min(4f, config.AI.FoliageTerrainSampleStep)
+                : config.AI.FoliageTerrainSampleStep;
+            var terrainHitsRequired = strictLineOfFire
+                ? Clamp(config.AI.FoliageTerrainSamplesToBlockVision, 2, 3)
+                : Math.Max(1, config.AI.FoliageTerrainSamplesToBlockVision);
+            var terrainBlockers = FoliageTerrainSampleHits(
+                from,
+                to,
+                distance,
+                terrainGraceDistance,
+                terrainStep,
+                terrainHitsRequired);
+
             blockerHits = blockers + terrainBlockers;
-            return terrainBlockers >= config.AI.FoliageTerrainSamplesToBlockVision;
+            return terrainBlockers >= terrainHitsRequired;
         }
 
         private int FoliageVisionMask()
@@ -13959,34 +14240,30 @@ namespace Oxide.Plugins
             return mask;
         }
 
-        private int FoliageTerrainSampleHits(Vector3 from, Vector3 to, float distance)
+        private int FoliageTerrainSampleHits(Vector3 from, Vector3 to, float distance, float clearDistance, float configuredStep, int requiredHits)
         {
             if (!config.AI.FoliageTerrainSampling || TerrainMeta.SplatMap == null)
             {
                 return 0;
             }
 
-            var step = Math.Max(3f, config.AI.FoliageTerrainSampleStep);
-            var firstSampleDistance = Math.Max(config.AI.MaximumClearVisionThroughFoliage, step);
-            var sampleCount = Mathf.Min(48, Mathf.FloorToInt((distance - firstSampleDistance) / step));
+            var step = Math.Max(3f, configuredStep);
+            var firstSampleDistance = Math.Max(step, clearDistance);
 
-            if (sampleCount <= 0)
+            if (firstSampleDistance >= distance - 1f)
             {
                 return 0;
             }
 
             var direction = (to - from).normalized;
             var hits = 0;
+            var samples = 0;
 
-            for (var i = 0; i < sampleCount; i++)
+            // Start at the first valid sample instead of firstSampleDistance + step.
+            // The old loop skipped one sample and often never reached its threshold.
+            for (var sampleDistance = firstSampleDistance; sampleDistance < distance - 1f && samples < 48; sampleDistance += step)
             {
-                var sampleDistance = firstSampleDistance + step * (i + 1);
-
-                if (sampleDistance >= distance - 1f)
-                {
-                    break;
-                }
-
+                samples++;
                 var sample = from + direction * sampleDistance;
                 sample.y = TerrainHeight(sample);
 
@@ -13997,7 +14274,7 @@ namespace Oxide.Plugins
 
                 hits++;
 
-                if (hits >= config.AI.FoliageTerrainSamplesToBlockVision)
+                if (hits >= requiredHits)
                 {
                     return hits;
                 }
@@ -16796,7 +17073,7 @@ namespace Oxide.Plugins
 
             if (pruned && !string.IsNullOrWhiteSpace(message))
             {
-                Puts(message);
+                BotLog(message);
             }
 
             return pruned;
@@ -17100,19 +17377,6 @@ namespace Oxide.Plugins
 
         private void PrepareNpcBody(BaseCombatEntity bot)
         {
-            var npc = bot as NPCPlayer;
-
-            if (npc != null)
-            {
-                try
-                {
-                    npc.Resume();
-                }
-                catch
-                {
-                }
-            }
-
             var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
             SuppressScientistBodyAudio(bot);
 
@@ -17331,8 +17595,6 @@ namespace Oxide.Plugins
 
             try
             {
-                navigator.SetNavMeshEnabled(true);
-                navigator.Resume();
                 navigator.CanPathFindToChaseTargetIfNoMovePoint = true;
                 navigator.CanUseRandomMovePointIfNonFound = true;
                 navigator.FaceMoveTowardsTarget = true;
@@ -20811,7 +21073,8 @@ namespace Oxide.Plugins
                 return BlockFire(runtime, "target_in_base");
             }
 
-            var visibility = TargetVisibility(bot, target, config.AI.MinimumExposedTargetFractionToShoot);
+            var visibility = TargetVisibility(bot, target, config.AI.MinimumExposedTargetFractionToShoot, true);
+            runtime.LastSightReason = DescribeVisionResult(visibility);
 
             if (!visibility.CanSee)
             {
@@ -21600,7 +21863,7 @@ namespace Oxide.Plugins
 
         private bool ShouldIgnoreRealPlayerTarget(BasePlayer player)
         {
-            return IsRealPlayer(player) && (ShouldIgnoreSafeZonePlayer(player) || ShouldIgnoreInvisiblePlayer(player));
+            return IsRealPlayer(player) && (ShouldIgnoreSafeZonePlayer(player) || ShouldIgnoreInvisiblePlayer(player) || PlayerHasRoamBotIgnorePermission(player));
         }
 
         private bool ShouldIgnoreInvisiblePlayer(BasePlayer player)
@@ -21611,6 +21874,40 @@ namespace Oxide.Plugins
             }
 
             return player.isInvisible || vanishedInvisiblePlayers.Contains(player.userID);
+        }
+
+        private bool PlayerHasRoamBotIgnorePermission(BasePlayer player)
+        {
+            return IsRealPlayer(player) && permission.UserHasPermission(player.UserIDString, IgnorePermission);
+        }
+
+        private void ClearPlayerTargetingAfterIgnorePermissionChange(string id, string permName, string reason)
+        {
+            if (!string.Equals(permName, IgnorePermission, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var player = FindPlayerForPermissionChange(id);
+            if (player != null)
+            {
+                ClearTargetingForIgnoredPlayer(player, reason);
+            }
+        }
+
+        private BasePlayer FindPlayerForPermissionChange(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return null;
+            }
+
+            if (ulong.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var userId))
+            {
+                return BasePlayer.FindByID(userId) ?? BasePlayer.FindAwakeOrSleeping(id);
+            }
+
+            return BasePlayer.FindAwakeOrSleeping(id);
         }
 
         private BasePlayer IgnoredInvisibleMemoryPlayer(BotRuntime runtime)
@@ -24746,7 +25043,7 @@ namespace Oxide.Plugins
 
             if (ConsoleLogDue($"debug:{key}", cooldown))
             {
-                Puts(message);
+                BotLog(message);
             }
         }
 
@@ -24761,7 +25058,7 @@ namespace Oxide.Plugins
 
             if (ConsoleLogDue($"debug-warn:{key}", cooldown))
             {
-                PrintWarning(message);
+                BotLog($"WARNING: {message}");
             }
         }
 
@@ -24771,7 +25068,7 @@ namespace Oxide.Plugins
 
             if (ConsoleLogDue($"info:{key}", cooldown))
             {
-                Puts(message);
+                BotLog(message);
             }
         }
 
@@ -24781,7 +25078,80 @@ namespace Oxide.Plugins
 
             if (ConsoleLogDue($"warn:{key}", cooldown))
             {
-                PrintWarning(message);
+                BotLog($"WARNING: {message}");
+            }
+        }
+
+        private void BotLog(string message, string throttleKey = "", float cooldownSeconds = 0f)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(throttleKey) && !ConsoleLogDue($"file:{throttleKey}", cooldownSeconds))
+            {
+                return;
+            }
+
+            PrunePluginLogsIfDue();
+            LogToFile(PluginLogFile, message, this, false);
+        }
+
+        private void PrunePluginLogsIfDue()
+        {
+            var now = Time.realtimeSinceStartup;
+            if (now < nextPluginLogPruneAt)
+            {
+                return;
+            }
+
+            nextPluginLogPruneAt = now + 60f;
+
+            try
+            {
+                var logDirectory = Interface.Oxide.LogDirectory;
+                if (string.IsNullOrWhiteSpace(logDirectory) || !Directory.Exists(logDirectory))
+                {
+                    return;
+                }
+
+                var cutoffUtc = DateTime.UtcNow.AddDays(-PluginLogRetentionDays);
+                foreach (var path in Directory.GetFiles(logDirectory, PluginLogFile + "*.txt"))
+                {
+                    var file = new FileInfo(path);
+                    if (file.LastWriteTimeUtc < cutoffUtc)
+                    {
+                        file.Delete();
+                        continue;
+                    }
+
+                    if (file.Length <= PluginLogMaximumBytes)
+                    {
+                        continue;
+                    }
+
+                    var lines = File.ReadAllLines(path);
+                    var retained = new List<string>();
+                    var retainedCharacters = 0;
+
+                    for (var index = lines.Length - 1; index >= 0 && retainedCharacters < PluginLogRetainedCharacters; index--)
+                    {
+                        retained.Add(lines[index]);
+                        retainedCharacters += lines[index].Length + Environment.NewLine.Length;
+                    }
+
+                    retained.Reverse();
+                    retained.Insert(0, $"[{DateTime.UtcNow:O}] Older RaidlandsRoamBots log entries were pruned automatically after the file exceeded {PluginLogMaximumBytes / 1024L / 1024L} MB.");
+                    File.WriteAllLines(path, retained);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ConsoleLogDue("plugin-log-prune-failed", 300f))
+                {
+                    PrintWarning($"Could not prune dedicated RaidlandsRoamBots logs: {ex.GetType().Name}: {ex.Message}");
+                }
             }
         }
 

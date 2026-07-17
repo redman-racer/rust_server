@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("SharedDoors", "dbteku", "2.0.1")]
+    [Info("SharedDoors", "dbteku/Raidlands", "2.0.2")]
     [Description("Making sharing doors easier.")]
     public class SharedDoors : RustPlugin
     {
@@ -118,14 +118,14 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool CanUseLockedEntity(BasePlayer player, BaseLock door)
+        private object CanUseLockedEntity(BasePlayer player, BaseLock door)
         {
             IPlayer iPlayer = covalence.Players.FindPlayerById(player.userID.ToString());
             bool canUse = false;
             canUse = (player.IsAdmin && holders.IsAKeyMaster(player.userID.ToString()))
             || (iPlayer.HasPermission(MASTER_PERM) && holders.IsAKeyMaster(player.userID.ToString()))
             || new DoorAuthorizer(door, player).CanOpen();
-            return canUse;
+            return canUse ? (object)true : null;
         }
         #region Commands
         [ChatCommand("sd")]
@@ -258,7 +258,10 @@ namespace Oxide.Plugins
                     }
                 }
 
-                PlaySound(canUse, door, player);
+                if (canUse)
+                {
+                    PlaySound(door, player);
+                }
                 return canUse;
             }
 
@@ -287,16 +290,9 @@ namespace Oxide.Plugins
                 return canUse;
             }
 
-            private void PlaySound(bool canUse, CodeLock door, BasePlayer player)
+            private void PlaySound(CodeLock door, BasePlayer player)
             {
-                if (canUse)
-                {
-                    Effect.server.Run(door.effectUnlocked.resourcePath, player.transform.position, Vector3.zero, null, false);
-                }
-                else
-                {
-                    Effect.server.Run(door.effectDenied.resourcePath, player.transform.position, Vector3.zero, null, false);
-                }
+                Effect.server.Run(door.effectUnlocked.resourcePath, player.transform.position, Vector3.zero, null, false);
             }
         }
 

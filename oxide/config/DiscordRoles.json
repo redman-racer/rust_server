@@ -1,5 +1,5 @@
 {
-  "Discord Bot Token": "MTUyMTEwNTg3OTQ3NzI1NjIzNA.Gh7o5s.X0ehUFqJItK8oLhtzsOlZchD_Ozq1hUGcLFoCw",
+  "Discord Bot Token": "${DISCORD_BOT_TOKEN}",
   "Discord Server ID (Optional if bot only in 1 guild)": "",
   "Sync Nicknames": false,
   "Sync Clan Tag": false,

@@ -1,11 +1,11 @@
 {
-  "ConfigVersion": 36,
+  "ConfigVersion": 38,
   "General": {
     "RequireBinocularPing": true,
     "MaxPingAgeSeconds": 20.0,
     "RequireLineOfSightToPing": true,
     "AllowFallbackRaycastTargeting": false,
-    "MaxCallRange": 250.0,
+    "MaxCallRange": 400.0,
     "MinimumDistanceFromCaller": 25.0,
     "BlockSafeZones": true,
     "SafeZoneBlockRadius": 150.0,
@@ -155,6 +155,24 @@
     "Deployables": 1.0,
     "Turrets": 1.0
   },
+  "BasePayloadDamageMultipliers": {
+    "bee_grenade": 1.0,
+    "bee_catapult_bomb": 1.0,
+    "beancan": 1.0,
+    "f1_grenade": 1.0,
+    "he_40mm": 1.0,
+    "molotov": 1.0,
+    "firebomb": 1.0,
+    "propane_bomb": 1.0,
+    "rocket": 1.0,
+    "hv_rocket": 1.0,
+    "incendiary_rocket": 1.0,
+    "mlrs_rocket": 10.0,
+    "homing_missile": 1.0,
+    "bradley_longbarrel_burst": 1.0,
+    "mortar_he_payload": 1.0,
+    "mortar_frag_payload": 1.0
+  },
   "LootDistribution": {
     "Enabled": true,
     "ContainerRules": {
@@ -182,6 +200,15 @@
     "SendPlayerCancels": true,
     "SendValidationFailures": false
   },
+  "WebsiteReplayEvents": {
+    "Enabled": true,
+    "ApiBaseUrl": "https://raidlands.net",
+    "ServerId": "raidlands-main",
+    "SharedSecret": "${WEBSITE_VIP_SHARED_SECRET}",
+    "WipeKey": "",
+    "RequestTimeoutMilliseconds": 20000,
+    "AllowInsecureHttpForDevelopment": false
+  },
   "StrikeDefinitions": {
     "bee_swarm_drone": {
       "Enabled": true,
@@ -192,8 +219,15 @@
       ],
       "Delivery": "drone",
       "Payload": "bee_grenade",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "bee_swarm_drone",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "bee_swarm_drone",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 1,
       "RPCost": 50,
       "PermissionRequired": "portableairstrikes.use.bee",
@@ -236,8 +270,15 @@
       ],
       "Delivery": "cargo_plane_jet",
       "Payload": "bee_catapult_bomb",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "bee_swarm_heavy",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "bee_swarm_heavy",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 2,
       "RPCost": 175,
       "PermissionRequired": "portableairstrikes.use.bee",
@@ -280,8 +321,15 @@
       ],
       "Delivery": "drone",
       "Payload": "beancan",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "beancan_drop",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "beancan_drop",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 1,
       "RPCost": 75,
       "PermissionRequired": "portableairstrikes.use.grenade",
@@ -324,8 +372,15 @@
       ],
       "Delivery": "drone",
       "Payload": "f1_grenade",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "bee_swarm_heavy",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "bee_swarm_heavy",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 2,
       "RPCost": 125,
       "PermissionRequired": "portableairstrikes.use.grenade",
@@ -368,8 +423,15 @@
       ],
       "Delivery": "drone",
       "Payload": "smoke",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "smoke_screen",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "smoke_screen",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 1,
       "RPCost": 50,
       "PermissionRequired": "portableairstrikes.use.utility",
@@ -412,8 +474,15 @@
       ],
       "Delivery": "drone",
       "Payload": "flashbang",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "flash_breach",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "flash_breach",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 1,
       "RPCost": 100,
       "PermissionRequired": "portableairstrikes.use.utility",
@@ -456,8 +525,15 @@
       ],
       "Delivery": "drone",
       "Payload": "he_40mm",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "he_40mm_micro",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "he_40mm_micro",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 2,
       "RPCost": 250,
       "PermissionRequired": "portableairstrikes.use.40mm",
@@ -500,8 +576,15 @@
       ],
       "Delivery": "drone",
       "Payload": "molotov",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "molotov_drop",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "molotov_drop",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 1,
       "RPCost": 125,
       "PermissionRequired": "portableairstrikes.use.fire",
@@ -544,8 +627,15 @@
       ],
       "Delivery": "cargo_plane_jet",
       "Payload": "firebomb",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "firebomb_run",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "firebomb_run",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 3,
       "RPCost": 350,
       "PermissionRequired": "portableairstrikes.use.fire",
@@ -588,8 +678,15 @@
       ],
       "Delivery": "cargo_plane_jet",
       "Payload": "propane_bomb",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "propane_bomb_drop",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "propane_bomb_drop",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 3,
       "RPCost": 700,
       "PermissionRequired": "portableairstrikes.use.propane",
@@ -632,10 +729,10 @@
       ],
       "Delivery": "attack_heli",
       "Payload": "hv_rocket",
-      "VisualProfileId": "attack_heli_rocket_run",
+      "VisualProfileId": "",
       "StrikeProfiles": [
         {
-          "ProfileId": "attack_heli_rocket_run",
+          "ProfileId": "hv_rocket_run",
           "StartDelaySeconds": 0.0,
           "Enabled": true,
           "PayloadCountLimit": 0
@@ -683,10 +780,10 @@
       ],
       "Delivery": "attack_heli",
       "Payload": "rocket",
-      "VisualProfileId": "attack_heli_rocket_run",
+      "VisualProfileId": "rocket_run",
       "StrikeProfiles": [
         {
-          "ProfileId": "attack_heli_rocket_run",
+          "ProfileId": "rocket_run",
           "StartDelaySeconds": 0.0,
           "Enabled": true,
           "PayloadCountLimit": 0
@@ -734,10 +831,10 @@
       ],
       "Delivery": "attack_heli",
       "Payload": "incendiary_rocket",
-      "VisualProfileId": "attack_heli_rocket_run",
+      "VisualProfileId": "incendiary_rocket_run",
       "StrikeProfiles": [
         {
-          "ProfileId": "attack_heli_rocket_run",
+          "ProfileId": "incendiary_rocket_run",
           "StartDelaySeconds": 0.0,
           "Enabled": true,
           "PayloadCountLimit": 0
@@ -777,7 +874,7 @@
       "DamageScales": {}
     },
     "mortar_he": {
-      "Enabled": true,
+      "Enabled": false,
       "DisplayName": "Mortar HE Mission",
       "TargetType": "ground_ping",
       "AcceptedTargetTypes": [
@@ -821,7 +918,7 @@
       "DamageScales": {}
     },
     "mortar_frag": {
-      "Enabled": true,
+      "Enabled": false,
       "DisplayName": "Mortar Frag Mission",
       "TargetType": "ground_ping",
       "AcceptedTargetTypes": [
@@ -873,8 +970,21 @@
       ],
       "Delivery": "a10_gun_run",
       "Payload": "bradley_longbarrel_burst",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "a10_strafe_run",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "a10_strafe_run",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        },
+        {
+          "ProfileId": "a10_strafe",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 3,
       "RPCost": 1000,
       "PermissionRequired": "portableairstrikes.use.a10",
@@ -922,8 +1032,15 @@
       ],
       "Delivery": "attack_heli",
       "Payload": "homing_missile",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "homing_heli",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "homing_heli",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 3,
       "RPCost": 800,
       "PermissionRequired": "portableairstrikes.use.homing.heli",
@@ -966,8 +1083,15 @@
       ],
       "Delivery": "cargo_plane_jet",
       "Payload": "homing_missile",
-      "VisualProfileId": "",
-      "StrikeProfiles": [],
+      "VisualProfileId": "homing_jet",
+      "StrikeProfiles": [
+        {
+          "ProfileId": "homing_jet",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        }
+      ],
       "Tier": 4,
       "RPCost": 1500,
       "PermissionRequired": "portableairstrikes.use.homing.jet",
@@ -1107,13 +1231,31 @@
       ],
       "Delivery": "drone",
       "Payload": "beancan",
-      "VisualProfileId": "jet_mlrs_run",
+      "VisualProfileId": "jet_nuke",
       "StrikeProfiles": [
+        {
+          "ProfileId": "jet_nuke",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        },
+        {
+          "ProfileId": "jet_nuke_run",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        },
+        {
+          "ProfileId": "mini_mlrs",
+          "StartDelaySeconds": 0.0,
+          "Enabled": true,
+          "PayloadCountLimit": 0
+        },
         {
           "ProfileId": "jet_mlrs_run",
           "StartDelaySeconds": 0.0,
           "Enabled": true,
-          "PayloadCountLimit": 12
+          "PayloadCountLimit": 0
         }
       ],
       "Tier": 4,

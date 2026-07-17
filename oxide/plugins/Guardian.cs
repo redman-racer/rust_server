@@ -15,13 +15,20 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Guardian", "WhiteDragon", "1.8.0")]
+    [Info("Guardian", "WhiteDragon/Raidlands", "1.8.3")]
     [Description("Protects the server from various annoyances, cheats, and macro attacks.")]
     class Guardian : CovalencePlugin
     {
         [PluginReference] private Plugin Friends, PlaytimeTracker;
 
         private static Guardian _instance;
+
+        private static bool IsFiniteVector(Vector3 value)
+        {
+            return !float.IsNaN(value.x) && !float.IsInfinity(value.x)
+                && !float.IsNaN(value.y) && !float.IsInfinity(value.y)
+                && !float.IsNaN(value.z) && !float.IsInfinity(value.z);
+        }
 
         #region _action_queue_
 
@@ -266,23 +273,70 @@ namespace Oxide.Plugins
                 {
                     var player = info.InitiatorPlayer;
 
+                    // HitInfo is pooled after OnEntityTakeDamage returns. Snapshot
+                    // every value used by the delayed check before NextTick runs.
+                    var hitPosition = info.HitPositionWorld;
+                    var projectileVelocity = info.ProjectileVelocity;
+                    var boneArea = info.boneArea;
+                    var projectileId = info.ProjectileID;
+
+                    // HitPositionWorld may also be local-space (0,0,0). A valid
+                    // projectile hit must be close to the entity it damaged.
+                    var targetWorldPosition = entity.transform.position;
+                    if(!IsFiniteVector(hitPosition) ||
+                       (hitPosition - targetWorldPosition).sqrMagnitude > 625.0f)
+                    {
+                        hitPosition = targetWorldPosition;
+                    }
+
                     if(Permissions.Bypass.AntiCheat.Aim(player.userID))
                     {
                         return;
                     }
 
-                    var weapon = Weapon.Get(player.userID, info.ProjectileID);
+                    var weapon = Weapon.Get(player.userID, projectileId);
 
                     if(weapon == null)
                     {
                         return;
                     }
 
+                    // Prefer the projectile origin recorded by the Rust server for
+                    // this exact projectile. Validate it against the player's world
+                    // transform so a local-space (0,0,0) value can never be accepted.
+                    var playerWorldPosition = player.transform.position;
+                    var shotPosition = weapon.Position;
+                    BasePlayer.FiredProjectile serverProjectile;
+
+                    if(player.firedProjectiles.TryGetValue(projectileId, out serverProjectile) &&
+                       IsFiniteVector(serverProjectile.initialPosition) &&
+                       (serverProjectile.initialPosition - playerWorldPosition).sqrMagnitude <= 100.0f)
+                    {
+                        shotPosition = serverProjectile.initialPosition;
+
+                        if(IsFiniteVector(serverProjectile.initialVelocity) &&
+                           serverProjectile.initialVelocity.sqrMagnitude > 0.01f)
+                        {
+                            projectileVelocity = serverProjectile.initialVelocity;
+                        }
+                    }
+
+                    if(!IsFiniteVector(shotPosition) ||
+                       (shotPosition - playerWorldPosition).sqrMagnitude > 100.0f)
+                    {
+                        shotPosition = playerWorldPosition + new Vector3(0.0f, 1.5f, 0.0f);
+                    }
+
                     _instance.NextTick(() =>
                     {
-                        var position = info.HitPositionWorld;
+                        if(player == null || player.IsDestroyed || !IsFiniteVector(hitPosition) || !IsFiniteVector(projectileVelocity))
+                        {
+                            return;
+                        }
 
-                        var distance = Vector3.Distance(position, weapon.Position);
+                        var position = hitPosition;
+
+                        var distance = Vector3.Distance(position, shotPosition);
 
                         bool can_trigger = false, hit_location = true, pvp = false;
 
@@ -315,13 +369,13 @@ namespace Oxide.Plugins
 
                         if(hit_location)
                         {
-                            if(info.boneArea == 0)
+                            if(boneArea == 0)
                             {
                                 history.repeat.Decrement();
                             }
                             else
                             {
-                                if(info.boneArea == history.boneArea)
+                                if(boneArea == history.boneArea)
                                 {
                                     history.repeat.Increment();
                                 }
@@ -331,7 +385,7 @@ namespace Oxide.Plugins
                                 }
                             }
 
-                            history.boneArea = info.boneArea;
+                            history.boneArea = boneArea;
 
                             if(pvp && (distance > pvp_distance))
                             {
@@ -350,7 +404,7 @@ namespace Oxide.Plugins
 
                         var range_variance = 1.0f - (distance / (weapon.Range * range_modifier));
 
-                        var angle = Vector3.Angle(weapon.AimAngle, info.ProjectileVelocity);
+                        var angle = Vector3.Angle(weapon.AimAngle, projectileVelocity);
 
                         var angle_drop_off = 12.0f / (4.0f - (weapon.Range / weapon.Velocity));
 
@@ -364,7 +418,7 @@ namespace Oxide.Plugins
 
                         if(hit_location && (distance > aim_distance) && (can_trigger || (angle > spin_angle)))
                         {
-                            history.hits.Add(info.ProjectileID);
+                            history.hits.Add(projectileId);
 
                             if(range_variance < sensitivity_lo)
                             {
@@ -382,7 +436,7 @@ namespace Oxide.Plugins
                             {
                                 BasePlayer.FiredProjectile projectile;
 
-                                if(player.firedProjectiles.TryGetValue(info.ProjectileID, out projectile))
+                                if(player.firedProjectiles.TryGetValue(projectileId, out projectile))
                                 {
                                     deflection = (projectile.ricochets > 0);
                                 }
@@ -397,7 +451,7 @@ namespace Oxide.Plugins
 
                                     foreach(var deflector in deflectors)
                                     {
-                                        if(deflector.SqrDistance(weapon.Position) < d_squared)
+                                        if(deflector.SqrDistance(shotPosition) < d_squared)
                                         {
                                             deflection = true;
 
@@ -444,7 +498,7 @@ namespace Oxide.Plugins
                             }
                         }
 
-                        var bodypart = Text.BodyPart(info.boneArea);
+                        var bodypart = Text.BodyPart(boneArea);
 
                         if(config.Log.AntiCheat.Aim)
                         {
@@ -463,15 +517,15 @@ namespace Oxide.Plugins
                             });
                         }
 
-                        Projectile.Log.SetAim(player.userID, info.ProjectileID, angle_variance, pvp_variance, range_variance, pvp, deflection);
+                        Projectile.Log.SetAim(player.userID, projectileId, angle_variance, pvp_variance, range_variance, pvp, deflection);
 
-                        Projectile.Log.SetVictim(player.userID, info.ProjectileID, target);
+                        Projectile.Log.SetVictim(player.userID, projectileId, target);
 
-                        Projectile.Log.SetHit(player.userID, info.ProjectileID, distance, info.boneArea);
+                        Projectile.Log.SetHit(player.userID, projectileId, distance, boneArea);
 
                         if(config.AntiCheat.Aim.Enabled && (violations > 0))
                         {
-                            Projectile.Log.SetAimViolations(player.userID, info.ProjectileID, violations);
+                            Projectile.Log.SetAimViolations(player.userID, projectileId, violations);
 
                             var hit_angle = angle.ToString("F1");
                             var hit_distance = distance.ToString("F1");
@@ -488,11 +542,11 @@ namespace Oxide.Plugins
                                 { "headshot_percent", history.headshot.Percent().ToString() },
                                 { "hip_fire", (weapon.Zoom == 1.0f).ToString() },
                                 { "hit_angle", hit_angle },
-                                { "hit_area", Text.BodyPart(info.boneArea, "en") },
+                                { "hit_area", Text.BodyPart(boneArea, "en") },
                                 { "hit_distance", hit_distance },
                                 { "hit_percent", history.hit.Percent().ToString() },
                                 { "movement_speed", weapon.Speed.ToString("F1") },
-                                { "projectile_id", info.ProjectileID.ToString() },
+                                { "projectile_id", projectileId.ToString() },
                                 { "ricochet", deflection.ToString() },
                                 { "swing_angle", "0.0" },
                                 { "violation_id", weapon.Fired.Ticks.ToString() },
@@ -12405,6 +12459,45 @@ namespace Oxide.Plugins
                 }
             }
             public static Weapon Get(ulong userid, int projectileid) => Projectile.Weapon(userid, projectileid);
+
+            private const float MaximumShotOriginOffsetSquared = 100.0f;
+
+            private static bool IsValidShotOrigin(Vector3 candidate, Vector3 playerWorldPosition)
+            {
+                return IsFiniteVector(candidate)
+                    && (candidate - playerWorldPosition).sqrMagnitude <= MaximumShotOriginOffsetSquared;
+            }
+
+            private static Vector3 ResolveShotOrigin(BaseProjectile weaponFired, BasePlayer player, ProtoBuf.ProjectileShoot fired)
+            {
+                // PlayerEyes.position and MuzzlePoint can be local-space (0,0,0)
+                // on current Rust builds. Validate candidates against the player's
+                // authoritative world transform instead.
+                var playerWorldPosition = player.transform.position;
+                var fallbackPosition = playerWorldPosition + new Vector3(0.0f, 1.5f, 0.0f);
+
+                if((fired?.projectiles?.Count ?? 0) > 0)
+                {
+                    var reportedPosition = fired.projectiles[0].startPos;
+                    if(IsValidShotOrigin(reportedPosition, playerWorldPosition))
+                    {
+                        return reportedPosition;
+                    }
+                }
+
+                var muzzleTransform = weaponFired.MuzzlePoint?.transform;
+                if(muzzleTransform != null)
+                {
+                    var muzzlePosition = muzzleTransform.position;
+                    if(IsValidShotOrigin(muzzlePosition, playerWorldPosition))
+                    {
+                        return muzzlePosition;
+                    }
+                }
+
+                return fallbackPosition;
+            }
+
             public static Weapon Get(BaseProjectile weapon_fired, BasePlayer player, ProtoBuf.ProjectileShoot fired = null)
             {
                 var item = weapon_fired.GetItem();
@@ -12429,7 +12522,7 @@ namespace Oxide.Plugins
 
                 var spread = (ammo.itemid == ShellBuckshot) || (ammo.itemid == ShellHandmade);
 
-                var position = weapon_fired.MuzzlePoint?.transform?.position ?? weapon_fired.transform?.position ?? player.transform.position;
+                var position = ResolveShotOrigin(weapon_fired, player, fired);
 
                 var weapon = Get();
 

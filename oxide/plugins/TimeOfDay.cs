@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("TimeOfDay", "FuJiCuRa", "2.3.4")]
+    [Info("TimeOfDay", "FuJiCuRa/Raidlands", "2.3.5")]
     [Description("Does alter day and night duration.")]
     public class TimeOfDay : RustPlugin
     {
@@ -32,6 +32,13 @@ namespace Oxide.Plugins
 		bool logAutoSkipConsole;
 		bool freezeTimeOnload;
 		float timeToFreeze;
+		bool enableNightCycleSchedule;
+		bool skipUnscheduledNights;
+		int daysBetweenNightCycles;
+		int scheduledNightLength;
+		int nightCycleDayCounter;
+		float skippedNightCutoffHour;
+		float dayStartHour;
 		
 		object GetConfig(string menu, string datavalue, object defaultValue)
 		{
@@ -62,6 +69,16 @@ namespace Oxide.Plugins
 			autoSkipNight = System.Convert.ToBoolean(GetConfig("Settings", "autoSkipNight", false));
 			autoSkipDay = System.Convert.ToBoolean(GetConfig("Settings", "autoSkipDay", false));
 			logAutoSkipConsole = System.Convert.ToBoolean(GetConfig("Settings", "logAutoSkipConsole", true));
+			enableNightCycleSchedule = System.Convert.ToBoolean(GetConfig("Settings", "enableNightCycleSchedule", true));
+			skipUnscheduledNights = System.Convert.ToBoolean(GetConfig("Settings", "skipUnscheduledNights", true));
+			daysBetweenNightCycles = System.Convert.ToInt32(GetConfig("Settings", "daysBetweenNightCycles", 3));
+			scheduledNightLength = System.Convert.ToInt32(GetConfig("Settings", "scheduledNightLength", 2));
+			skippedNightCutoffHour = System.Convert.ToSingle(GetConfig("Settings", "skippedNightCutoffHour", 17.0f));
+			dayStartHour = System.Convert.ToSingle(GetConfig("Settings", "dayStartHour", 9.0f));
+			if (daysBetweenNightCycles < 1) daysBetweenNightCycles = 1;
+			if (scheduledNightLength < 1) scheduledNightLength = 1;
+			skippedNightCutoffHour = Mathf.Clamp(skippedNightCutoffHour, 0.0f, 23.9f);
+			dayStartHour = Mathf.Clamp(dayStartHour, 0.0f, 23.9f);
 			
 			presetDay =  System.Convert.ToInt32(GetConfig("DatePreset", "presetDay", 1));
 			presetMonth =  System.Convert.ToInt32(GetConfig("DatePreset", "presetMonth", 1));
@@ -161,11 +178,37 @@ namespace Oxide.Plugins
 				OnSunrise();
 				return;
 			}
+			if (TOD_Sky.Instance.Cycle.Hour >= skippedNightCutoffHour && activatedDay && ShouldSkipNextScheduledNight())
+			{
+				SkipScheduledNight();
+				return;
+			}
 			if ((TOD_Sky.Instance.Cycle.Hour > TOD_Sky.Instance.SunsetTime || TOD_Sky.Instance.Cycle.Hour < TOD_Sky.Instance.SunriseTime) && activatedDay)
 			{
 				OnSunset();
 				return;
 			}
+		}
+
+		bool ShouldSkipNextScheduledNight()
+		{
+			if (!enableNightCycleSchedule || !skipUnscheduledNights) return false;
+			return (nightCycleDayCounter + 1) % daysBetweenNightCycles != 0;
+		}
+
+		void SkipNight(string logMessage)
+		{
+			float timeToAdd = (24 - TOD_Sky.Instance.Cycle.Hour) + dayStartHour;
+			TOD_Sky.Instance.Cycle.Hour += timeToAdd;
+			if (logAutoSkipConsole)
+				Puts(logMessage);
+			OnSunrise();
+		}
+
+		void SkipScheduledNight()
+		{
+			nightCycleDayCounter++;
+			SkipNight($"Nighttime autoskipped before darkness ({nightCycleDayCounter}/{daysBetweenNightCycles})");
 		}
 
         void OnSunrise()
@@ -188,16 +231,25 @@ namespace Oxide.Plugins
         void OnSunset()
         {
 			if (!Initialized) return;
-			if (autoSkipNight)
+			if (autoSkipNight && !enableNightCycleSchedule)
 			{
-				float timeToAdd = (24 - TOD_Sky.Instance.Cycle.Hour) + TOD_Sky.Instance.SunriseTime;
-				TOD_Sky.Instance.Cycle.Hour += timeToAdd;
-				if (logAutoSkipConsole)
-					Puts("Nighttime autoskipped");
-				OnSunrise();
+				SkipNight("Nighttime autoskipped");
 				return;
 			}
-			timeComponent.DayLengthInMinutes = nightLength * (24.0f / (24.0f - (TOD_Sky.Instance.SunsetTime - TOD_Sky.Instance.SunriseTime)));
+			int currentNightLength = nightLength;
+			if (enableNightCycleSchedule)
+			{
+				nightCycleDayCounter++;
+				if (skipUnscheduledNights && nightCycleDayCounter % daysBetweenNightCycles != 0)
+				{
+					SkipNight($"Nighttime autoskipped ({nightCycleDayCounter}/{daysBetweenNightCycles})");
+					return;
+				}
+				currentNightLength = scheduledNightLength;
+				if (logAutoSkipConsole)
+					Puts($"Scheduled nighttime started for {scheduledNightLength} minutes");
+			}
+			timeComponent.DayLengthInMinutes = currentNightLength * (24.0f / (24.0f - (TOD_Sky.Instance.SunsetTime - TOD_Sky.Instance.SunriseTime)));
 			if (activatedDay)
 				Interface.CallHook("OnTimeSunset");
 			activatedDay = false;
@@ -322,7 +374,12 @@ namespace Oxide.Plugins
 			stringBuilder.AppendLine("Sunrise Hour".PadRight(15) + string.Format("{0}:{1}", System.Math.Truncate(ts1.TotalHours).ToString(), ts1.Minutes.ToString()));
 			stringBuilder.AppendLine("Sunset Hour".PadRight(15) + string.Format("{0}:{1}", System.Math.Truncate(ts2.TotalHours).ToString(), ts2.Minutes.ToString()));
 			stringBuilder.AppendLine("Daylength".PadRight(15) + dayLength.ToString() + " minutes");
-			stringBuilder.Append("Nightlength".PadRight(15) + nightLength.ToString() + " minutes");
+			stringBuilder.AppendLine("Nightlength".PadRight(15) + nightLength.ToString() + " minutes");
+			if (enableNightCycleSchedule)
+			{
+				stringBuilder.AppendLine("Night Cycle".PadRight(15) + "Every " + daysBetweenNightCycles.ToString() + " days");
+				stringBuilder.Append("Cycle Night".PadRight(15) + scheduledNightLength.ToString() + " minutes");
+			}
 			PrintPluginMessageToChat(player, stringBuilder.ToString().TrimEnd());
         }
 

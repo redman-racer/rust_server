@@ -22,7 +22,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("NTeleportation", "nivex", "1.9.5")]
+    [Info("NTeleportation", "nivex/Raidlands", "1.9.9")]
     [Description("Multiple teleportation systems for admin and players")]
     class NTeleportation : RustPlugin
     {
@@ -51,6 +51,7 @@ namespace Oxide.Plugins
         private const string PermCaveTpR = "nteleportation.cavetpr";
         private const string PermTpR = "nteleportation.tpr";
         private const string PermTpA = "nteleportation.tpa";
+        private const string PermAtp = "nteleportation.atp";
         private const string PermTp = "nteleportation.tp";
         private const string PermDisallowTpToMe = "nteleportation.disallowtptome";
         private const string PermTpT = "nteleportation.tpt";
@@ -358,6 +359,9 @@ namespace Oxide.Plugins
 
             [JsonProperty(PropertyName = "Auto Wake Up After Teleport")]
             public bool AutoWakeUp;
+
+            [JsonProperty(PropertyName = "Raidlands: Use Native Teleport Without Loading Screen")]
+            public bool UseNativeTeleport = true;
 
             [JsonProperty(PropertyName = "Seconds Until Teleporting Home Offline Players Within SafeZones")]
             public float TeleportHomeSafeZone;
@@ -3123,6 +3127,7 @@ namespace Oxide.Plugins
             permission.RegisterPermission(PermTpB, this);
             permission.RegisterPermission(PermTpR, this);
             permission.RegisterPermission(PermTpA, this);
+            permission.RegisterPermission(PermAtp, this);
             permission.RegisterPermission(PermTpConsole, this);
             permission.RegisterPermission(PermTpT, this);
             permission.RegisterPermission(PermTpN, this);
@@ -3404,6 +3409,7 @@ namespace Oxide.Plugins
             CheckNewSave();
             AddCovalenceCommands();
             foreach (var player in BasePlayer.activePlayerList) OnPlayerConnected(player);
+            timer.Once(1f, RecoverInterruptedTeleportPlayers);
             _cmc = ServerMgr.Instance.StartCoroutine(SetupMonuments());
             timer.Every(1f, CheckAllRequests);
             InitDeepSea();
@@ -3437,11 +3443,13 @@ namespace Oxide.Plugins
             AddCovalenceCommand("tpa", nameof(CommandTeleportAccept));
             AddCovalenceCommand("tpat", nameof(CommandTeleportAcceptToggle));
             AddCovalenceCommand("tpt", nameof(CommandTeleportAcceptToggle));
-            AddCovalenceCommand("atp", nameof(CommandTeleportAcceptToggle));
+            AddCovalenceCommand("atp", nameof(CommandTeleportAcceptToggle), PermAtp);
             AddCovalenceCommand("wipehomes", nameof(CommandWipeHomes));
             AddCovalenceCommand("tphelp", nameof(CommandTeleportHelp));
             AddCovalenceCommand("tpinfo", nameof(CommandTeleportInfo));
             AddCovalenceCommand("tpc", nameof(CommandTeleportCancel));
+            AddCovalenceCommand("ntp.state", nameof(CommandTeleportState));
+            AddCovalenceCommand("ntp.recover", nameof(CommandTeleportRecover));
             AddCovalenceCommand("teleport.toplayer", nameof(CommandTeleportII));
             AddCovalenceCommand("teleport.topos", nameof(CommandTeleportII));
             AddCovalenceCommand("teleport.importhomes", nameof(CommandImportHomes));
@@ -5637,7 +5645,8 @@ namespace Oxide.Plugins
             command = command.ToLower();
             if (DisabledCommandData.DisabledCommands.Contains(command)) { user.Reply("Disabled command: " + command); return; }
             var player = user.Object as BasePlayer;
-            if (player == null || !IsAllowedMsg(player, PermTpT)) { return; }
+            string perm = command == "atp" ? PermAtp : PermTpT;
+            if (player == null || !IsAllowedMsg(player, perm)) { return; }
             if (Array.Exists(args, arg => arg == "friend" || arg == "clan" || arg == "team" || arg == "all"))
             {
                 ToggleTPTEnabled(player, command, args);
@@ -5668,9 +5677,14 @@ namespace Oxide.Plugins
             return Clans != null && Convert.ToBoolean(Clans?.Call("IsMemberOrAlly", playerId, targetId));
         }
 
+        private bool HasAutoTeleportPermission(BasePlayer player)
+        {
+            return permission.UserHasPermission(player.UserIDString, PermTpT) || permission.UserHasPermission(player.UserIDString, PermAtp);
+        }
+
         private bool InstantTeleportAccept(BasePlayer target, BasePlayer player)
         {
-            if (!permission.UserHasPermission(target.UserIDString, PermTpT) || !permission.UserHasPermission(player.UserIDString, PermTpT))
+            if (!HasAutoTeleportPermission(target) || !HasAutoTeleportPermission(player))
             {
                 return false;
             }
@@ -7383,15 +7397,11 @@ namespace Oxide.Plugins
                 player.SetParent(null, true, true);
             }
 
-            if (player.IsConnected)
-            {
-                if (!player.limitNetworking && !player.isInvisible)
-                {
-                    player.SendNetworkUpdateImmediate();
-                }
+            bool useLoadingScreen = player.IsConnected && !config.Settings.UseNativeTeleport;
 
+            if (useLoadingScreen)
+            {
                 player.StartSleeping();
-                player.SetPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot, b: true);
                 player.ClientRPC(RpcTarget.Player(config.Settings.Quick ? "StartLoading_Quick" : "StartLoading", player), arg1: true);
             }
 
@@ -7406,16 +7416,38 @@ namespace Oxide.Plugins
                 if (!player.limitNetworking && !player.isInvisible)
                 {
                     player.UpdateNetworkGroup();
-                    player.SendCompleteSnapshot();
                 }
 
-                if (CanWake(player)) player.Invoke(() =>
+                if (useLoadingScreen)
                 {
-                    if (player != null && player.IsConnected)
+                    player.SetPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot, b: true);
+                }
+
+                if (!player.limitNetworking && !player.isInvisible)
+                {
+                    player.SendNetworkUpdateImmediate();
+                }
+
+                if (useLoadingScreen)
+                {
+                    // Match Rust's supported loading transition when the optional
+                    // legacy loading-screen path is explicitly enabled.
+                    if (config.Settings.AutoWakeUp) player.Invoke(() =>
                     {
-                        player.EndSleeping();
-                    }
-                }, 0.5f);
+                        if (player != null && player.IsConnected)
+                        {
+                            FinishTeleportWake(player);
+                        }
+                    }, 0.5f);
+
+                    if (config.Settings.AutoWakeUp) player.Invoke(() =>
+                    {
+                        if (player != null && player.IsConnected && player.IsSleeping())
+                        {
+                            FinishTeleportWake(player);
+                        }
+                    }, 3f);
+                }
             }
 
             if (config.Settings.PlaySoundsAfterTeleport)
@@ -7481,10 +7513,104 @@ namespace Oxide.Plugins
             return false;
         }
 
-        private bool CanWake(BasePlayer player)
+        private void FinishTeleportWake(BasePlayer player)
         {
-            if (!config.Settings.AutoWakeUp) return false;
-            return player.IsOnGround() || player.limitNetworking || player.isInvisible || player.IsFlying || player.IsAdmin;
+            if (player == null || !player.IsConnected) return;
+
+            // EndSleeping performs the correct Rust wake/snapshot transition.
+            // Clearing ReceivingSnapshot manually can race the snapshot stream and
+            // leave the client permanently on StartLoading's black screen.
+            if (player.IsSleeping()) player.EndSleeping();
+            player.SendNetworkUpdateImmediate();
+        }
+
+        private string DescribeMovementState(BasePlayer player)
+        {
+            if (player == null) return "player=null";
+
+            var mounted = player.GetMounted();
+            var parent = player.GetParentEntity();
+            return string.Format(
+                "name={0} id={1} connected={2} alive={3} sleeping={4} snapshot={5} mounted={6}:{7} parent={8}:{9} wounded={10} incapacitated={11} spectating={12} pos={13}",
+                player.displayName,
+                player.UserIDString,
+                player.IsConnected,
+                player.IsAlive(),
+                player.IsSleeping(),
+                player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot),
+                mounted != null,
+                mounted != null ? mounted.ShortPrefabName : "none",
+                parent != null,
+                parent != null ? parent.ShortPrefabName : "none",
+                player.IsWounded(),
+                player.IsIncapacitated(),
+                player.HasPlayerFlag(BasePlayer.PlayerFlags.Spectating),
+                player.transform.position);
+        }
+
+        private BasePlayer FindRecoveryTarget(IPlayer user, string[] args)
+        {
+            if (args == null || args.Length < 1)
+            {
+                user.Reply("Usage: ntp.state <player|steamId> or ntp.recover <player|steamId>");
+                return null;
+            }
+
+            return FindPlayersSingle(args[0], user.Object as BasePlayer);
+        }
+
+        private bool CanUseRecoveryCommand(IPlayer user)
+        {
+            var player = user.Object as BasePlayer;
+            return user.IsServer || player != null && (player.IsAdmin || permission.UserHasPermission(player.UserIDString, PermTp));
+        }
+
+        private void CommandTeleportState(IPlayer user, string command, string[] args)
+        {
+            if (!CanUseRecoveryCommand(user)) return;
+            var target = FindRecoveryTarget(user, args);
+            if (target == null) return;
+
+            var state = DescribeMovementState(target);
+            user.Reply(state);
+            Puts("NTeleport movement state: {0}", state);
+        }
+
+        private void CommandTeleportRecover(IPlayer user, string command, string[] args)
+        {
+            if (!CanUseRecoveryCommand(user)) return;
+            var target = FindRecoveryTarget(user, args);
+            if (target == null) return;
+
+            var before = DescribeMovementState(target);
+            target.EnsureDismounted();
+            if (target.HasParent()) target.SetParent(null, true, true);
+            target.SetPlayerFlag(BasePlayer.PlayerFlags.Spectating, false);
+            if (target.IsSleeping()) target.EndSleeping();
+            if (target.IsWounded() || target.IsIncapacitated()) target.StopWounded();
+            target.Teleport(target.transform.position + Vector3.up * 2f);
+            target.UpdateNetworkGroup();
+            target.SendNetworkUpdateImmediate();
+
+            var after = DescribeMovementState(target);
+            user.Reply("Recovery applied. BEFORE: " + before);
+            user.Reply("AFTER: " + after);
+            Puts("NTeleport movement recovery BEFORE: {0}", before);
+            Puts("NTeleport movement recovery AFTER: {0}", after);
+        }
+
+        private void RecoverInterruptedTeleportPlayers()
+        {
+            if (!config.Settings.AutoWakeUp) return;
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (player == null || !player.IsConnected) continue;
+                if (!player.IsSleeping() || !player.HasPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot)) continue;
+
+                Puts("Recovering interrupted teleport state for {0}[{1}].", player.displayName, player.UserIDString);
+                FinishTeleportWake(player);
+            }
         }
 
         public void RemoveProtections(ulong userid)

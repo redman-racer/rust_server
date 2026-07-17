@@ -7,7 +7,7 @@
       "Alliance limit": 2
     },
     "Invite Options": {
-      "Maximum allowed member invites at any given time": 1,
+      "Maximum allowed member invites at any given time": 100,
       "Member invite expiry time (seconds)": 86400,
       "Maximum allowed alliance invites at any given time": 2,
       "Alliance invite expiry time (seconds)": 86400
@@ -38,11 +38,12 @@
   },
   "Settings": {
     "Log clan and member changes": false,
-    "Data save interval (seconds)": 900
+    "Data save interval (seconds)": 900,
+    "Clear clans on map wipe": true
   },
   "Version": {
     "Major": 0,
     "Minor": 2,
-    "Patch": 10
+    "Patch": 11
   }
 }

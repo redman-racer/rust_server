@@ -32,7 +32,9 @@ namespace Oxide.Plugins
             public Dictionary<string, float> SpeedMultipliers = new Dictionary<string, float>
             {
                 { "global", 1.0f },
-                { "furnace.shortname", 1.0f }
+                { "furnace.shortname", 1.0f },
+                { "mixingtable", 1.0f },
+                { "mixingtable.deployed", 1.0f }
             };
 
             [JsonProperty(PropertyName = "Fuel Usage Speed Multipliers",
@@ -158,6 +160,20 @@ namespace Oxide.Plugins
                 UnityEngine.Object.Destroy(component);
             }
 
+            var mixingTables = UnityEngine.Object.FindObjectsOfType<MixingTable>();
+            PrintDebug($"Processing MixingTable(s).. Amount: {mixingTables.Length}.");
+
+            for (var i = 0; i < mixingTables.Length; i++)
+            {
+                var mixingTable = mixingTables[i];
+                var component = mixingTable.GetComponent<MixingTableController>();
+
+                if (component != null)
+                    component.RestoreDefaultSpeed();
+
+                UnityEngine.Object.Destroy(component);
+            }
+
             PrintDebug("Done.");
         }
 
@@ -174,6 +190,14 @@ namespace Oxide.Plugins
                 var oven = ovens[i];
 
                 OnEntitySpawned(oven);
+            }
+
+            var mixingTables = UnityEngine.Object.FindObjectsOfType<MixingTable>();
+            PrintDebug($"Processing MixingTable(s).. Amount: {mixingTables.Length}.");
+
+            for (var i = 0; i < mixingTables.Length; i++)
+            {
+                OnEntitySpawned(mixingTables[i]);
             }
 
             timer.Once(1f, () =>
@@ -193,16 +217,32 @@ namespace Oxide.Plugins
 
                     component.StartCooking();
                 }
+
+                for (var i = 0; i < mixingTables.Length; i++)
+                {
+                    var mixingTable = mixingTables[i];
+                    if (mixingTable == null || mixingTable.IsDestroyed || !mixingTable.IsOn() || !CanUse(mixingTable.OwnerID))
+                        continue;
+
+                    var component = mixingTable.gameObject.GetComponent<MixingTableController>();
+                    if (component != null)
+                        component.ApplySpeed();
+                }
             });
         }
 
         private void OnEntitySpawned(BaseNetworkable entity)
         {
             var oven = entity as BaseOven;
-            if (oven == null)
+            if (oven != null)
+            {
+                oven.gameObject.AddComponent<FurnaceController>();
                 return;
+            }
 
-            oven.gameObject.AddComponent<FurnaceController>();
+            var mixingTable = entity as MixingTable;
+            if (mixingTable != null)
+                mixingTable.gameObject.AddComponent<MixingTableController>();
         }
 
         private object OnOvenToggle(StorageContainer oven, BasePlayer player)
@@ -229,6 +269,22 @@ namespace Oxide.Plugins
             }
 
             return false;
+        }
+
+        private void OnMixingTableToggle(MixingTable mixingTable, BasePlayer player)
+        {
+            if (mixingTable == null || player == null)
+                return;
+
+            var canUse = CanUse(mixingTable.OwnerID) || CanUse(player.userID);
+            if (!canUse)
+                return;
+
+            var component = mixingTable.gameObject.GetComponent<MixingTableController>();
+            if (component == null)
+                component = mixingTable.gameObject.AddComponent<MixingTableController>();
+
+            timer.Once(0.1f, component.ApplySpeed);
         }
 
         #endregion
@@ -288,6 +344,8 @@ namespace Oxide.Plugins
 
             private List<string> _blacklist;
             private List<string> _whitelist;
+            private bool _requiresFuel = true;
+            private bool _isCooking;
 
             private bool? IsAllowed(string shortname)
             {
@@ -312,6 +370,8 @@ namespace Oxide.Plugins
                     modifierF = 1.0f;
 
                 _speedMultiplier = 0.5f / modifierF;
+                _requiresFuel = !Furnace.ShortPrefabName.Contains("electric");
+                PrintDebug($"Oven controller attached: {Furnace.ShortPrefabName}, requires fuel: {_requiresFuel}");
 
                 if (!_config.FuelSpeedMultipliers.TryGetValue(Furnace.ShortPrefabName, out modifierF) &&
                     !_config.FuelSpeedMultipliers.TryGetValue("global", out modifierF))
@@ -344,6 +404,25 @@ namespace Oxide.Plugins
                 {
                     // ignored
                 }
+
+                InvokeRepeating(CheckCookingState, 1f, 1f);
+            }
+
+            private void OnDestroy()
+            {
+                CancelInvoke(CheckCookingState);
+            }
+
+            private void CheckCookingState()
+            {
+                if (_requiresFuel || _isCooking || Furnace == null || !Furnace.IsOn())
+                    return;
+
+                if (_config.UsePermission &&
+                    !_instance.permission.UserHasPermission(Furnace.OwnerID.ToString(), PermissionUse))
+                    return;
+
+                StartCooking();
             }
 
             private Item FindBurnable()
@@ -378,7 +457,15 @@ namespace Oxide.Plugins
 
                 if (itemBurnable == null)
                 {
-                    StopCooking();
+                    if (_requiresFuel)
+                    {
+                        StopCooking();
+                        return;
+                    }
+
+                    SmeltItems();
+                    _ticks++;
+                    Interface.CallHook("OnOvenCooked", this, itemBurnable, null);
                     return;
                 }
 
@@ -525,7 +612,7 @@ namespace Oxide.Plugins
 
             public void StartCooking()
             {
-                if (FindBurnable() == null)
+                if (_requiresFuel && FindBurnable() == null)
                 {
                     PrintDebug("No burnable.");
                     return;
@@ -540,6 +627,7 @@ namespace Oxide.Plugins
                 PrintDebug($"Speed Multiplier: {_speedMultiplier}");
                 Furnace.InvokeRepeating(Cook, _speedMultiplier, _speedMultiplier);
                 Furnace.SetFlag(BaseEntity.Flags.On, true);
+                _isCooking = true;
             }
 
             public void StopCooking()
@@ -547,6 +635,93 @@ namespace Oxide.Plugins
                 PrintDebug("Stopping cooking..");
                 Furnace.CancelInvoke(Cook);
                 Furnace.StopCooking();
+                _isCooking = false;
+            }
+        }
+
+        public class MixingTableController : FacepunchBehaviour
+        {
+            private MixingTable _mixingTable;
+            private float _speedModifier;
+            private bool _isSpeedApplied;
+
+            private MixingTable Table
+            {
+                get
+                {
+                    if (_mixingTable == null)
+                        _mixingTable = GetComponent<MixingTable>();
+
+                    return _mixingTable;
+                }
+            }
+
+            private void Awake()
+            {
+                float modifier;
+                if (!_config.SpeedMultipliers.TryGetValue(Table.ShortPrefabName, out modifier) &&
+                    !_config.SpeedMultipliers.TryGetValue("mixingtable", out modifier) &&
+                    !_config.SpeedMultipliers.TryGetValue("mixingtable.deployed", out modifier) &&
+                    !_config.SpeedMultipliers.TryGetValue("global", out modifier))
+                    modifier = 1.0f;
+
+                if (modifier <= 0f)
+                    modifier = 1.0f;
+
+                _speedModifier = modifier;
+                PrintDebug($"Mixing table speed modifier ({Table.ShortPrefabName}): {_speedModifier}");
+
+                InvokeRepeating(CheckMixingState, 0.25f, 0.25f);
+            }
+
+            private void OnDestroy()
+            {
+                CancelInvoke(CheckMixingState);
+            }
+
+            private void CheckMixingState()
+            {
+                if (Table == null)
+                    return;
+
+                if (!Table.IsOn() || Table.RemainingMixTime <= 0.0)
+                {
+                    _isSpeedApplied = false;
+                    return;
+                }
+
+                if (!_isSpeedApplied)
+                    ApplySpeed();
+            }
+
+            public void ApplySpeed()
+            {
+                if (Table == null || !Table.IsOn() || Table.RemainingMixTime <= 0.0)
+                    return;
+
+                if (_speedModifier > 1f && Table.currentRecipe != null && Table.currentQuantity > 0)
+                {
+                    var expectedTotalTime = Table.currentRecipe.MixingDuration * Table.currentQuantity;
+                    if (expectedTotalTime > 0 && Table.TotalMixTime > expectedTotalTime / _speedModifier)
+                    {
+                        Table.RemainingMixTime /= _speedModifier;
+                        Table.TotalMixTime /= _speedModifier;
+                    }
+                }
+
+                Table.CancelInvoke(Table.TickMix);
+                Table.InvokeRepeating(Table.TickMix, 1f, 1f);
+                _isSpeedApplied = true;
+            }
+
+            public void RestoreDefaultSpeed()
+            {
+                if (Table == null || !Table.IsOn() || Table.RemainingMixTime <= 0.0)
+                    return;
+
+                Table.CancelInvoke(Table.TickMix);
+                Table.InvokeRepeating(Table.TickMix, 1f, 1f);
+                _isSpeedApplied = false;
             }
         }
 

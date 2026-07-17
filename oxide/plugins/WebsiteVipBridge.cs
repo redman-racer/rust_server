@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.6.1")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.6.2")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -290,9 +290,11 @@ namespace Oxide.Plugins
             public int StatsSyncIntervalSeconds = 300;
             public int StatsDebounceSeconds = 30;
             public int StatsBotSnapshotLimit = 0;
+            public bool BrandConfigSyncEnabled = false;
             public bool HeatmapEnabled = false;
             public int HeatmapSyncIntervalSeconds = 300;
             public int HeatmapBucketSize = 100;
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> HeatmapMetrics = new List<string>
             {
                 "player_deaths",
@@ -318,6 +320,7 @@ namespace Oxide.Plugins
             public int PermissionSnapshotDebounceSeconds = 10;
             public int PermissionSnapshotSettledDelaySeconds = 120;
             public int KitDataBackupCount = 8;
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> KitPermissionManagedGroups = new List<string>
             {
                 "default",
@@ -337,6 +340,7 @@ namespace Oxide.Plugins
                 "claim_discord_member",
                 "claim_discord_booster"
             };
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> KitPermissionPrefixes = new List<string>
             {
                 "kits.",
@@ -344,6 +348,7 @@ namespace Oxide.Plugins
             };
             public string WipeKey = "";
             public string WipeStartedAt = "";
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> ManagedGroups = new List<string>
             {
                 "rank_vip",
@@ -875,6 +880,10 @@ namespace Oxide.Plugins
             }
 
             MergeStorefrontBundleDefaults(config.StorefrontBundles, defaults.StorefrontBundles);
+            config.HeatmapMetrics = DistinctConfigValues(config.HeatmapMetrics);
+            config.KitPermissionManagedGroups = DistinctConfigValues(config.KitPermissionManagedGroups);
+            config.KitPermissionPrefixes = DistinctConfigValues(config.KitPermissionPrefixes);
+            config.ManagedGroups = DistinctConfigValues(config.ManagedGroups);
             SaveConfig();
         }
 
@@ -883,12 +892,33 @@ namespace Oxide.Plugins
             Config.WriteObject(config, true);
         }
 
+        private static List<string> DistinctConfigValues(IEnumerable<string> values)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var value in values ?? Enumerable.Empty<string>())
+            {
+                var normalized = (value ?? "").Trim();
+
+                if (normalized.Length > 0 && seen.Add(normalized))
+                {
+                    result.Add(normalized);
+                }
+            }
+
+            return result;
+        }
+
         private void OnServerInitialized()
         {
             LoadDeletedGroupState();
             LoadStorefrontOverrides();
             EnsureManagedGroups(config.ManagedGroups);
-            SyncBrandConfigs();
+            if (config.BrandConfigSyncEnabled)
+            {
+                SyncBrandConfigs();
+            }
             LogBridgeSecretDiagnostics();
             SyncChanges();
             StartKitSync();
@@ -1258,6 +1288,29 @@ namespace Oxide.Plugins
                 : lastStatusHeartbeatAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
 
             ReplyBridge(player, $"Status heartbeat enabled={config.StatusHeartbeatEnabled}, interval={interval}s, last success={last}. Current heartbeat requested.");
+        }
+
+        [Command("websitevip.brand.status")]
+        private void BrandStatusCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            ReplyBridge(player, $"Automatic brand config sync is {(config.BrandConfigSyncEnabled ? "enabled" : "disabled")}. SmartChatBot auto messages are never replaced by brand sync.");
+        }
+
+        [Command("websitevip.brand.sync")]
+        private void BrandSyncCommand(IPlayer player, string command, string[] args)
+        {
+            if (!CanRunBridgeCommand(player))
+            {
+                return;
+            }
+
+            var updated = SyncBrandConfigs();
+            ReplyBridge(player, $"Brand config sync completed; {updated} config file(s) changed.");
         }
 
         [Command("websitevip.heatmap.sync")]
@@ -5819,7 +5872,7 @@ namespace Oxide.Plugins
             return TryGetBrandValue(key, out value) ? value : "";
         }
 
-        private void SyncBrandConfigs()
+        private int SyncBrandConfigs()
         {
             var updated = 0;
 
@@ -5835,6 +5888,8 @@ namespace Oxide.Plugins
             {
                 Puts($"Raidlands brand config sync updated {updated} config file(s).");
             }
+
+            return updated;
         }
 
         private int SyncJsonConfig(string configName, Action<JObject> apply)
@@ -5914,18 +5969,6 @@ namespace Oxide.Plugins
         {
             json["Chat Prefix"] = "<color=#ff3b3b>Raidlands</color> ";
             json["Show Chat Prefix"] = true;
-            json["Auto Messages"] = new JArray(
-                new JObject
-                {
-                    ["Permission"] = "smartchatbot.messages",
-                    ["Message Frequency"] = "5m",
-                    ["Auto Messages"] = new JArray(
-                        new JObject
-                        {
-                            ["Is Enabled"] = true,
-                            ["Message"] = "Visit https://raidlands.net/ for store perks, Discord, and live stats."
-                        })
-                });
         }
 
         private void ApplyKitsBrand(JObject json)

@@ -37,7 +37,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Cupboard Limiter", "Spiikesan", "1.7.6")]
+    [Info("Cupboard Limiter", "Spiikesan/Raidlands", "1.7.7")]
     [Description("Simplified version for cupboard limits")]
 
     public class CupboardLimiter : RustPlugin
@@ -46,10 +46,19 @@ namespace Oxide.Plugins
 
         bool debug = false;
 
-        const string Vip_Perm = "cupboardlimiter.vip";
+        const string Vip_Perm = "cupboardlimiter.legacyvip";
         const string Bypass_Perm = "cupboardlimiter.bypass";
         const string Admin_Perm = "cupboardlimiter.admin";
-        const string Other_Perm = "cupboardlimiter.limit_";
+        static readonly string[] RankedLimitPermissions =
+        {
+            "cupboardlimiter.vip",
+            "cupboardlimiter.vipplus",
+            "cupboardlimiter.mvp",
+            "cupboardlimiter.golden",
+            "cupboardlimiter.diamond",
+            "cupboardlimiter.titan",
+            "cupboardlimiter.ultimate"
+        };
         const string CommandList_Perm = "cupboardlimiter.commandList";
 
         const string Message_MaxLimitDefault = "MaxLimitDefault";
@@ -144,10 +153,18 @@ namespace Oxide.Plugins
 
             for (int i = 0; i < configData.Limits.OtherLimits.Count; i++)
             {
-                permission.RegisterPermission(Other_Perm + (i + 1), this);
+                permission.RegisterPermission(GetRankedLimitPermission(i), this);
             }
 
             if (debug) Puts($"Debug is activated check CupboardLimiter.cs file if not intended");
+        }
+
+        private static string GetRankedLimitPermission(int index)
+        {
+            if (index >= 0 && index < RankedLimitPermissions.Length)
+                return RankedLimitPermissions[index];
+
+            return $"cupboardlimiter.limit_{index + 1}";
         }
 
         private ConfigData configData;
@@ -494,7 +511,7 @@ namespace Oxide.Plugins
                 bool otherLimitPerm = false;
                 for (int i = 0; i < configData.Limits.OtherLimits.Count; i++)
                 {
-                    if (permission.UserHasPermission(player.UserIDString, Other_Perm + (i + 1)))
+                    if (permission.UserHasPermission(player.UserIDString, GetRankedLimitPermission(i)))
                     {
                         otherLimitPerm = true;
                         break;
@@ -543,7 +560,7 @@ namespace Oxide.Plugins
                 int olimit = -1;
                 for (int i = 0; i < configData.Limits.OtherLimits.Count; i++)
                 {
-                    if (permission.UserHasPermission(player.UserIDString, Other_Perm + (i + 1)))
+                    if (permission.UserHasPermission(player.UserIDString, GetRankedLimitPermission(i)))
                     {
                         if (configData.Limits.OtherLimits[i] > olimit)
                         {

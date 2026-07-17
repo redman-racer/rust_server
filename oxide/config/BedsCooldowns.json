@@ -3,10 +3,10 @@
     {
       "Permission": "bedscooldowns.vip1",
       "Priority": 1,
-      "Sleeping bag cooldown": 15.0,
-      "Bed cooldown": 15.0,
-      "Sleeping bag unlock time": 15.0,
-      "Bed unlock time": 15.0
+      "Sleeping bag cooldown": 30.0,
+      "Bed cooldown": 30.0,
+      "Sleeping bag unlock time": 30.0,
+      "Bed unlock time": 30.0
     },
     {
       "Permission": "bedscooldowns.vip2",

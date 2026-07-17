@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Facepunch;
 using Newtonsoft.Json;
 using Oxide.Core;
@@ -15,11 +17,11 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikes", "Raidlands", "0.1.53")]
+    [Info("PortableAirstrikes", "Raidlands", "0.1.54")]
     [Description("Configurable single-use CID binocular airstrike selection, automatic targeting pings, persisted manual default strikes, validation, terrain-aware, more believable multi-phase visual delivery flyovers with autoload-safe repeated sound cues, direct-command execution, audit logging, webhooks, warning markers, in-game warnings, and warning diagnostics.")]
     public class PortableAirstrikes : RustPlugin
     {
-        private const int CurrentConfigVersion = 36;
+        private const int CurrentConfigVersion = 38;
         private const int DefaultAirstrikeItemMaxStackSize = 1;
         private const int MaximumAirstrikeItemMaxStackSize = 1;
         private const int DefaultAirstrikeItemMaxChargesPerItem = 65535;
@@ -34,6 +36,7 @@ namespace Oxide.Plugins
         private const string UsePermission = "portableairstrikes.use";
         private const string DataFileName = "PortableAirstrikes_Data";
         private const string VisualProfilesDataFileName = "PortableAirstrikes/VisualProfiles";
+        private const string SecretsConfigName = "Secrets.local";
         private const string StrikeUiName = "PortableAirstrikes.Selection";
         private const string AdminUiName = "PortableAirstrikes.Admin";
         private const string AdminNumberEditUiName = "PortableAirstrikes.Admin.NumberEdit";
@@ -194,12 +197,16 @@ namespace Oxide.Plugins
         [PluginReference]
         private Plugin PortableAirstrikesAnimationEditor;
 
+        [PluginReference]
+        private Plugin RaidlandsUiEscapeBridge;
+
         private Configuration config;
         private StoredData storedData;
         private VisualProfileFile visualProfileFile;
         private Dictionary<string, string> visualProfileMotionModes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> visualProfileReleaseModes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> visualProfileWarnings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string> secrets;
         private string lastVisualProfileLoadMessage = "Visual profiles have not been loaded yet.";
         private string lastVisualProfileLoadAtUtc = "";
         private bool lastVisualProfileLoadSucceeded;
@@ -331,11 +338,17 @@ namespace Oxide.Plugins
             [JsonProperty("DamageScales")]
             public DamageScaleSettings DamageScales = new DamageScaleSettings();
 
+            [JsonProperty("BasePayloadDamageMultipliers")]
+            public BasePayloadDamageMultiplierSettings BasePayloadDamageMultipliers = new BasePayloadDamageMultiplierSettings();
+
             [JsonProperty("LootDistribution")]
             public LootDistributionSettings LootDistribution = new LootDistributionSettings();
 
             [JsonProperty("AuditWebhooks")]
             public AuditWebhookSettings AuditWebhooks = new AuditWebhookSettings();
+
+            [JsonProperty("WebsiteReplayEvents")]
+            public WebsiteReplayEventSettings WebsiteReplayEvents = new WebsiteReplayEventSettings();
 
             [JsonProperty("StrikeDefinitions")]
             public Dictionary<string, StrikeDefinition> StrikeDefinitions = DefaultStrikeDefinitions();
@@ -697,6 +710,30 @@ namespace Oxide.Plugins
             public float A10DeliveryVehicleHealth = 900f;
         }
 
+        private class WebsiteReplayEventSettings
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled;
+
+            [JsonProperty("ApiBaseUrl")]
+            public string ApiBaseUrl = "https://raidlands.net";
+
+            [JsonProperty("ServerId")]
+            public string ServerId = "raidlands-main";
+
+            [JsonProperty("SharedSecret")]
+            public string SharedSecret = "${RAIDLANDS_BRIDGE_SHARED_SECRET}";
+
+            [JsonProperty("WipeKey")]
+            public string WipeKey = "";
+
+            [JsonProperty("RequestTimeoutMilliseconds")]
+            public int RequestTimeoutMilliseconds = 20000;
+
+            [JsonProperty("AllowInsecureHttpForDevelopment")]
+            public bool AllowInsecureHttpForDevelopment;
+        }
+
         private class DamageScaleSettings
         {
             [JsonProperty("Players")]
@@ -713,6 +750,57 @@ namespace Oxide.Plugins
 
             [JsonProperty("Turrets")]
             public float Turrets = 1f;
+        }
+
+        private class BasePayloadDamageMultiplierSettings
+        {
+            [JsonProperty("bee_grenade")]
+            public float BeeGrenade = 1f;
+
+            [JsonProperty("bee_catapult_bomb")]
+            public float BeeCatapultBomb = 1f;
+
+            [JsonProperty("beancan")]
+            public float Beancan = 1f;
+
+            [JsonProperty("f1_grenade")]
+            public float F1Grenade = 1f;
+
+            [JsonProperty("he_40mm")]
+            public float He40mm = 1f;
+
+            [JsonProperty("molotov")]
+            public float Molotov = 1f;
+
+            [JsonProperty("firebomb")]
+            public float Firebomb = 1f;
+
+            [JsonProperty("propane_bomb")]
+            public float PropaneBomb = 1f;
+
+            [JsonProperty("rocket")]
+            public float Rocket = 1f;
+
+            [JsonProperty("hv_rocket")]
+            public float HvRocket = 1f;
+
+            [JsonProperty("incendiary_rocket")]
+            public float IncendiaryRocket = 1f;
+
+            [JsonProperty("mlrs_rocket")]
+            public float MlrsRocket = 1f;
+
+            [JsonProperty("homing_missile")]
+            public float HomingMissile = 1f;
+
+            [JsonProperty("bradley_longbarrel_burst")]
+            public float BradleyLongbarrelBurst = 1f;
+
+            [JsonProperty("mortar_he_payload")]
+            public float MortarHePayload = 1f;
+
+            [JsonProperty("mortar_frag_payload")]
+            public float MortarFragPayload = 1f;
         }
 
         private class LootDistributionSettings
@@ -2667,7 +2755,7 @@ namespace Oxide.Plugins
             }
 
             var key = GetDamageScaleKey(entity);
-            var scale = GetReleaseDamageScale(release.Event, key);
+            var scale = GetBasePayloadDamageMultiplier(release.Payload, key) * GetReleaseDamageScale(release.Event, key);
             if (string.Equals(key, "Vehicles", StringComparison.OrdinalIgnoreCase))
             {
                 scale *= GetReleaseVehicleDamageScale(release.Event);
@@ -2684,7 +2772,7 @@ namespace Oxide.Plugins
                 info.damageTypes.ScaleAll(scale);
                 if (config?.General != null && config.General.DebugMode)
                 {
-                    Puts("Scaled native release damage from payload entity " + initiator.net.ID.Value + " against " + key + " by " + scale.ToString("0.###", CultureInfo.InvariantCulture) + ".");
+                    Puts("Scaled native release damage from payload " + release.Payload + " entity " + initiator.net.ID.Value + " against " + key + " by " + scale.ToString("0.###", CultureInfo.InvariantCulture) + ".");
                 }
             }
             catch (Exception ex)
@@ -3737,7 +3825,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            DestroyStrikeUi(player);
+            CloseRegisteredUi(player, "portable airstrikes close button");
         }
 
         [ConsoleCommand("portableairstrikes.ui.select")]
@@ -4156,7 +4244,7 @@ namespace Oxide.Plugins
                 CursorEnabled = true,
                 Image = { Color = "0.035 0.040 0.048 0.965" },
                 RectTransform = { AnchorMin = "0.075 0.065", AnchorMax = "0.925 0.935" }
-            }, "Overlay", AdminUiName);
+            }, "Hud.Menu", AdminUiName);
 
             AddAdminPanel(container, root, "0.018 0.880", "0.982 0.982", "0.080 0.092 0.112 0.96");
             AddUiLabel(container, root, "Portable Airstrikes Admin", 20, TextAnchor.MiddleLeft, "0.035 0.925", "0.55 0.975", "1 0.86 0.58 1");
@@ -4208,6 +4296,8 @@ namespace Oxide.Plugins
 
             var statusText = string.IsNullOrWhiteSpace(state.Status) ? "Ready." : ShortenAdminText(state.Status, 190);
             AddUiLabel(container, root, statusText, 10, TextAnchor.MiddleLeft, "0.205 0.035", "0.965 0.080", "0.66 0.74 0.80 1");
+            // This workbench refreshes its CUI roots after each action. Do not attach
+            // the native-loot Escape bridge until that lifecycle is stable.
             CuiHelper.AddUi(player, container);
             if (state.NumberEdit != null)
             {
@@ -7309,7 +7399,7 @@ namespace Oxide.Plugins
                 CursorEnabled = true,
                 Image = { Color = "0.030 0.036 0.045 0.985" },
                 RectTransform = { AnchorMin = "0.370 0.195", AnchorMax = "0.630 0.705" }
-            }, "Overlay", AdminNumberEditUiName);
+            }, "Hud.Menu", AdminNumberEditUiName);
 
             AddUiLabel(container, root, "Exact Number", 15, TextAnchor.MiddleLeft, "0.075 0.890", "0.68 0.965", "1 0.86 0.58 1");
             AddUiLabel(container, root, ShortenAdminText(edit.Label, 42), 10, TextAnchor.MiddleLeft, "0.075 0.820", "0.925 0.875", "0.70 0.78 0.84 1");
@@ -7427,9 +7517,11 @@ namespace Oxide.Plugins
             if (player != null)
             {
                 CuiHelper.DestroyUi(player, AdminUiName);
+                UnregisterUiBridge(player, AdminUiName);
                 if (clearNumberEdit)
                 {
                     CuiHelper.DestroyUi(player, AdminNumberEditUiName);
+                    UnregisterUiBridge(player, AdminNumberEditUiName);
                     AdminUiState state;
                     if (adminUiStates.TryGetValue(player.userID, out state))
                     {
@@ -7676,6 +7768,7 @@ namespace Oxide.Plugins
             Reply(player, validation.Strike.DisplayName + suffix + " inbound at " + DescribeTarget(context.Target) + ". " + rpText + "; " + tokenText + ". Cooldown started." + markerText + cancelText);
 
             RecordStrikeAudit(context, "started", "Accepted; warning delay " + FormatSeconds(warningDelay) + "." + markerText + " " + FormatWarningFanoutSummary(warningFanout) + ".", true);
+            PostWebsiteReplayAirstrikeEvent(context);
             SaveData();
             ScheduleCallTimer(context, warningDelay, () => DispatchStrike(context, executor));
         }
@@ -13195,16 +13288,94 @@ namespace Oxide.Plugins
             return Mathf.Clamp(releaseEvent.VehicleDamageScale <= 0f ? 1f : releaseEvent.VehicleDamageScale, 0f, 10f);
         }
 
+        private float GetBasePayloadDamageMultiplier(string payload, string key = "")
+        {
+            if (config?.BasePayloadDamageMultipliers == null || string.IsNullOrWhiteSpace(payload))
+            {
+                return 1f;
+            }
+
+            float scale;
+            switch (NormalizePayloadId(payload))
+            {
+                case "bee_grenade":
+                    scale = config.BasePayloadDamageMultipliers.BeeGrenade;
+                    break;
+                case "bee_catapult_bomb":
+                    scale = config.BasePayloadDamageMultipliers.BeeCatapultBomb;
+                    break;
+                case "beancan":
+                    scale = config.BasePayloadDamageMultipliers.Beancan;
+                    break;
+                case "f1_grenade":
+                    scale = config.BasePayloadDamageMultipliers.F1Grenade;
+                    break;
+                case "he_40mm":
+                    scale = config.BasePayloadDamageMultipliers.He40mm;
+                    break;
+                case "molotov":
+                    scale = config.BasePayloadDamageMultipliers.Molotov;
+                    break;
+                case "firebomb":
+                    scale = config.BasePayloadDamageMultipliers.Firebomb;
+                    break;
+                case "propane_bomb":
+                    scale = config.BasePayloadDamageMultipliers.PropaneBomb;
+                    break;
+                case "rocket":
+                    scale = config.BasePayloadDamageMultipliers.Rocket;
+                    break;
+                case "hv_rocket":
+                    scale = config.BasePayloadDamageMultipliers.HvRocket;
+                    break;
+                case "incendiary_rocket":
+                    scale = config.BasePayloadDamageMultipliers.IncendiaryRocket;
+                    break;
+                case "mlrs_rocket":
+                    scale = config.BasePayloadDamageMultipliers.MlrsRocket;
+                    break;
+                case "homing_missile":
+                    scale = config.BasePayloadDamageMultipliers.HomingMissile;
+                    break;
+                case "bradley_longbarrel_burst":
+                    scale = config.BasePayloadDamageMultipliers.BradleyLongbarrelBurst;
+                    break;
+                case "mortar_he_payload":
+                    scale = config.BasePayloadDamageMultipliers.MortarHePayload;
+                    break;
+                case "mortar_frag_payload":
+                    scale = config.BasePayloadDamageMultipliers.MortarFragPayload;
+                    break;
+                default:
+                    scale = 1f;
+                    break;
+            }
+
+            return Mathf.Clamp(scale <= 0f ? 1f : scale, 0f, 100f);
+        }
+
         private void RegisterPayloadReleaseMetadata(BaseEntity entity, VisualPayloadEvent releaseEvent)
         {
-            if (entity == null || releaseEvent == null || entity.net == null || entity.net.ID.Value == 0UL)
+            RegisterPayloadReleaseMetadata(entity, releaseEvent == null ? "" : releaseEvent.Payload, releaseEvent);
+        }
+
+        private void RegisterPayloadReleaseMetadata(BaseEntity entity, string payload, VisualPayloadEvent releaseEvent)
+        {
+            if (entity == null || entity.net == null || entity.net.ID.Value == 0UL)
             {
                 return;
             }
 
-            if (Math.Abs(GetReleaseDamageScale(releaseEvent, "") - 1f) <= 0.001f
+            payload = NormalizePayloadId(string.IsNullOrWhiteSpace(payload) && releaseEvent != null ? releaseEvent.Payload : payload);
+            if (releaseEvent == null && Math.Abs(GetBasePayloadDamageMultiplier(payload) - 1f) <= 0.001f)
+            {
+                return;
+            }
+
+            if (Math.Abs(GetBasePayloadDamageMultiplier(payload) - 1f) <= 0.001f
+                && Math.Abs(GetReleaseDamageScale(releaseEvent, "") - 1f) <= 0.001f
                 && Math.Abs(GetReleaseVehicleDamageScale(releaseEvent) - 1f) <= 0.001f
-                && (releaseEvent.DamageScales == null || releaseEvent.DamageScales.Count == 0))
+                && (releaseEvent == null || releaseEvent.DamageScales == null || releaseEvent.DamageScales.Count == 0))
             {
                 return;
             }
@@ -13212,14 +13383,14 @@ namespace Oxide.Plugins
             payloadReleaseMetadataByEntityId[entity.net.ID.Value] = new RuntimePayloadRelease
             {
                 Event = ClonePayloadEvent(releaseEvent),
-                Payload = releaseEvent.Payload,
-                Time = releaseEvent.Time,
-                SourceEventIndex = releaseEvent.Index
+                Payload = payload,
+                Time = releaseEvent == null ? 0f : releaseEvent.Time,
+                SourceEventIndex = releaseEvent == null ? 0 : releaseEvent.Index
             };
 
             if (config?.General != null && config.General.DebugMode)
             {
-                Puts("Tagged native payload entity " + entity.net.ID.Value + " for release damage scaling. If Rust reports explosion damage from another initiator, native damage will stay unchanged.");
+                Puts("Tagged native payload " + payload + " entity " + entity.net.ID.Value + " for release damage scaling. If Rust reports explosion damage from another initiator, native damage will stay unchanged.");
             }
         }
 
@@ -13312,7 +13483,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
-                RegisterPayloadReleaseMetadata(entity, releaseEvent);
+                RegisterPayloadReleaseMetadata(entity, spec.Id, releaseEvent);
 
                 if (projectile != null)
                 {
@@ -13418,7 +13589,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
-                RegisterPayloadReleaseMetadata(entity, releaseEvent);
+                RegisterPayloadReleaseMetadata(entity, spec.Id, releaseEvent);
 
                 if (projectile != null)
                 {
@@ -13524,7 +13695,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
-                RegisterPayloadReleaseMetadata(entity, releaseEvent);
+                RegisterPayloadReleaseMetadata(entity, spec.Id, releaseEvent);
 
                 if (projectile != null)
                 {
@@ -13635,7 +13806,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
-                RegisterPayloadReleaseMetadata(entity, releaseEvent);
+                RegisterPayloadReleaseMetadata(entity, spec.Id, releaseEvent);
 
                 if (projectile != null)
                 {
@@ -13764,7 +13935,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
-                RegisterPayloadReleaseMetadata(entity, releaseEvent);
+                RegisterPayloadReleaseMetadata(entity, spec.Id, releaseEvent);
 
                 if (projectile != null)
                 {
@@ -14122,7 +14293,7 @@ namespace Oxide.Plugins
                 }
 
                 entity.Spawn();
-                RegisterPayloadReleaseMetadata(entity, releaseEvent);
+                RegisterPayloadReleaseMetadata(entity, spec.Id, releaseEvent);
 
                 if (projectile != null)
                 {
@@ -14622,6 +14793,164 @@ namespace Oxide.Plugins
             catch (Exception ex)
             {
                 PrintWarning("Airstrike audit webhook could not be sent: " + ex.Message);
+            }
+        }
+
+        private void PostWebsiteReplayAirstrikeEvent(AirstrikeCallContext context)
+        {
+            if (context == null || context.Strike == null || context.Target == null || config?.WebsiteReplayEvents == null || !config.WebsiteReplayEvents.Enabled)
+            {
+                return;
+            }
+
+            var secret = ResolveWebsiteReplaySharedSecret();
+            if (string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(config.WebsiteReplayEvents.ApiBaseUrl))
+            {
+                return;
+            }
+
+            var profileId = "";
+            VisualProfileConfig profile;
+            TryResolveVisualProfileForStrike(context.Strike, out profileId, out profile);
+            var vehicle = NormalizeVisualProfileVehicle(profile == null ? "" : profile.Vehicle, context.Strike, null, GetDeliveryVisualProfileForStrike(context.Strike));
+            var occurredAt = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            var payload = new
+            {
+                server_id = config.WebsiteReplayEvents.ServerId,
+                wipe_key = string.IsNullOrWhiteSpace(config.WebsiteReplayEvents.WipeKey) ? config.WebsiteReplayEvents.ServerId + "-current" : config.WebsiteReplayEvents.WipeKey,
+                events = new[]
+                {
+                    new
+                    {
+                        event_key = context.CallId,
+                        event_type = "airstrike",
+                        occurred_at = occurredAt,
+                        x = Math.Round(context.Target.Position.x, 3),
+                        y = Math.Round(context.Target.Position.y, 3),
+                        z = Math.Round(context.Target.Position.z, 3),
+                        profile_key = profileId ?? "",
+                        vehicle = vehicle ?? "",
+                        payload = new
+                        {
+                            strikeId = context.Strike.Id ?? "",
+                            strikeName = context.Strike.DisplayName ?? "",
+                            callerId = context.CallerUserId.ToString(),
+                            payload = context.Strike.Payload ?? "",
+                            delivery = context.Strike.Delivery ?? ""
+                        }
+                    }
+                }
+            };
+            var body = JsonConvert.SerializeObject(payload);
+            var url = config.WebsiteReplayEvents.ApiBaseUrl.TrimEnd('/') + "/api/server/map-replay-events-snapshot.php";
+            var headers = BuildWebsiteReplayHeaders("POST", url, body, secret);
+            headers["Content-Type"] = "application/json";
+
+            try
+            {
+                webrequest.Enqueue(url, body, (code, response) =>
+                {
+                    if (code >= 200 && code < 300)
+                    {
+                        return;
+                    }
+
+                    if (config.General.DebugMode)
+                    {
+                        PrintWarning("Website replay event post failed with HTTP " + code + ": " + (response ?? ""));
+                    }
+                }, this, RequestMethod.POST, headers, Math.Max(5000, config.WebsiteReplayEvents.RequestTimeoutMilliseconds));
+            }
+            catch (Exception ex)
+            {
+                if (config.General.DebugMode)
+                {
+                    PrintWarning("Website replay event could not be sent: " + ex.Message);
+                }
+            }
+        }
+
+        private string ResolveWebsiteReplaySharedSecret()
+        {
+            var secret = config?.WebsiteReplayEvents?.SharedSecret ?? "";
+            secret = secret.Trim();
+            if (secret.StartsWith("${", StringComparison.Ordinal) && secret.EndsWith("}", StringComparison.Ordinal) && secret.Length > 3)
+            {
+                var key = secret.Substring(2, secret.Length - 3);
+                string configuredSecret;
+                if (LoadSecrets().TryGetValue(key, out configuredSecret))
+                {
+                    secret = configuredSecret ?? "";
+                }
+                else
+                {
+                    secret = Environment.GetEnvironmentVariable(key) ?? "";
+                }
+            }
+
+            return secret.Trim();
+        }
+
+        private Dictionary<string, string> LoadSecrets()
+        {
+            if (secrets != null)
+            {
+                return secrets;
+            }
+
+            secrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var path = Path.Combine(Interface.Oxide.ConfigDirectory, $"{SecretsConfigName}.json");
+
+            if (!File.Exists(path))
+            {
+                return secrets;
+            }
+
+            try
+            {
+                var loadedSecrets = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+                if (loadedSecrets != null)
+                {
+                    secrets = new Dictionary<string, string>(loadedSecrets, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read oxide/config/{SecretsConfigName}.json for website replay events: {ex.Message}");
+            }
+
+            return secrets;
+        }
+
+        private Dictionary<string, string> BuildWebsiteReplayHeaders(string method, string url, string body, string secret)
+        {
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+            var pathAndQuery = new Uri(url).PathAndQuery;
+            var bodyHash = Sha256Hex(body ?? "");
+            var canonical = method.ToUpperInvariant() + "\n" + pathAndQuery + "\n" + timestamp + "\n" + bodyHash;
+
+            return new Dictionary<string, string>
+            {
+                ["X-Raidlands-Server"] = config.WebsiteReplayEvents.ServerId,
+                ["X-Raidlands-Timestamp"] = timestamp,
+                ["X-Raidlands-Signature"] = HmacSha256Hex(canonical, secret),
+                ["Accept"] = "application/json"
+            };
+        }
+
+        private static string Sha256Hex(string value)
+        {
+            using (var sha = SHA256.Create())
+            {
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""))).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        private static string HmacSha256Hex(string value, string secret)
+        {
+            using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret ?? "")))
+            {
+                return BitConverter.ToString(hmac.ComputeHash(Encoding.UTF8.GetBytes(value ?? ""))).Replace("-", "").ToLowerInvariant();
             }
         }
 
@@ -15193,7 +15522,7 @@ namespace Oxide.Plugins
                 CursorEnabled = true,
                 Image = { Color = "0.05 0.06 0.07 0.92" },
                 RectTransform = { AnchorMin = "0.23 0.16", AnchorMax = "0.77 0.86" }
-            }, "Overlay", StrikeUiName);
+            }, "Hud.Menu", StrikeUiName);
 
             AddUiLabel(container, root, "Portable Airstrikes", 18, TextAnchor.MiddleLeft, "0.06 0.88", "0.70 0.98", "1 0.88 0.70 1");
             AddUiButton(container, root, "X", "portableairstrikes.ui.close", "0.92 0.90", "0.98 0.98", "0.50 0.12 0.10 0.95", 14);
@@ -15223,7 +15552,9 @@ namespace Oxide.Plugins
             }
 
             AddUiLabel(container, root, "Direct: /" + GetOpenCommand() + " <id>   Save default manually: /" + GetOpenCommand() + " default <id>", 10, TextAnchor.MiddleLeft, "0.06 0.03", "0.86 0.08", "0.62 0.66 0.70 1");
+            RegisterUiBridge(player, StrikeUiName, true);
             CuiHelper.AddUi(player, container);
+            ArmUiBridge(player, StrikeUiName, 0.5f);
         }
 
         private void ShowStrikeConfirmUi(BasePlayer player, string strikeId)
@@ -15245,7 +15576,7 @@ namespace Oxide.Plugins
                 CursorEnabled = true,
                 Image = { Color = "0.05 0.06 0.07 0.94" },
                 RectTransform = { AnchorMin = "0.32 0.28", AnchorMax = "0.68 0.72" }
-            }, "Overlay", StrikeUiName);
+            }, "Hud.Menu", StrikeUiName);
 
             AddUiLabel(container, root, "Confirm Airstrike", 17, TextAnchor.MiddleLeft, "0.08 0.84", "0.74 0.96", "1 0.88 0.70 1");
             AddUiButton(container, root, "X", "portableairstrikes.ui.close", "0.88 0.86", "0.96 0.96", "0.50 0.12 0.10 0.95", 14);
@@ -15262,7 +15593,9 @@ namespace Oxide.Plugins
             }
 
             AddUiButton(container, root, "CANCEL", "portableairstrikes.ui.close", "0.53 0.12", "0.92 0.25", "0.18 0.20 0.23 0.95", 13);
+            RegisterUiBridge(player, StrikeUiName, true);
             CuiHelper.AddUi(player, container);
+            ArmUiBridge(player, StrikeUiName, 0.5f);
         }
 
         private List<StrikeDefinition> BuildVisibleStrikeList(BasePlayer player, List<StrikeDefinition> strikes)
@@ -15431,7 +15764,63 @@ namespace Oxide.Plugins
             if (player != null)
             {
                 CuiHelper.DestroyUi(player, StrikeUiName);
+                UnregisterUiBridge(player, StrikeUiName);
             }
+        }
+
+        private void CloseRegisteredUi(BasePlayer player, string reason)
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            bool bridgeClosed = (bool)(RaidlandsUiEscapeBridge?.Call("ClosePlayerUis", player, reason) ?? false);
+            if (bridgeClosed)
+            {
+                return;
+            }
+
+            OnRaidlandsUiBridgeClosed(player, reason);
+        }
+
+        private void RegisterUiBridge(BasePlayer player, string rootName, bool waitForReady = false)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("RegisterUi", player, this, rootName, nameof(OnRaidlandsUiBridgeClosed), waitForReady);
+        }
+
+        private void ArmUiBridge(BasePlayer player, string rootName, float delaySeconds = 0f)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            if (delaySeconds <= 0f)
+            {
+                RaidlandsUiEscapeBridge?.Call("ArmUi", player, this, rootName);
+                return;
+            }
+
+            timer.Once(delaySeconds, () => RaidlandsUiEscapeBridge?.Call("ArmUi", player, this, rootName));
+        }
+
+        private void UnregisterUiBridge(BasePlayer player, string rootName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(rootName))
+                return;
+
+            RaidlandsUiEscapeBridge?.Call("UnregisterUi", player, this, rootName);
+        }
+
+        private void OnRaidlandsUiBridgeClosed(BasePlayer player, string reason)
+        {
+            if (player == null)
+                return;
+
+            DestroyStrikeUi(player);
+            DestroyAdminUi(player);
         }
 
         private void CreateToolTargetMarker(BasePlayer player, AirstrikeTarget target)
@@ -18510,6 +18899,11 @@ namespace Oxide.Plugins
                 config.DamageScales = defaults.DamageScales;
             }
 
+            if (config.BasePayloadDamageMultipliers == null)
+            {
+                config.BasePayloadDamageMultipliers = defaults.BasePayloadDamageMultipliers;
+            }
+
             if (config.LootDistribution == null)
             {
                 config.LootDistribution = defaults.LootDistribution;
@@ -18518,6 +18912,11 @@ namespace Oxide.Plugins
             if (config.AuditWebhooks == null)
             {
                 config.AuditWebhooks = defaults.AuditWebhooks;
+            }
+
+            if (config.WebsiteReplayEvents == null)
+            {
+                config.WebsiteReplayEvents = defaults.WebsiteReplayEvents;
             }
 
             if (string.IsNullOrWhiteSpace(config.ChatPrefix))
@@ -18682,6 +19081,11 @@ namespace Oxide.Plugins
             config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.AttackHeliDeliveryVehicleHealth : config.DeliveryVisuals.AttackHeliDeliveryVehicleHealth, 1f, 10000f);
             config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth : config.DeliveryVisuals.CargoPlaneDeliveryVehicleHealth, 1f, 10000f);
             config.DeliveryVisuals.A10DeliveryVehicleHealth = Mathf.Clamp(config.DeliveryVisuals.A10DeliveryVehicleHealth <= 0f ? defaults.DeliveryVisuals.A10DeliveryVehicleHealth : config.DeliveryVisuals.A10DeliveryVehicleHealth, 1f, 10000f);
+            config.WebsiteReplayEvents.ApiBaseUrl = string.IsNullOrWhiteSpace(config.WebsiteReplayEvents.ApiBaseUrl) ? defaults.WebsiteReplayEvents.ApiBaseUrl : config.WebsiteReplayEvents.ApiBaseUrl.Trim().TrimEnd('/');
+            config.WebsiteReplayEvents.ServerId = string.IsNullOrWhiteSpace(config.WebsiteReplayEvents.ServerId) ? defaults.WebsiteReplayEvents.ServerId : config.WebsiteReplayEvents.ServerId.Trim();
+            config.WebsiteReplayEvents.SharedSecret = config.WebsiteReplayEvents.SharedSecret == null ? defaults.WebsiteReplayEvents.SharedSecret : config.WebsiteReplayEvents.SharedSecret.Trim();
+            config.WebsiteReplayEvents.WipeKey = config.WebsiteReplayEvents.WipeKey == null ? "" : config.WebsiteReplayEvents.WipeKey.Trim();
+            config.WebsiteReplayEvents.RequestTimeoutMilliseconds = Math.Max(5000, config.WebsiteReplayEvents.RequestTimeoutMilliseconds);
 
             if (config.LootDistribution.ContainerRules == null)
             {

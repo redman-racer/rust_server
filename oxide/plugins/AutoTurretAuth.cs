@@ -41,6 +41,7 @@ namespace Oxide.Plugins
         
         private object OnTurretTarget(AutoTurret turret, BaseCombatEntity entity)
         {
+            if (turret is NPCAutoTurret) return null;
             var player = entity as BasePlayer;
             if (player == null) return null;
             if (!IsAuthed(player, turret)) return null;
@@ -51,7 +52,7 @@ namespace Oxide.Plugins
         private void OnEntityBuilt(Planner plan, GameObject go)
         {
             var turret = go.ToBaseEntity() as AutoTurret;
-            if (turret == null) return;
+            if (turret == null || turret is NPCAutoTurret) return;
             authorizedPlayers = turret.GetBuildingPrivilege()?.authorizedPlayers;
             if (authorizedPlayers == null) return;
             foreach (ulong playerId in authorizedPlayers)
@@ -107,7 +108,7 @@ namespace Oxide.Plugins
         private static void FindTurrets(uint buildingId)
         {
             turrets = UnityEngine.Object.FindObjectsOfType<AutoTurret>()
-                .Where(x => x.GetBuildingPrivilege()?.buildingID == buildingId);
+                .Where(x => !(x is NPCAutoTurret) && x.GetBuildingPrivilege()?.buildingID == buildingId);
         }
         
         private static IEnumerator AddPlayer(ulong playerId)

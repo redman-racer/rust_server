@@ -44,6 +44,7 @@
 !/oxide/config/**
 !/oxide/config/Secrets.example.json
 /oxide/config/Secrets.local.json
+.audit_*
 !/oxide/lang/
 !/oxide/lang/**
 !/oxide/discord/

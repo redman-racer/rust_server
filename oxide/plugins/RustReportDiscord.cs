@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Report Discord", "OpenAI", "0.4.1")]
+    [Info("Rust Report Discord", "OpenAI/Raidlands", "0.4.2")]
     [Description("Captures F7 reports with recent PvP combat context and sends an evidence summary to Discord.")]
     public class RustReportDiscord : RustPlugin
     {
@@ -83,7 +83,7 @@ namespace Oxide.Plugins
             [JsonProperty("Include team IDs in Discord")]
             public bool IncludeTeamIds = true;
 
-            [JsonProperty("Demo search folders relative to server root")]
+            [JsonProperty("Demo search folders relative to server root", ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> DemoSearchFolders = new List<string> { "demos", "server" };
 
             [JsonProperty("Attach completed demos to Discord")]
@@ -188,6 +188,22 @@ namespace Oxide.Plugins
 
         protected override void SaveConfig() => Config.WriteObject(_config, true);
 
+        private static List<string> DistinctConfigValues(IEnumerable<string> values)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var value in values ?? Enumerable.Empty<string>())
+            {
+                var normalized = (value ?? string.Empty).Trim();
+
+                if (normalized.Length > 0 && seen.Add(normalized))
+                    result.Add(normalized);
+            }
+
+            return result;
+        }
+
         private void NormalizeConfig()
         {
             // Migrate the previous default recording duration to the new 60-second default.
@@ -204,6 +220,7 @@ namespace Oxide.Plugins
             _config.MaximumDiscordUploadSizeMb = Mathf.Clamp(_config.MaximumDiscordUploadSizeMb, 1f, 100f);
             if (_config.DemoSearchFolders == null || _config.DemoSearchFolders.Count == 0)
                 _config.DemoSearchFolders = new List<string> { "demos", "server" };
+            _config.DemoSearchFolders = DistinctConfigValues(_config.DemoSearchFolders);
         }
 
         private void OnServerInitialized()

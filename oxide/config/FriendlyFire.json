@@ -1,12 +1,11 @@
-
 {
   "Command": "ff",
   "Player Default Settings": {
-    "Friendly Fire": true
+    "Friendly Fire": false
   },
   "Change friendly fire state permission": "friendlyfire.changestate",
   "Send friendly fire messages": true,
   "Include check if friend": false,
   "Include check if team member": false,
-  "Include check if clan member": false
+  "Include check if clan member": true
 }

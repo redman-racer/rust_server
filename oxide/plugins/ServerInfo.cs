@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Server Info", "FastBurst", "0.6.2")]
+    [Info("Server Info", "FastBurst/Raidlands", "0.6.3")]
     [Description("UI customizable server info with multiple tabs")]
     public sealed class ServerInfo : RustPlugin
     {
@@ -60,6 +60,10 @@ namespace Oxide.Plugins
                 }
             }
 
+            _settings = _settings ?? Settings.CreateDefault();
+            _settings.StaffGroups = DistinctConfigValues(_settings.StaffGroups);
+            _settings.AdminGroups = DistinctConfigValues(_settings.AdminGroups);
+
             foreach (var player in BasePlayer.activePlayerList)
                 AddHelpButton(player);
 
@@ -80,6 +84,24 @@ namespace Oxide.Plugins
             }
 
             PlayerActiveTabs.Clear();
+        }
+
+        private static List<string> DistinctConfigValues(IEnumerable<string> values)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var value in values ?? Enumerable.Empty<string>())
+            {
+                var normalized = (value ?? string.Empty).Trim();
+
+                if (normalized.Length > 0 && seen.Add(normalized))
+                {
+                    result.Add(normalized);
+                }
+            }
+
+            return result;
         }
 
         [ConsoleCommand("changetab")]
@@ -1260,7 +1282,9 @@ namespace Oxide.Plugins
 
             public List<HelpTab> Tabs { get; set; }
             public List<CommandCategory> CommandCatalog { get; set; }
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> StaffGroups { get; set; }
+            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> AdminGroups { get; set; }
             public bool CommandCatalogUsesPluginLoadedChecks { get; set; }
             public bool CommandCatalogUsesPermissionChecks { get; set; }
