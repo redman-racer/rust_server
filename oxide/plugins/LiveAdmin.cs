@@ -11,7 +11,7 @@ using Oxide.Game.Rust.Cui;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-[Info("LiveAdmin", "Codex", "0.8.6")]
+[Info("LiveAdmin", "Codex", "0.9.0")]
 [Description("A live in-game staff admin panel for Rust/uMod servers.")]
 public class LiveAdmin : RustPlugin
 {
@@ -231,6 +231,8 @@ public int AutoWipeIntervalDays = 7;
 public string AutoWipeTimeUtc = "17:00";
 public bool AutoWipeMap = true;
 public bool AutoWipeBlueprints = false;
+public bool ForceWipeBlueprints = true;
+public bool ForceWipeOfflineCleanup = true;
 public string AutoWipeSeed = "random";
 public int AutoWipeMapSize = 3500;
 public string AutoWipeCustomMapUrl = string.Empty;
@@ -239,24 +241,23 @@ public string AutoWipeDiscordCommandText = string.Empty;
 public string ForceWipeDiscordCommandText = string.Empty;
 public string AutoWipeCommandText = "say Auto wipe command list is not configured.";
 public string ForceWipeCommandText = "say Force wipe command list is not configured.";
-public string MapWipeDeletePathText = "server/{identity}/save/*.sav||server/{identity}/save/*.map||server/{identity}/save/*.sav.*";
-public string BlueprintWipeDeletePathText = "server/{identity}/player.blueprints*.db||server/{identity}/player.blueprints*.db-journal";
+public string MapWipeDeletePathText = "*.sav||*.map||*.sav.*";
+public string BlueprintWipeDeletePathText = "player.blueprints*.db*";
 public List<string> AutoWipeCommands = new List<string> { "say Auto wipe command list is not configured." };
 public List<string> ForceWipeCommands = new List<string> { "say Force wipe command list is not configured." };
 public List<string> AutoWipeDiscordCommands = new List<string>();
 public List<string> ForceWipeDiscordCommands = new List<string>();
-public bool ForceWipeDeletesFiles = true;
+public bool ForceWipeDeletesFiles = false;
 public string WipeFileRoot = string.Empty;
 public List<string> MapWipeDeletePaths = new List<string>
 {
-"server/{identity}/save/*.sav",
-"server/{identity}/save/*.map",
-"server/{identity}/save/*.sav.*"
+"*.sav",
+"*.map",
+"*.sav.*"
 };
 public List<string> BlueprintWipeDeletePaths = new List<string>
 {
-"server/{identity}/player.blueprints*.db",
-"server/{identity}/player.blueprints*.db-journal"
+"player.blueprints*.db*"
 };
 public List<PlayerActionCommand> PlayerActions = new List<PlayerActionCommand>
 {
@@ -632,11 +633,11 @@ config.ForceWipeDiscordCommands = new List<string>();
 }
 if (config.MapWipeDeletePaths == null || config.MapWipeDeletePaths.Count == 0)
 {
-config.MapWipeDeletePaths = SplitConfigList(config.MapWipeDeletePathText, "server/{identity}/save/*.sav");
+config.MapWipeDeletePaths = SplitConfigList(config.MapWipeDeletePathText, "*.sav");
 }
 if (config.BlueprintWipeDeletePaths == null || config.BlueprintWipeDeletePaths.Count == 0)
 {
-config.BlueprintWipeDeletePaths = SplitConfigList(config.BlueprintWipeDeletePathText, "server/{identity}/player.blueprints*.db");
+config.BlueprintWipeDeletePaths = SplitConfigList(config.BlueprintWipeDeletePathText, "player.blueprints*.db*");
 }
 NormalizeConfigLists();
 if (config.QuickCommands == null)
@@ -4711,12 +4712,12 @@ EnsureNextAutoWipe();
 if (!DateTime.TryParse(storedData.NextAutoWipeUtc, out var next)) return;
 if (DateTime.UtcNow < next) return;
 var mode = ScheduledWipeMode(next);
-RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : config.AutoWipeCommands);
+if (!RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : config.AutoWipeCommands)) return;
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
 RefreshWipeViews();
 }
-private void RunWipeCommands(BasePlayer actor, string action, List<string> commands)
+private bool RunWipeCommands(BasePlayer actor, string action, List<string> commands)
 {
 var force = action == "ForceWipe";
 var dryRun = force && config.ForceWipeDryRunDefault;
@@ -4724,11 +4725,11 @@ activeWipeSeed = ResolveWipeSeed();
 var wipeSeed = activeWipeSeed;
 if (dryRun)
 {
-var preview = string.Join(" | ", PreviewWipeCommands(action).Concat(PreviewWipeFiles(config.AutoWipeBlueprints)).Take(10).ToArray());
+var preview = string.Join(" | ", PreviewWipeCommands(action).Concat(PreviewWipeFiles(config.ForceWipeBlueprints)).Take(10).ToArray());
 Reply(actor, "Force wipe dry-run only. No commands or files were changed.");
 LogDryRun(actor, "Wipe", action, "server", string.Empty, preview);
 activeWipeSeed = null;
-return;
+return false;
 }
 if (config.AllowGlobalChatAnnouncements && !string.IsNullOrEmpty(config.AutoWipeAnnouncement))
 {
@@ -4736,10 +4737,16 @@ PrintToChat(FormatWipeText(config.AutoWipeAnnouncement));
 }
 activeWipeSeed = wipeSeed;
 RunWipeSetupCommands(action == "ForceWipe" ? config.ForceWipeDiscordCommands : config.AutoWipeDiscordCommands);
-PrepareNextWorld(action, wipeSeed);
-if (action == "ForceWipe" && config.ForceWipeDeletesFiles)
+if (!PrepareNextWorld(action, wipeSeed))
 {
-DeleteForceWipeFiles(actor);
+activeWipeSeed = null;
+return false;
+}
+if (force && config.ForceWipeOfflineCleanup && !WriteForceWipeMarker(wipeSeed))
+{
+LogFailed(actor, "Wipe", action, "server", string.Empty, "Offline force-wipe marker could not be written; shutdown was cancelled.");
+activeWipeSeed = null;
+return false;
 }
 foreach (var command in (commands ?? new List<string>()).Where(c => !string.IsNullOrEmpty(c)))
 {
@@ -4747,18 +4754,47 @@ var formatted = FormatWipeText(command);
 if (!IsCommandAllowed(actor, formatted, "Wipe")) continue;
 ConsoleSystem.Run(ConsoleSystem.Option.Server, formatted);
 }
-WriteAudit(actor, "Pending", "Wipe", action, "server", string.Empty, $"map={config.AutoWipeMap} bp={config.AutoWipeBlueprints} seed={wipeSeed} size={config.AutoWipeMapSize}; awaiting restart verification");
+WriteAudit(actor, "Pending", "Wipe", action, "server", string.Empty, $"map={config.AutoWipeMap} bp={(force ? config.ForceWipeBlueprints : config.AutoWipeBlueprints)} seed={wipeSeed} size={config.AutoWipeMapSize}; awaiting restart verification");
 activeWipeSeed = null;
 RefreshConsoleViews();
+return true;
 }
 
-private void PrepareNextWorld(string action, string wipeSeed)
+private bool WriteForceWipeMarker(string wipeSeed)
 {
-if (!config.AutoWipeMap) return;
+try
+{
+if (!int.TryParse(wipeSeed, out var seed) || seed <= 0) return false;
+var root = GetWipeRoot();
+Directory.CreateDirectory(root);
+var marker = Path.Combine(root, ".liveadmin-force-wipe.pending");
+var lines = new[]
+{
+"version=1",
+"mode=force",
+"seed=" + seed,
+"worldsize=" + Math.Max(1000, Math.Min(6000, config.AutoWipeMapSize)),
+"wipe_map=" + (config.AutoWipeMap ? "1" : "0"),
+"wipe_blueprints=" + (config.ForceWipeBlueprints ? "1" : "0")
+};
+File.WriteAllLines(marker, lines);
+Puts("Offline force-wipe marker written. The startup wrapper will remove map and blueprint files while Rust is stopped.");
+return true;
+}
+catch (Exception ex)
+{
+Puts("Failed to write offline force-wipe marker: " + ex.Message);
+return false;
+}
+}
+
+private bool PrepareNextWorld(string action, string wipeSeed)
+{
+if (!config.AutoWipeMap) return true;
 if (!int.TryParse(wipeSeed, out var seed) || seed <= 0)
 {
 LogFailed(null, "Wipe", action, "server", string.Empty, "Could not resolve a valid numeric map seed.");
-return;
+return false;
 }
 
 var size = Math.Max(1000, Math.Min(6000, config.AutoWipeMapSize));
@@ -4770,7 +4806,7 @@ ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.writecfg");
 if (!WriteNextWorldServerConfig(seed, size, levelUrl))
 {
 LogFailed(null, "Wipe", action, "server", string.Empty, "Could not persist the next world settings to cfg/server.cfg.");
-return;
+return false;
 }
 
 storedData.PendingWipeMode = action;
@@ -4780,6 +4816,7 @@ storedData.PendingWipeMapSize = size;
 storedData.PendingWipeLevelUrl = levelUrl;
 SaveData();
 Puts($"{action} prepared: next world seed={seed}, size={size}. Waiting for restart verification.");
+return true;
 }
 
 private bool WriteNextWorldServerConfig(int seed, int size, string levelUrl)
@@ -4822,9 +4859,11 @@ var seedMatches = ConVar.Server.seed == storedData.PendingWipeSeed;
 var sizeMatches = ConVar.Server.worldsize == storedData.PendingWipeMapSize;
 var expectedUrl = storedData.PendingWipeLevelUrl ?? string.Empty;
 var urlMatches = string.Equals(ConVar.Server.levelurl ?? string.Empty, expectedUrl, StringComparison.OrdinalIgnoreCase);
+var offlineCleanupMatches = !string.Equals(storedData.PendingWipeMode, "ForceWipe", StringComparison.OrdinalIgnoreCase)
+|| (seedMatches && sizeMatches && urlMatches && VerifyForceWipeCleanupReceipt());
 var details = $"expected seed={storedData.PendingWipeSeed} size={storedData.PendingWipeMapSize}; running seed={ConVar.Server.seed} size={ConVar.Server.worldsize}";
 
-if (seedMatches && sizeMatches && urlMatches)
+if (seedMatches && sizeMatches && urlMatches && offlineCleanupMatches)
 {
 storedData.LastWipeUtc = Now();
 LogSuccess(null, "Wipe", storedData.PendingWipeMode + "Verified", "server", string.Empty, details);
@@ -4842,6 +4881,34 @@ storedData.PendingWipeSeed = 0;
 storedData.PendingWipeMapSize = 0;
 storedData.PendingWipeLevelUrl = null;
 SaveData();
+}
+
+private bool VerifyForceWipeCleanupReceipt()
+{
+try
+{
+var receipt = Path.Combine(GetWipeRoot(), ".liveadmin-force-wipe.cleaned");
+if (!File.Exists(receipt)) return false;
+var values = File.ReadAllLines(receipt)
+.Select(line => (line ?? string.Empty).Split(new[] { '=' }, 2))
+.Where(parts => parts.Length == 2)
+.ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim(), StringComparer.OrdinalIgnoreCase);
+var valid = values.TryGetValue("seed", out var seedText)
+&& int.TryParse(seedText, out var seed)
+&& seed == storedData.PendingWipeSeed
+&& values.TryGetValue("worldsize", out var sizeText)
+&& int.TryParse(sizeText, out var size)
+&& size == storedData.PendingWipeMapSize
+&& values.TryGetValue("status", out var status)
+&& string.Equals(status, "cleaned", StringComparison.OrdinalIgnoreCase);
+if (valid) File.Delete(receipt);
+return valid;
+}
+catch (Exception ex)
+{
+Puts("Failed to verify offline force-wipe receipt: " + ex.Message);
+return false;
+}
 }
 private void RunWipeSetupCommands(List<string> commands)
 {
@@ -4947,13 +5014,13 @@ return patterns.Where(IsSafeWipePattern).Select(FormatWipeText).ToList();
 private void PreviewWipe(BasePlayer player, string mode)
 {
 var commands = PreviewWipeCommands(mode);
-var files = PreviewWipeFiles(mode == "ForceWipe" && config.AutoWipeBlueprints);
+var files = PreviewWipeFiles(mode == "ForceWipe" && config.ForceWipeBlueprints);
 Reply(player, $"{mode} preview: {commands.Count} commands, {files.Count} file patterns. See logs.");
 LogDryRun(player, "Wipe", "Preview" + mode, "server", string.Empty, string.Join(" | ", commands.Concat(files).Take(12).ToArray()));
 }
 private void PreviewWipeFilesOnly(BasePlayer player)
 {
-var files = PreviewWipeFiles(config.AutoWipeBlueprints);
+var files = PreviewWipeFiles(config.ForceWipeBlueprints);
 Reply(player, $"File deletion preview: {files.Count} safe patterns. See logs.");
 LogDryRun(player, "Wipe", "PreviewWipeFiles", "server", string.Empty, string.Join(" | ", files.Take(12).ToArray()));
 }

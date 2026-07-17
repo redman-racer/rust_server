@@ -8,8 +8,11 @@ Date: 2026-07-17
 - `oxide/plugins/NTeleportation.cs`
 - `oxide/plugins/ToolCupboardTurrets.cs`
 - `oxide/config/DiscordRoles.json`
+- `oxide/config/LiveAdmin.json`
+- `runds.sh`
+- `.gitattributes`
 
-`oxide/config/LiveAdmin.json` only gained a terminating newline and has no functional configuration change.
+`oxide/config/LiveAdmin.json` now enables offline first-Thursday force wipes while normal weekly wipes continue to preserve blueprints.
 
 ## LiveAdmin 0.8.6
 
@@ -18,6 +21,16 @@ Date: 2026-07-17
 - Normal wipes continue to preserve blueprints and do not depend on unsafe live save-file deletion.
 - Wipes are recorded as pending until the restarted server verifies the expected seed, world size, and level URL.
 - `LastWipeUtc` is updated only after successful post-restart verification; mismatches are written as failed audit entries.
+
+## LiveAdmin 0.9.0 monthly force wipes
+
+- The first configured Thursday of each month uses the existing `ForceWipe` schedule mode.
+- Force wipes write a validated offline cleanup marker before the restart and enable blueprint wiping independently of normal weekly wipes.
+- `runds.sh` moves the marker into a processing state, validates every field, deletes only top-level map saves/maps and `player.blueprints*.db*` files beneath the configured identity root, and writes a cleanup receipt.
+- The force-wipe launch explicitly passes the generated seed and configured 3500 world size to `RustDedicated`.
+- LiveAdmin requires a matching cleanup receipt plus the expected running seed, world size, and level URL before recording force-wipe success.
+- If marker creation fails, the scheduled wipe is not advanced and shutdown is cancelled so it can safely retry.
+- The server must be launched through the updated `runds.sh`; deployments that bypass it cannot perform or verify offline force-wipe cleanup.
 
 ## NTeleportation 1.9.9
 

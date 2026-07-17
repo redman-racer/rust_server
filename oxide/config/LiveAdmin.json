@@ -118,6 +118,8 @@
   "AutoWipeTimeUtc": "18:00",
   "AutoWipeMap": true,
   "AutoWipeBlueprints": false,
+  "ForceWipeBlueprints": true,
+  "ForceWipeOfflineCleanup": true,
   "AutoWipeSeed": "random",
   "AutoWipeMapSize": 3500,
   "AutoWipeCustomMapUrl": "",
@@ -125,9 +127,9 @@
   "AutoWipeDiscordCommandText": "",
   "ForceWipeDiscordCommandText": "",
   "AutoWipeCommandText": "say Scheduled normal wipe is starting now.||server.save||writecfg||restart 60",
-  "ForceWipeCommandText": "say ADMIN FORCE WIPE is starting now. Server will restart shortly.||server.save||writecfg||quit",
-  "MapWipeDeletePathText": "server/{identity}/save/*.sav||server/{identity}/save/*.map||server/{identity}/save/*.sav.*",
-  "BlueprintWipeDeletePathText": "server/{identity}/player.blueprints*.db||server/{identity}/player.blueprints*.db-journal",
+  "ForceWipeCommandText": "say ADMIN FORCE WIPE is starting now. Server will restart shortly.||server.save||writecfg||restart 60",
+  "MapWipeDeletePathText": "*.sav||*.map||*.sav.*",
+  "BlueprintWipeDeletePathText": "player.blueprints*.db*",
   "AutoWipeCommands": [
     "say Scheduled normal wipe is starting now.",
     "server.save",
@@ -138,20 +140,19 @@
     "say ADMIN FORCE WIPE is starting now. Server will restart shortly.",
     "server.save",
     "writecfg",
-    "quit"
+    "restart 60"
   ],
   "AutoWipeDiscordCommands": [],
   "ForceWipeDiscordCommands": [],
   "ForceWipeDeletesFiles": false,
   "WipeFileRoot": "/server/server/rust",
   "MapWipeDeletePaths": [
-    "server/{identity}/save/*.sav",
-    "server/{identity}/save/*.map",
-    "server/{identity}/save/*.sav.*"
+    "*.sav",
+    "*.map",
+    "*.sav.*"
   ],
   "BlueprintWipeDeletePaths": [
-    "server/{identity}/player.blueprints*.db",
-    "server/{identity}/player.blueprints*.db-journal"
+    "player.blueprints*.db*"
   ],
   "PlayerActions": [
     {
