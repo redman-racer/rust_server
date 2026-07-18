@@ -8,12 +8,14 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsPortaforts", "Raidlands", "1.2.8")]
+    [Info("RaidlandsPortaforts", "Raidlands", "1.2.9")]
     [Description("Provides Raidlands Portafort token items backed by CopyPaste placement.")]
     public class RaidlandsPortaforts : RustPlugin
     {
-        private const string AdminPermission = "raidlands.portaforts.admin";
-        private const string CooldownBypassPermission = "raidlands.portaforts.cooldown.bypass";
+        private const string AdminPermission = "raidlandsportaforts.admin";
+        private const string CooldownBypassPermission = "raidlandsportaforts.cooldown.bypass";
+        private const string LegacyAdminPermission = "raidlands.portaforts.admin";
+        private const string LegacyCooldownBypassPermission = "raidlands.portaforts.cooldown.bypass";
         private const string CooldownDataFile = "RaidlandsPortaforts_Cooldowns";
         private static readonly int GroundLayer = LayerMask.GetMask("Terrain", "World", "Water", "Default");
         private static readonly int PlacementBlockLayer = LayerMask.GetMask("Construction", "Construction Trigger", "Deployed", "Vehicle Large");
@@ -875,14 +877,21 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (permission.UserHasPermission(player.UserIDString, CooldownBypassPermission))
+            if (UserHasPluginPermission(player, CooldownBypassPermission, LegacyCooldownBypassPermission))
             {
                 return true;
             }
 
             return config.RateLimit != null
                 && config.RateLimit.AdminsBypass
-                && permission.UserHasPermission(player.UserIDString, AdminPermission);
+                && UserHasPluginPermission(player, AdminPermission, LegacyAdminPermission);
+        }
+
+        private bool UserHasPluginPermission(BasePlayer player, string currentPermission, string legacyPermission)
+        {
+            return player != null
+                && (permission.UserHasPermission(player.UserIDString, currentPermission)
+                    || permission.UserHasPermission(player.UserIDString, legacyPermission));
         }
 
         private void StartPlayerCooldown(BasePlayer player)
@@ -2224,7 +2233,7 @@ namespace Oxide.Plugins
             }
 
             var player = arg.Connection.player as BasePlayer;
-            return player != null && permission.UserHasPermission(player.UserIDString, AdminPermission);
+            return UserHasPluginPermission(player, AdminPermission, LegacyAdminPermission);
         }
 
         private BasePlayer FindPlayer(string value)

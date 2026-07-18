@@ -1,11 +1,11 @@
 {
   "AutoSpawn": {
     "CooldownMinutesAfterRun": 60.0,
-    "Enabled": false,
+    "Enabled": true,
     "IntervalMinutes": 120.0,
     "JitterMinutes": 30.0,
-    "MaxActiveRaidBases": 1,
-    "MinOnlinePlayers": 4
+    "MaxActiveRaidBases": 8,
+    "MinOnlinePlayers": 0
   },
   "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
   "Cleanup": {
@@ -15,33 +15,90 @@
     "Forced Cleanup Timeout Seconds": 10800.0,
     "Remove Markers": true
   },
+  "Event Types": {
+    "Automatic Bases": {
+      "Check Frequency Minutes": 15.0,
+      "Display Name": "Automatic Bases",
+      "Enabled": true,
+      "Hard Lifetime Hours": 24.0,
+      "Layouts": [
+        {
+          "Enabled": true,
+          "Layout Id": "ababmxking-1",
+          "Weight": 1.0
+        },
+        {
+          "Enabled": true,
+          "Layout Id": "heizenberg-1",
+          "Weight": 1.0
+        },
+        {
+          "Enabled": true,
+          "Layout Id": "justintoactive-1",
+          "Weight": 1.0
+        },
+        {
+          "Enabled": true,
+          "Layout Id": "plasma-1",
+          "Weight": 1.0
+        }
+      ],
+      "Maximum Active Bases": 8,
+      "Maximum Spawns Per Check": 2,
+      "Minimum Active Bases": 4,
+      "Minimum Online Players": 0,
+      "Percentage To Announce": 25.0
+    }
+  },
   "LayoutRotation": {
-    "EnabledLayouts": [],
+    "EnabledLayouts": [
+      "ababmxking-1",
+      "heizenberg-1",
+      "justintoactive-1",
+      "plasma-1"
+    ],
     "IgnoredLayouts": [
       "raidlands_portafort",
       "raidlands_portafort_test"
     ],
     "PublicDisplayName": "Public Raid Base"
   },
+  "Leaderboard": {
+    "Maximum API Page Size": 100,
+    "Maximum Detailed History Entries": 10000,
+    "Season Placement Points": [
+      {
+        "Place": 1,
+        "Points": 10
+      },
+      {
+        "Place": 2,
+        "Points": 6
+      },
+      {
+        "Place": 3,
+        "Points": 4
+      }
+    ],
+    "Wipe Key": ""
+  },
   "LocationRules": {
     "BlockMonuments": true,
+    "BlockNoBuildZones": true,
     "BlockPlayerBases": true,
     "BlockRoads": true,
     "BlockSafeZones": true,
     "BlockWater": true,
     "DefaultMonumentRadius": 80.0,
     "FlatnessSampleRadius": 18.0,
+    "Footprint Clearance Padding": 6.0,
     "MaxFlatnessDelta": 5.0,
     "MaxSlope": 0.45,
-    "MinDistanceFromMapEdge": 350.0,
-    "MinimumDistanceBetweenEvents": 350.0,
-    "MonumentRadiusPadding": 85.0,
-    "OverlapPadding": 4.0,
+    "MinDistanceFromMapEdge": 100.0,
+    "MinimumDistanceBetweenEvents": 200.0,
+    "MonumentRadiusPadding": 50.0,
     "PlayerBaseRadius": 95.0,
-    "RandomSearchAttempts": 80,
-    "RoadCheckDepth": 40.0,
-    "RoadCheckHeight": 10.0,
-    "SafeZoneRadius": 120.0,
+    "Search Progress Log Interval Seconds": 60.0,
     "WaterClearance": 1.5
   },
   "MapMarker": {
@@ -52,6 +109,18 @@
     "RadiusMeters": 90.0
   },
   "Paste": {
+    "Adaptive Foundations": {
+      "Enabled": true,
+      "Exposure Threshold Meters": 0.75,
+      "Maximum Foundation Clearance Meters": 1.25,
+      "Maximum Foundation Embed Meters": 0.25,
+      "Maximum Lowering Meters": 6.0,
+      "Maximum Origin Adjustment Meters": 0.75,
+      "Maximum Water Depth Meters": 3.0,
+      "Raise Base Layer Above Water": true,
+      "Stability Audit Delay Seconds": 1.0,
+      "Water Surface Clearance Meters": 0.25
+    },
     "CopyPaste Arguments": [
       "deployables",
       "true",
@@ -67,6 +136,8 @@
       "0",
       "blockcollision",
       "0",
+      "stability",
+      "false",
       "enablesaving",
       "false"
     ],
@@ -78,68 +149,53 @@
       1.5,
       3.0
     ],
+    "Pasted Turret Survival Audit Delays Seconds": [
+      0.25,
+      1.5,
+      5.0
+    ],
     "RandomRotationDegreesStep": 90.0
   },
-  "Purchase": {
-    "Allow Random Layout": true,
-    "Allowed Layout Ids": [],
-    "Announce Purchaser": true,
-    "Cooldown Minutes Global": 45.0,
-    "Cooldown Minutes Per Player": 180.0,
-    "Costs": [
-      {
-        "Amount": 12000,
-        "DisplayName": "12,000 RP",
-        "ShortName": null,
-        "Type": "RP"
-      },
-      {
-        "Amount": 50000,
-        "DisplayName": "50,000 scrap",
-        "ShortName": "scrap",
-        "Type": "Item"
-      }
-    ],
-    "Default Layout Id": "random",
-    "Enabled": true,
-    "Min Online Players": 0,
-    "Permission": "raidlandsevents.player.purchase",
-    "Purchaser Does Not Own Event": true,
-    "Refund On Start Failure": true,
-    "Require Random Location": true
-  },
   "Rewards": {
-    "Award ServerRewards RP": false,
-    "Enabled": false,
-    "Placement RP Rewards": [
-      {
-        "Place": 1,
-        "ServerRewards RP": 10000
-      },
-      {
-        "Place": 2,
-        "ServerRewards RP": 5000
-      },
-      {
-        "Place": 3,
-        "ServerRewards RP": 2500
-      }
-    ],
-    "Queue Rewards If ServerRewards Missing": true,
-    "Tell Players About RP Rewards": true
+    "Admin Default Profile Id": "default_raid_base",
+    "Admin Event Payouts Enabled": false,
+    "Allowed Command Prefixes": [],
+    "Automatic Default Profile Id": "default_raid_base",
+    "Automatic Event Payouts Enabled": true,
+    "Enabled": true,
+    "Layout Profile Overrides": {},
+    "Queue Failed Rewards": true,
+    "Tell Players About Rewards": true
   },
   "Scoring": {
     "Announce Leaderboard On Completion": true,
     "Enabled": true,
     "Event Entity Damage Points Per 100 Damage": 1.0,
     "Explosive Event Entity Damage Bonus Points Per 100 Damage": 4.0,
+    "Ignore Allied Clan PVP": true,
+    "Ignore Same Clan PVP": true,
+    "Ignore Same Rust Team PVP": true,
+    "Ignore Sleeping Victims": true,
     "Max Leaderboard Entries": 5,
+    "Maximum Player Damage Points Per Victim Per Minute": 50,
     "Minimum Score To Qualify": 250,
     "Player Damage Points Per 100 Damage": 5.0,
     "Player Kill Points": 100,
+    "Repeat Victim Kill Multiplier": 0.25,
+    "Repeat Victim Window Seconds": 180.0,
     "Require Attacker And Victim Inside Radius": true,
     "Score Radius Meters": 120.0,
     "Tool Cupboard Destroyed Points": 1000,
     "Use Layout Center For Score Radius": true
+  },
+  "Server Id": "raidlands-main",
+  "Spawn Grid": {
+    "Build Budget Milliseconds": 1.0,
+    "Candidate Checks Per Slice": 25,
+    "Cell Size": 12.5,
+    "Enabled": true,
+    "Minimum Healthy Candidate Count": 1000,
+    "Persist Cache": true,
+    "Temporary Rejection Retry Seconds": 60.0
   }
 }

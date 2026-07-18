@@ -42,7 +42,7 @@ using System.Diagnostics;
 
 namespace Oxide.Plugins
 {
-    [Info("Copy Paste", "misticos", "4.2.15")]
+    [Info("Copy Paste", "misticos", "4.2.24")]
     [Description("Copy and paste buildings to save them or move them")]
     public class CopyPaste : CovalencePlugin
     {
@@ -77,8 +77,141 @@ namespace Oxide.Plugins
         private const float LegacyElevatorLiftVerticalTolerance = 0.5f;
         private const float LegacyElevatorShaftMatchMaxHorizontalDistanceSqr = 1f;
         private const float LegacyElevatorShaftMatchForwardDotMin = 0.98f;
+        private const string RaidlandsGeneratedRoleKey = "__raidlands_generated_role";
+        private const string RaidlandsOriginalOrderKey = "__raidlands_original_order";
+        private const string RaidlandsRoleLoweredFoundation = "lowered-foundation";
+        private const string RaidlandsRoleCapFloor = "cap-floor";
+        private const string RaidlandsRoleFullWall = "full-wall";
+        private const string RaidlandsRoleHalfWall = "half-wall";
+        private const string SquareFoundationPrefab = "assets/prefabs/building core/foundation/foundation.prefab";
+        private const string TriangleFoundationPrefab = "assets/prefabs/building core/foundation.triangle/foundation.triangle.prefab";
+        private const string SquareFloorPrefab = "assets/prefabs/building core/floor/floor.prefab";
+        private const string TriangleFloorPrefab = "assets/prefabs/building core/floor.triangle/floor.triangle.prefab";
+        private const string FullWallPrefab = "assets/prefabs/building core/wall/wall.prefab";
+        private const string HalfWallPrefab = "assets/prefabs/building core/wall.half/wall.half.prefab";
+        private const float RaidlandsHalfWallHeight = 1.5f;
+        private const float RaidlandsPoseTolerance = 0.08f;
+        private const float RaidlandsRotationToleranceDegrees = 1f;
         private bool _pasteReady;
         private readonly List<PasteData> _pendingPastes = new();
+
+        public sealed class RaidlandsAdaptiveFoundationOptions
+        {
+            public bool Enabled = true;
+            public float ExposureThreshold = 0.75f;
+            public float GroundClearance = 0.25f;
+            public float MaximumFoundationEmbed = 0.25f;
+            public float MaximumFoundationClearance = 1.25f;
+            public float MaximumOriginAdjustment = 0.75f;
+            public float MaximumLowering = 6f;
+            public bool RaiseBaseLayerAboveWater = true;
+            public float WaterSurfaceClearance = 0.25f;
+            public float MaximumWaterDepth = 3f;
+            public float StabilityAuditDelay = 1f;
+        }
+
+        public sealed class RaidlandsAdaptiveFoundationPlan
+        {
+            public RaidlandsAdaptiveFoundationOptions Options;
+            public int AdjustedFoundations;
+            public int GeneratedFoundations;
+            public int GeneratedCapFloors;
+            public int GeneratedFullWalls;
+            public int GeneratedHalfWalls;
+            public float MaximumLowering;
+            public float OriginVerticalAdjustment;
+            public int NaturallySeatedFoundations;
+            public int WaterSupportedFoundations;
+            public float MaximumWaterDepth;
+            public int ExpectedGeneratedEntities;
+            public readonly List<BaseEntity> SpawnedGeneratedEntities = new();
+            public readonly List<BuildingBlock> SpawnedBuildingBlocks = new();
+
+            public Dictionary<string, object> BuildReport(bool auditPassed, string failure = null)
+            {
+                return new Dictionary<string, object>
+                {
+                    ["Paste Started"] = true,
+                    ["Enabled"] = Options?.Enabled == true,
+                    ["Audit Passed"] = auditPassed,
+                    ["Failure"] = failure,
+                    ["Adjusted Foundations"] = AdjustedFoundations,
+                    ["Generated Foundations"] = GeneratedFoundations,
+                    ["Generated Cap Floors"] = GeneratedCapFloors,
+                    ["Generated Full Walls"] = GeneratedFullWalls,
+                    ["Generated Half Walls"] = GeneratedHalfWalls,
+                    ["Expected Generated Entities"] = ExpectedGeneratedEntities,
+                    ["Spawned Generated Entities"] = SpawnedGeneratedEntities.Count,
+                    ["Maximum Lowering Meters"] = MaximumLowering,
+                    ["Origin Vertical Adjustment Meters"] = OriginVerticalAdjustment,
+                    ["Naturally Seated Foundations"] = NaturallySeatedFoundations,
+                    ["Water Supported Foundations"] = WaterSupportedFoundations,
+                    ["Maximum Water Depth Meters"] = MaximumWaterDepth
+                };
+            }
+        }
+
+        private sealed class RaidlandsFoundationNode
+        {
+            public Dictionary<string, object> Data;
+            public string Prefab;
+            public Vector3 SourcePosition;
+            public Vector3 LoweredPosition;
+            public Quaternion Rotation;
+            public int LoweringSteps;
+            public int Grade;
+            public ulong SkinId;
+            public int OriginalOrder;
+            public float MinimumTerrainHeight;
+            public float MaximumTerrainHeight;
+            public float MaximumWaterHeight;
+            public bool IsOverWater;
+            public readonly List<RaidlandsFoundationEdgeRef> Edges = new();
+        }
+
+        private sealed class RaidlandsVerticalFit
+        {
+            public float Adjustment;
+            public int NaturallySeated;
+            public int ValidFoundations;
+            public int TotalLoweringSteps;
+            public int WaterBlocked;
+            public int Buried;
+            public int SupportDepthExceeded;
+            public int CourseAlignmentBlocked;
+            public readonly Dictionary<RaidlandsFoundationNode, int> LoweringSteps = new();
+        }
+
+        private sealed class RaidlandsFoundationEdgeRef
+        {
+            public RaidlandsFoundationNode Foundation;
+            public string Key;
+            public Vector3 Position;
+            public Quaternion Rotation;
+        }
+
+        private sealed class RaidlandsSupportEdge
+        {
+            public string Key;
+            public Vector3 Position;
+            public Quaternion Rotation;
+            public readonly List<RaidlandsFoundationEdgeRef> FoundationEdges = new();
+            public readonly Dictionary<int, RaidlandsSupportSlot> Slots = new();
+            public readonly List<RaidlandsExistingWallSpan> ExistingWalls = new();
+        }
+
+        private sealed class RaidlandsSupportSlot
+        {
+            public float BottomY;
+            public readonly List<RaidlandsFoundationNode> Contributors = new();
+        }
+
+        private sealed class RaidlandsExistingWallSpan
+        {
+            public Dictionary<string, object> Data;
+            public float BottomY;
+            public float TopY;
+        }
 
         private Dictionary<string, Stack<List<BaseEntity>>> _lastPastes =
             new Dictionary<string, Stack<List<BaseEntity>>>();
@@ -537,7 +670,7 @@ namespace Oxide.Plugins
 
         [HookMethod(nameof(API_RaidlandsTryTrackedPasteAtPosition))]
         public object API_RaidlandsTryTrackedPasteAtPosition(object trackingId, object filename, object rawPosition,
-            object rawArgs, object rawRotationDegrees = null)
+            object rawArgs, object rawRotationDegrees = null, object rawAdaptiveFoundationOptions = null)
         {
             var trackingIdString = trackingId?.ToString();
             var pasteFile = filename?.ToString();
@@ -556,34 +689,89 @@ namespace Oxide.Plugins
             if (!TryGetRaidlandsFloat(rawRotationDegrees, 0f, out rotationDegrees))
                 return "Raidlands tracked paste rotation was invalid";
 
+            RaidlandsAdaptiveFoundationOptions adaptiveFoundationOptions;
+            string adaptiveOptionsError;
+            if (!TryParseRaidlandsAdaptiveFoundationOptions(rawAdaptiveFoundationOptions, out adaptiveFoundationOptions,
+                    out adaptiveOptionsError))
+                return adaptiveOptionsError;
+
             PasteData pasteData = null;
             Action callback = () =>
             {
                 if (pasteData == null)
                     return;
 
-                var pastedEntityIds = pasteData.PastedEntities
-                    .Where(entity => entity != null && !entity.IsDestroyed && entity.net != null && entity.net.ID.IsValid)
-                    .Select(entity => entity.net.ID.Value)
-                    .Distinct()
-                    .ToList();
-
-                Interface.CallHook("OnRaidlandsTrackedPasteFinished", trackingIdString, pasteData.Filename,
-                    pastedEntityIds, pasteData.Player, pasteData.StartPos);
+                var auditDelay = pasteData.RaidlandsAdaptiveFoundationPlan?.Options?.StabilityAuditDelay ?? 0f;
+                Action complete = () => CompleteRaidlandsTrackedPaste(trackingIdString, pasteFile, pasteData);
+                if (auditDelay > 0f)
+                    timer.Once(auditDelay, complete);
+                else
+                    NextTick(complete);
             };
 
             var result = TryPaste(pastePosition, pasteFile, _consolePlayer, DegreeToRadian(rotationDegrees),
-                NormalizeRaidlandsPasteArgs(rawArgs), callback: callback);
+                NormalizeRaidlandsPasteArgs(rawArgs), callback: callback,
+                structureFirst: adaptiveFoundationOptions != null,
+                adaptiveFoundationOptions: adaptiveFoundationOptions);
 
             pasteData = result.Item2;
 
             if (pasteData == null)
             {
                 Interface.CallHook("OnRaidlandsTrackedPasteFailed", trackingIdString, pasteFile, result.Item1,
-                    pastePosition);
+                    pastePosition, new List<ulong>(), new Dictionary<string, object>
+                    {
+                        ["Paste Started"] = false
+                    });
             }
 
             return result.Item1;
+        }
+
+        private void CompleteRaidlandsTrackedPaste(string trackingId, string filename, PasteData pasteData)
+        {
+            if (pasteData == null)
+                return;
+
+            var pastedEntityIds = pasteData.PastedEntities
+                .Where(entity => entity != null && !entity.IsDestroyed && entity.net != null && entity.net.ID.IsValid)
+                .Select(entity => entity.net.ID.Value)
+                .Distinct()
+                .ToList();
+            var plan = pasteData.RaidlandsAdaptiveFoundationPlan;
+            if (plan == null)
+            {
+                Interface.CallHook("OnRaidlandsTrackedPasteFinished", trackingId, pasteData.Filename,
+                    pastedEntityIds, pasteData.Player, pasteData.StartPos, new Dictionary<string, object>());
+                return;
+            }
+
+            string failure = null;
+            var survivingGenerated = plan.SpawnedGeneratedEntities.Count(entity =>
+                entity != null && !entity.IsDestroyed && entity.net != null && entity.net.ID.IsValid);
+            if (plan.SpawnedGeneratedEntities.Count != plan.ExpectedGeneratedEntities)
+                failure = $"generated support spawn count was {plan.SpawnedGeneratedEntities.Count}/{plan.ExpectedGeneratedEntities}";
+            else if (survivingGenerated != plan.ExpectedGeneratedEntities)
+                failure = $"generated support survival count was {survivingGenerated}/{plan.ExpectedGeneratedEntities}";
+            else
+            {
+                var destroyedBuildingBlocks = plan.SpawnedBuildingBlocks.Count(block =>
+                    block == null || block.IsDestroyed || block.net == null || !block.net.ID.IsValid);
+                if (destroyedBuildingBlocks > 0)
+                    failure = $"{destroyedBuildingBlocks} spawned building block(s) failed the stability audit";
+            }
+
+            var report = plan.BuildReport(failure == null, failure);
+            if (failure != null)
+            {
+                Interface.CallHook("OnRaidlandsTrackedPasteFailed", trackingId, filename,
+                    $"Raidlands adaptive foundation audit failed: {failure}", pasteData.StartPos, pastedEntityIds,
+                    report);
+                return;
+            }
+
+            Interface.CallHook("OnRaidlandsTrackedPasteFinished", trackingId, pasteData.Filename,
+                pastedEntityIds, pasteData.Player, pasteData.StartPos, report);
         }
 
         [HookMethod(nameof(API_RaidlandsTryPasteFromSteamId))]
@@ -708,6 +896,118 @@ namespace Oxide.Plugins
             }
 
             return float.TryParse(rawValue.ToString(), out value);
+        }
+
+        private bool TryParseRaidlandsAdaptiveFoundationOptions(object rawValue,
+            out RaidlandsAdaptiveFoundationOptions options, out string error)
+        {
+            options = null;
+            error = null;
+            if (rawValue == null)
+                return true;
+
+            options = new RaidlandsAdaptiveFoundationOptions();
+
+            IDictionary<string, object> values = rawValue as IDictionary<string, object>;
+            if (values == null)
+            {
+                try
+                {
+                    values = JsonConvert.DeserializeObject<Dictionary<string, object>>(
+                        JsonConvert.SerializeObject(rawValue));
+                }
+                catch (Exception exception)
+                {
+                    error = $"Raidlands adaptive foundation options were invalid: {exception.Message}";
+                    return false;
+                }
+            }
+
+            if (values == null)
+            {
+                error = "Raidlands adaptive foundation options were invalid";
+                return false;
+            }
+
+            object optionValue;
+            if (TryGetRaidlandsOption(values, "Enabled", out optionValue) &&
+                !bool.TryParse(optionValue?.ToString(), out options.Enabled))
+            {
+                error = "Raidlands adaptive foundation Enabled option was invalid";
+                return false;
+            }
+
+            if (TryGetRaidlandsOption(values, "Raise Base Layer Above Water", out optionValue) &&
+                !bool.TryParse(optionValue?.ToString(), out options.RaiseBaseLayerAboveWater))
+            {
+                error = "Raidlands adaptive foundation Raise Base Layer Above Water option was invalid";
+                return false;
+            }
+
+            if (!TryReadRaidlandsOptionFloat(values, "Exposure Threshold Meters", options.ExposureThreshold,
+                    out options.ExposureThreshold)
+                || !TryReadRaidlandsOptionFloat(values, "Ground Clearance Meters", options.GroundClearance,
+                    out options.GroundClearance)
+                || !TryReadRaidlandsOptionFloat(values, "Maximum Foundation Embed Meters",
+                    options.MaximumFoundationEmbed, out options.MaximumFoundationEmbed)
+                || !TryReadRaidlandsOptionFloat(values, "Maximum Foundation Clearance Meters",
+                    options.MaximumFoundationClearance, out options.MaximumFoundationClearance)
+                || !TryReadRaidlandsOptionFloat(values, "Maximum Origin Adjustment Meters",
+                    options.MaximumOriginAdjustment, out options.MaximumOriginAdjustment)
+                || !TryReadRaidlandsOptionFloat(values, "Maximum Lowering Meters", options.MaximumLowering,
+                    out options.MaximumLowering)
+                || !TryReadRaidlandsOptionFloat(values, "Water Surface Clearance Meters",
+                    options.WaterSurfaceClearance, out options.WaterSurfaceClearance)
+                || !TryReadRaidlandsOptionFloat(values, "Maximum Water Depth Meters",
+                    options.MaximumWaterDepth, out options.MaximumWaterDepth)
+                || !TryReadRaidlandsOptionFloat(values, "Stability Audit Delay Seconds", options.StabilityAuditDelay,
+                    out options.StabilityAuditDelay))
+            {
+                error = "One or more Raidlands adaptive foundation numeric options were invalid";
+                return false;
+            }
+
+            options.ExposureThreshold = Mathf.Clamp(options.ExposureThreshold, 0f, RaidlandsHalfWallHeight);
+            options.GroundClearance = Mathf.Clamp(options.GroundClearance, 0f, RaidlandsHalfWallHeight - 0.1f);
+            options.MaximumFoundationClearance = Mathf.Clamp(options.MaximumFoundationClearance,
+                options.GroundClearance + 0.1f, RaidlandsHalfWallHeight);
+            options.MaximumFoundationEmbed = Mathf.Clamp(options.MaximumFoundationEmbed,
+                Math.Max(0f, RaidlandsHalfWallHeight - options.MaximumFoundationClearance),
+                RaidlandsHalfWallHeight);
+            options.MaximumOriginAdjustment = Mathf.Clamp(options.MaximumOriginAdjustment, 0f,
+                RaidlandsHalfWallHeight);
+            options.MaximumLowering = Mathf.Clamp(options.MaximumLowering, RaidlandsHalfWallHeight, 30f);
+            options.WaterSurfaceClearance = Mathf.Clamp(options.WaterSurfaceClearance, 0.05f, 3f);
+            options.MaximumWaterDepth = Mathf.Clamp(options.MaximumWaterDepth, 0.5f,
+                options.MaximumLowering);
+            options.StabilityAuditDelay = Mathf.Clamp(options.StabilityAuditDelay, 0f, 10f);
+            return true;
+        }
+
+        private bool TryReadRaidlandsOptionFloat(IDictionary<string, object> values, string key, float defaultValue,
+            out float result)
+        {
+            object rawValue;
+            return TryGetRaidlandsOption(values, key, out rawValue)
+                ? TryGetRaidlandsFloat(rawValue, defaultValue, out result)
+                : TryGetRaidlandsFloat(null, defaultValue, out result);
+        }
+
+        private bool TryGetRaidlandsOption(IDictionary<string, object> values, string key, out object result)
+        {
+            result = null;
+            if (values == null)
+                return false;
+
+            foreach (var entry in values)
+            {
+                if (!string.Equals(entry.Key, key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                result = entry.Value;
+                return true;
+            }
+
+            return false;
         }
 
         private object TryPasteFromVector3(Vector3 pos, float rotationCorrection, string filename, string[] args,
@@ -1849,7 +2149,8 @@ namespace Oxide.Plugins
         private PasteData Paste(ICollection<Dictionary<string, object>> entities, Dictionary<string, object> protocol,
             bool ownership, Vector3 startPos, IPlayer player, bool stability, float rotationCorrection,
             float heightAdj, bool auth, Action callback, Action<BaseEntity> callbackSpawned, string filename,
-            bool checkPlaced, bool enableSaving = true, bool? dlc = null, int? skinsMode = null)
+            bool checkPlaced, bool enableSaving = true, bool? dlc = null, int? skinsMode = null,
+            RaidlandsAdaptiveFoundationPlan adaptiveFoundationPlan = null)
         {
             //Settings
 
@@ -1884,6 +2185,7 @@ namespace Oxide.Plugins
                 Version = vNumber,
                 EnableSaving = enableSaving,
                 Dlc = dlc ?? _config.Paste.Dlc,
+                RaidlandsAdaptiveFoundationPlan = adaptiveFoundationPlan,
                 SkinsMode = (SkinsMode)(skinsMode.HasValue && IsValidSkinsMode(skinsMode.Value)
                     ? skinsMode.Value
                     : _config.Paste.SkinsMode)
@@ -3811,6 +4113,12 @@ namespace Oxide.Plugins
             }
 
             pasteData.PastedEntities.Add(entity);
+            if (pasteData.RaidlandsAdaptiveFoundationPlan != null && buildingBlock != null && !isChild)
+            {
+                pasteData.RaidlandsAdaptiveFoundationPlan.SpawnedBuildingBlocks.Add(buildingBlock);
+                if (data.ContainsKey(RaidlandsGeneratedRoleKey))
+                    pasteData.RaidlandsAdaptiveFoundationPlan.SpawnedGeneratedEntities.Add(entity);
+            }
             pasteData.CallbackSpawned?.Invoke(entity);
         }
 
@@ -4919,10 +5227,683 @@ namespace Oxide.Plugins
             return flags;
         }
 
+        private bool TryApplyRaidlandsAdaptiveFoundations(HashSet<Dictionary<string, object>> preloadData,
+            RaidlandsAdaptiveFoundationOptions options, out RaidlandsAdaptiveFoundationPlan plan, out string error)
+        {
+            plan = new RaidlandsAdaptiveFoundationPlan { Options = options };
+            error = null;
+            if (options?.Enabled != true)
+                return true;
+            if (preloadData == null || preloadData.Count == 0)
+            {
+                error = "Raidlands adaptive foundation planning received no pasted entities";
+                return false;
+            }
+            if (TerrainMeta.HeightMap == null)
+            {
+                error = "Raidlands adaptive foundation planning could not access the terrain height map";
+                return false;
+            }
+
+            var originalEntities = preloadData.ToList();
+            for (var index = 0; index < originalEntities.Count; index++)
+                originalEntities[index][RaidlandsOriginalOrderKey] = index;
+
+            var foundations = new List<RaidlandsFoundationNode>();
+            foreach (var entityData in originalEntities)
+            {
+                if (!IsRaidlandsFoundationData(entityData))
+                    continue;
+
+                RaidlandsFoundationNode foundation;
+                if (!TryCreateRaidlandsFoundationNode(entityData, options, foundations.Count, out foundation, out error))
+                    return false;
+                foundations.Add(foundation);
+            }
+
+            if (foundations.Count == 0)
+                return true;
+
+            if (options.RaiseBaseLayerAboveWater)
+            {
+                var deepestWaterFoundation = foundations
+                    .Where(value => value.IsOverWater)
+                    .OrderByDescending(value => value.MaximumWaterHeight - value.MinimumTerrainHeight)
+                    .FirstOrDefault();
+                var maximumWaterDepth = deepestWaterFoundation == null
+                    ? 0f
+                    : Math.Max(0f, deepestWaterFoundation.MaximumWaterHeight
+                                       - deepestWaterFoundation.MinimumTerrainHeight);
+                if (maximumWaterDepth > options.MaximumWaterDepth + 0.001f)
+                {
+                    error = $"Raidlands adaptive foundation water depth {maximumWaterDepth:0.##}m exceeds the configured {options.MaximumWaterDepth:0.##}m maximum";
+                    return false;
+                }
+
+                plan.WaterSupportedFoundations = foundations.Count(value => value.IsOverWater);
+                plan.MaximumWaterDepth = maximumWaterDepth;
+            }
+
+            RaidlandsVerticalFit verticalFit;
+            if (!TryFitRaidlandsFoundationElevation(preloadData, foundations, options, out verticalFit, out error))
+                return false;
+            ApplyRaidlandsFoundationElevation(preloadData, foundations, verticalFit, plan);
+
+            var supportEdges = new Dictionary<string, RaidlandsSupportEdge>(StringComparer.Ordinal);
+            foreach (var foundation in foundations)
+            {
+                foreach (var foundationEdge in foundation.Edges)
+                {
+                    RaidlandsSupportEdge supportEdge;
+                    if (!supportEdges.TryGetValue(foundationEdge.Key, out supportEdge))
+                    {
+                        supportEdges[foundationEdge.Key] = supportEdge = new RaidlandsSupportEdge
+                        {
+                            Key = foundationEdge.Key,
+                            Position = foundationEdge.Position,
+                            Rotation = foundationEdge.Rotation
+                        };
+                    }
+                    supportEdge.FoundationEdges.Add(foundationEdge);
+                }
+            }
+
+            var generatedOrder = originalEntities.Count;
+            foreach (var foundation in foundations.Where(value => value.LoweringSteps > 0))
+            {
+                preloadData.Remove(foundation.Data);
+
+                var loweredFoundation = CreateRaidlandsGeneratedBuildingBlock(foundation.Data, foundation.Prefab,
+                    foundation.LoweredPosition, foundation.Rotation, RaidlandsRoleLoweredFoundation, generatedOrder++);
+                var capFloorPrefab = string.Equals(foundation.Prefab, TriangleFoundationPrefab,
+                    StringComparison.OrdinalIgnoreCase) ? TriangleFloorPrefab : SquareFloorPrefab;
+                var capFloor = CreateRaidlandsGeneratedBuildingBlock(foundation.Data, capFloorPrefab,
+                    foundation.SourcePosition, foundation.Rotation, RaidlandsRoleCapFloor, generatedOrder++);
+                preloadData.Add(loweredFoundation);
+                preloadData.Add(capFloor);
+
+                plan.AdjustedFoundations++;
+                plan.GeneratedFoundations++;
+                plan.GeneratedCapFloors++;
+                plan.ExpectedGeneratedEntities += 2;
+                plan.MaximumLowering = Math.Max(plan.MaximumLowering,
+                    foundation.LoweringSteps * RaidlandsHalfWallHeight);
+            }
+
+            if (plan.AdjustedFoundations == 0)
+                return true;
+
+            foreach (var supportEdge in supportEdges.Values)
+            {
+                foreach (var foundationEdge in supportEdge.FoundationEdges)
+                {
+                    var foundation = foundationEdge.Foundation;
+                    if (foundation.LoweringSteps <= 0)
+                        continue;
+
+                    var hasRetainedFoundationSupport = supportEdge.FoundationEdges.Any(other =>
+                        other.Foundation != foundation
+                        && other.Foundation.LoweringSteps == 0
+                        && Math.Abs(other.Foundation.SourcePosition.y - foundation.SourcePosition.y) <= RaidlandsPoseTolerance);
+                    if (hasRetainedFoundationSupport)
+                        continue;
+
+                    for (var step = 0; step < foundation.LoweringSteps; step++)
+                    {
+                        var bottomY = foundationEdge.Position.y
+                                      - foundation.LoweringSteps * RaidlandsHalfWallHeight
+                                      + step * RaidlandsHalfWallHeight;
+                        var slotKey = Mathf.RoundToInt(bottomY / RaidlandsPoseTolerance);
+                        RaidlandsSupportSlot slot;
+                        if (!supportEdge.Slots.TryGetValue(slotKey, out slot))
+                        {
+                            supportEdge.Slots[slotKey] = slot = new RaidlandsSupportSlot { BottomY = bottomY };
+                        }
+                        if (!slot.Contributors.Contains(foundation))
+                            slot.Contributors.Add(foundation);
+                    }
+                }
+            }
+
+            CollectRaidlandsExistingWallSpans(originalEntities, supportEdges);
+            foreach (var supportEdge in supportEdges.Values.Where(value => value.Slots.Count > 0))
+            {
+                var slots = supportEdge.Slots.Values.OrderBy(value => value.BottomY).ToList();
+                var covered = new bool[slots.Count];
+                for (var index = 0; index < slots.Count; index++)
+                {
+                    RaidlandsExistingWallSpan coveringWall;
+                    if (!TryFindRaidlandsCoveringWall(supportEdge, slots[index], out coveringWall))
+                        continue;
+
+                    covered[index] = true;
+                    UpgradeRaidlandsExistingSupportWall(coveringWall.Data,
+                        StrongestRaidlandsFoundation(slots[index].Contributors));
+                }
+
+                for (var index = 0; index < slots.Count;)
+                {
+                    if (covered[index])
+                    {
+                        index++;
+                        continue;
+                    }
+
+                    var canUseFullWall = index + 1 < slots.Count
+                        && !covered[index + 1]
+                        && Math.Abs(slots[index + 1].BottomY - slots[index].BottomY - RaidlandsHalfWallHeight)
+                            <= RaidlandsPoseTolerance;
+                    var contributors = new List<RaidlandsFoundationNode>(slots[index].Contributors);
+                    if (canUseFullWall)
+                    {
+                        foreach (var contributor in slots[index + 1].Contributors)
+                        {
+                            if (!contributors.Contains(contributor))
+                                contributors.Add(contributor);
+                        }
+                    }
+
+                    var sourceFoundation = StrongestRaidlandsFoundation(contributors);
+                    if (sourceFoundation == null)
+                    {
+                        error = $"Raidlands adaptive foundation edge {supportEdge.Key} had no source foundation";
+                        return false;
+                    }
+
+                    var wallPosition = supportEdge.Position;
+                    wallPosition.y = slots[index].BottomY;
+                    var wall = CreateRaidlandsGeneratedBuildingBlock(sourceFoundation.Data,
+                        canUseFullWall ? FullWallPrefab : HalfWallPrefab, wallPosition, supportEdge.Rotation,
+                        canUseFullWall ? RaidlandsRoleFullWall : RaidlandsRoleHalfWall, generatedOrder++);
+                    preloadData.Add(wall);
+                    plan.ExpectedGeneratedEntities++;
+                    if (canUseFullWall)
+                    {
+                        plan.GeneratedFullWalls++;
+                        index += 2;
+                    }
+                    else
+                    {
+                        plan.GeneratedHalfWalls++;
+                        index++;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        private bool TryCreateRaidlandsFoundationNode(Dictionary<string, object> data,
+            RaidlandsAdaptiveFoundationOptions options, int fallbackOrder, out RaidlandsFoundationNode foundation,
+            out string error)
+        {
+            foundation = null;
+            error = null;
+            Vector3 position;
+            Quaternion rotation;
+            if (!TryGetRaidlandsEntityPose(data, out position, out rotation))
+            {
+                error = "Raidlands adaptive foundation planning found a foundation without a world pose";
+                return false;
+            }
+
+            var prefab = data["prefabname"]?.ToString();
+            var construction = PrefabAttribute.server.Find<Construction>(StringPool.Get(prefab));
+            if (construction?.allSockets == null)
+            {
+                error = $"Raidlands adaptive foundation planning found no construction sockets for {prefab}";
+                return false;
+            }
+
+            foundation = new RaidlandsFoundationNode
+            {
+                Data = data,
+                Prefab = prefab,
+                SourcePosition = position,
+                LoweredPosition = position,
+                Rotation = rotation,
+                Grade = GetRaidlandsBuildingGrade(data),
+                SkinId = GetRaidlandsSkinId(data),
+                OriginalOrder = GetRaidlandsOriginalOrder(data, fallbackOrder)
+            };
+
+            var edgeKeys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var socket in construction.allSockets.OfType<ConstructionSocket>()
+                         .Where(value => value != null && value.female
+                             && value.socketType == ConstructionSocket.Type.Wall))
+            {
+                Vector3 edgePosition;
+                Quaternion edgeRotation;
+                if (!TryGetRaidlandsSocketPlacement(position, rotation, socket, FullWallPrefab,
+                        out edgePosition, out edgeRotation, out error))
+                    return false;
+
+                Vector3 halfWallPosition;
+                Quaternion halfWallRotation;
+                if (!TryGetRaidlandsSocketPlacement(position, rotation, socket, HalfWallPrefab,
+                        out halfWallPosition, out halfWallRotation, out error))
+                    return false;
+                if (Vector3.Distance(edgePosition, halfWallPosition) > 0.02f
+                    || Quaternion.Angle(edgeRotation, halfWallRotation) > 2f)
+                {
+                    error = $"Raidlands adaptive foundation found incompatible full/half wall placements for {prefab}";
+                    return false;
+                }
+
+                var edgeKey = RaidlandsEdgeKey(edgePosition, edgeRotation);
+                if (!edgeKeys.Add(edgeKey))
+                    continue;
+                foundation.Edges.Add(new RaidlandsFoundationEdgeRef
+                {
+                    Foundation = foundation,
+                    Key = edgeKey,
+                    Position = edgePosition,
+                    Rotation = edgeRotation
+                });
+            }
+
+            if (foundation.Edges.Count == 0)
+            {
+                error = $"Raidlands adaptive foundation planning found no wall sockets for {prefab}";
+                return false;
+            }
+
+            var minimumTerrainHeight = TerrainMeta.HeightMap.GetHeight(position);
+            var maximumTerrainHeight = minimumTerrainHeight;
+            var maximumWaterHeight = float.MinValue;
+            float centerWaterHeight;
+            if (TryGetRaidlandsWaterSurfaceHeight(position, minimumTerrainHeight, out centerWaterHeight))
+                maximumWaterHeight = centerWaterHeight;
+            foreach (var edge in foundation.Edges)
+            {
+                var terrainHeight = TerrainMeta.HeightMap.GetHeight(edge.Position);
+                minimumTerrainHeight = Math.Min(minimumTerrainHeight, terrainHeight);
+                maximumTerrainHeight = Math.Max(maximumTerrainHeight, terrainHeight);
+                float waterHeight;
+                if (TryGetRaidlandsWaterSurfaceHeight(edge.Position, terrainHeight, out waterHeight))
+                    maximumWaterHeight = Math.Max(maximumWaterHeight, waterHeight);
+            }
+
+            foundation.MinimumTerrainHeight = minimumTerrainHeight;
+            foundation.MaximumTerrainHeight = maximumTerrainHeight;
+            foundation.IsOverWater = maximumWaterHeight > float.MinValue;
+            foundation.MaximumWaterHeight = foundation.IsOverWater ? maximumWaterHeight : maximumTerrainHeight;
+            return true;
+        }
+
+        private bool TryGetRaidlandsWaterSurfaceHeight(Vector3 position, float terrainHeight,
+            out float waterHeight)
+        {
+            waterHeight = terrainHeight;
+            if (TerrainMeta.WaterMap == null)
+                return false;
+
+            // WaterMap alone can sit below the effective ocean plane. Use Rust's topology-aware
+            // water query so this second-line paste guard agrees with RaidlandsEvents.
+            waterHeight = WaterLevel.GetWaterSurface(position, false, true, null);
+            if (float.IsNaN(waterHeight) || float.IsInfinity(waterHeight))
+            {
+                waterHeight = terrainHeight;
+                return false;
+            }
+            return waterHeight > terrainHeight + 0.05f;
+        }
+
+        private bool TryFitRaidlandsFoundationElevation(HashSet<Dictionary<string, object>> preloadData,
+            List<RaidlandsFoundationNode> foundations, RaidlandsAdaptiveFoundationOptions options,
+            out RaidlandsVerticalFit fit, out string error)
+        {
+            fit = null;
+            error = null;
+            if (preloadData == null || foundations == null || foundations.Count == 0)
+            {
+                error = "Raidlands adaptive foundation elevation fitting received no foundations";
+                return false;
+            }
+
+            var maximumSteps = Mathf.FloorToInt((options.MaximumLowering + 0.001f) /
+                                                RaidlandsHalfWallHeight);
+            var minimumClearance = -options.MaximumFoundationEmbed;
+            var maximumClearance = Math.Max(minimumClearance,
+                Math.Max(options.ExposureThreshold, options.MaximumFoundationClearance));
+            var maximumAdjustment = options.MaximumOriginAdjustment;
+            var candidates = new HashSet<float>();
+            AddRaidlandsVerticalFitCandidate(candidates, -maximumAdjustment, maximumAdjustment);
+            AddRaidlandsVerticalFitCandidate(candidates, 0f, maximumAdjustment);
+            AddRaidlandsVerticalFitCandidate(candidates, maximumAdjustment, maximumAdjustment);
+
+            foreach (var foundation in foundations)
+            {
+                var sourceClearance = foundation.SourcePosition.y - foundation.MaximumTerrainHeight;
+                if (options.RaiseBaseLayerAboveWater && foundation.IsOverWater)
+                {
+                    AddRaidlandsVerticalFitCandidate(candidates,
+                        foundation.MaximumWaterHeight + options.WaterSurfaceClearance
+                        - foundation.SourcePosition.y, maximumAdjustment);
+                }
+                for (var loweringSteps = 0; loweringSteps <= maximumSteps; loweringSteps++)
+                {
+                    var courseHeight = loweringSteps * RaidlandsHalfWallHeight;
+                    var intervalMinimum = minimumClearance - sourceClearance + courseHeight;
+                    var intervalMaximum = maximumClearance - sourceClearance + courseHeight;
+                    if (intervalMaximum < -maximumAdjustment - 0.001f
+                        || intervalMinimum > maximumAdjustment + 0.001f)
+                        continue;
+
+                    intervalMinimum = Mathf.Clamp(intervalMinimum, -maximumAdjustment, maximumAdjustment);
+                    intervalMaximum = Mathf.Clamp(intervalMaximum, -maximumAdjustment, maximumAdjustment);
+                    AddRaidlandsVerticalFitCandidate(candidates, intervalMinimum, maximumAdjustment);
+                    AddRaidlandsVerticalFitCandidate(candidates, intervalMaximum, maximumAdjustment);
+                    AddRaidlandsVerticalFitCandidate(candidates,
+                        (intervalMinimum + intervalMaximum) * 0.5f, maximumAdjustment);
+                }
+            }
+
+            RaidlandsVerticalFit best = null;
+            foreach (var adjustment in candidates.OrderBy(value => Math.Abs(value)).ThenBy(value => value))
+            {
+                var candidate = EvaluateRaidlandsVerticalFit(foundations, adjustment, maximumSteps,
+                    minimumClearance, maximumClearance, options);
+                if (!IsBetterRaidlandsVerticalFit(candidate, best))
+                    continue;
+                best = candidate;
+            }
+
+            if (best == null || best.ValidFoundations != foundations.Count)
+            {
+                var validFoundations = best?.ValidFoundations ?? 0;
+                var diagnostics = best == null
+                    ? "no fit candidates"
+                    : $"best adjustment {best.Adjustment:+0.##;-0.##;0}m blocked water={best.WaterBlocked}, buried={best.Buried}, supportDepth={best.SupportDepthExceeded}, courseAlignment={best.CourseAlignmentBlocked}";
+                error = $"Raidlands adaptive foundation vertical fit could safely place only {validFoundations}/{foundations.Count} foundation cells within {minimumClearance:0.##}-{maximumClearance:0.##}m terrain clearance using a +/-{maximumAdjustment:0.##}m origin adjustment and {options.MaximumLowering:0.##}m maximum lowering; {diagnostics}";
+                return false;
+            }
+            if (best.NaturallySeated <= 0
+                && !(options.RaiseBaseLayerAboveWater && foundations.Any(value => value.IsOverWater)))
+            {
+                error = $"Raidlands adaptive foundation vertical fit would rebuild every one of the {foundations.Count} foundation cells; at least one original foundation must remain normally seated";
+                return false;
+            }
+
+            fit = best;
+            return true;
+        }
+
+        private void AddRaidlandsVerticalFitCandidate(HashSet<float> candidates, float adjustment,
+            float maximumAdjustment)
+        {
+            candidates.Add(Mathf.Round(Mathf.Clamp(adjustment, -maximumAdjustment, maximumAdjustment) * 10000f)
+                           / 10000f);
+        }
+
+        private RaidlandsVerticalFit EvaluateRaidlandsVerticalFit(List<RaidlandsFoundationNode> foundations,
+            float adjustment, int maximumSteps, float minimumClearance, float maximumClearance,
+            RaidlandsAdaptiveFoundationOptions options)
+        {
+            var fit = new RaidlandsVerticalFit { Adjustment = adjustment };
+            foreach (var foundation in foundations)
+            {
+                if (options.RaiseBaseLayerAboveWater && foundation.IsOverWater
+                    && foundation.SourcePosition.y + adjustment
+                    < foundation.MaximumWaterHeight + options.WaterSurfaceClearance - 0.001f)
+                {
+                    fit.WaterBlocked++;
+                    continue;
+                }
+
+                var adjustedClearance = foundation.SourcePosition.y + adjustment
+                                        - foundation.MaximumTerrainHeight;
+                if (adjustedClearance < minimumClearance - 0.001f)
+                {
+                    fit.Buried++;
+                    continue;
+                }
+                if (adjustedClearance > maximumClearance
+                    + maximumSteps * RaidlandsHalfWallHeight + 0.001f)
+                {
+                    fit.SupportDepthExceeded++;
+                    continue;
+                }
+                var selectedSteps = -1;
+                for (var loweringSteps = 0; loweringSteps <= maximumSteps; loweringSteps++)
+                {
+                    var finalClearance = adjustedClearance - loweringSteps * RaidlandsHalfWallHeight;
+                    if (finalClearance < minimumClearance - 0.001f
+                        || finalClearance > maximumClearance + 0.001f)
+                        continue;
+                    selectedSteps = loweringSteps;
+                    break;
+                }
+
+                if (selectedSteps < 0)
+                {
+                    fit.CourseAlignmentBlocked++;
+                    continue;
+                }
+
+                fit.ValidFoundations++;
+                fit.LoweringSteps[foundation] = selectedSteps;
+                fit.TotalLoweringSteps += selectedSteps;
+                if (selectedSteps == 0)
+                    fit.NaturallySeated++;
+            }
+            return fit;
+        }
+
+        private bool IsBetterRaidlandsVerticalFit(RaidlandsVerticalFit candidate, RaidlandsVerticalFit current)
+        {
+            if (candidate == null)
+                return false;
+            if (current == null || candidate.ValidFoundations != current.ValidFoundations)
+                return current == null || candidate.ValidFoundations > current.ValidFoundations;
+            if (candidate.NaturallySeated != current.NaturallySeated)
+                return candidate.NaturallySeated > current.NaturallySeated;
+            if (Math.Abs(Math.Abs(candidate.Adjustment) - Math.Abs(current.Adjustment)) > 0.0001f)
+                return Math.Abs(candidate.Adjustment) < Math.Abs(current.Adjustment);
+            if (candidate.TotalLoweringSteps != current.TotalLoweringSteps)
+                return candidate.TotalLoweringSteps < current.TotalLoweringSteps;
+            return candidate.Adjustment > current.Adjustment;
+        }
+
+        private void ApplyRaidlandsFoundationElevation(HashSet<Dictionary<string, object>> preloadData,
+            List<RaidlandsFoundationNode> foundations, RaidlandsVerticalFit fit,
+            RaidlandsAdaptiveFoundationPlan plan)
+        {
+            var offset = Vector3.up * fit.Adjustment;
+            foreach (var entityData in preloadData)
+            {
+                Vector3 position;
+                Quaternion rotation;
+                if (!TryGetRaidlandsEntityPose(entityData, out position, out rotation))
+                    continue;
+                entityData["position"] = position + offset;
+            }
+
+            foreach (var foundation in foundations)
+            {
+                foundation.SourcePosition += offset;
+                foundation.LoweringSteps = fit.LoweringSteps[foundation];
+                foundation.LoweredPosition = foundation.SourcePosition - Vector3.up *
+                    (foundation.LoweringSteps * RaidlandsHalfWallHeight);
+                foreach (var edge in foundation.Edges)
+                    edge.Position += offset;
+            }
+
+            plan.OriginVerticalAdjustment = fit.Adjustment;
+            plan.NaturallySeatedFoundations = fit.NaturallySeated;
+        }
+
+        private bool TryGetRaidlandsSocketPlacement(Vector3 targetPosition, Quaternion targetRotation,
+            ConstructionSocket targetSocket, string buildingPrefab, out Vector3 placementPosition,
+            out Quaternion placementRotation, out string error)
+        {
+            placementPosition = Vector3.zero;
+            placementRotation = Quaternion.identity;
+            error = null;
+            var construction = PrefabAttribute.server.Find<Construction>(StringPool.Get(buildingPrefab));
+            if (construction?.allSockets == null)
+            {
+                error = $"Raidlands adaptive foundation found no construction sockets for {buildingPrefab}";
+                return false;
+            }
+
+            var targetSocketRotation = targetSocket.rotation;
+            if (targetSocket.male && targetSocket.female)
+                targetSocketRotation *= Quaternion.Euler(180f, 0f, 180f);
+            var targetWorldPosition = targetPosition + targetRotation * targetSocket.position;
+            var targetWorldRotation = targetRotation * targetSocketRotation;
+
+            var candidates = construction.allSockets.OfType<ConstructionSocket>()
+                .Where(socket => socket != null && socket.male && socket.IsCompatible(targetSocket))
+                .OrderBy(socket => socket.position.y)
+                .ToList();
+            foreach (var maleSocket in candidates)
+            {
+                var rotation = targetWorldRotation * Quaternion.Inverse(maleSocket.rotation);
+                var position = targetWorldPosition - rotation * maleSocket.position;
+                if (!maleSocket.CanConnect(position, rotation, targetSocket, targetPosition, targetRotation))
+                    continue;
+
+                placementPosition = position;
+                placementRotation = rotation;
+                return true;
+            }
+
+            error = $"Raidlands adaptive foundation could not align {buildingPrefab} to wall socket {targetSocket.socketName}";
+            return false;
+        }
+
+        private void CollectRaidlandsExistingWallSpans(List<Dictionary<string, object>> entities,
+            Dictionary<string, RaidlandsSupportEdge> supportEdges)
+        {
+            foreach (var entityData in entities)
+            {
+                var prefab = entityData.TryGetValue("prefabname", out var rawPrefab) ? rawPrefab?.ToString() : null;
+                var wallHeight = string.Equals(prefab, FullWallPrefab, StringComparison.OrdinalIgnoreCase)
+                    ? RaidlandsHalfWallHeight * 2f
+                    : string.Equals(prefab, HalfWallPrefab, StringComparison.OrdinalIgnoreCase)
+                        ? RaidlandsHalfWallHeight
+                        : 0f;
+                if (wallHeight <= 0f || !TryGetRaidlandsEntityPose(entityData, out var position, out var rotation))
+                    continue;
+
+                RaidlandsSupportEdge supportEdge;
+                if (!supportEdges.TryGetValue(RaidlandsEdgeKey(position, rotation), out supportEdge))
+                    continue;
+                supportEdge.ExistingWalls.Add(new RaidlandsExistingWallSpan
+                {
+                    Data = entityData,
+                    BottomY = position.y,
+                    TopY = position.y + wallHeight
+                });
+            }
+        }
+
+        private bool TryFindRaidlandsCoveringWall(RaidlandsSupportEdge edge, RaidlandsSupportSlot slot,
+            out RaidlandsExistingWallSpan coveringWall)
+        {
+            coveringWall = edge.ExistingWalls.FirstOrDefault(wall =>
+                wall.BottomY <= slot.BottomY + RaidlandsPoseTolerance
+                && wall.TopY >= slot.BottomY + RaidlandsHalfWallHeight - RaidlandsPoseTolerance);
+            return coveringWall != null;
+        }
+
+        private void UpgradeRaidlandsExistingSupportWall(Dictionary<string, object> wallData,
+            RaidlandsFoundationNode sourceFoundation)
+        {
+            if (wallData == null || sourceFoundation == null ||
+                GetRaidlandsBuildingGrade(wallData) >= sourceFoundation.Grade)
+                return;
+            wallData["grade"] = sourceFoundation.Grade;
+            wallData["skinid"] = sourceFoundation.SkinId;
+            if (sourceFoundation.Data.TryGetValue("customColour", out var customColour))
+                wallData["customColour"] = customColour;
+        }
+
+        private RaidlandsFoundationNode StrongestRaidlandsFoundation(
+            IEnumerable<RaidlandsFoundationNode> foundations)
+        {
+            return foundations?
+                .Where(value => value != null)
+                .OrderByDescending(value => value.Grade)
+                .ThenBy(value => value.OriginalOrder)
+                .FirstOrDefault();
+        }
+
+        private Dictionary<string, object> CreateRaidlandsGeneratedBuildingBlock(
+            Dictionary<string, object> sourceData, string prefab, Vector3 position, Quaternion rotation, string role,
+            int order)
+        {
+            var generated = new Dictionary<string, object>
+            {
+                ["prefabname"] = prefab,
+                ["skinid"] = GetRaidlandsSkinId(sourceData),
+                ["flags"] = new Dictionary<string, object>(),
+                ["position"] = position,
+                ["rotation"] = rotation,
+                ["grade"] = GetRaidlandsBuildingGrade(sourceData),
+                [RaidlandsGeneratedRoleKey] = role,
+                [RaidlandsOriginalOrderKey] = order
+            };
+            if (sourceData.TryGetValue("ownerid", out var ownerId))
+                generated["ownerid"] = ownerId;
+            if (sourceData.TryGetValue("customColour", out var customColour))
+                generated["customColour"] = customColour;
+            return generated;
+        }
+
+        private bool IsRaidlandsFoundationData(Dictionary<string, object> entityData)
+        {
+            if (entityData == null || !entityData.ContainsKey("grade"))
+                return false;
+            var prefab = entityData.TryGetValue("prefabname", out var rawPrefab) ? rawPrefab?.ToString() : null;
+            return string.Equals(prefab, SquareFoundationPrefab, StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(prefab, TriangleFoundationPrefab, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TryGetRaidlandsEntityPose(Dictionary<string, object> data, out Vector3 position,
+            out Quaternion rotation)
+        {
+            position = Vector3.zero;
+            rotation = Quaternion.identity;
+            if (data == null || !data.TryGetValue("position", out var rawPosition) || rawPosition is not Vector3)
+                return false;
+            position = (Vector3)rawPosition;
+            if (data.TryGetValue("rotation", out var rawRotation) && rawRotation is Quaternion quaternion)
+                rotation = quaternion;
+            return true;
+        }
+
+        private int GetRaidlandsBuildingGrade(Dictionary<string, object> data)
+        {
+            return data != null && data.TryGetValue("grade", out var grade) ? Convert.ToInt32(grade) : 0;
+        }
+
+        private ulong GetRaidlandsSkinId(Dictionary<string, object> data)
+        {
+            return data != null && data.TryGetValue("skinid", out var skinId) ? Convert.ToUInt64(skinId) : 0UL;
+        }
+
+        private int GetRaidlandsOriginalOrder(Dictionary<string, object> data, int fallback = int.MaxValue)
+        {
+            return data != null && data.TryGetValue(RaidlandsOriginalOrderKey, out var order)
+                ? Convert.ToInt32(order)
+                : fallback;
+        }
+
+        private string RaidlandsEdgeKey(Vector3 position, Quaternion rotation)
+        {
+            var axisYaw = Mathf.Repeat(rotation.eulerAngles.y, 180f);
+            var yawBuckets = Mathf.RoundToInt(180f / RaidlandsRotationToleranceDegrees);
+            var yawKey = Mathf.RoundToInt(axisYaw / RaidlandsRotationToleranceDegrees) % yawBuckets;
+            return $"{Mathf.RoundToInt(position.x / RaidlandsPoseTolerance)}:{Mathf.RoundToInt(position.z / RaidlandsPoseTolerance)}:{yawKey}";
+        }
+
         private ValueTuple<object, PasteData> TryPaste(Vector3 startPos, string filename, IPlayer player,
             float rotationCorrection,
             string[] args, bool autoHeight = true, Action callback = null,
-            Action<BaseEntity> callbackSpawned = null)
+            Action<BaseEntity> callbackSpawned = null, bool structureFirst = false,
+            RaidlandsAdaptiveFoundationOptions adaptiveFoundationOptions = null)
         {
             var userId = player?.Id;
 
@@ -5085,6 +6066,18 @@ namespace Oxide.Plugins
                 }
             }
 
+            RaidlandsAdaptiveFoundationPlan adaptiveFoundationPlan = null;
+            if (structureFirst && adaptiveFoundationOptions?.Enabled == true)
+            {
+                string adaptiveFoundationError;
+                if (!TryApplyRaidlandsAdaptiveFoundations(preloadData, adaptiveFoundationOptions,
+                        out adaptiveFoundationPlan, out adaptiveFoundationError))
+                    return new ValueTuple<object, PasteData>(adaptiveFoundationError, null);
+
+                startPos.y += adaptiveFoundationPlan.OriginVerticalAdjustment;
+                Puts($"Raidlands tracked paste '{filename}' adaptive foundations planned: adjusted={adaptiveFoundationPlan.AdjustedFoundations}, naturallySeated={adaptiveFoundationPlan.NaturallySeatedFoundations}, waterSupported={adaptiveFoundationPlan.WaterSupportedFoundations}, maxWaterDepth={adaptiveFoundationPlan.MaximumWaterDepth:0.##}m, originAdjustment={adaptiveFoundationPlan.OriginVerticalAdjustment:+0.##;-0.##;0}m, loweredFoundations={adaptiveFoundationPlan.GeneratedFoundations}, capFloors={adaptiveFoundationPlan.GeneratedCapFloors}, fullWalls={adaptiveFoundationPlan.GeneratedFullWalls}, halfWalls={adaptiveFoundationPlan.GeneratedHalfWalls}, maxLowering={adaptiveFoundationPlan.MaximumLowering:0.##}m.");
+            }
+
             if (blockCollision > 0f)
             {
                 var collision = CheckCollision(preloadData, startPos, blockCollision);
@@ -5098,11 +6091,58 @@ namespace Oxide.Plugins
             if (data["protocol"] != null)
                 protocol = data["protocol"] as Dictionary<string, object>;
 
-            var pasteData = Paste(preloadData, protocol, ownership, startPos, player, stability, rotationCorrection,
+            ICollection<Dictionary<string, object>> pasteEntities = preloadData;
+            if (structureFirst)
+            {
+                pasteEntities = preloadData
+                    .OrderBy(GetRaidlandsTrackedPasteGroup)
+                    .ThenBy(entity => GetRaidlandsTrackedPasteGroup(entity) == 0
+                        ? GetRaidlandsTrackedPasteHeight(entity)
+                        : 0f)
+                    .ThenBy(entity => GetRaidlandsTrackedPasteGroup(entity) == 0
+                        ? GetRaidlandsTrackedBuildingPiecePriority(entity)
+                        : 0)
+                    .ThenBy(entity => GetRaidlandsOriginalOrder(entity))
+                    .ToList();
+                var structureCount = pasteEntities.Count(entity => GetRaidlandsTrackedPasteGroup(entity) == 0);
+                Puts($"Raidlands tracked paste '{filename}' ordered dependency-first: structures={structureCount}, remaining={pasteEntities.Count - structureCount}.");
+            }
+
+            var pasteData = Paste(pasteEntities, protocol, ownership, startPos, player, stability, rotationCorrection,
                 autoHeight ? heightAdj : 0, auth, callback, callbackSpawned, filename, checkPlaced, enableSaving,
-                dlc, skinsMode);
+                dlc, skinsMode, adaptiveFoundationPlan);
 
             return new ValueTuple<object, PasteData>(true, pasteData);
+        }
+
+        private int GetRaidlandsTrackedPasteGroup(Dictionary<string, object> entityData)
+        {
+            return entityData != null && entityData.ContainsKey("grade") ? 0 : 1;
+        }
+
+        private float GetRaidlandsTrackedPasteHeight(Dictionary<string, object> entityData)
+        {
+            return entityData != null && entityData.TryGetValue("position", out var rawPosition)
+                && rawPosition is Vector3 position
+                ? position.y
+                : 0f;
+        }
+
+        private int GetRaidlandsTrackedBuildingPiecePriority(Dictionary<string, object> entityData)
+        {
+            if (entityData == null)
+                return 3;
+            var prefab = entityData.TryGetValue("prefabname", out var rawPrefab) ? rawPrefab?.ToString() : null;
+            if (string.IsNullOrWhiteSpace(prefab))
+                return 3;
+            if (prefab.IndexOf("foundation", StringComparison.OrdinalIgnoreCase) >= 0)
+                return 0;
+            if (prefab.IndexOf("floor", StringComparison.OrdinalIgnoreCase) >= 0
+                || prefab.IndexOf("roof", StringComparison.OrdinalIgnoreCase) >= 0)
+                return 1;
+            if (prefab.IndexOf("wall", StringComparison.OrdinalIgnoreCase) >= 0)
+                return 2;
+            return 3;
         }
 
         private void TryPasteLocks(BaseEntity entity, Dictionary<string, object> data, PasteData pasteData)
@@ -6185,6 +7225,7 @@ namespace Oxide.Plugins
             public Quaternion QuaternionRotation;
             public Action CallbackFinished;
             public Action<BaseEntity> CallbackSpawned;
+            public RaidlandsAdaptiveFoundationPlan RaidlandsAdaptiveFoundationPlan;
 
             public bool Auth;
             public Vector3 StartPos;

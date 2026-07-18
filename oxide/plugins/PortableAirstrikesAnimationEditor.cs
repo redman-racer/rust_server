@@ -14,8 +14,8 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikesAnimationEditor", "Raidlands", "0.2.9")]
-    [Description("Admin CUI editor for PortableAirstrikes flight paths and manual or repeated-pattern payload releases, with schema-2 preservation and save notifications for website sync.")]
+    [Info("PortableAirstrikesAnimationEditor", "Raidlands", "0.2.12")]
+    [Description("Admin CUI editor for PortableAirstrikes flight paths and manual, repeated, or mixed payload releases, with schema-3 preservation and save notifications for website sync.")]
     public class PortableAirstrikesAnimationEditor : RustPlugin
     {
         private const string AdminPermission = "portableairstrikesanimationeditor.admin";
@@ -33,6 +33,7 @@ namespace Oxide.Plugins
         private const int ReleaseRowsPerPage = 8;
         private const int WaypointRowsPerPage = 8;
         private const int MaxGeneratedReleaseGroups = 1000;
+        private const int MaxGeneratedPreviewOccurrences = 400;
         private const int CommandRowsPerPage = 6;
         private const float ReleasePatternDetectionToleranceSeconds = 0.02f;
 
@@ -118,8 +119,17 @@ namespace Oxide.Plugins
 
         private static readonly string[] PayloadValues =
         {
+            "patrol_heli_gun",
+            "bradley_coax_gun",
+            "autoturret_gun",
+            "bradley_main_cannon",
+            "patrol_heli_rocket",
+            "patrol_heli_rocket_airburst",
+            "patrol_heli_rocket_napalm",
+            "sam_rocket",
             "bee_grenade",
             "bee_catapult_bomb",
+            "catapult_boulder",
             "beancan",
             "f1_grenade",
             "smoke",
@@ -133,7 +143,13 @@ namespace Oxide.Plugins
             "incendiary_rocket",
             "mortar_he_payload",
             "mortar_frag_payload",
-            "bradley_longbarrel_burst",
+            "cannon_ball",
+            "ballista_hammerhead",
+            "ballista_incendiary",
+            "ballista_piercer",
+            "ballista_pitchfork",
+            "flame_turret_fireball",
+            "torpedo",
             "homing_missile",
             "mlrs_rocket"
         };
@@ -158,6 +174,12 @@ namespace Oxide.Plugins
 
         [PluginReference]
         private Plugin RaidlandsUiEscapeBridge;
+
+        [PluginReference]
+        private Plugin PortableAirstrikes;
+
+        private readonly List<string> runtimePayloadValues = new List<string>(PayloadValues);
+        private readonly Dictionary<string, string> payloadDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         /*
          * Standalone integration notes:
@@ -234,6 +256,33 @@ namespace Oxide.Plugins
 
             [JsonProperty("CompiledReleaseEvents", NullValueHandling = NullValueHandling.Ignore)]
             public object CompiledReleaseEvents;
+
+            [JsonProperty("GeneratedReleaseGroups", NullValueHandling = NullValueHandling.Ignore)]
+            public List<GeneratedReleaseGroup> GeneratedReleaseGroups;
+        }
+
+        private class GeneratedReleaseGroup
+        {
+            [JsonProperty("StartTime")]
+            public float StartTime;
+
+            [JsonProperty("IntervalSeconds")]
+            public float IntervalSeconds;
+
+            [JsonProperty("UnitsPerRelease")]
+            public int UnitsPerRelease;
+
+            [JsonProperty("UnitIntervalSeconds")]
+            public float UnitIntervalSeconds;
+
+            [JsonProperty("MaximumUnits")]
+            public int MaximumUnits;
+
+            [JsonProperty("Template")]
+            public VisualPayloadEvent Template;
+
+            [JsonProperty("HardpointOffsets", NullValueHandling = NullValueHandling.Ignore)]
+            public object HardpointOffsets;
         }
 
         private class VisualProfileWaypoint
@@ -294,6 +343,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("SpreadRadius")]
             public float SpreadRadius = -1f;
+
+            [JsonProperty("TargetingMode")]
+            public string TargetingMode = "simple";
+
+            [JsonProperty("AccuracyPercent")]
+            public float AccuracyPercent = 75f;
 
             [JsonProperty("LaunchSpeed")]
             public float LaunchSpeed = -1f;
@@ -479,7 +534,16 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
+            RefreshPayloadCatalog();
             Puts("Loaded " + CountProfiles() + " visual profile(s). Admin editor command: /airanim.");
+        }
+
+        private void OnPluginLoaded(Plugin plugin)
+        {
+            if (plugin != null && string.Equals(plugin.Name, "PortableAirstrikes", StringComparison.OrdinalIgnoreCase))
+            {
+                RefreshPayloadCatalog();
+            }
         }
 
         private void Unload()
@@ -1385,7 +1449,7 @@ namespace Oxide.Plugins
                 for (var i = 0; i < events.Count && i < MaxChatRows; i++)
                 {
                     var ev = events[i];
-                    Reply(player, "#" + DisplayIndex(i) + " t=" + FormatSeconds(ev.Time) + " payload=" + GetPayloadDisplay(ev.Payload) + " count=" + Math.Max(1, ev.Count) + " spread=" + FormatOptionalFloat(ev.SpreadRadius) + ".");
+                    Reply(player, "#" + DisplayIndex(i) + " t=" + FormatSeconds(ev.Time) + " payload=" + GetPayloadDisplay(ev.Payload) + " count=" + Math.Max(1, ev.Count) + " targeting=" + NormalizeTargetingMode(ev.TargetingMode) + " accuracy=" + FormatFloat(ev.AccuracyPercent) + "% spread=" + FormatOptionalFloat(ev.SpreadRadius) + ".");
                 }
 
                 if (events.Count > MaxChatRows)
@@ -1456,6 +1520,48 @@ namespace Oxide.Plugins
                 profile.PayloadReleaseMode = requestedMode;
                 NormalizeProfile(session.ProfileId, profile);
                 SetStatus(session, "Payload release mode set to " + (requestedMode == "generated" ? "repeated pattern" : "manual events") + ".", "");
+                RefreshOpenEditorSurfaces(player);
+                return;
+            }
+
+            if (sub == "targeting" || sub == "targetmode" || sub == "accuracy")
+            {
+                if (args == null || args.Length < 3)
+                {
+                    Reply(player, sub == "accuracy" ? "Usage: /airanim payload accuracy <0-100>." : "Usage: /airanim payload targeting simple|advanced.");
+                    return;
+                }
+
+                var targetEvent = IsRepeatedPatternMode(profile) ? profile.ReleaseTemplate : GetSelectedPayloadEvent(session, profile);
+                if (targetEvent == null)
+                {
+                    Reply(player, "Select a manual release or switch to a repeated pattern first.");
+                    return;
+                }
+
+                if (sub == "accuracy")
+                {
+                    float accuracy;
+                    if (!TryParseFloat(args[2], out accuracy))
+                    {
+                        Reply(player, "Invalid accuracy percentage.");
+                        return;
+                    }
+                    targetEvent.AccuracyPercent = Mathf.Clamp(accuracy, 0f, 100f);
+                }
+                else
+                {
+                    var requestedTargeting = (args[2] ?? "").Trim().ToLowerInvariant();
+                    if (requestedTargeting != "simple" && requestedTargeting != "advanced")
+                    {
+                        Reply(player, "Targeting mode must be simple or advanced.");
+                        return;
+                    }
+                    targetEvent.TargetingMode = requestedTargeting;
+                }
+
+                NormalizeProfile(session.ProfileId, profile);
+                SetStatus(session, "Targeting set to " + NormalizeTargetingMode(targetEvent.TargetingMode) + " at " + FormatFloat(targetEvent.AccuracyPercent) + "% accuracy.", "");
                 RefreshOpenEditorSurfaces(player);
                 return;
             }
@@ -1618,7 +1724,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Reply(player, "Payload commands: list, add [seconds], edit <index>, remove <index>, clear, mode repeated|manual, max <totalUnits>, units <perRelease>, interval <seconds>, set <index> <field> <value>.");
+            Reply(player, "Payload commands: list, add [seconds], edit <index>, remove <index>, clear, mode repeated|manual, targeting simple|advanced, accuracy <0-100>, max <totalUnits>, units <perRelease>, interval <seconds>, set <index> mode simple|advanced, set <index> accuracy <0-100>, set <index> <field> <value>.");
         }
 
         private void CmdStopWaypoints(BasePlayer player, string[] args)
@@ -3775,20 +3881,21 @@ namespace Oxide.Plugins
             AddButton(container, root, "DUP", "airanim.release.dup", "0.871 0.370", "0.918 0.410", "0.14 0.31 0.20 0.96", 8);
             AddButton(container, root, "DEL", "airanim.release.delete", "0.926 0.370", "0.970 0.410", "0.45 0.11 0.08 0.96", 8);
 
-            AddButton(container, root, session.ReleaseAdvancedOpen ? "ADVANCED ▴" : "ADVANCED ▾", "airanim.release.advanced", "0.745 0.315", "0.970 0.352", session.ReleaseAdvancedOpen ? "0.28 0.20 0.10 0.98" : "0.14 0.18 0.23 0.96", 8);
-            if (session.ReleaseAdvancedOpen)
+            var simpleTargeting = IsSimpleTargeting(ev);
+            AddButton(container, root, "TARGETING: " + (simpleTargeting ? "SIMPLE" : "ADVANCED"), "airanim.release.targetmode", "0.745 0.315", "0.855 0.352", simpleTargeting ? "0.14 0.31 0.20 0.96" : "0.34 0.20 0.09 0.98", 7);
+            AddButton(container, root, "FULL SETTINGS", "airanim.release.openpopup", "0.860 0.315", "0.970 0.352", "0.16 0.20 0.25 0.96", 7);
+            if (simpleTargeting)
             {
-                AddCompactReleaseField(container, root, "SPREAD", FormatOptionalFloat(ev.SpreadRadius), "spread", 0.745f, 0.265f);
-                AddCompactReleaseField(container, root, "SPEED", FormatOptionalFloat(ev.LaunchSpeed), "speed", 0.860f, 0.265f);
-                AddCompactReleaseField(container, root, "FUSE", FormatOptionalFloat(ev.FuseSeconds), "fuse", 0.745f, 0.215f);
-                AddCompactReleaseField(container, root, "DAMAGE", FormatFloat(ev.DamageScale), "damage", 0.860f, 0.215f);
-                AddCompactReleaseField(container, root, "SPLASH", FormatOptionalFloat(ev.SplashRadius), "splash", 0.745f, 0.165f);
-                AddCompactReleaseField(container, root, "IMPACT", FormatOptionalFloat(ev.ImpactRadius), "impact", 0.860f, 0.165f);
-                AddButton(container, root, "FULL ADVANCED POPUP", "airanim.release.openpopup", "0.745 0.110", "0.970 0.148", "0.16 0.20 0.25 0.96", 7);
+                AddCompactReleaseField(container, root, "ACCURACY %", FormatFloat(ev.AccuracyPercent), "accuracy", 0.745f, 0.255f);
+                AddCompactReleaseField(container, root, "SPREAD RADIUS", FormatOptionalFloat(ev.SpreadRadius), "spread", 0.860f, 0.255f);
+                var effective = GetEffectiveAccuracyRadius(ev);
+                AddLabel(container, root, effective < 0f ? "Spread inherits the strike; accuracy scales its radius." : "Effective maximum miss: " + FormatFloat(effective) + "m", 8, TextAnchor.UpperLeft, "0.745 0.175", "0.970 0.235", "0.55 0.66 0.72 1");
             }
             else
             {
-                AddLabel(container, root, "Offsets, spread, speed, fuse, damage and tracking are hidden until needed.", 8, TextAnchor.UpperLeft, "0.745 0.220", "0.970 0.295", "0.48 0.57 0.64 1");
+                AddLabel(container, root, "TARGET OFFSETS", 7, TextAnchor.MiddleLeft, "0.745 0.255", "0.850 0.285", "0.56 0.65 0.72 1");
+                AddLabel(container, root, "X " + FormatFloat(ev.TargetOffsetX) + "   Y " + FormatFloat(ev.TargetOffsetY) + "   Z " + FormatFloat(ev.TargetOffsetZ), 9, TextAnchor.MiddleLeft, "0.745 0.215", "0.970 0.255", "0.86 0.91 0.95 1");
+                AddLabel(container, root, "Advanced mode preserves authored offsets and full spread.", 8, TextAnchor.UpperLeft, "0.745 0.160", "0.970 0.205", "0.55 0.66 0.72 1");
             }
         }
 
@@ -3829,10 +3936,13 @@ namespace Oxide.Plugins
             AddButton(container, root, "-0.05 INTERVAL", "airanim.pattern.delta interval -0.05", "0.745 0.205", "0.850 0.242", "0.32 0.13 0.10 0.96", 7);
             AddButton(container, root, "+0.05 INTERVAL", "airanim.pattern.delta interval 0.05", "0.860 0.205", "0.970 0.242", "0.14 0.31 0.20 0.96", 7);
 
-            AddButton(container, root, session.ReleaseAdvancedOpen ? "TEMPLATE ADVANCED ▴" : "TEMPLATE ADVANCED ▾", "airanim.release.advanced", "0.745 0.155", "0.970 0.192", session.ReleaseAdvancedOpen ? "0.28 0.20 0.10 0.98" : "0.14 0.18 0.23 0.96", 8);
-            if (session.ReleaseAdvancedOpen)
+            var simpleTargeting = IsSimpleTargeting(template);
+            AddButton(container, root, "TARGETING: " + (simpleTargeting ? "SIMPLE" : "ADVANCED"), "airanim.pattern.targetmode", "0.745 0.155", "0.855 0.192", simpleTargeting ? "0.14 0.31 0.20 0.96" : "0.34 0.20 0.09 0.98", 7);
+            AddButton(container, root, "FULL SETTINGS", "airanim.pattern.openpopup", "0.860 0.155", "0.970 0.192", "0.16 0.24 0.34 0.96", 7);
+            if (simpleTargeting)
             {
-                AddButton(container, root, "OPEN FULL TEMPLATE SETTINGS", "airanim.pattern.openpopup", "0.745 0.100", "0.970 0.140", "0.16 0.24 0.34 0.96", 8);
+                AddCompactPatternField(container, root, "ACCURACY %", FormatFloat(template.AccuracyPercent), "accuracy", 0.745f, 0.105f);
+                AddCompactPatternField(container, root, "SPREAD RADIUS", FormatOptionalFloat(template.SpreadRadius), "spread", 0.860f, 0.105f);
             }
         }
 
@@ -4068,7 +4178,8 @@ namespace Oxide.Plugins
 
             AddPanel(container, root, "0.030 0.895", "0.970 0.970", "0.09 0.10 0.12 0.96");
             AddLabel(container, root, "Release #" + DisplayIndex(session.SelectedPayloadEventIndex), 16, TextAnchor.MiddleLeft, "0.055 0.925", "0.405 0.962", "1 0.86 0.58 1");
-            AddLabel(container, root, session.ProfileId + " | " + GetPayloadDisplay(ev.Payload), 10, TextAnchor.MiddleRight, "0.405 0.925", "0.855 0.962", "0.60 0.68 0.74 1");
+            AddLabel(container, root, session.ProfileId + " | " + GetPayloadDisplay(ev.Payload), 9, TextAnchor.MiddleRight, "0.405 0.925", "0.675 0.962", "0.60 0.68 0.74 1");
+            AddButton(container, root, IsSimpleTargeting(ev) ? "SIMPLE" : "ADVANCED", "airanim.release.targetmode", "0.690 0.920", "0.855 0.962", IsSimpleTargeting(ev) ? "0.14 0.31 0.20 0.96" : "0.34 0.20 0.09 0.98", 8);
             AddButton(container, root, "X", "airanim.release.close", "0.875 0.920", "0.945 0.962", "0.55 0.12 0.10 0.95", 14);
 
             AddReleaseValueButton(container, root, "TIME", FormatSeconds(ev.Time), "time", 0.055f, 0.835f);
@@ -4081,15 +4192,29 @@ namespace Oxide.Plugins
             AddReleaseValueButton(container, root, "Y", FormatFloat(ev.CarrierOffsetY), "carriery", 0.275f, 0.730f);
             AddReleaseValueButton(container, root, "Z", FormatFloat(ev.CarrierOffsetZ), "carrierz", 0.495f, 0.730f);
 
-            AddLabel(container, root, "Target Offset", 11, TextAnchor.MiddleLeft, "0.055 0.675", "0.320 0.710", "1 1 1 1");
-            AddReleaseValueButton(container, root, "X", FormatFloat(ev.TargetOffsetX), "targetx", 0.055f, 0.625f);
-            AddReleaseValueButton(container, root, "Y", FormatFloat(ev.TargetOffsetY), "targety", 0.275f, 0.625f);
-            AddReleaseValueButton(container, root, "Z", FormatFloat(ev.TargetOffsetZ), "targetz", 0.495f, 0.625f);
+            if (IsSimpleTargeting(ev))
+            {
+                AddLabel(container, root, "Simple Targeting", 11, TextAnchor.MiddleLeft, "0.055 0.675", "0.320 0.710", "1 1 1 1");
+                AddReleaseValueButton(container, root, "ACCURACY %", FormatFloat(ev.AccuracyPercent), "accuracy", 0.055f, 0.625f);
+                AddReleaseValueButton(container, root, "SPREAD RADIUS", FormatOptionalFloat(ev.SpreadRadius), "spread", 0.275f, 0.625f);
+                var effective = GetEffectiveAccuracyRadius(ev);
+                AddLabel(container, root, effective < 0f ? "Inherited spread" : "Max miss " + FormatFloat(effective) + "m", 9, TextAnchor.MiddleLeft, "0.495 0.625", "0.715 0.670", "0.62 0.74 0.80 1");
+            }
+            else
+            {
+                AddLabel(container, root, "Target Offset", 11, TextAnchor.MiddleLeft, "0.055 0.675", "0.320 0.710", "1 1 1 1");
+                AddReleaseValueButton(container, root, "X", FormatFloat(ev.TargetOffsetX), "targetx", 0.055f, 0.625f);
+                AddReleaseValueButton(container, root, "Y", FormatFloat(ev.TargetOffsetY), "targety", 0.275f, 0.625f);
+                AddReleaseValueButton(container, root, "Z", FormatFloat(ev.TargetOffsetZ), "targetz", 0.495f, 0.625f);
+            }
 
             AddLabel(container, root, "Flight", 11, TextAnchor.MiddleLeft, "0.055 0.570", "0.320 0.605", "1 1 1 1");
-            AddReleaseValueButton(container, root, "SPREAD", FormatOptionalFloat(ev.SpreadRadius), "spread", 0.055f, 0.520f);
-            AddReleaseValueButton(container, root, "SPEED", FormatOptionalFloat(ev.LaunchSpeed), "speed", 0.275f, 0.520f);
-            AddReleaseValueButton(container, root, "FUSE", FormatOptionalFloat(ev.FuseSeconds), "fuse", 0.495f, 0.520f);
+            if (!IsSimpleTargeting(ev))
+            {
+                AddReleaseValueButton(container, root, "SPREAD", FormatOptionalFloat(ev.SpreadRadius), "spread", 0.055f, 0.520f);
+            }
+            AddReleaseValueButton(container, root, "SPEED", FormatOptionalFloat(ev.LaunchSpeed), "speed", IsSimpleTargeting(ev) ? 0.055f : 0.275f, 0.520f);
+            AddReleaseValueButton(container, root, "FUSE", FormatOptionalFloat(ev.FuseSeconds), "fuse", IsSimpleTargeting(ev) ? 0.275f : 0.495f, 0.520f);
 
             AddLabel(container, root, "Balance", 11, TextAnchor.MiddleLeft, "0.055 0.465", "0.320 0.500", "1 1 1 1");
             AddReleaseValueButton(container, root, "DMG", FormatFloat(ev.DamageScale), "damage", 0.055f, 0.415f);
@@ -4160,7 +4285,7 @@ namespace Oxide.Plugins
 
             AddPanel(container, root, "0.025 0.905", "0.975 0.975", "0.075 0.085 0.105 0.98");
             AddLabel(container, root, "Repeated Pattern Template", 16, TextAnchor.MiddleLeft, "0.050 0.930", "0.650 0.965", "1 0.86 0.58 1");
-            AddLabel(container, root, "Click any value to open the keypad", 8, TextAnchor.MiddleRight, "0.520 0.930", "0.865 0.965", "0.52 0.61 0.68 1");
+            AddButton(container, root, IsSimpleTargeting(template) ? "SIMPLE" : "ADVANCED", "airanim.pattern.targetmode", "0.690 0.925", "0.865 0.965", IsSimpleTargeting(template) ? "0.14 0.31 0.20 0.96" : "0.34 0.20 0.09 0.98", 8);
             AddButton(container, root, "X", "airanim.pattern.closepopup", "0.885 0.925", "0.950 0.965", "0.55 0.12 0.10 0.96", 13);
 
             AddLabel(container, root, "ORDNANCE", 8, TextAnchor.MiddleLeft, "0.050 0.855", "0.200 0.885", "0.66 0.74 0.80 1");
@@ -4172,15 +4297,29 @@ namespace Oxide.Plugins
             AddPatternPopupInput(container, root, "Y", FormatFloat(template.CarrierOffsetY), "carriery", 0.350f, 0.725f, 0.275f);
             AddPatternPopupInput(container, root, "Z", FormatFloat(template.CarrierOffsetZ), "carrierz", 0.650f, 0.725f, 0.300f);
 
-            AddLabel(container, root, "TARGET OFFSET", 10, TextAnchor.MiddleLeft, "0.050 0.665", "0.300 0.698", "0.90 0.94 0.98 1");
-            AddPatternPopupInput(container, root, "X", FormatFloat(template.TargetOffsetX), "targetx", 0.050f, 0.605f, 0.275f);
-            AddPatternPopupInput(container, root, "Y", FormatFloat(template.TargetOffsetY), "targety", 0.350f, 0.605f, 0.275f);
-            AddPatternPopupInput(container, root, "Z", FormatFloat(template.TargetOffsetZ), "targetz", 0.650f, 0.605f, 0.300f);
+            if (IsSimpleTargeting(template))
+            {
+                AddLabel(container, root, "SIMPLE TARGETING", 10, TextAnchor.MiddleLeft, "0.050 0.665", "0.300 0.698", "0.90 0.94 0.98 1");
+                AddPatternPopupInput(container, root, "ACCURACY %", FormatFloat(template.AccuracyPercent), "accuracy", 0.050f, 0.605f, 0.275f);
+                AddPatternPopupInput(container, root, "SPREAD RADIUS", FormatOptionalFloat(template.SpreadRadius), "spread", 0.350f, 0.605f, 0.275f);
+                var effective = GetEffectiveAccuracyRadius(template);
+                AddLabel(container, root, effective < 0f ? "INHERITS STRIKE SPREAD" : "MAX MISS " + FormatFloat(effective) + "m", 9, TextAnchor.MiddleLeft, "0.650 0.605", "0.950 0.655", "0.62 0.74 0.80 1");
+            }
+            else
+            {
+                AddLabel(container, root, "TARGET OFFSET", 10, TextAnchor.MiddleLeft, "0.050 0.665", "0.300 0.698", "0.90 0.94 0.98 1");
+                AddPatternPopupInput(container, root, "X", FormatFloat(template.TargetOffsetX), "targetx", 0.050f, 0.605f, 0.275f);
+                AddPatternPopupInput(container, root, "Y", FormatFloat(template.TargetOffsetY), "targety", 0.350f, 0.605f, 0.275f);
+                AddPatternPopupInput(container, root, "Z", FormatFloat(template.TargetOffsetZ), "targetz", 0.650f, 0.605f, 0.300f);
+            }
 
             AddLabel(container, root, "FLIGHT / DELIVERY", 10, TextAnchor.MiddleLeft, "0.050 0.545", "0.300 0.578", "0.90 0.94 0.98 1");
-            AddPatternPopupInput(container, root, "SPREAD", FormatFloat(template.SpreadRadius), "spread", 0.050f, 0.485f, 0.275f);
-            AddPatternPopupInput(container, root, "SPEED", FormatFloat(template.LaunchSpeed), "speed", 0.350f, 0.485f, 0.275f);
-            AddPatternPopupInput(container, root, "FUSE", FormatFloat(template.FuseSeconds), "fuse", 0.650f, 0.485f, 0.300f);
+            if (!IsSimpleTargeting(template))
+            {
+                AddPatternPopupInput(container, root, "SPREAD", FormatFloat(template.SpreadRadius), "spread", 0.050f, 0.485f, 0.275f);
+            }
+            AddPatternPopupInput(container, root, "SPEED", FormatFloat(template.LaunchSpeed), "speed", IsSimpleTargeting(template) ? 0.050f : 0.350f, 0.485f, 0.275f);
+            AddPatternPopupInput(container, root, "FUSE", FormatFloat(template.FuseSeconds), "fuse", IsSimpleTargeting(template) ? 0.350f : 0.650f, 0.485f, 0.300f);
 
             AddLabel(container, root, "BALANCE", 10, TextAnchor.MiddleLeft, "0.050 0.425", "0.300 0.458", "0.90 0.94 0.98 1");
             AddPatternPopupInput(container, root, "DAMAGE", FormatFloat(template.DamageScale), "damage", 0.050f, 0.365f, 0.205f);
@@ -5406,6 +5545,39 @@ namespace Oxide.Plugins
             ShowEditorUi(player);
         }
 
+        [ConsoleCommand("airanim.release.targetmode")]
+        private void CCmdReleaseTargetMode(ConsoleSystem.Arg arg)
+        {
+            var player = GetArgPlayer(arg);
+            if (player == null || !CanUse(player))
+            {
+                return;
+            }
+
+            var session = GetOrCreateSession(player);
+            VisualProfileConfig profile;
+            if (!TryGetSessionProfile(player, session, out profile))
+            {
+                return;
+            }
+
+            var ev = GetSelectedPayloadEvent(session, profile);
+            if (ev == null)
+            {
+                return;
+            }
+
+            var reopenPopup = session.ReleaseUiOpen;
+            ev.TargetingMode = IsSimpleTargeting(ev) ? "advanced" : "simple";
+            NormalizeProfileKeepingRelease(session, profile, ev);
+            SetStatus(session, "Release targeting set to " + ev.TargetingMode + ".", ev.TargetingMode == "simple" ? "Target offsets are preserved but ignored." : "Authored target offsets and full spread are active.");
+            ShowEditorUi(player);
+            if (reopenPopup)
+            {
+                ShowPayloadReleasePopupUi(player);
+            }
+        }
+
         [ConsoleCommand("airanim.release.atwp")]
         private void CCmdReleaseAtWaypoint(ConsoleSystem.Arg arg)
         {
@@ -5654,6 +5826,39 @@ namespace Oxide.Plugins
             RebuildMarkers(player, session);
             SetStatus(session, "Extended profile duration to " + FormatSeconds(profile.DurationSeconds) + ".", "Repeated pattern now fits within the profile.");
             ShowEditorUi(player);
+        }
+
+        [ConsoleCommand("airanim.pattern.targetmode")]
+        private void CCmdPatternTargetMode(ConsoleSystem.Arg arg)
+        {
+            var player = GetArgPlayer(arg);
+            if (player == null || !CanUse(player))
+            {
+                return;
+            }
+
+            var session = GetOrCreateSession(player);
+            VisualProfileConfig profile;
+            if (!TryGetSessionProfile(player, session, out profile))
+            {
+                return;
+            }
+
+            if (profile.ReleaseTemplate == null)
+            {
+                profile.ReleaseTemplate = new VisualPayloadEvent();
+            }
+
+            var reopenPopup = session.PatternTemplateUiOpen;
+            profile.ReleaseTemplate.TargetingMode = IsSimpleTargeting(profile.ReleaseTemplate) ? "advanced" : "simple";
+            profile.PayloadReleaseMode = "generated";
+            NormalizeProfile(session.ProfileId, profile);
+            SetStatus(session, "Pattern targeting set to " + profile.ReleaseTemplate.TargetingMode + ".", profile.ReleaseTemplate.TargetingMode == "simple" ? "Target offsets are preserved but ignored." : "Authored target offsets and full spread are active.");
+            ShowEditorUi(player);
+            if (reopenPopup)
+            {
+                ShowPatternTemplatePopupUi(player);
+            }
         }
 
         [ConsoleCommand("airanim.pattern.payload")]
@@ -7951,6 +8156,19 @@ namespace Oxide.Plugins
             {
                 ev.Payload = NormalizePayload(value);
             }
+            else if (key == "targetingmode")
+            {
+                var requestedMode = (value ?? "").Trim().ToLowerInvariant();
+                if (requestedMode != "simple" && requestedMode != "advanced")
+                {
+                    if (reply)
+                    {
+                        Reply(player, "Targeting mode must be simple or advanced.");
+                    }
+                    return false;
+                }
+                ev.TargetingMode = requestedMode;
+            }
             else
             {
                 float parsed;
@@ -9822,6 +10040,7 @@ namespace Oxide.Plugins
                 {
                     profile.CompiledTrack = null;
                     profile.CompiledReleaseEvents = null;
+                    profile.GeneratedReleaseGroups = null;
                 }
             }
 
@@ -10063,7 +10282,7 @@ namespace Oxide.Plugins
                 profileFile = CreateDefaultProfileFile();
             }
 
-            if (profileFile.SchemaVersion != 1 && profileFile.SchemaVersion != 2)
+            if (profileFile.SchemaVersion != 1 && profileFile.SchemaVersion != 2 && profileFile.SchemaVersion != 3)
             {
                 profileFile.SchemaVersion = DefaultSchemaVersion;
             }
@@ -10196,6 +10415,8 @@ namespace Oxide.Plugins
             payloadEvent.TargetOffsetY = Mathf.Clamp(payloadEvent.TargetOffsetY, -200f, 500f);
             payloadEvent.TargetOffsetZ = Mathf.Clamp(payloadEvent.TargetOffsetZ, -500f, 500f);
             payloadEvent.SpreadRadius = ClampOptional(payloadEvent.SpreadRadius, 0f, 250f);
+            payloadEvent.TargetingMode = NormalizeTargetingMode(payloadEvent.TargetingMode);
+            payloadEvent.AccuracyPercent = Mathf.Clamp(payloadEvent.AccuracyPercent, 0f, 100f);
             payloadEvent.LaunchSpeed = ClampOptional(payloadEvent.LaunchSpeed, 0f, 500f);
             payloadEvent.FuseSeconds = ClampOptional(payloadEvent.FuseSeconds, 0f, 60f);
             payloadEvent.DamageScale = Mathf.Clamp(payloadEvent.DamageScale <= 0f ? 1f : payloadEvent.DamageScale, 0f, 10f);
@@ -10248,7 +10469,33 @@ namespace Oxide.Plugins
         private string NormalizePayloadReleaseMode(string mode)
         {
             var normalized = (mode ?? "").Trim().ToLowerInvariant();
+            if (normalized == "mixed")
+            {
+                return "mixed";
+            }
             return normalized == "generated" || normalized == "auto" || normalized == "pattern" || normalized == "repeated" || normalized == "repeat" ? "generated" : "manual";
+        }
+
+        private string NormalizeTargetingMode(string mode)
+        {
+            return string.Equals((mode ?? "").Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
+                ? "advanced"
+                : "simple";
+        }
+
+        private bool IsSimpleTargeting(VisualPayloadEvent payloadEvent)
+        {
+            return payloadEvent == null || string.Equals(NormalizeTargetingMode(payloadEvent.TargetingMode), "simple", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private float GetEffectiveAccuracyRadius(VisualPayloadEvent payloadEvent)
+        {
+            if (payloadEvent == null || payloadEvent.SpreadRadius < 0f)
+            {
+                return -1f;
+            }
+
+            return payloadEvent.SpreadRadius * (1f - Mathf.Clamp01(payloadEvent.AccuracyPercent / 100f));
         }
 
         private void PreparePreviewPayloadSchedule(EditorSession session, VisualProfileConfig profile)
@@ -10284,7 +10531,8 @@ namespace Oxide.Plugins
                 return schedule;
             }
 
-            if (!IsRepeatedPatternMode(profile))
+            var hasCompactGroups = profile.GeneratedReleaseGroups != null && profile.GeneratedReleaseGroups.Count > 0;
+            if (!IsRepeatedPatternMode(profile) || string.Equals(profile.PayloadReleaseMode, "mixed", StringComparison.OrdinalIgnoreCase))
             {
                 if (profile.PayloadEvents == null)
                 {
@@ -10299,6 +10547,38 @@ namespace Oxide.Plugins
                     }
                 }
 
+                if (!hasCompactGroups)
+                {
+                    schedule.Sort((a, b) => a.Time.CompareTo(b.Time));
+                    return schedule;
+                }
+            }
+
+            if (hasCompactGroups)
+            {
+                var generatedCount = 0;
+                foreach (var group in profile.GeneratedReleaseGroups)
+                {
+                    if (group == null || group.Template == null || group.MaximumUnits <= 0 || group.UnitsPerRelease <= 0)
+                    {
+                        continue;
+                    }
+                    for (var unit = 0; unit < group.MaximumUnits && generatedCount < MaxGeneratedPreviewOccurrences; unit++)
+                    {
+                        var burstIndex = unit / group.UnitsPerRelease;
+                        var unitIndex = unit % group.UnitsPerRelease;
+                        var generated = ClonePayloadEvent(group.Template) ?? new VisualPayloadEvent();
+                        generated.Time = group.StartTime + burstIndex * group.IntervalSeconds + unitIndex * group.UnitIntervalSeconds;
+                        generated.Count = 1;
+                        generated.Index = unit + 1;
+                        schedule.Add(generated);
+                        generatedCount++;
+                    }
+                    if (generatedCount >= MaxGeneratedPreviewOccurrences)
+                    {
+                        break;
+                    }
+                }
                 schedule.Sort((a, b) => a.Time.CompareTo(b.Time));
                 return schedule;
             }
@@ -10461,7 +10741,8 @@ namespace Oxide.Plugins
 
             if (!NearlyEqual(a.CarrierOffsetX, b.CarrierOffsetX) || !NearlyEqual(a.CarrierOffsetY, b.CarrierOffsetY) || !NearlyEqual(a.CarrierOffsetZ, b.CarrierOffsetZ)
                 || !NearlyEqual(a.TargetOffsetX, b.TargetOffsetX) || !NearlyEqual(a.TargetOffsetY, b.TargetOffsetY) || !NearlyEqual(a.TargetOffsetZ, b.TargetOffsetZ)
-                || !NearlyEqual(a.SpreadRadius, b.SpreadRadius) || !NearlyEqual(a.LaunchSpeed, b.LaunchSpeed) || !NearlyEqual(a.FuseSeconds, b.FuseSeconds)
+                || !string.Equals(NormalizeTargetingMode(a.TargetingMode), NormalizeTargetingMode(b.TargetingMode), StringComparison.OrdinalIgnoreCase)
+                || !NearlyEqual(a.AccuracyPercent, b.AccuracyPercent) || !NearlyEqual(a.SpreadRadius, b.SpreadRadius) || !NearlyEqual(a.LaunchSpeed, b.LaunchSpeed) || !NearlyEqual(a.FuseSeconds, b.FuseSeconds)
                 || !NearlyEqual(a.DamageScale, b.DamageScale) || !NearlyEqual(a.VehicleDamageScale, b.VehicleDamageScale)
                 || !NearlyEqual(a.SplashRadius, b.SplashRadius) || !NearlyEqual(a.ImpactRadius, b.ImpactRadius)
                 || !NearlyEqual(a.MaxTrackingSeconds, b.MaxTrackingSeconds) || !NearlyEqual(a.MaxTrackingDistance, b.MaxTrackingDistance))
@@ -10637,6 +10918,8 @@ namespace Oxide.Plugins
                 TargetOffsetY = source.TargetOffsetY,
                 TargetOffsetZ = source.TargetOffsetZ,
                 SpreadRadius = source.SpreadRadius,
+                TargetingMode = source.TargetingMode,
+                AccuracyPercent = source.AccuracyPercent,
                 LaunchSpeed = source.LaunchSpeed,
                 FuseSeconds = source.FuseSeconds,
                 DamageScale = source.DamageScale,
@@ -10670,7 +10953,7 @@ namespace Oxide.Plugins
                 case "attack_heli":
                     return "hv_rocket";
                 case "a10":
-                    return "bradley_longbarrel_burst";
+                    return "patrol_heli_gun";
                 default:
                     return "mlrs_rocket";
             }
@@ -10684,7 +10967,7 @@ namespace Oxide.Plugins
             }
 
             var normalized = payload.Trim().Replace("-", "_").Replace(" ", "_").ToLowerInvariant();
-            foreach (var value in PayloadValues)
+            foreach (var value in runtimePayloadValues)
             {
                 if (string.Equals(value, normalized, StringComparison.OrdinalIgnoreCase))
                 {
@@ -10698,21 +10981,76 @@ namespace Oxide.Plugins
         private string GetNextPayload(string payload)
         {
             var normalized = NormalizePayload(payload);
-            for (var i = 0; i < PayloadValues.Length; i++)
+            for (var i = 0; i < runtimePayloadValues.Count; i++)
             {
-                if (string.Equals(PayloadValues[i], normalized, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(runtimePayloadValues[i], normalized, StringComparison.OrdinalIgnoreCase))
                 {
-                    return PayloadValues[(i + 1) % PayloadValues.Length];
+                    return runtimePayloadValues[(i + 1) % runtimePayloadValues.Count];
                 }
             }
 
-            return PayloadValues.Length == 0 ? "" : PayloadValues[0];
+            return runtimePayloadValues.Count == 0 ? "" : runtimePayloadValues[0];
         }
 
         private string GetPayloadDisplay(string payload)
         {
             var normalized = NormalizePayload(payload);
-            return string.IsNullOrWhiteSpace(normalized) ? "(strike payload)" : normalized;
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "(strike payload)";
+            }
+
+            string label;
+            return payloadDisplayNames.TryGetValue(normalized, out label) && !string.IsNullOrWhiteSpace(label) ? label : normalized;
+        }
+
+        private void RefreshPayloadCatalog()
+        {
+            runtimePayloadValues.Clear();
+            runtimePayloadValues.AddRange(PayloadValues);
+            payloadDisplayNames.Clear();
+
+            if (PortableAirstrikes == null)
+            {
+                return;
+            }
+
+            var catalog = PortableAirstrikes.Call("API_GetPayloadCatalog") as List<Dictionary<string, object>>;
+            if (catalog == null || catalog.Count == 0)
+            {
+                return;
+            }
+
+            runtimePayloadValues.Clear();
+            foreach (var descriptor in catalog)
+            {
+                object idValue;
+                if (descriptor == null || !descriptor.TryGetValue("Id", out idValue) || idValue == null)
+                {
+                    continue;
+                }
+
+                var id = NormalizePayload(idValue.ToString());
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                object displayValue;
+                if (descriptor.TryGetValue("DisplayName", out displayValue) && displayValue != null)
+                {
+                    payloadDisplayNames[id] = displayValue.ToString();
+                }
+
+                object deprecatedValue;
+                var deprecated = descriptor.TryGetValue("Deprecated", out deprecatedValue)
+                    && deprecatedValue != null
+                    && Convert.ToBoolean(deprecatedValue, CultureInfo.InvariantCulture);
+                if (!deprecated && !runtimePayloadValues.Exists(value => string.Equals(value, id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    runtimePayloadValues.Add(id);
+                }
+            }
         }
 
         private float GetPayloadDamageScale(VisualPayloadEvent payloadEvent, string key)
@@ -10785,6 +11123,15 @@ namespace Oxide.Plugins
                 case "spread":
                 case "spreadradius":
                     return "spread";
+                case "accuracy":
+                case "accuracypercent":
+                case "accuracy_percentage":
+                    return "accuracy";
+                case "mode":
+                case "targeting":
+                case "targetingmode":
+                case "targeting_mode":
+                    return "targetingmode";
                 case "speed":
                 case "launchspeed":
                     return "speed";
@@ -10868,6 +11215,9 @@ namespace Oxide.Plugins
                 case "spread":
                     ev.SpreadRadius = value;
                     return;
+                case "accuracy":
+                    ev.AccuracyPercent = value;
+                    return;
                 case "speed":
                     ev.LaunchSpeed = value;
                     return;
@@ -10928,6 +11278,7 @@ namespace Oxide.Plugins
                 case "targety": return ev.TargetOffsetY;
                 case "targetz": return ev.TargetOffsetZ;
                 case "spread": return ev.SpreadRadius;
+                case "accuracy": return ev.AccuracyPercent;
                 case "speed": return ev.LaunchSpeed;
                 case "fuse": return ev.FuseSeconds;
                 case "damage": return ev.DamageScale;
@@ -11007,6 +11358,15 @@ namespace Oxide.Plugins
                 Vehicle = "a10",
                 DurationSeconds = 8.5f,
                 FirstPayloadDelaySeconds = 3.8f,
+                PayloadReleaseMode = "generated",
+                MaxPayloadCount = 24,
+                PayloadReleaseIntervalSeconds = 0.06f,
+                ReleaseTemplate = new VisualPayloadEvent
+                {
+                    Time = 3.8f,
+                    Payload = "patrol_heli_gun",
+                    Count = 1
+                },
                 RotationSmoothTimeSeconds = 0.16f,
                 MinimumTerrainClearance = 50.0f,
                 Waypoints = new List<VisualProfileWaypoint>

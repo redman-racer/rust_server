@@ -1,7 +1,7 @@
 {
   "ApiBaseUrl": "https://raidlands.net",
   "ServerId": "raidlands-main",
-  "SharedSecret": "",
+  "SharedSecret": "${WEBSITE_VIP_SHARED_SECRET}",
   "WipeKey": "",
   "RenderName": "Icons",
   "TextureRenderName": "Default",
@@ -20,6 +20,15 @@
   "PublishPlayerLocations": true,
   "PlayerLocationIntervalSeconds": 15,
   "PublishReplayEvents": true,
+  "PublishRaidlandsEvents": true,
+  "PublishWorldEvents": true,
+  "PublishDiscreteServerEvents": true,
+  "WorldEventIntervalSeconds": 15,
+  "WorldEventMinimumMovementMeters": 2.0,
+  "WorldEventMinimumRotationDegrees": 3.0,
+  "WorldEventRouteMaxSamples": 96,
+  "WorldEventPayloadMaxBytes": 11500,
+  "AirdropCarrierSearchRadiusMeters": 600.0,
   "PublishEnvironment": true,
   "EnvironmentIntervalSeconds": 30
 }

@@ -35,6 +35,7 @@ class ServerRewards : RustPlugin
     private static Func<string, string, string> _getMessage;
 
     private const string ADMIN_PERMISSION = "serverrewards.admin";
+    private const int MAX_PURCHASE_QUANTITY = 100;
 
     #endregion
 
@@ -147,6 +148,8 @@ class ServerRewards : RustPlugin
     }
     
     private static double CurrentTime() => DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1, 0, 0, 0)).TotalSeconds;
+
+    private static string FormatNumber(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
     private void RegisterStoreCommands(Command command)
     {
@@ -975,6 +978,12 @@ class ServerRewards : RustPlugin
 
         CreateNavigation(container, user, UI_HEADER);
 
+        const string BALANCE = "sr.balance";
+        _balances.Data.TryGetValue(user.UserId, out int balance);
+        float balanceRight = user.Category <= NavigationCategory.Items ? -230f : -30f;
+        UI.Panel(container, UI_HEADER, Configuration.UI.ButtonConfirm, Anchor.CenterRight, new Offset(balanceRight - 125f, -10f, balanceRight, 10f), BALANCE);
+        UI.Text(container, BALANCE, user.Translate("UI.RP", FormatNumber(balance)), Anchor.FullStretch, Offset.zero, color: Configuration.UI.ButtonConfirmText);
+
         if (user.Category <= NavigationCategory.Items)
         {
             if (!string.IsNullOrEmpty(_magnifyIcon))
@@ -1070,18 +1079,13 @@ class ServerRewards : RustPlugin
             }
         }
 
-        const string BALANCE = "sr.balance";
-        _balances.Data.TryGetValue(user.UserId, out int balance);
-        UI.Panel(container, FOOTER, Configuration.UI.ButtonConfirm, Anchor.CenterRight, new Offset(-130f, -10f, -5f, 10f), BALANCE);
-        UI.Text(container, BALANCE, user.Translate("UI.RP", balance), Anchor.FullStretch, Offset.zero, color: Configuration.UI.ButtonConfirmText);
-
         if (Configuration.UI.ShowPlaytime && PlaytimeTracker != null)
         {
             object t = Interface.CallHook("GetPlayTime", user.Player.UserIDString);
             if (t is double time)
             {
                 const string PLAYTIME = "sr.playtime";
-                UI.Panel(container, FOOTER, Configuration.UI.ButtonPurchase, Anchor.CenterRight, new Offset(-280f, -10f, -135f, 10f), PLAYTIME);
+                UI.Panel(container, FOOTER, Configuration.UI.ButtonPurchase, Anchor.CenterRight, new Offset(-155f, -10f, -5f, 10f), PLAYTIME);
                 UI.Countdown(container, PLAYTIME, user.Translate("UI.Playtime", "%TIME_LEFT%"), (int)time, int.MaxValue, Anchor.FullStretch, Offset.zero, color: Configuration.UI.ButtonPurchaseText);
             }
         }
@@ -1257,11 +1261,11 @@ class ServerRewards : RustPlugin
             UI.Icon(container, iconName, Products.Item.BlueprintBase.itemid, 0UL, Anchor.BottomLeft, new Offset(2.5f, 2.5f, 26.5f, 26.5f));
 
         if (item.Amount > 1)
-            UI.Text(container, iconName, $"x{item.Amount}", Anchor.BottomStretch, new Offset(2.5f, 0f, -2.5f, 20f), align: TextAnchor.LowerRight);
+            UI.Text(container, iconName, $"x{FormatNumber(item.Amount)}", Anchor.BottomStretch, new Offset(2.5f, 0f, -2.5f, 20f), align: TextAnchor.LowerRight);
 
         if (user.AdminMode)
             CreateAdminButtons(container, parent, user, ProductType.Item, item.ID);
-        else CreatePurchaseButton(container, parent, user, ProductType.Item, item.ID, item.Cost, balance, isDlcRestricted);
+        else CreateItemPurchaseControls(container, parent, user, item, balance, isDlcRestricted);
     }
 
     #endregion
@@ -2255,30 +2259,45 @@ class ServerRewards : RustPlugin
         user.SendUI(container);
     }
     
-    private void CreatePurchaseButton(CuiElementContainer container, string parent, UIUser user, ProductType productType, int productId, int productCost, int balance, bool isDlcRestricted = false)
+    private void CreateItemPurchaseControls(CuiElementContainer container, string parent, UIUser user, Products.Item item, int balance, bool isDlcRestricted)
+    {
+        int quantity = user.GetPurchaseQuantity(item.ID);
+
+        string quantityName = $"{parent}.quantity";
+        UI.Panel(container, parent, Colors.BarelyVisibleDark, Anchor.BottomLeft, new Offset(2.5f, 2.5f, 39.5f, 22.5f), quantityName);
+        UI.Text(container, quantityName, "x", Anchor.FullStretch, new Offset(2f, 0f, -24f, 0f), size: 10);
+        UI.Input(container, quantityName, quantity.ToString(CultureInfo.InvariantCulture), $"{Commands.SetPurchaseQuantity} {item.ID}", Anchor.FullStretch, new Offset(13f, 0f, -2f, 0f), size: 10, align: TextAnchor.MiddleCenter, charsLimit: 3);
+
+        CreatePurchaseButton(container, parent, user, ProductType.Item, item.ID, item.Cost, balance, isDlcRestricted, quantity, true);
+    }
+
+    private void CreatePurchaseButton(CuiElementContainer container, string parent, UIUser user, ProductType productType, int productId, int productCost, int balance, bool isDlcRestricted = false, int quantity = 1, bool hasQuantityInput = false)
     {
         bool isOnCooldown = _cooldowns.Data.HasCooldown(user.UserId, productId, out double remaining);
-        
-        bool canPurchase = productCost <= balance && !isOnCooldown && !isDlcRestricted;
+
+        long totalCost = (long)productCost * quantity;
+        bool hasValidCost = totalCost <= int.MaxValue;
+        bool canPurchase = hasValidCost && totalCost <= balance && !isOnCooldown && !isDlcRestricted;
         
         string buttonColor = !canPurchase ? Configuration.UI.ButtonReject : Configuration.UI.ButtonPurchase;
         string textColor = !canPurchase ? Configuration.UI.ButtonRejectText : Configuration.UI.ButtonPurchaseText;
 
-        string buttonText = isDlcRestricted ? user.Translate("UI.DLCItem") : productCost == 0 ? user.Translate("UI.Free") : user.Translate("UI.Cost", productCost);
+        string buttonText = isDlcRestricted ? user.Translate("UI.DLCItem") : totalCost == 0 ? user.Translate("UI.Free") : user.Translate("UI.Cost", FormatNumber(totalCost));
         
         string sprite = !canPurchase ? Sprites.Occupied : Sprites.Cart;
-        string command = !canPurchase ? string.Empty : $"{Commands.Purchase} {(int)productType} {productId}";
+        string command = !canPurchase ? string.Empty : $"{Commands.Purchase} {(int)productType} {productId} {quantity}";
         
         Offset iconOffset = !canPurchase ? new Offset(6f, -7f, 20f, 7f) : new Offset(4f, -9f, 22f, 9f);
         
         string buttonName = $"{parent}.button";
         
-        UI.Panel(container, parent, buttonColor, Anchor.BottomStretch, new Offset(2.5f, 2.5f, -2.5f, 22.5f), buttonName);
+        Offset buttonOffset = hasQuantityInput ? new Offset(42f, 2.5f, -2.5f, 22.5f) : new Offset(2.5f, 2.5f, -2.5f, 22.5f);
+        UI.Panel(container, parent, buttonColor, Anchor.BottomStretch, buttonOffset, buttonName);
         UI.Sprite(container, buttonName, sprite, textColor, Anchor.CenterLeft, iconOffset);
         
         if (isOnCooldown)
-            UI.Countdown(container, buttonName, "%TIME_LEFT%", (int)remaining, 0, Anchor.FullStretch, new Offset(11f, 0f, 0f, 0f), color: textColor);
-        else UI.Text(container, buttonName, buttonText, Anchor.FullStretch, new Offset(11f, 0f, 0f, 0f), size: 12, color: textColor);
+            UI.Countdown(container, buttonName, "%TIME_LEFT%", (int)remaining, 0, Anchor.FullStretch, new Offset(11f, 0f, 0f, 0f), size: hasQuantityInput ? 10 : 14, color: textColor);
+        else UI.Text(container, buttonName, buttonText, Anchor.FullStretch, new Offset(11f, 0f, 0f, 0f), size: hasQuantityInput ? 10 : 12, color: textColor);
         
         UI.Button(container, buttonName, command, Anchor.FullStretch, Offset.zero);
     }
@@ -2389,6 +2408,8 @@ class ServerRewards : RustPlugin
         public BasePlayer TransferTarget;
         public int TransferAmount = 1;
 
+        private readonly Dictionary<int, int> _purchaseQuantities = new Dictionary<int, int>();
+
         private int _toastIdx = 0;
         public int CurrentToastIdx => _toastIdx;
 
@@ -2470,6 +2491,12 @@ class ServerRewards : RustPlugin
         public string Translate(string key, params object[] args) => 
             args == null || args.Length == 0 ? _getMessage(key, Player.UserIDString) : string.Format(_getMessage(key, Player.UserIDString), args);
 
+        public int GetPurchaseQuantity(int productId) =>
+            _purchaseQuantities.TryGetValue(productId, out int quantity) ? quantity : 1;
+
+        public void SetPurchaseQuantity(int productId, int quantity) =>
+            _purchaseQuantities[productId] = quantity;
+
         private static readonly Hash<ulong, UIUser> UIUsers = new Hash<ulong, UIUser>();
 
         public static UIUser Get(BasePlayer player)
@@ -2509,6 +2536,7 @@ class ServerRewards : RustPlugin
         public const string ItemCategory = "srui.itemcategory";
         public const string KitCategory = "srui.kitcategory";
         public const string Purchase = "srui.purchase";
+        public const string SetPurchaseQuantity = "srui.purchasequantity";
         public const string Sell = "srui.sell";
         public const string ConfirmSell = "srui.confirmsell";
         public const string CancelSell = "srui.cancelsell";
@@ -2995,6 +3023,13 @@ class ServerRewards : RustPlugin
             return;
         }
 
+        int quantity = productType == ProductType.Item ? arg.GetInt(2, user.GetPurchaseQuantity(productId)) : 1;
+        if (quantity < 1 || quantity > MAX_PURCHASE_QUANTITY)
+        {
+            CreateToast(user, ToastType.Error, user.Translate("UI.Error.Title"), user.Translate("UI.Error.InvalidQuantity", MAX_PURCHASE_QUANTITY));
+            return;
+        }
+
         if (_cooldowns.Data.HasCooldown(player.userID, productId, out double remaining))
         {
             CreateToast(user, ToastType.Error, user.Translate("UI.Error.Title"), user.Translate("UI.Error.OnCooldown"));
@@ -3003,34 +3038,60 @@ class ServerRewards : RustPlugin
 
         _balances.Data.TryGetValue(player.userID, out int balance);
 
-        if (product.Cost > balance)
+        long totalCost = (long)product.Cost * quantity;
+        if (totalCost > int.MaxValue || totalCost > balance)
         {
             CreateToast(user, ToastType.Error, user.Translate("UI.Error.Title"), user.Translate("UI.Error.InsufficientBalance"));
             return;
         }
         
-        if (!product.GiveToPlayer(player))
+        bool gavePurchase = product is Products.Item item ? item.GiveToPlayer(player, quantity) : product.GiveToPlayer(player);
+        if (!gavePurchase)
         {
             CreateToast(user, ToastType.Error, user.Translate("UI.Error.Title"), user.Translate("UI.Error.GivePurchase"));
             return;
         }
         
-        if (product.Cost > 0)
-            _balances.Data[player.userID] = balance - product.Cost;
+        if (totalCost > 0)
+            _balances.Data[player.userID] = balance - (int)totalCost;
         
         SendPointsUpdated(player.userID);
         
         if (product.Cooldown > 0)
             _cooldowns.Data.AddCooldown(player.userID, productId, product.Cooldown);
         
+        string purchaseName = product is Products.Item purchasedItem ? purchasedItem.GetPurchaseName(quantity) : product.PurchaseName;
+
         if (Configuration.Options.Logs)
-            LogToFile("Purchases", $"{player.displayName} ({player.userID}) bought {product.DisplayName} (ID: {product.ID}) for {product.Cost}RP", this, true, true);
+            LogToFile("Purchases", $"{player.displayName} ({player.userID}) bought {purchaseName} (ID: {product.ID}) for {totalCost}RP", this, true, true);
         
         OpenStore(player);
         
-        CreateToast(user, ToastType.Info, user.Translate("UI.Purchase.Title"), 
-            product.Cost > 0 ? user.Translate("UI.Purchase.Success", product.PurchaseName, product.Cost) : 
-                user.Translate("UI.Purchase.Free", product.PurchaseName));
+        CreateToast(user, ToastType.Info, user.Translate("UI.Purchase.Title"),
+            totalCost > 0 ? user.Translate("UI.Purchase.Success", purchaseName, FormatNumber(totalCost)) :
+                user.Translate("UI.Purchase.Free", purchaseName));
+    }
+
+    [ConsoleCommand(Commands.SetPurchaseQuantity)]
+    private void CommandSetPurchaseQuantity(ConsoleSystem.Arg arg)
+    {
+        BasePlayer player = arg.Player();
+
+        UIUser user = UIUser.Get(player);
+        if (user == null)
+            return;
+
+        int productId = arg.GetInt(0, -1);
+        if (productId < 0)
+            return;
+
+        Products products = user.NpcStore is { CustomStore: true } ? user.NpcStore.Products : _products.Data;
+        if (!products.TryFindProductByID(ProductType.Item, productId, out Products.Product product) || product is not Products.Item)
+            return;
+
+        int quantity = Mathf.Clamp(arg.GetInt(1, 1), 1, MAX_PURCHASE_QUANTITY);
+        user.SetPurchaseQuantity(productId, quantity);
+        OpenStore(player);
     }
     
     [ConsoleCommand(Commands.Sell)]
@@ -3645,13 +3706,14 @@ class ServerRewards : RustPlugin
             container.Add(element);
         }
         
-        public static void Input(CuiElementContainer container, string parent, string text, string command, Anchor anchor, Offset offset, int size = 14, TextAnchor align = TextAnchor.MiddleLeft)
+        public static void Input(CuiElementContainer container, string parent, string text, string command, Anchor anchor, Offset offset, int size = 14, TextAnchor align = TextAnchor.MiddleLeft, int charsLimit = 0)
         {
             CuiInputFieldComponent input = Pool.Get<CuiInputFieldComponent>();
             input.Text = text;
             input.Command = command;
             input.FontSize = size;
             input.Align = align;
+            input.CharsLimit = charsLimit;
 
             CuiRectTransformComponent rect = Pool.Get<CuiRectTransformComponent>();
             rect.AnchorMin = anchor.Min;
@@ -4705,7 +4767,10 @@ class ServerRewards : RustPlugin
             public ItemCategory Category;
 
             [JsonIgnore]
-            public override string PurchaseName => Amount > 0 ? $"{Amount} x {DisplayName}" : DisplayName;
+            public override string PurchaseName => Amount > 0 ? $"{FormatNumber(Amount)} x {DisplayName}" : DisplayName;
+
+            public string GetPurchaseName(int quantity) =>
+                Amount > 0 ? $"{FormatNumber((long)Amount * quantity)} x {DisplayName}" : DisplayName;
 
             [JsonIgnore]
             private ItemDefinition _itemDefinition;
@@ -4832,8 +4897,13 @@ class ServerRewards : RustPlugin
                 }
             }
 
-            public override bool GiveToPlayer(BasePlayer player)
+            public override bool GiveToPlayer(BasePlayer player) => GiveToPlayer(player, 1);
+
+            public bool GiveToPlayer(BasePlayer player, int quantity)
             {
+                if (quantity < 1 || quantity > MAX_PURCHASE_QUANTITY)
+                    return false;
+
                 ItemDefinition itemDefinition = ItemDefinition;
                 if (!itemDefinition)
                 {
@@ -4841,14 +4911,19 @@ class ServerRewards : RustPlugin
                     return false;
                 }
 
-                global::Item item = null;
-                if (IsBp)
+                for (int i = 0; i < quantity; i++)
                 {
-                    item = ItemManager.Create(BlueprintBase, Amount);
-                    item.blueprintTarget = itemDefinition.itemid;
+                    global::Item item;
+                    if (IsBp)
+                    {
+                        item = ItemManager.Create(BlueprintBase, Amount);
+                        item.blueprintTarget = itemDefinition.itemid;
+                    }
+                    else item = ItemManager.Create(itemDefinition, Amount, SkinId);
+
+                    player.GiveItem(item, BaseEntity.GiveItemReason.PickedUp);
                 }
-                else item = ItemManager.Create(itemDefinition, Amount, SkinId);
-                player.GiveItem(item, BaseEntity.GiveItemReason.PickedUp);
+
                 return true;
             }
         }
@@ -5625,7 +5700,7 @@ class ServerRewards : RustPlugin
         ["UI.CreateProduct"] = "CREATE PRODUCT",
         ["UI.Cancel"] = "CANCEL",
         ["UI.Confirm"] = "CONFIRM",
-        ["UI.RP"] = "RP: {0}",
+        ["UI.RP"] = "{0} RP",
         ["UI.Playtime"] = "PLAYTIME: {0}",
         ["UI.Kit.Belt"] = "BELT",
         ["UI.Kit.Wear"] = "WEAR",
@@ -5689,6 +5764,7 @@ class ServerRewards : RustPlugin
         ["UI.Error.InvalidProduct"] = "The product you are trying to purchase does not exist",
         ["UI.Error.GivePurchase"] = "A error occured when purchasing this product...",
         ["UI.Error.InsufficientBalance"] = "You do not have the required funds to make this purchase",
+        ["UI.Error.InvalidQuantity"] = "Enter a quantity from 1 to {0}",
         ["UI.Error.OnCooldown"] = "You are still on cooldown for this product",
         ["UI.Purchase.Title"] = "PRODUCT PURCHASED!",
         ["UI.Purchase.Success"] = "You have purchased {0} for {1}RP",

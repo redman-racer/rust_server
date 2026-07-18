@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -11,7 +12,7 @@ using RaycastHit = UnityEngine.RaycastHit;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.0.14")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.1.0")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
@@ -26,7 +27,7 @@ namespace Oxide.Plugins
         private const string OwnerlessManageConfirmation = "confirm";
 
         [PluginReference]
-        private Plugin Clans, Friends, RemoverTool, TurretSwitches, Vanish;
+        private Plugin Clans, CustomItemDefinitions, Friends, RemoverTool, TurretSwitches, Vanish;
 
         private Configuration config;
         private readonly HashSet<ulong> handledTurretIds = new HashSet<ulong>();
@@ -34,6 +35,10 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, ulong> sentrySupportEntityIds = new Dictionary<ulong, ulong>();
         private readonly HashSet<ulong> pendingSupportDropSentryIds = new HashSet<ulong>();
         private string resolvedSentryPrefab;
+        private ItemDefinition sentryCustomItemDefinition;
+        private uint sentryIconFileId;
+        private bool warnedCustomItemDefinitionsUnavailable;
+        private bool warnedSentryIconMissing;
         private static readonly int TargetLineOfSightMask = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed", "Default");
 
         private class Configuration
@@ -121,6 +126,30 @@ namespace Oxide.Plugins
 
             [JsonProperty("Display Name")]
             public string DisplayName = "Outpost Sentry Turret";
+
+            [JsonProperty("Use Custom Item Definition")]
+            public bool UseCustomItemDefinition = true;
+
+            [JsonProperty("Allow Vanilla Fallback If Custom Item Definition Is Missing")]
+            public bool AllowVanillaFallbackIfCustomItemDefinitionMissing = true;
+
+            [JsonProperty("Custom Shortname")]
+            public string CustomShortname = "raidlands.scientist.sentry";
+
+            [JsonProperty("Custom Item ID")]
+            public int CustomItemId = -395118448;
+
+            [JsonProperty("Icon File ID")]
+            public uint IconFileId;
+
+            [JsonProperty("Icon PNG Data Path")]
+            public string IconPngDataPath = "RaidlandsSentryTurrets/scientist-turret.png";
+
+            [JsonProperty("Default Description")]
+            public string DefaultDescription = "Deploys a player-owned Scientist Sentry Turret.";
+
+            [JsonProperty("Maximum Stack Size")]
+            public int MaximumStackSize = 5;
 
             [JsonProperty("Skin")]
             public ulong Skin;
@@ -239,6 +268,29 @@ namespace Oxide.Plugins
                 config.SentryItem.DisplayName = "Outpost Sentry Turret";
             }
 
+            var defaultSentryItem = new SentryItem();
+            if (string.IsNullOrWhiteSpace(config.SentryItem.CustomShortname))
+            {
+                config.SentryItem.CustomShortname = defaultSentryItem.CustomShortname;
+            }
+
+            if (config.SentryItem.CustomItemId == 0)
+            {
+                config.SentryItem.CustomItemId = defaultSentryItem.CustomItemId;
+            }
+
+            if (config.SentryItem.IconPngDataPath == null)
+            {
+                config.SentryItem.IconPngDataPath = defaultSentryItem.IconPngDataPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(config.SentryItem.DefaultDescription))
+            {
+                config.SentryItem.DefaultDescription = defaultSentryItem.DefaultDescription;
+            }
+
+            config.SentryItem.MaximumStackSize = Math.Max(1, config.SentryItem.MaximumStackSize);
+
             if (config.OutpostSentryPrefabCandidates == null || config.OutpostSentryPrefabCandidates.Length == 0)
             {
                 config.OutpostSentryPrefabCandidates = new Configuration().OutpostSentryPrefabCandidates;
@@ -335,6 +387,8 @@ namespace Oxide.Plugins
                 TrackSentrySupport(entity);
             }
 
+            TryRegisterSentryCustomItemDefinition();
+
             var restoredEventSentries = ManagePersistedRaidlandsEventSentries();
             if (restoredEventSentries > 0)
             {
@@ -360,6 +414,39 @@ namespace Oxide.Plugins
             }
 
             StartSupportLossMonitor();
+        }
+
+        private void OnPluginLoaded(Plugin plugin)
+        {
+            if (plugin == null || !string.Equals(plugin.Name, "CustomItemDefinitions", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            CustomItemDefinitions = plugin;
+            warnedCustomItemDefinitionsUnavailable = false;
+            NextTick(() =>
+            {
+                TryRegisterSentryCustomItemDefinition();
+            });
+        }
+
+        private void OnPluginUnloaded(Plugin plugin)
+        {
+            if (plugin == null || CustomItemDefinitions != plugin)
+            {
+                return;
+            }
+
+            CustomItemDefinitions = null;
+            sentryCustomItemDefinition = null;
+            sentryIconFileId = 0;
+            PrintWarning("CustomItemDefinitions unloaded. New sentry items will use the compatible vanilla autoturret fallback.");
+        }
+
+        private void Unload()
+        {
+            ClearSentryCustomItemDefinition(true);
         }
 
         [ConsoleCommand("raidlands.sentry.give")]
@@ -1890,6 +1977,11 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            if (IsActiveSentryCustomItem(item.info))
+            {
+                return true;
+            }
+
             if (!string.Equals(item.info.shortname, config.SentryItem.Shortname, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
@@ -1909,6 +2001,12 @@ namespace Oxide.Plugins
             if (config.SentryItem == null || string.IsNullOrWhiteSpace(shortname))
             {
                 return false;
+            }
+
+            if (WantsSentryCustomItemDefinition()
+                && string.Equals(shortname, GetSentryCustomShortname(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
             }
 
             if (!string.Equals(shortname, config.SentryItem.Shortname, StringComparison.OrdinalIgnoreCase))
@@ -1961,7 +2059,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var itemDefinition = ItemManager.FindItemDefinition(config.SentryItem.Shortname);
+            var itemDefinition = GetSentryCreateItemDefinition() ?? ItemManager.FindItemDefinition(config.SentryItem.Shortname);
             if (itemDefinition == null)
             {
                 return;
@@ -2670,12 +2768,219 @@ namespace Oxide.Plugins
             return CreateSentryItem(1);
         }
 
+        private bool WantsSentryCustomItemDefinition()
+        {
+            return config?.SentryItem != null && config.SentryItem.UseCustomItemDefinition;
+        }
+
+        private string GetSentryCustomShortname()
+        {
+            return string.IsNullOrWhiteSpace(config?.SentryItem?.CustomShortname)
+                ? "raidlands.scientist.sentry"
+                : config.SentryItem.CustomShortname.Trim();
+        }
+
+        private bool IsActiveSentryCustomItem(ItemDefinition definition)
+        {
+            if (definition == null || !WantsSentryCustomItemDefinition())
+            {
+                return false;
+            }
+
+            return ReferenceEquals(definition, sentryCustomItemDefinition)
+                || string.Equals(definition.shortname, GetSentryCustomShortname(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private ItemDefinition GetSentryCreateItemDefinition()
+        {
+            TryRegisterSentryCustomItemDefinition();
+            return sentryCustomItemDefinition;
+        }
+
+        private bool TryRegisterSentryCustomItemDefinition()
+        {
+            if (!WantsSentryCustomItemDefinition())
+            {
+                return false;
+            }
+
+            if (sentryCustomItemDefinition != null)
+            {
+                return true;
+            }
+
+            if (CustomItemDefinitions == null || !CustomItemDefinitions.IsLoaded)
+            {
+                if (!warnedCustomItemDefinitionsUnavailable)
+                {
+                    warnedCustomItemDefinitionsUnavailable = true;
+                    PrintWarning(config.SentryItem.AllowVanillaFallbackIfCustomItemDefinitionMissing
+                        ? "CustomItemDefinitions is unavailable. New sentry items will use the compatible vanilla autoturret fallback."
+                        : "CustomItemDefinitions is required for the configured scientist sentry item.");
+                }
+
+                return false;
+            }
+
+            var customShortname = GetSentryCustomShortname();
+            var existing = ItemManager.FindItemDefinition(customShortname);
+            if (existing != null)
+            {
+                var isCustomDefinition = CustomItemDefinitions.Call("IsCustomDefinition", existing);
+                if (!(isCustomDefinition is bool) || !(bool)isCustomDefinition)
+                {
+                    PrintWarning("Scientist sentry CID registration skipped because shortname '" + customShortname + "' already belongs to another item definition.");
+                    return false;
+                }
+
+                sentryCustomItemDefinition = existing;
+                existing.stackable = config.SentryItem.MaximumStackSize;
+                return true;
+            }
+
+            var parent = ItemManager.FindItemDefinition(config.SentryItem.Shortname);
+            if (parent == null)
+            {
+                PrintWarning("Scientist sentry CID registration failed because parent item '" + config.SentryItem.Shortname + "' was not found.");
+                return false;
+            }
+
+            var iconFileId = ResolveSentryIconFileId();
+            try
+            {
+                var dto = new
+                {
+                    parentItemId = parent.itemid,
+                    shortname = customShortname,
+                    itemId = config.SentryItem.CustomItemId,
+                    iconFileId = iconFileId,
+                    defaultName = config.SentryItem.DisplayName,
+                    defaultDescription = config.SentryItem.DefaultDescription,
+                    defaultSkinId = config.SentryItem.Skin,
+                    maxStackSize = config.SentryItem.MaximumStackSize,
+                    category = ItemCategory.Construction,
+                    itemMods = parent.itemMods,
+                    repairable = false,
+                    craftable = false,
+                    defaultBlueprintUnlocked = false
+                };
+
+                var registered = CustomItemDefinitions.Call("Register", dto, this) as ItemDefinition;
+                if (registered == null)
+                {
+                    PrintWarning("CustomItemDefinitions.Register returned no scientist sentry item definition.");
+                    return false;
+                }
+
+                sentryCustomItemDefinition = registered;
+                registered.stackable = config.SentryItem.MaximumStackSize;
+                warnedCustomItemDefinitionsUnavailable = false;
+                Puts("Registered scientist sentry custom item '" + registered.shortname + "' itemId=" + registered.itemid + " iconFileId=" + iconFileId + ".");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PrintWarning("Scientist sentry CID registration failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private uint ResolveSentryIconFileId()
+        {
+            if (config.SentryItem.IconFileId != 0)
+            {
+                return config.SentryItem.IconFileId;
+            }
+
+            if (sentryIconFileId != 0)
+            {
+                return sentryIconFileId;
+            }
+
+            var path = config.SentryItem.IconPngDataPath;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return 0;
+            }
+
+            path = path.Trim();
+            if (!Path.IsPathRooted(path))
+            {
+                path = path.TrimStart('/', '\\').Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                path = Path.Combine(Interface.Oxide.DataDirectory, path);
+            }
+
+            if (!File.Exists(path))
+            {
+                if (!warnedSentryIconMissing)
+                {
+                    warnedSentryIconMissing = true;
+                    PrintWarning("Scientist sentry icon was not found at '" + path + "'.");
+                }
+
+                return 0;
+            }
+
+            if (FileStorage.server == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                if (bytes == null || bytes.Length == 0)
+                {
+                    return 0;
+                }
+
+                sentryIconFileId = FileStorage.server.Store(bytes, FileStorage.Type.png, default);
+                return sentryIconFileId;
+            }
+            catch (Exception ex)
+            {
+                PrintWarning("Could not load scientist sentry icon from '" + path + "': " + ex.Message);
+                return 0;
+            }
+        }
+
+        private void ClearSentryCustomItemDefinition(bool unregister)
+        {
+            if (unregister && sentryCustomItemDefinition != null && CustomItemDefinitions != null && CustomItemDefinitions.IsLoaded)
+            {
+                try
+                {
+                    CustomItemDefinitions.Call("Unregister", sentryCustomItemDefinition, this);
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning("Could not unregister scientist sentry custom item: " + ex.Message);
+                }
+            }
+
+            sentryCustomItemDefinition = null;
+            sentryIconFileId = 0;
+        }
+
         private Item CreateSentryItem(int amount)
         {
-            var item = ItemManager.CreateByName(config.SentryItem.Shortname, Math.Max(1, amount), config.SentryItem.Skin);
+            var customDefinition = GetSentryCreateItemDefinition();
+            var createShortname = customDefinition?.shortname;
+            if (string.IsNullOrWhiteSpace(createShortname))
+            {
+                if (WantsSentryCustomItemDefinition() && !config.SentryItem.AllowVanillaFallbackIfCustomItemDefinitionMissing)
+                {
+                    PrintWarning("Could not create scientist sentry item because its custom item definition is unavailable and fallback is disabled.");
+                    return null;
+                }
+
+                createShortname = config.SentryItem.Shortname;
+            }
+
+            var item = ItemManager.CreateByName(createShortname, Math.Max(1, amount), customDefinition == null ? config.SentryItem.Skin : 0UL);
             if (item == null)
             {
-                PrintWarning($"Could not create sentry item '{config.SentryItem.Shortname}'.");
+                PrintWarning($"Could not create sentry item '{createShortname}'.");
                 return null;
             }
 

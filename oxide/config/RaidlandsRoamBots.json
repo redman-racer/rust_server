@@ -376,7 +376,7 @@
   },
   "Player Observation Learning": {
     "Enabled": true,
-    "Apply Mode": "profiles",
+    "Apply Mode": "shadow",
     "Source": "admin_testers",
     "Observed Player SteamIds": [
       "76561198274680338",
@@ -392,12 +392,7 @@
       "76561198446672226",
       "76561197969015795"
     ],
-    "Player Profile Spawn Weights": {
-      "ababmxking": 25,
-      "bod": 25,
-      "fireclan": 25,
-      "sudol": 25
-    },
+    "Player Profile Spawn Weights": {},
     "Log Observation Traces": true,
     "Sample Interval Seconds": 1.0,
     "Outcome Window Seconds": 10.0,

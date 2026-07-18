@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsVehicleTokens", "Raidlands", "1.0.6")]
+    [Info("RaidlandsVehicleTokens", "Raidlands", "1.1.1")]
     [Description("Provides Raidlands vehicle token items backed by SpawnHeli and VehicleLicence spawns.")]
     public class RaidlandsVehicleTokens : RustPlugin
     {
@@ -21,13 +21,14 @@ namespace Oxide.Plugins
         private const string LegacyBypassPermission = "raidlands.vehicletokens.bypass";
         private const string LegacyVehicleHp125Permission = "raidlands.vehicle.hp.125";
         private const string LegacyVehicleHp150Permission = "raidlands.vehicle.hp.150";
-        private const string DefaultLegacyTokenShortname = "wrappedgift";
-        private const string DefaultParentTokenShortname = "scrap";
+        private const string DefaultLegacyTokenShortname = "grenade.smoke";
+        private const string DefaultParentTokenShortname = "grenade.smoke";
+        private const string LegacyWrappedGiftTokenShortname = "wrappedgift";
+        private const string LegacyNonThrowableParentShortname = "scrap";
         private const string CustomTokenShortnamePrefix = "raidlands.vehicle.token.";
         private const string DefaultTokenIconDataFolder = "RaidlandsVehicleTokens";
         private const int DefaultTokenMaxStackSize = 100;
         private const int MaximumTokenMaxStackSize = 65535;
-        private const float DefaultDroppedTokenOwnerSearchRadius = 8f;
         private const float DefaultTokenSpawnMinForwardDistance = 5f;
         private const float DefaultTokenSpawnMaxForwardDistance = 15f;
         private const float DefaultTokenSpawnYawOffsetDegrees = -90f;
@@ -48,7 +49,15 @@ namespace Oxide.Plugins
         private readonly Dictionary<string, ItemDefinition> customTokenDefinitions = new Dictionary<string, ItemDefinition>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, uint> tokenIconFileIds = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> warnedMissingIconPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<ulong, PendingThrowableToken> pendingThrowableTokens = new Dictionary<ulong, PendingThrowableToken>();
+        private readonly HashSet<BaseEntity> handledThrowableEntities = new HashSet<BaseEntity>();
         private bool warnedCIDUnavailable;
+
+        private class PendingThrowableToken
+        {
+            public string DefinitionKey;
+            public float ExpiresAt;
+        }
 
         private class Configuration
         {
@@ -58,11 +67,14 @@ namespace Oxide.Plugins
             [JsonProperty("Use Actions")]
             public string[] UseActions = { "unwrap", "open", "use" };
 
-            [JsonProperty("Redeem On Item Drop")]
-            public bool RedeemOnItemDrop = true;
+            [JsonProperty("Deploy On Throwable Throw")]
+            public bool DeployOnThrowableThrow = true;
 
-            [JsonProperty("Item Drop Redeem Delay Seconds")]
-            public float ItemDropRedeemDelaySeconds = 0.1f;
+            [JsonProperty("Throwable Deploy Delay Seconds")]
+            public float ThrowableDeployDelaySeconds = 1.25f;
+
+            [JsonProperty("Throwable Intent Timeout Seconds")]
+            public float ThrowableIntentTimeoutSeconds = 5f;
 
             [JsonProperty("Dropped Spawn Vertical Offset")]
             public float DroppedSpawnVerticalOffset = 1f;
@@ -75,9 +87,6 @@ namespace Oxide.Plugins
 
             [JsonProperty("Token Spawn Yaw Offset Degrees")]
             public float TokenSpawnYawOffsetDegrees = DefaultTokenSpawnYawOffsetDegrees;
-
-            [JsonProperty("Dropped Token Owner Search Radius")]
-            public float DroppedTokenOwnerSearchRadius = DefaultDroppedTokenOwnerSearchRadius;
 
             [JsonProperty("Refresh Custom Item Definitions On Load")]
             public bool RefreshCustomItemDefinitionsOnLoad = true;
@@ -195,13 +204,12 @@ namespace Oxide.Plugins
                 config.UseActions = new Configuration().UseActions;
             }
 
-            config.ItemDropRedeemDelaySeconds = Mathf.Clamp(config.ItemDropRedeemDelaySeconds <= 0f ? 0.1f : config.ItemDropRedeemDelaySeconds, 0.01f, 2f);
+            config.ThrowableDeployDelaySeconds = Mathf.Clamp(config.ThrowableDeployDelaySeconds < 0f ? 1.25f : config.ThrowableDeployDelaySeconds, 0f, 30f);
+            config.ThrowableIntentTimeoutSeconds = Mathf.Clamp(config.ThrowableIntentTimeoutSeconds <= 0f ? 5f : config.ThrowableIntentTimeoutSeconds, 1f, 30f);
             config.DroppedSpawnVerticalOffset = Mathf.Clamp(config.DroppedSpawnVerticalOffset, 0f, 10f);
             config.TokenSpawnMinForwardDistance = Mathf.Clamp(config.TokenSpawnMinForwardDistance, 0f, 100f);
             config.TokenSpawnMaxForwardDistance = Mathf.Clamp(config.TokenSpawnMaxForwardDistance, config.TokenSpawnMinForwardDistance, 150f);
             config.TokenSpawnYawOffsetDegrees = Mathf.Clamp(config.TokenSpawnYawOffsetDegrees, -360f, 360f);
-            config.DroppedTokenOwnerSearchRadius = Mathf.Clamp(config.DroppedTokenOwnerSearchRadius <= 0f ? DefaultDroppedTokenOwnerSearchRadius : config.DroppedTokenOwnerSearchRadius, 1f, 30f);
-
             if (config.VehicleTokens == null || config.VehicleTokens.Count == 0)
             {
                 config.VehicleTokens = DefaultVehicleTokens();
@@ -237,6 +245,8 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            pendingThrowableTokens.Clear();
+            handledThrowableEntities.Clear();
             SaveData();
         }
 
@@ -252,8 +262,29 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
+            MigrateLegacyCustomTokens();
             RefreshCustomTokenDefinitions();
-            TryRegisterCustomTokenDefinitions();
+        }
+
+        private void OnPlayerConnected(BasePlayer player)
+        {
+            NextTick(() => MigrateLegacyCustomTokens(player));
+        }
+
+        private void OnItemAddedToContainer(ItemContainer container, Item item)
+        {
+            if (item == null)
+            {
+                return;
+            }
+
+            NextTick(() =>
+            {
+                if (item != null && item.info != null)
+                {
+                    MigrateOrRefreshTokenItem(item, container?.playerOwner);
+                }
+            });
         }
 
         private void OnPluginLoaded(Plugin plugin)
@@ -267,8 +298,8 @@ namespace Oxide.Plugins
             {
                 CustomItemDefinitions = plugin;
                 warnedCIDUnavailable = false;
+                MigrateLegacyCustomTokens();
                 RefreshCustomTokenDefinitions();
-                TryRegisterCustomTokenDefinitions();
             }
         }
 
@@ -285,7 +316,6 @@ namespace Oxide.Plugins
                 customTokenDefinitions.Clear();
                 tokenIconFileIds.Clear();
                 warnedCIDUnavailable = false;
-                PrintWarning("CustomItemDefinitions unloaded. Vehicle tokens will use legacy fallback item creation when configured.");
             }
         }
 
@@ -453,27 +483,32 @@ namespace Oxide.Plugins
             return CreateToken(definition, Math.Max(1, amount));
         }
 
-        private void OnItemDropped(Item item, BaseEntity entity)
-        {
-            HandleItemDropped(item, entity, null);
-        }
-
-        private void OnItemDropped(Item item, BaseEntity entity, BasePlayer player)
-        {
-            HandleItemDropped(item, entity, player);
-        }
-
-        private void HandleItemDropped(Item item, BaseEntity entity, BasePlayer explicitPlayer)
+        private void OnItemUse(Item item, int amountToUse)
         {
             VehicleTokenDefinition definition;
-            if (!config.RedeemOnItemDrop || item == null || entity == null || !TryGetDefinitionByToken(item, out definition))
+            if (!config.DeployOnThrowableThrow
+                || amountToUse <= 0
+                || item == null
+                || !TryGetDefinitionByToken(item, out definition))
             {
                 return;
             }
 
-            var playerId = ResolveDroppedTokenOwnerId(item, entity, explicitPlayer);
-            var definitionKey = definition.Key;
-            timer.Once(config.ItemDropRedeemDelaySeconds, () => TryRedeemDroppedToken(playerId, item, entity, definitionKey));
+            var player = item.parent?.playerOwner ?? item.GetOwnerPlayer();
+            if (player != null)
+            {
+                MarkPendingThrowable(player.userID, definition.Key);
+            }
+        }
+
+        private void OnExplosiveThrown(BasePlayer player, BaseEntity entity)
+        {
+            TryHandleThrowableToken(player, entity);
+        }
+
+        private void OnExplosiveDropped(BasePlayer player, BaseEntity entity, ThrownWeapon thrown)
+        {
+            TryHandleThrowableToken(player, entity);
         }
 
         private object CanLicensedVehicleSpawn(BasePlayer player, string vehicleType, Vector3 position, Quaternion rotation)
@@ -593,40 +628,125 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private bool TryRedeemDroppedToken(ulong playerId, Item item, BaseEntity entity, string definitionKey)
+        private void MarkPendingThrowable(ulong playerId, string definitionKey)
         {
-            if (item == null || entity == null || entity.IsDestroyed)
+            if (playerId == 0UL || string.IsNullOrWhiteSpace(definitionKey))
+            {
+                return;
+            }
+
+            var pending = new PendingThrowableToken
+            {
+                DefinitionKey = definitionKey,
+                ExpiresAt = Time.realtimeSinceStartup + config.ThrowableIntentTimeoutSeconds
+            };
+            pendingThrowableTokens[playerId] = pending;
+
+            timer.Once(config.ThrowableIntentTimeoutSeconds + 0.25f, () =>
+            {
+                PendingThrowableToken current;
+                if (pendingThrowableTokens.TryGetValue(playerId, out current)
+                    && ReferenceEquals(current, pending)
+                    && current.ExpiresAt <= Time.realtimeSinceStartup)
+                {
+                    pendingThrowableTokens.Remove(playerId);
+                }
+            });
+        }
+
+        private bool TryConsumePendingThrowable(ulong playerId, out VehicleTokenDefinition definition)
+        {
+            definition = null;
+            PendingThrowableToken pending;
+            if (!pendingThrowableTokens.TryGetValue(playerId, out pending))
             {
                 return false;
             }
 
-            var player = playerId == 0UL
-                ? FindNearestPlayer(entity.transform.position, config.DroppedTokenOwnerSearchRadius)
-                : BasePlayer.FindAwakeOrSleeping(playerId.ToString());
-            if (player == null)
+            pendingThrowableTokens.Remove(playerId);
+            if (pending.ExpiresAt < Time.realtimeSinceStartup)
             {
                 return false;
+            }
+
+            definition = FindDefinition(pending.DefinitionKey);
+            return definition != null && definition.Enabled;
+        }
+
+        private void TryHandleThrowableToken(BasePlayer player, BaseEntity entity)
+        {
+            if (!config.DeployOnThrowableThrow
+                || player == null
+                || entity == null
+                || !handledThrowableEntities.Add(entity))
+            {
+                return;
             }
 
             VehicleTokenDefinition definition;
-            if (!TryGetDefinitionByToken(item, out definition) || !string.Equals(definition.Key, definitionKey, StringComparison.OrdinalIgnoreCase))
+            if (!TryConsumePendingThrowable(player.userID, out definition)
+                && !TryGetDefinitionByToken(player.GetActiveItem(), out definition))
             {
-                return false;
+                handledThrowableEntities.Remove(entity);
+                return;
             }
 
-            Vector3 spawnPosition;
-            Quaternion spawnRotation;
-            GetTokenSpawnTransform(player, definition, out spawnPosition, out spawnRotation);
-
-            if (!TrySpawnVehicle(player, definition, spawnPosition, spawnRotation))
+            var playerId = player.userID;
+            var definitionKey = definition.Key;
+            timer.Once(config.ThrowableDeployDelaySeconds, () =>
             {
-                Reply(player, $"{definition.DisplayName} could not be spawned. Your dropped {definition.TokenDisplayName} was left where you threw it.");
-                return false;
+                handledThrowableEntities.Remove(entity);
+
+                var thrower = BasePlayer.FindAwakeOrSleeping(playerId.ToString());
+                if (thrower == null)
+                {
+                    return;
+                }
+
+                if (entity == null || entity.IsDestroyed)
+                {
+                    RefundThrownToken(thrower, definitionKey, "because the thrown smoke grenade disappeared before deployment");
+                    return;
+                }
+
+                var currentDefinition = FindDefinition(definitionKey);
+                if (currentDefinition == null || !currentDefinition.Enabled)
+                {
+                    RefundThrownToken(thrower, definitionKey, "because that vehicle token is no longer enabled");
+                    entity.Kill();
+                    return;
+                }
+
+                Vector3 spawnPosition;
+                Quaternion spawnRotation;
+                GetThrownTokenSpawnTransform(thrower, currentDefinition, entity.transform.position, out spawnPosition, out spawnRotation);
+
+                if (TrySpawnVehicle(thrower, currentDefinition, spawnPosition, spawnRotation))
+                {
+                    Reply(thrower, $"{currentDefinition.DisplayName} spawned from the thrown {currentDefinition.TokenDisplayName}.");
+                }
+                else
+                {
+                    RefundThrownToken(thrower, definitionKey, "because the vehicle could not be spawned");
+                }
+
+                if (entity != null && !entity.IsDestroyed)
+                {
+                    entity.Kill();
+                }
+            });
+        }
+
+        private void RefundThrownToken(BasePlayer player, string definitionKey, string reason)
+        {
+            var definition = FindDefinition(definitionKey);
+            if (definition == null || GiveVehicleToken(player, definitionKey, 1) != 1)
+            {
+                Reply(player, $"Could not refund the thrown vehicle token {reason}. Contact an administrator.");
+                return;
             }
 
-            ConsumeOneDroppedItem(item, entity);
-            Reply(player, $"{definition.DisplayName} spawned from dropped token. One {definition.TokenDisplayName} was consumed.");
-            return true;
+            Reply(player, $"Your {definition.TokenDisplayName} was refunded {reason}.");
         }
 
         private void GetTokenSpawnTransform(BasePlayer player, VehicleTokenDefinition definition, out Vector3 spawnPosition, out Quaternion spawnRotation)
@@ -637,6 +757,19 @@ namespace Oxide.Plugins
                 : config.TokenSpawnMinForwardDistance;
 
             spawnPosition = GetGroundPosition(player.transform.position + forward * distance);
+            if (string.Equals(definition.Backend, "SpawnHeli", StringComparison.OrdinalIgnoreCase))
+            {
+                spawnPosition += Vector3.up * config.DroppedSpawnVerticalOffset;
+            }
+
+            var yaw = Quaternion.LookRotation(forward).eulerAngles.y + config.TokenSpawnYawOffsetDegrees;
+            spawnRotation = Quaternion.Euler(0f, yaw, 0f);
+        }
+
+        private void GetThrownTokenSpawnTransform(BasePlayer player, VehicleTokenDefinition definition, Vector3 thrownPosition, out Vector3 spawnPosition, out Quaternion spawnRotation)
+        {
+            var forward = GetPlayerFlatForward(player);
+            spawnPosition = GetGroundPosition(thrownPosition);
             if (string.Equals(definition.Backend, "SpawnHeli", StringComparison.OrdinalIgnoreCase))
             {
                 spawnPosition += Vector3.up * config.DroppedSpawnVerticalOffset;
@@ -675,51 +808,6 @@ namespace Oxide.Plugins
             }
 
             return position;
-        }
-
-        private ulong ResolveDroppedTokenOwnerId(Item item, BaseEntity entity, BasePlayer explicitPlayer)
-        {
-            if (explicitPlayer != null)
-            {
-                return explicitPlayer.userID.Get();
-            }
-
-            var owner = item.GetOwnerPlayer() ?? item.parent?.playerOwner;
-            if (owner != null)
-            {
-                return owner.userID.Get();
-            }
-
-            if (entity != null && entity.OwnerID != 0UL)
-            {
-                return entity.OwnerID;
-            }
-
-            return 0UL;
-        }
-
-        private BasePlayer FindNearestPlayer(Vector3 position, float radius)
-        {
-            BasePlayer closest = null;
-            var closestDistance = radius * radius;
-            foreach (var player in BasePlayer.activePlayerList)
-            {
-                if (player == null || !player.IsConnected || player.IsSleeping())
-                {
-                    continue;
-                }
-
-                var distance = (player.transform.position - position).sqrMagnitude;
-                if (distance > closestDistance)
-                {
-                    continue;
-                }
-
-                closest = player;
-                closestDistance = distance;
-            }
-
-            return closest;
         }
 
         private bool TrySpawnVehicle(BasePlayer player, VehicleTokenDefinition definition, Vector3? position, Quaternion? rotation)
@@ -768,7 +856,7 @@ namespace Oxide.Plugins
             var spawned = SpawnHeli.Call(definition.SpawnHeliApiHook, player, options) as BaseEntity;
             if (spawned == null || spawned.IsDestroyed)
             {
-                Reply(player, $"{definition.DisplayName} could not be spawned. Your token was not consumed.");
+                Reply(player, $"{definition.DisplayName} could not be spawned. No vehicle was created.");
                 return false;
             }
 
@@ -800,7 +888,7 @@ namespace Oxide.Plugins
             var tempKey = TemporaryLicenceKey(player.userID, definition.VehicleLicenceType);
             if (alreadyLicensed && !storedData.TemporaryVehicleLicenceKeys.Contains(tempKey))
             {
-                Reply(player, $"You already have a normal {definition.DisplayName} license. Your token was not consumed.");
+                Reply(player, $"You already have a normal {definition.DisplayName} license. No vehicle was created.");
                 return false;
             }
 
@@ -810,7 +898,7 @@ namespace Oxide.Plugins
                 addedTemporaryLicence = AddVehicleLicence(player.userID, definition.VehicleLicenceType);
                 if (!addedTemporaryLicence)
                 {
-                    Reply(player, $"Could not prepare a {definition.DisplayName} token spawn. Your token was not consumed.");
+                    Reply(player, $"Could not prepare a {definition.DisplayName} token spawn. No vehicle was created.");
                     return false;
                 }
 
@@ -842,7 +930,7 @@ namespace Oxide.Plugins
                     ForgetTemporaryLicence(player.userID, definition.VehicleLicenceType);
                 }
 
-                Reply(player, $"{definition.DisplayName} could not be spawned. Your token was not consumed.");
+                Reply(player, $"{definition.DisplayName} could not be spawned. No vehicle was created.");
                 return false;
             }
 
@@ -881,7 +969,7 @@ namespace Oxide.Plugins
             spawned = (bool)result;
             if (!spawned)
             {
-                Reply(player, $"{definition.DisplayName} could not be spawned. Your token was not consumed.");
+                Reply(player, $"{definition.DisplayName} could not be spawned. No vehicle was created.");
             }
 
             return true;
@@ -939,14 +1027,8 @@ namespace Oxide.Plugins
 
         private Item CreateToken(VehicleTokenDefinition definition, int amount)
         {
-            TryRegisterCustomTokenDefinition(definition);
-
-            var shortname = GetTokenCreateShortname(definition);
-            var item = ItemManager.CreateByName(shortname, Math.Max(1, amount), GetTokenCreateSkin(definition));
-            if (item == null && definition.AllowLegacyFallbackIfCIDMissing && !string.Equals(shortname, definition.TokenShortname, StringComparison.OrdinalIgnoreCase))
-            {
-                item = ItemManager.CreateByName(definition.TokenShortname, Math.Max(1, amount), definition.TokenSkin);
-            }
+            var shortname = string.IsNullOrWhiteSpace(definition.TokenShortname) ? DefaultLegacyTokenShortname : definition.TokenShortname;
+            var item = ItemManager.CreateByName(shortname, Math.Max(1, amount), definition.TokenSkin);
 
             if (item == null)
             {
@@ -954,13 +1036,29 @@ namespace Oxide.Plugins
                 return null;
             }
 
+            ApplyTokenItemFields(item, definition);
+            return item;
+        }
+
+        private void ApplyTokenItemFields(Item item, VehicleTokenDefinition definition)
+        {
+            if (item == null || definition == null)
+            {
+                return;
+            }
+
             if (!string.IsNullOrWhiteSpace(definition.TokenDisplayName))
             {
                 item.name = definition.TokenDisplayName;
             }
 
+            var iconFileId = ResolveTokenIconFileId(definition);
+            if (iconFileId != 0)
+            {
+                item.iconImageId = iconFileId;
+            }
+
             item.MarkDirty();
-            return item;
         }
 
         private bool TryGetDefinitionByToken(Item item, out VehicleTokenDefinition definition)
@@ -1003,7 +1101,7 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                if (WantsCustomTokenDefinition(candidate)
+                if (HasConfiguredCustomIdentity(candidate)
                     && string.Equals(shortname, candidate.CustomShortname, StringComparison.OrdinalIgnoreCase))
                 {
                     definition = candidate;
@@ -1034,19 +1132,19 @@ namespace Oxide.Plugins
 
         private bool IsCustomTokenItem(Item item, VehicleTokenDefinition definition)
         {
-            if (item?.info == null || !WantsCustomTokenDefinition(definition))
+            if (item?.info == null || !HasConfiguredCustomIdentity(definition))
             {
                 return false;
             }
 
-            TryRegisterCustomTokenDefinition(definition);
             ItemDefinition customDefinition;
             if (customTokenDefinitions.TryGetValue(definition.Key, out customDefinition) && ReferenceEquals(item.info, customDefinition))
             {
                 return true;
             }
 
-            return string.Equals(item.info.shortname, definition.CustomShortname, StringComparison.OrdinalIgnoreCase);
+            return string.Equals(item.info.shortname, definition.CustomShortname, StringComparison.OrdinalIgnoreCase)
+                || item.info.itemid == definition.CustomItemId;
         }
 
         private bool IsLegacyTokenItem(Item item, VehicleTokenDefinition definition)
@@ -1075,6 +1173,13 @@ namespace Oxide.Plugins
             return definition != null
                 && definition.Enabled
                 && definition.UseCustomItemDefinition
+                && !string.IsNullOrWhiteSpace(definition.CustomShortname)
+                && definition.CustomItemId != 0;
+        }
+
+        private bool HasConfiguredCustomIdentity(VehicleTokenDefinition definition)
+        {
+            return definition != null
                 && !string.IsNullOrWhiteSpace(definition.CustomShortname)
                 && definition.CustomItemId != 0;
         }
@@ -1110,7 +1215,14 @@ namespace Oxide.Plugins
         private int GetTokenMaxStackSize(VehicleTokenDefinition definition)
         {
             var configured = definition == null ? DefaultTokenMaxStackSize : definition.MaxStackSize;
-            return Math.Max(1, Math.Min(configured > 0 ? configured : DefaultTokenMaxStackSize, MaximumTokenMaxStackSize));
+            var maximum = MaximumTokenMaxStackSize;
+            var nativeDefinition = ItemManager.FindItemDefinition(definition?.TokenShortname ?? DefaultLegacyTokenShortname);
+            if (nativeDefinition != null && nativeDefinition.stackable > 0)
+            {
+                maximum = Math.Min(maximum, nativeDefinition.stackable);
+            }
+
+            return Math.Max(1, Math.Min(configured > 0 ? configured : DefaultTokenMaxStackSize, maximum));
         }
 
         private bool TryRegisterCustomTokenDefinitions()
@@ -1146,7 +1258,7 @@ namespace Oxide.Plugins
 
             foreach (var definition in config.VehicleTokens)
             {
-                if (!WantsCustomTokenDefinition(definition))
+                if (!HasConfiguredCustomIdentity(definition))
                 {
                     continue;
                 }
@@ -1166,12 +1278,12 @@ namespace Oxide.Plugins
                 {
                     if (CustomItemDefinitions.Call("Unregister", existing, this) is bool unregistered && unregistered)
                     {
-                        Puts("Refreshed stale CID vehicle token definition '" + definition.CustomShortname + "'.");
+                        Puts("Removed legacy CID vehicle token definition '" + definition.CustomShortname + "'; new tokens use native smoke grenades.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    PrintWarning("Could not refresh CID vehicle token definition '" + definition.CustomShortname + "': " + ex.Message);
+                    PrintWarning("Could not remove legacy CID vehicle token definition '" + definition.CustomShortname + "': " + ex.Message);
                 }
             }
         }
@@ -1221,7 +1333,7 @@ namespace Oxide.Plugins
             }
 
             var description = string.IsNullOrWhiteSpace(definition.DefaultDescription)
-                ? "Drop this token to spawn a " + definition.DisplayName + "."
+                ? GetDefaultTokenDescription(definition)
                 : definition.DefaultDescription.Trim();
 
             try
@@ -1290,8 +1402,129 @@ namespace Oxide.Plugins
         private string GetTokenDescription(VehicleTokenDefinition definition)
         {
             return string.IsNullOrWhiteSpace(definition?.DefaultDescription)
-                ? "Drop this token to spawn a " + (definition?.DisplayName ?? "vehicle") + "."
+                ? GetDefaultTokenDescription(definition)
                 : definition.DefaultDescription.Trim();
+        }
+
+        private static string GetDefaultTokenDescription(VehicleTokenDefinition definition)
+        {
+            return "Throw this smoke grenade to spawn a " + (definition?.DisplayName ?? "vehicle") + ". Dropping the item will not deploy it.";
+        }
+
+        private void MigrateLegacyCustomTokens()
+        {
+            foreach (var player in BasePlayer.allPlayerList)
+            {
+                MigrateLegacyCustomTokens(player);
+            }
+        }
+
+        private void MigrateLegacyCustomTokens(BasePlayer player)
+        {
+            if (player?.inventory == null)
+            {
+                return;
+            }
+
+            MigrateLegacyCustomTokens(player.inventory.containerMain, player);
+            MigrateLegacyCustomTokens(player.inventory.containerBelt, player);
+            MigrateLegacyCustomTokens(player.inventory.containerWear, player);
+        }
+
+        private void MigrateLegacyCustomTokens(ItemContainer container, BasePlayer player)
+        {
+            if (container?.itemList == null)
+            {
+                return;
+            }
+
+            foreach (var item in new List<Item>(container.itemList))
+            {
+                MigrateOrRefreshTokenItem(item, player);
+            }
+        }
+
+        private void MigrateOrRefreshTokenItem(Item item, BasePlayer player)
+        {
+            VehicleTokenDefinition definition;
+            if (TryGetLegacyCustomTokenDefinition(item, out definition))
+            {
+                ReplaceLegacyCustomToken(item, definition, player);
+                return;
+            }
+
+            if (TryGetDefinitionByToken(item, out definition))
+            {
+                ApplyTokenItemFields(item, definition);
+            }
+        }
+
+        private bool TryGetLegacyCustomTokenDefinition(Item item, out VehicleTokenDefinition definition)
+        {
+            definition = null;
+            if (item?.info == null || config?.VehicleTokens == null)
+            {
+                return false;
+            }
+
+            foreach (var candidate in config.VehicleTokens)
+            {
+                if (candidate.Enabled && IsCustomTokenItem(item, candidate))
+                {
+                    definition = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool ReplaceLegacyCustomToken(Item legacyItem, VehicleTokenDefinition definition, BasePlayer player)
+        {
+            var container = legacyItem?.parent;
+            if (legacyItem?.info == null || container == null || definition == null)
+            {
+                return false;
+            }
+
+            var replacement = CreateToken(definition, legacyItem.amount);
+            if (replacement == null)
+            {
+                return false;
+            }
+
+            var position = legacyItem.position;
+            var wasActive = player != null && ReferenceEquals(player.GetActiveItem(), legacyItem);
+            if (wasActive)
+            {
+                player.UpdateActiveItem(default);
+            }
+
+            legacyItem.RemoveFromContainer();
+            if (!replacement.MoveToContainer(container, position, false))
+            {
+                legacyItem.MoveToContainer(container, position, false);
+                replacement.Remove();
+                if (wasActive)
+                {
+                    NextTick(() => player.UpdateActiveItem(legacyItem.uid));
+                }
+                return false;
+            }
+
+            legacyItem.Remove();
+            if (wasActive)
+            {
+                NextTick(() =>
+                {
+                    if (player != null && replacement.parent == player.inventory?.containerBelt)
+                    {
+                        player.UpdateActiveItem(replacement.uid);
+                    }
+                });
+            }
+
+            return true;
         }
 
         private uint ResolveTokenIconFileId(VehicleTokenDefinition definition)
@@ -1673,34 +1906,6 @@ namespace Oxide.Plugins
             item.Remove();
         }
 
-        private void ConsumeOneDroppedItem(Item item, BaseEntity entity)
-        {
-            if (item == null)
-            {
-                return;
-            }
-
-            if (item.amount > 1)
-            {
-                item.amount -= 1;
-                item.MarkDirty();
-                if (entity != null && !entity.IsDestroyed)
-                {
-                    entity.SendNetworkUpdate();
-                }
-                return;
-            }
-
-            item.RemoveFromWorld();
-            item.RemoveFromContainer();
-            item.Remove();
-
-            if (entity != null && !entity.IsDestroyed)
-            {
-                entity.Kill();
-            }
-        }
-
         private bool CanUseAdminCommand(ConsoleSystem.Arg arg)
         {
             if (arg == null || arg.Connection == null || arg.Connection.authLevel > 0 || arg.IsAdmin)
@@ -1891,7 +2096,8 @@ namespace Oxide.Plugins
             definition.Key = (definition.Key ?? "").Trim();
             definition.DisplayName = string.IsNullOrWhiteSpace(definition.DisplayName) ? definition.Key : definition.DisplayName.Trim();
 
-            if (string.IsNullOrWhiteSpace(definition.TokenShortname))
+            if (string.IsNullOrWhiteSpace(definition.TokenShortname)
+                || string.Equals(definition.TokenShortname, LegacyWrappedGiftTokenShortname, StringComparison.OrdinalIgnoreCase))
             {
                 definition.TokenShortname = DefaultLegacyTokenShortname;
             }
@@ -1911,19 +2117,30 @@ namespace Oxide.Plugins
                 definition.CustomItemId = DefaultCustomItemId(definition.Key);
             }
 
-            if (string.IsNullOrWhiteSpace(definition.ParentShortname))
+            if (string.IsNullOrWhiteSpace(definition.ParentShortname)
+                || string.Equals(definition.ParentShortname, LegacyNonThrowableParentShortname, StringComparison.OrdinalIgnoreCase))
             {
                 definition.ParentShortname = DefaultParentTokenShortname;
             }
+
+            if (string.Equals(definition.ParentShortname, DefaultParentTokenShortname, StringComparison.OrdinalIgnoreCase))
+            {
+                definition.ImportParentItemMods = true;
+            }
+
+            // Native smoke-grenade definitions are required for a usable held throwable.
+            // The configured CID identity remains as a kit alias and legacy-item migration key.
+            definition.UseCustomItemDefinition = false;
 
             if (string.IsNullOrWhiteSpace(definition.IconPngDataPath))
             {
                 definition.IconPngDataPath = DefaultTokenIconDataFolder + "/" + definition.Key + ".png";
             }
 
-            if (string.IsNullOrWhiteSpace(definition.DefaultDescription))
+            if (string.IsNullOrWhiteSpace(definition.DefaultDescription)
+                || definition.DefaultDescription.TrimStart().StartsWith("Drop this token to spawn ", StringComparison.OrdinalIgnoreCase))
             {
-                definition.DefaultDescription = "Drop this token to spawn a " + definition.DisplayName + ".";
+                definition.DefaultDescription = GetDefaultTokenDescription(definition);
             }
 
             definition.MaxStackSize = Math.Max(1, Math.Min(definition.MaxStackSize <= 0 ? DefaultTokenMaxStackSize : definition.MaxStackSize, MaximumTokenMaxStackSize));
@@ -2000,14 +2217,14 @@ namespace Oxide.Plugins
 
         private static void ApplyCustomDefaults(VehicleTokenDefinition definition, int customItemId)
         {
-            definition.UseCustomItemDefinition = true;
+            definition.UseCustomItemDefinition = false;
             definition.AllowLegacyFallbackIfCIDMissing = false;
             definition.CustomShortname = CustomTokenShortnamePrefix + definition.Key;
             definition.CustomItemId = customItemId;
             definition.ParentShortname = DefaultParentTokenShortname;
             definition.IconPngDataPath = DefaultTokenIconDataFolder + "/" + definition.Key + ".png";
-            definition.DefaultDescription = "Drop this token to spawn a " + definition.DisplayName + ".";
-            definition.ImportParentItemMods = false;
+            definition.DefaultDescription = GetDefaultTokenDescription(definition);
+            definition.ImportParentItemMods = true;
             definition.MaxStackSize = DefaultTokenMaxStackSize;
         }
 

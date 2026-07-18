@@ -4,8 +4,8 @@ using Newtonsoft.Json;
 
 namespace Oxide.Plugins
 {
-    [Info("Dropped Item Despawn", "Raidlands", "1.0.0")]
-    [Description("Applies category-based despawn times to individually dropped items.")]
+    [Info("Dropped Item Despawn", "Raidlands", "1.1.1")]
+    [Description("Applies category-based despawn times to individually dropped items, including items already on the ground.")]
     public class DroppedItemDespawn : RustPlugin
     {
         private PluginConfig _config;
@@ -20,12 +20,25 @@ namespace Oxide.Plugins
             "grenade.f1"
         };
 
+        private void OnServerInitialized()
+        {
+            if (!_config.UpdateExistingItemsOnLoad)
+                return;
+
+            // Wait one tick so saved entities and Rust's native despawn invokes have
+            // finished initializing before replacing their timers.
+            NextTick(() =>
+            {
+                UpdateAllDroppedItems();
+            });
+        }
+
         private void OnItemDropped(Item item, BaseEntity entity)
         {
             if (item == null || item.info == null || entity == null || entity.IsDestroyed || !(entity is DroppedItem))
                 return;
 
-            var lifetime = GetLifetime(item.info);
+            float lifetime = GetLifetime(item.info);
             NextTick(() => ApplyLifetime(entity, lifetime));
         }
 
@@ -36,6 +49,42 @@ namespace Oxide.Plugins
 
             entity.CancelInvoke(entity.KillMessage);
             entity.Invoke(entity.KillMessage, Math.Max(1f, lifetime));
+        }
+
+        private int UpdateAllDroppedItems()
+        {
+            int updated = 0;
+            int skipped = 0;
+
+            foreach (BaseNetworkable networkable in BaseNetworkable.serverEntities)
+            {
+                DroppedItem droppedItem = networkable as DroppedItem;
+                if (droppedItem == null || droppedItem.IsDestroyed || droppedItem.item?.info == null)
+                {
+                    if (droppedItem != null)
+                        skipped++;
+                    continue;
+                }
+
+                ApplyLifetime(droppedItem, GetLifetime(droppedItem.item.info));
+                updated++;
+            }
+
+            Puts("Updated despawn timers for " + updated + " existing dropped item(s)" +
+                 (skipped > 0 ? "; skipped " + skipped + " uninitialized item(s)." : "."));
+            return updated;
+        }
+
+        [ConsoleCommand("droppeditemdespawn.refresh")]
+        private void RefreshDroppedItemsCommand(ConsoleSystem.Arg arg)
+        {
+            // The dedicated server console has no player connection. Connected
+            // callers must still be authenticated as administrators.
+            if (arg == null || (arg.Connection != null && !arg.IsAdmin))
+                return;
+
+            int updated = UpdateAllDroppedItems();
+            arg.ReplyWith("Dropped Item Despawn refreshed " + updated + " existing dropped item(s).");
         }
 
         private float GetLifetime(ItemDefinition definition)
@@ -112,6 +161,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Everything else (seconds)")]
             public float DefaultSeconds = 180f;
+
+            [JsonProperty("Update all existing dropped items when the plugin loads")]
+            public bool UpdateExistingItemsOnLoad = true;
 
             public void Validate()
             {

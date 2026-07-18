@@ -17,21 +17,21 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("PortableAirstrikes", "Raidlands", "0.1.54")]
+    [Info("PortableAirstrikes", "Raidlands", "0.1.61")]
     [Description("Configurable single-use CID binocular airstrike selection, automatic targeting pings, persisted manual default strikes, validation, terrain-aware, more believable multi-phase visual delivery flyovers with autoload-safe repeated sound cues, direct-command execution, audit logging, webhooks, warning markers, in-game warnings, and warning diagnostics.")]
     public class PortableAirstrikes : RustPlugin
     {
-        private const int CurrentConfigVersion = 38;
+        private const int CurrentConfigVersion = 40;
         private const int DefaultAirstrikeItemMaxStackSize = 1;
         private const int MaximumAirstrikeItemMaxStackSize = 1;
         private const int DefaultAirstrikeItemMaxChargesPerItem = 65535;
         private const int MaximumAirstrikeItemMaxChargesPerItem = 65535;
         private const int DefaultRecentCallHistoryLimit = 50;
         private const int MaxDebugHistoryRows = 10;
-        private const float StrikePickerRowHeightPixels = 58f;
+        private const float StrikePickerRowHeightPixels = 76f;
         private const float StrikePickerRowGapPixels = 8f;
         private const float StrikePickerContentPaddingPixels = 4f;
-        private const float StrikePickerMinimumScrollContentHeight = 430f;
+        private const float StrikePickerMinimumScrollContentHeight = 365f;
         private const string AdminPermission = "portableairstrikes.admin";
         private const string UsePermission = "portableairstrikes.use";
         private const string DataFileName = "PortableAirstrikes_Data";
@@ -67,12 +67,31 @@ namespace Oxide.Plugins
         private const string MortarHeShellPrefab = "assets/prefabs/deployable/mortar/mortar_shell_basic.prefab";
         private const string MortarFragShellPrefab = "assets/prefabs/deployable/mortar/mortar_shell_fragment.prefab";
         private const string CatapultBeeProjectilePrefab = "assets/content/vehicles/siegeweapons/catapult/ammo/projectiles/boulder_bee.prefab";
+        private const string CatapultBoulderProjectilePrefab = "assets/content/vehicles/siegeweapons/catapult/ammo/projectiles/boulder.prefab";
         private const string CatapultFirebombProjectilePrefab = "assets/content/vehicles/siegeweapons/catapult/ammo/projectiles/boulder_incendiary.prefab";
         private const string CatapultPropaneProjectilePrefab = "assets/content/vehicles/siegeweapons/catapult/ammo/projectiles/boulder_explosive.prefab";
         private const string HvRocketPrefab = "assets/prefabs/ammo/rocket/rocket_hv.prefab";
         private const string BasicRocketPrefab = "assets/prefabs/ammo/rocket/rocket_basic.prefab";
         private const string IncendiaryRocketPrefab = "assets/prefabs/ammo/rocket/rocket_fire.prefab";
         private const string MlrsRocketPrefab = "assets/content/vehicles/mlrs/rocket_mlrs.prefab";
+        private const string PatrolHeliRocketPrefab = "assets/prefabs/npc/patrol helicopter/rocket_heli.prefab";
+        private const string PatrolHeliAirburstRocketPrefab = "assets/prefabs/npc/patrol helicopter/rocket_heli_airburst.prefab";
+        private const string PatrolHeliNapalmRocketPrefab = "assets/prefabs/npc/patrol helicopter/rocket_heli_napalm.prefab";
+        private const string SamRocketPrefab = "assets/prefabs/npc/sam_site_turret/rocket_sam.prefab";
+        private const string BradleyMainCannonShellPrefab = "assets/prefabs/npc/m2bradley/maincannonshell.prefab";
+        private const string FlameTurretFireballPrefab = "assets/prefabs/npc/flame turret/flameturret_fireball.prefab";
+        private const string CannonBallPrefab = "assets/prefabs/deployable/deployable_cannon/ammo/cannon_ball.prefab";
+        private const string BallistaHammerheadPrefab = "assets/content/vehicles/siegeweapons/ballista/ammo/projectiles/ballista.bolt.hammerhead.projectile.prefab";
+        private const string BallistaIncendiaryPrefab = "assets/content/vehicles/siegeweapons/ballista/ammo/projectiles/ballista.bolt.incendiary.projectile.prefab";
+        private const string BallistaPiercerPrefab = "assets/content/vehicles/siegeweapons/ballista/ammo/projectiles/ballista.bolt.piercer.projectile.prefab";
+        private const string BallistaPitchforkPrefab = "assets/content/vehicles/siegeweapons/ballista/ammo/projectiles/ballista.bolt.pitchfork.projectile.prefab";
+        private const string TorpedoPrefab = "assets/prefabs/ammo/torpedo/torpedostraight.prefab";
+        private const string PatrolHeliGunFireEffect = "assets/prefabs/npc/patrol helicopter/effects/gun_fire.prefab";
+        private const string PatrolHeliBulletEffect = "assets/prefabs/npc/patrol helicopter/helibullet.prefab";
+        private const string BradleyCoaxGunFireEffect = "assets/prefabs/npc/m2bradley/effects/coaxmgattack.prefab";
+        private const string BradleyCoaxBulletEffect = "assets/prefabs/npc/m2bradley/coaxbullet.prefab";
+        private const string AutoTurretGunFireEffect = "assets/prefabs/npc/autoturret/muzzleflash_test.prefab";
+        private const string AutoTurretBulletEffect = "assets/prefabs/npc/autoturret/sentrybullet.prefab";
         private const string BradleyMainCannonAttackEffect = "assets/prefabs/npc/m2bradley/effects/maincannonattack.prefab";
         private const string BradleyMainCannonShellExplosionEffect = "assets/prefabs/npc/m2bradley/effects/maincannonshell_explosion.prefab";
         private const string BulletImpactEffect = "assets/bundled/prefabs/fx/impacts/bullet/generic/generic1.prefab";
@@ -118,6 +137,7 @@ namespace Oxide.Plugins
         private const float A10DefaultPulseBaseDamage = 18f;
         private const float A10FinishPaddingSeconds = 1.25f;
         private const int A10MuzzleEffectInterval = 3;
+        private const int MaxConfiguredA10BurstCount = 80;
         private const float NativeStrikeMapMarkerBaseRadius = 0.015f;
         private const float NativeStrikeMapMarkerRadiusPerConfiguredMeter = 0.004f;
         private const float MinimumNativeStrikeMapMarkerRadius = 0.02f;
@@ -146,6 +166,7 @@ namespace Oxide.Plugins
         private const int MaxVisualProfileWaypoints = 256;
         private const int MaxCompiledVisualFrames = 6000;
         private const int MaxCompiledReleaseEvents = 2000;
+        private const int MaxPayloadUnitsPerProfile = MaxCompiledReleaseEvents;
         private const string CompiledCoordinateSystem = "unity-target-relative-local-v1";
         private const float DefaultFlyoverSoundIntervalSeconds = 0.75f;
         private const float DefaultVisualRotationSmoothTimeSeconds = 0.18f;
@@ -965,6 +986,9 @@ namespace Oxide.Plugins
             [JsonProperty("SpreadRadius")]
             public float SpreadRadius = 8f;
 
+            [JsonProperty("AccuracyPercent")]
+            public float AccuracyPercent = 75f;
+
             [JsonProperty("SpreadMultiplier")]
             public float SpreadMultiplier = 1f;
 
@@ -1045,6 +1069,24 @@ namespace Oxide.Plugins
 
             [JsonProperty("PayloadCountLimit")]
             public int PayloadCountLimit;
+        }
+
+        private class ProfilePayloadUiStats
+        {
+            public string Payload;
+            public int Count;
+            public float MinAccuracy = float.MaxValue;
+            public float MaxAccuracy = float.MinValue;
+            public float MinSpread = float.MaxValue;
+            public float MaxSpread = float.MinValue;
+            public float MinDamage = float.MaxValue;
+            public float MaxDamage = float.MinValue;
+            public float MinVehicleDamage = float.MaxValue;
+            public float MaxVehicleDamage = float.MinValue;
+            public float MaxSplash = -1f;
+            public float MaxImpact = -1f;
+            public float MaxTrackingSeconds = -1f;
+            public float MaxTrackingDistance = -1f;
         }
 
         private class StoredData
@@ -1187,6 +1229,8 @@ namespace Oxide.Plugins
             public string ActiveVisualProfileId = "";
             public VisualProfileConfig ActiveVisualProfile;
             public readonly List<RuntimePayloadRelease> PayloadReleaseSchedule = new List<RuntimePayloadRelease>();
+            public CompactReleaseSchedule CompactReleaseSchedule;
+            public string PayloadScheduleError = "";
             public Vector3 PlannedDeliveryApproach = Vector3.forward;
             public Vector3 MortarSourcePosition;
             public bool HasMortarSourcePosition;
@@ -1293,6 +1337,9 @@ namespace Oxide.Plugins
             public string Id;
             public string DisplayName;
             public float BaseDamage;
+            public string AttackEffect;
+            public string TracerEffect;
+            public string ImpactEffect;
         }
 
         private class FlightWaypoint
@@ -1390,6 +1437,27 @@ namespace Oxide.Plugins
 
             [JsonProperty("CompiledReleaseEvents", NullValueHandling = NullValueHandling.Ignore)]
             public List<VisualPayloadEvent> CompiledReleaseEvents;
+
+            [JsonProperty("GeneratedReleaseGroups", NullValueHandling = NullValueHandling.Ignore)]
+            public List<GeneratedReleaseGroup> GeneratedReleaseGroups;
+        }
+
+        private class GeneratedReleaseOffset
+        {
+            [JsonProperty("X")] public float X;
+            [JsonProperty("Y")] public float Y;
+            [JsonProperty("Z")] public float Z;
+        }
+
+        private class GeneratedReleaseGroup
+        {
+            [JsonProperty("StartTime")] public float StartTime;
+            [JsonProperty("IntervalSeconds")] public float IntervalSeconds;
+            [JsonProperty("UnitIntervalSeconds")] public float UnitIntervalSeconds;
+            [JsonProperty("UnitsPerRelease")] public int UnitsPerRelease = 1;
+            [JsonProperty("MaximumUnits")] public int MaximumUnits;
+            [JsonProperty("Template")] public VisualPayloadEvent Template = new VisualPayloadEvent();
+            [JsonProperty("HardpointOffsets")] public List<GeneratedReleaseOffset> HardpointOffsets = new List<GeneratedReleaseOffset>();
         }
 
         private class CompiledVisualTrack
@@ -1502,6 +1570,12 @@ namespace Oxide.Plugins
             [JsonProperty("SpreadRadius")]
             public float SpreadRadius = -1f;
 
+            [JsonProperty("TargetingMode")]
+            public string TargetingMode = "simple";
+
+            [JsonProperty("AccuracyPercent")]
+            public float AccuracyPercent = 75f;
+
             [JsonProperty("LaunchSpeed")]
             public float LaunchSpeed = -1f;
 
@@ -1538,6 +1612,27 @@ namespace Oxide.Plugins
             public int SequenceIndex;
             public int TotalCount;
             public int SourceEventIndex;
+        }
+
+        private class CompactReleaseCursor
+        {
+            public VisualPayloadEvent ManualEvent;
+            public GeneratedReleaseGroup Group;
+            public int SourceOrder;
+            public int UnitIndex;
+            public int MaximumUnits;
+            public float NextTime;
+        }
+
+        private class CompactReleaseSchedule
+        {
+            public readonly List<CompactReleaseCursor> Cursors = new List<CompactReleaseCursor>();
+            public int Budget;
+            public int TotalCount;
+            public int Released;
+            public float LatestTime;
+            public float LatestCompletionTime;
+            public float StartedAt;
         }
 
         private class StrikeProfileExecution
@@ -1908,7 +2003,7 @@ namespace Oxide.Plugins
                 var effectiveCount = plugin.PreparePayloadReleaseSchedule(context, "drone", DeliveryVisualProfile.RocketRun, count, context.Strike.Payload, firstPayloadDelay, DroneDropPayloadDelay, spec.FinishDelaySeconds, out firstPayloadDelay, out postReleaseDuration, out finishDelay);
                 if (effectiveCount <= 0)
                 {
-                    callback(false, "No payload releases fit inside the selected drone visual profile.");
+                    callback(false, plugin.GetPayloadScheduleFailure(context, "No payload releases fit inside the selected drone visual profile."));
                     return;
                 }
 
@@ -2007,7 +2102,7 @@ namespace Oxide.Plugins
                 var effectiveCount = plugin.PreparePayloadReleaseSchedule(context, null, DeliveryVisualProfile.HeavyDrop, count, context.Strike.Payload, firstPayloadDelay, HeavyDropPayloadDelay, spec.FinishDelaySeconds, out firstPayloadDelay, out postReleaseDuration, out finishDelay);
                 if (effectiveCount <= 0)
                 {
-                    callback(false, "No payload releases fit inside the selected heavy-drop visual profile.");
+                    callback(false, plugin.GetPayloadScheduleFailure(context, "No payload releases fit inside the selected heavy-drop visual profile."));
                     return;
                 }
 
@@ -2107,7 +2202,7 @@ namespace Oxide.Plugins
                 var effectiveCount = plugin.PreparePayloadReleaseSchedule(context, null, DeliveryVisualProfile.RocketRun, count, context.Strike.Payload, firstPayloadDelay, RocketRunProjectileDelay, spec.FinishDelaySeconds, out firstPayloadDelay, out postReleaseDuration, out finishDelay);
                 if (effectiveCount <= 0)
                 {
-                    callback(false, "No payload releases fit inside the selected rocket-run visual profile.");
+                    callback(false, plugin.GetPayloadScheduleFailure(context, "No payload releases fit inside the selected rocket-run visual profile."));
                     return;
                 }
 
@@ -2205,7 +2300,7 @@ namespace Oxide.Plugins
                 var effectiveCount = plugin.PreparePayloadReleaseSchedule(context, "f15", DeliveryVisualProfile.Mlrs, count, context.Strike.Payload, firstPayloadDelay, MlrsRocketDelay, spec.FinishDelaySeconds, out firstPayloadDelay, out postReleaseDuration, out finishDelay);
                 if (effectiveCount <= 0)
                 {
-                    callback(false, "No payload releases fit inside the selected MLRS visual profile.");
+                    callback(false, plugin.GetPayloadScheduleFailure(context, "No payload releases fit inside the selected MLRS visual profile."));
                     return;
                 }
 
@@ -2313,7 +2408,7 @@ namespace Oxide.Plugins
                 var effectiveCount = plugin.PreparePayloadReleaseSchedule(context, null, DeliveryVisualProfile.HomingMissile, count, context.Strike.Payload, firstPayloadDelay, HomingMissileLaunchDelay, finishPadding, out firstPayloadDelay, out postReleaseDuration, out finishDelay);
                 if (effectiveCount <= 0)
                 {
-                    callback(false, "No payload releases fit inside the selected homing-missile visual profile.");
+                    callback(false, plugin.GetPayloadScheduleFailure(context, "No payload releases fit inside the selected homing-missile visual profile."));
                     return;
                 }
 
@@ -2494,7 +2589,7 @@ namespace Oxide.Plugins
                 var effectiveCount = plugin.PreparePayloadReleaseSchedule(context, "a10", DeliveryVisualProfile.A10, burstCount, context.Strike.Payload, firstPayloadDelay, pulseDelay, A10FinishPaddingSeconds, out firstPayloadDelay, out postReleaseDuration, out finishDelay);
                 if (effectiveCount <= 0)
                 {
-                    callback(false, "No payload releases fit inside the selected A-10 visual profile.");
+                    callback(false, plugin.GetPayloadScheduleFailure(context, "No payload releases fit inside the selected A-10 visual profile."));
                     return;
                 }
 
@@ -2584,7 +2679,7 @@ namespace Oxide.Plugins
             TryRegisterAirstrikeCustomItemDefinition();
             NormalizeOnlineAirstrikeInventories();
             StartToolPingWatcher();
-            Puts("Loaded " + GetEnabledStrikeCount() + " enabled strike definition(s). Charge-backed CID targeting binoculars, automatic tool ping targeting, persisted manual player defaults, scrollable CUI selection, admin workbench layout polish with keypad numeric editing, paged give search, clickable page and field help, Commands and Help tabs, high-rate visual delivery flyovers/artillery sources with optional schema-2 compiled editor tracks, multi-release payload schedules, and editor-parity waypoint position/rotation playback, autoload-safe repeated sound cues, loot item injection, monument blocking, audit logging/webhooks, cancellable warning calls, heavy warning markers, in-game warning fanout diagnostics, vehicle-aware homing target locks, mini-ping recovery, and direct-command executors are active in v0.1.52.");
+            Puts("Loaded " + GetEnabledStrikeCount() + " enabled strike definition(s). Charge-backed CID targeting binoculars, automatic tool ping targeting, persisted manual player defaults, tiered player selection with strike-profile details and device help, the native non-handheld ordnance catalog, individually scheduled patrol-heli rockets, high-rate visual delivery flyovers/artillery sources with compiled editor tracks, multi-release payload schedules, and direct-command executors are active in v0.1.61.");
         }
 
         private void OnPlayerConnected(BasePlayer player)
@@ -3848,6 +3943,60 @@ namespace Oxide.Plugins
             TryPrepareStrike(player, strikeId, false);
         }
 
+        [ConsoleCommand("portableairstrikes.ui.tier")]
+        private void CCmdUiTier(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null || arg.Args == null || arg.Args.Length < 1)
+            {
+                return;
+            }
+
+            int tier;
+            if (!int.TryParse(arg.GetString(0), NumberStyles.Integer, CultureInfo.InvariantCulture, out tier))
+            {
+                return;
+            }
+
+            ShowStrikeOverview(player, Mathf.Clamp(tier, 1, 5));
+        }
+
+        [ConsoleCommand("portableairstrikes.ui.details")]
+        private void CCmdUiDetails(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null || arg.Args == null || arg.Args.Length < 2)
+            {
+                return;
+            }
+
+            int tier;
+            if (!int.TryParse(arg.GetString(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out tier))
+            {
+                tier = 1;
+            }
+
+            ShowStrikeDetailsUi(player, arg.GetString(0), Mathf.Clamp(tier, 1, 5), arg.Args.Length >= 3 ? arg.GetString(2) : "");
+        }
+
+        [ConsoleCommand("portableairstrikes.ui.help")]
+        private void CCmdUiHelp(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null)
+            {
+                return;
+            }
+
+            var tier = 1;
+            if (arg.Args != null && arg.Args.Length > 0)
+            {
+                int.TryParse(arg.GetString(0), NumberStyles.Integer, CultureInfo.InvariantCulture, out tier);
+            }
+
+            ShowStrikeHelpUi(player, Mathf.Clamp(tier, 1, 5));
+        }
+
         [ConsoleCommand("portableairstrikes.ui.confirm")]
         private void CCmdUiConfirm(ConsoleSystem.Arg arg)
         {
@@ -4476,7 +4625,8 @@ namespace Oxide.Plugins
 
             AddAdminDetailNumberRow(container, body, "Warn", FormatFloat(strike.WarningDelaySeconds), "portableairstrikes.adminfield strike.warning " + strike.Id + " ", 0.330f, "Player Cooldown", FormatFloat(strike.CooldownPerPlayerSeconds), "portableairstrikes.adminfield strike.playercd " + strike.Id + " ");
             AddAdminDetailNumberRow(container, body, "Clan Cooldown", FormatFloat(strike.CooldownPerClanSeconds), "portableairstrikes.adminfield strike.clancd " + strike.Id + " ", 0.270f, "Global Cooldown", FormatFloat(strike.GlobalCooldownSeconds), "portableairstrikes.adminfield strike.globalcd " + strike.Id + " ");
-            AddUiLabel(container, body, "Payloads, release timing, spread, damage, and max counts come from included strike profiles. Use Balance for wrapper multipliers and per-profile caps.", 9, TextAnchor.MiddleLeft, "0.50 0.135", "0.94 0.205", "0.62 0.70 0.76 1");
+            AddAdminDetailNumberRow(container, body, "Fallback Accuracy %", FormatFloat(strike.AccuracyPercent), "portableairstrikes.adminfield strike.accuracy " + strike.Id + " ", 0.205f, "Fallback Spread", FormatFloat(strike.SpreadRadius), "portableairstrikes.adminfield strike.spread " + strike.Id + " ");
+            AddUiLabel(container, body, "Fallback accuracy/spread apply when no authored release event is available. Profile targeting remains authored in the animation editor.", 8, TextAnchor.MiddleLeft, "0.50 0.095", "0.94 0.155", "0.62 0.70 0.76 1");
         }
 
         private void DrawAdminBalanceTab(CuiElementContainer container, string body, BasePlayer player, AdminUiState state)
@@ -4961,6 +5111,9 @@ namespace Oxide.Plugins
 
             entries.Add(new AdminCommandHelpEntry(scope, "selectionui", "Selection UI", "portableairstrikes.ui.close", "Internal CUI command used by selection/confirm close buttons."));
             entries.Add(new AdminCommandHelpEntry(scope, "selectionui", "Selection UI", "portableairstrikes.ui.select <strikeId>", "Internal CUI command used when a player selects a strike."));
+            entries.Add(new AdminCommandHelpEntry(scope, "selectionui", "Selection UI", "portableairstrikes.ui.tier <tier>", "Internal CUI command used by player-facing tier tabs and modal back buttons."));
+            entries.Add(new AdminCommandHelpEntry(scope, "selectionui", "Selection UI", "portableairstrikes.ui.details <strikeId> <tier> [profileId]", "Internal CUI command used by strike cards and profile detail tabs."));
+            entries.Add(new AdminCommandHelpEntry(scope, "selectionui", "Selection UI", "portableairstrikes.ui.help [tier]", "Internal CUI command used by the How It Works modal."));
             entries.Add(new AdminCommandHelpEntry(scope, "selectionui", "Selection UI", "portableairstrikes.ui.confirm <strikeId>", "Internal CUI command used by the confirmation modal."));
 
             entries.Add(new AdminCommandHelpEntry(scope, "adminui", "Admin UI", "portableairstrikes.adminui", "Open or refresh the admin panel for the calling admin.", true));
@@ -5173,6 +5326,9 @@ namespace Oxide.Plugins
                 case "spread":
                     strike.SpreadRadius = ParseAdminFloat(value, strike.SpreadRadius, 0f, 250f);
                     break;
+                case "accuracy":
+                    strike.AccuracyPercent = ParseAdminFloat(value, strike.AccuracyPercent, 0f, 100f);
+                    break;
                 case "spreadmult":
                     strike.SpreadMultiplier = ParseAdminFloat(value, strike.SpreadMultiplier, 0.01f, 100f);
                     break;
@@ -5183,7 +5339,7 @@ namespace Oxide.Plugins
                     strike.MissileCount = ParseAdminInt(value, strike.MissileCount, 0, 12);
                     break;
                 case "burst":
-                    strike.BurstCount = ParseAdminInt(value, strike.BurstCount, 0, 80);
+                    strike.BurstCount = ParseAdminInt(value, strike.BurstCount, 0, MaxConfiguredA10BurstCount);
                     break;
                 case "line":
                     strike.LineLength = ParseAdminFloat(value, strike.LineLength, 0f, 200f);
@@ -6154,17 +6310,93 @@ namespace Oxide.Plugins
         private List<string> GetSupportedPayloads()
         {
             var payloads = new List<string>();
-            foreach (var key in strikeExecutors.Keys)
+            foreach (var descriptor in BuildPayloadCatalog(false))
             {
-                var parts = key.Split(':');
-                if (parts.Length == 2 && !ContainsString(payloads, parts[1]))
+                object id;
+                if (descriptor.TryGetValue("Id", out id) && id != null && !ContainsString(payloads, id.ToString()))
                 {
-                    payloads.Add(parts[1]);
+                    payloads.Add(id.ToString());
                 }
             }
 
             payloads.Sort(StringComparer.OrdinalIgnoreCase);
             return payloads;
+        }
+
+        [HookMethod("API_GetPayloadCatalog")]
+        private object API_GetPayloadCatalog()
+        {
+            return BuildPayloadCatalog(true);
+        }
+
+        private List<Dictionary<string, object>> BuildPayloadCatalog(bool includeDeprecated)
+        {
+            var catalog = new List<Dictionary<string, object>>();
+            Action<string, string, string, string, string, string> add = (id, label, category, nativeSource, execution, restriction) =>
+            {
+                catalog.Add(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = id,
+                    ["DisplayName"] = label,
+                    ["Category"] = category,
+                    ["NativeSource"] = nativeSource,
+                    ["ExecutionType"] = execution,
+                    ["Restriction"] = restriction ?? "",
+                    ["Deprecated"] = false,
+                    ["ReplacementId"] = ""
+                });
+            };
+
+            add("patrol_heli_gun", "Patrol Helicopter Machine Gun", "Vehicle guns", "Patrol Helicopter helibullet", "hitscan_round", "");
+            add("bradley_coax_gun", "Bradley Coax Machine Gun", "Vehicle guns", "M2 Bradley coaxbullet", "hitscan_round", "");
+            add("autoturret_gun", "Auto Turret Gun", "Automated defenses", "Auto Turret sentrybullet", "hitscan_round", "");
+            add("bradley_main_cannon", "Bradley Main Cannon", "Vehicle cannon", BradleyMainCannonShellPrefab, "native_projectile", "");
+            add("patrol_heli_rocket", "Patrol Helicopter Rocket", "Vehicle rockets", PatrolHeliRocketPrefab, "native_projectile", "One projectile per release");
+            add("patrol_heli_rocket_airburst", "Patrol Helicopter Airburst Rocket", "Vehicle rockets", PatrolHeliAirburstRocketPrefab, "native_projectile", "One projectile per release");
+            add("patrol_heli_rocket_napalm", "Patrol Helicopter Napalm Rocket", "Vehicle rockets", PatrolHeliNapalmRocketPrefab, "native_projectile", "One projectile per release");
+            add("sam_rocket", "SAM Rocket", "Guided rockets", SamRocketPrefab, "native_projectile", "");
+            add("mlrs_rocket", "MLRS Rocket", "Guided rockets", MlrsRocketPrefab, "native_projectile", "");
+            add("homing_missile", "Homing Missile", "Guided rockets", HvRocketPrefab, "tracked_projectile", "Vehicle target required");
+            add("hv_rocket", "HV Rocket", "Rockets", HvRocketPrefab, "native_projectile", "");
+            add("rocket", "Standard Rocket", "Rockets", BasicRocketPrefab, "native_projectile", "");
+            add("incendiary_rocket", "Incendiary Rocket", "Rockets", IncendiaryRocketPrefab, "native_projectile", "");
+            add("mortar_he_payload", "Mortar HE Shell", "Artillery", MortarHeShellPrefab, "native_projectile", "");
+            add("mortar_frag_payload", "Mortar Fragmentation Shell", "Artillery", MortarFragShellPrefab, "native_projectile", "");
+            add("cannon_ball", "Deployable Cannon Ball", "Artillery", CannonBallPrefab, "native_projectile", "");
+            add("he_40mm", "40mm HE Grenade", "Explosives", He40mmGrenadePrefab, "native_projectile", "");
+            add("catapult_boulder", "Catapult Boulder", "Siege", CatapultBoulderProjectilePrefab, "native_projectile", "");
+            add("bee_catapult_bomb", "Catapult Bee Bomb", "Siege", CatapultBeeProjectilePrefab, "native_projectile", "");
+            add("firebomb", "Catapult Incendiary Bomb", "Siege", CatapultFirebombProjectilePrefab, "native_projectile", "");
+            add("propane_bomb", "Catapult Explosive Bomb", "Siege", CatapultPropaneProjectilePrefab, "native_projectile", "");
+            add("ballista_hammerhead", "Ballista Hammerhead Bolt", "Siege", BallistaHammerheadPrefab, "native_projectile", "");
+            add("ballista_incendiary", "Ballista Incendiary Bolt", "Siege", BallistaIncendiaryPrefab, "native_projectile", "");
+            add("ballista_piercer", "Ballista Piercer Bolt", "Siege", BallistaPiercerPrefab, "native_projectile", "");
+            add("ballista_pitchfork", "Ballista Pitchfork Bolt", "Siege", BallistaPitchforkPrefab, "native_projectile", "");
+            add("flame_turret_fireball", "Flame Turret Fireball", "Automated defenses", FlameTurretFireballPrefab, "native_projectile", "");
+            add("torpedo", "Torpedo", "Naval", TorpedoPrefab, "native_projectile", "Water target required");
+            add("bee_grenade", "Bee Grenade", "Dropped ordnance", BeeGrenadePrefab, "native_projectile", "");
+            add("beancan", "Beancan Grenade", "Dropped ordnance", BeancanGrenadePrefab, "native_projectile", "");
+            add("f1_grenade", "F1 Grenade", "Dropped ordnance", F1GrenadePrefab, "native_projectile", "");
+            add("smoke", "Smoke Grenade", "Dropped ordnance", SmokeGrenadePrefab, "native_projectile", "");
+            add("flashbang", "Flashbang", "Dropped ordnance", FlashbangGrenadePrefab, "native_projectile", "");
+            add("molotov", "Molotov", "Dropped ordnance", MolotovGrenadePrefab, "native_projectile", "");
+
+            if (includeDeprecated)
+            {
+                catalog.Add(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = "bradley_longbarrel_burst",
+                    ["DisplayName"] = "Legacy Bradley Cannon Pulse",
+                    ["Category"] = "Legacy",
+                    ["NativeSource"] = BradleyMainCannonAttackEffect,
+                    ["ExecutionType"] = "simulated_pulse",
+                    ["Restriction"] = "Existing profiles only",
+                    ["Deprecated"] = true,
+                    ["ReplacementId"] = "bradley_main_cannon"
+                });
+            }
+
+            return catalog;
         }
 
         private bool IsStrikeExecutorCompatible(StrikeDefinition strike)
@@ -6737,6 +6969,7 @@ namespace Oxide.Plugins
                 case "field.strike.playercd": return "Player Cooldown is seconds before the same player can call this wrapper again.";
                 case "field.strike.clancd": return "Clan Cooldown is seconds before another member of the caller's team/clan can call this wrapper.";
                 case "field.strike.globalcd": return "Global Cooldown is seconds before anyone on the server can call this wrapper again.";
+                case "field.strike.accuracy": return "Fallback Accuracy is used without an authored release event: 0 uses the full fallback spread and 100 is dead center.";
                 case "field.strike.spreadmult": return "Spread x multiplies authored profile spread; keep positive values to avoid inverted behavior.";
                 case "field.strike.impactmult": return "Impact x multiplies payload impact radius for profiles that support radius scaling.";
                 case "field.strike.damagemult": return "Damage x multiplies outgoing payload damage across supported target classes.";
@@ -7165,6 +7398,7 @@ namespace Oxide.Plugins
                     case "base": current = strike.BaseCount.ToString(CultureInfo.InvariantCulture); return true;
                     case "max": current = strike.MaxCount.ToString(CultureInfo.InvariantCulture); return true;
                     case "spread": current = FormatFloat(strike.SpreadRadius); return true;
+                    case "accuracy": current = FormatFloat(strike.AccuracyPercent); return true;
                     case "spreadmult": current = FormatFloat(strike.SpreadMultiplier); return true;
                     case "rockets": current = strike.RocketCount.ToString(CultureInfo.InvariantCulture); return true;
                     case "missiles": current = strike.MissileCount.ToString(CultureInfo.InvariantCulture); return true;
@@ -7321,6 +7555,7 @@ namespace Oxide.Plugins
                 case "strike.base": return "Base count";
                 case "strike.max": return "Max count";
                 case "strike.spread": return "Spread radius";
+                case "strike.accuracy": return "Accuracy percent";
                 case "strike.rockets": return "Rocket count";
                 case "strike.missiles": return "Missile count";
                 case "strike.burst": return "Burst count";
@@ -7809,6 +8044,9 @@ namespace Oxide.Plugins
             strikeExecutors["off_map_mortar:mortar_he_payload"] = mortar;
             strikeExecutors["off_map_mortar:mortar_frag_payload"] = mortar;
             strikeExecutors["a10_gun_run:bradley_longbarrel_burst"] = a10Strafe;
+            strikeExecutors["a10_gun_run:patrol_heli_gun"] = a10Strafe;
+            strikeExecutors["a10_gun_run:bradley_coax_gun"] = a10Strafe;
+            strikeExecutors["a10_gun_run:autoturret_gun"] = a10Strafe;
         }
 
         private bool TryGetExecutor(StrikeDefinition strike, out IStrikeExecutor executor, out string message)
@@ -7868,6 +8106,77 @@ namespace Oxide.Plugins
             }
 
             return result;
+        }
+
+        [HookMethod(nameof(API_IsWebsiteReplayCarrier))]
+        public bool API_IsWebsiteReplayCarrier(ulong entityId)
+        {
+            return FindWebsiteReplayCarrier(entityId, false) != null;
+        }
+
+        [HookMethod(nameof(API_GetWebsiteReplayCarrierMetadata))]
+        public object API_GetWebsiteReplayCarrierMetadata(ulong entityId)
+        {
+            var context = FindWebsiteReplayCarrier(entityId, true);
+            if (context == null || context.Strike == null)
+            {
+                return null;
+            }
+
+            BaseEntity carrier = null;
+            foreach (var visual in context.VisualEntities)
+            {
+                if (visual != null && visual.net != null && visual.net.ID.Value == entityId)
+                {
+                    carrier = visual;
+                    break;
+                }
+            }
+            var vehicle = CanonicalWebsiteVehicle(NormalizeVisualProfileVehicle(
+                context.ActiveVisualProfile == null ? "" : context.ActiveVisualProfile.Vehicle,
+                context.Strike,
+                carrier == null ? "" : carrier.PrefabName,
+                GetDeliveryVisualProfileForStrike(context.Strike)));
+            return new Dictionary<string, object>
+            {
+                ["callId"] = context.CallId ?? "",
+                ["strikeId"] = context.Strike.Id ?? "",
+                ["profileKey"] = context.ActiveVisualProfileId ?? "",
+                ["vehicle"] = vehicle,
+                ["assetKey"] = WebsiteAssetKeyForVehicle(vehicle),
+                ["prefab"] = carrier == null ? WebsiteCarrierPrefabForVehicle(vehicle) : (carrier.PrefabName ?? carrier.ShortPrefabName ?? "")
+            };
+        }
+
+        private AirstrikeCallContext FindWebsiteReplayCarrier(ulong entityId, bool requireMetadata)
+        {
+            if (entityId == 0)
+            {
+                return null;
+            }
+
+            foreach (var root in new List<AirstrikeCallContext>(activeCalls.Values))
+            {
+                foreach (var context in EnumerateExecutionContexts(root))
+                {
+                    if (context == null || !IsCallActive(context))
+                    {
+                        continue;
+                    }
+                    foreach (var visual in context.VisualEntities)
+                    {
+                        if (visual == null || visual.IsDestroyed || visual.net == null || visual.net.ID.Value != entityId)
+                        {
+                            continue;
+                        }
+                        if (!requireMetadata || context.Strike != null)
+                        {
+                            return context;
+                        }
+                    }
+                }
+            }
+            return null;
         }
 
         private List<StrikeProfileAssignment> GetStrikeProfileAssignments(StrikeDefinition strike)
@@ -8076,6 +8385,7 @@ namespace Oxide.Plugins
                 BaseCount = count,
                 MaxCount = count,
                 SpreadRadius = source.SpreadRadius,
+                AccuracyPercent = source.AccuracyPercent,
                 SpreadMultiplier = source.SpreadMultiplier,
                 BurstCount = source.BurstCount,
                 LineLength = source.LineLength,
@@ -9241,7 +9551,10 @@ namespace Oxide.Plugins
             }
 
             var configuredCount = strike.BurstCount > 0 ? strike.BurstCount : 18;
-            return Mathf.Clamp(configuredCount, 1, 80);
+            // User-authored strike configuration is normalized to MaxConfiguredA10BurstCount.
+            // Profile execution clones can carry a larger compiled per-unit release contract, so
+            // keep those later timing groups instead of truncating the schedule to the first pass.
+            return Mathf.Clamp(configuredCount, 1, MaxPayloadUnitsPerProfile);
         }
 
         private float GetA10PulseDelaySeconds(StrikeDefinition strike)
@@ -9288,22 +9601,8 @@ namespace Oxide.Plugins
         private Vector3 GetRocketVolleyImpactPosition(AirstrikeCallContext context, Vector3 approach, int rocketIndex, int totalRockets)
         {
             var center = context.Target.Position;
-            var right = new Vector3(-approach.z, 0f, approach.x);
-            if (right.sqrMagnitude <= 0.01f)
-            {
-                right = Vector3.right;
-            }
-            else
-            {
-                right.Normalize();
-            }
-
-            var spread = Mathf.Clamp(GetStrikeSpreadRadius(context.Strike), 0f, 100f);
-            var linePosition = totalRockets <= 1 ? 0f : (((rocketIndex - 1f) / (totalRockets - 1f)) - 0.5f) * 2f;
-            var lateralJitter = UnityEngine.Random.Range(-Mathf.Min(1.5f, spread * 0.15f), Mathf.Min(1.5f, spread * 0.15f));
-            var forwardJitter = UnityEngine.Random.Range(-spread * 0.25f, spread * 0.25f);
-
-            return center + right * ((linePosition * spread) + lateralJitter) + approach * forwardJitter;
+            var spread = GetEffectiveStrikeAccuracyRadius(context.Strike, GetStrikeSpreadRadius(context.Strike));
+            return RandomAccuracySpreadPosition(center, spread);
         }
 
         private Vector3 GetA10StrafeDirection(AirstrikeCallContext context)
@@ -9338,8 +9637,9 @@ namespace Oxide.Plugins
                 right.Normalize();
             }
 
-            var lineLength = Mathf.Clamp((context.Strike.LineLength <= 0f ? 55f : context.Strike.LineLength) * NormalizePositiveMultiplier(context.Strike.LineLengthMultiplier), 5f, 400f);
-            var width = Mathf.Clamp((context.Strike.Width <= 0f ? 7f : context.Strike.Width) * NormalizePositiveMultiplier(context.Strike.WidthMultiplier), 0f, 100f);
+            var missFactor = 1f - Mathf.Clamp01(context.Strike.AccuracyPercent / 100f);
+            var lineLength = Mathf.Clamp((context.Strike.LineLength <= 0f ? 55f : context.Strike.LineLength) * NormalizePositiveMultiplier(context.Strike.LineLengthMultiplier), 0f, 400f) * missFactor;
+            var width = Mathf.Clamp((context.Strike.Width <= 0f ? 7f : context.Strike.Width) * NormalizePositiveMultiplier(context.Strike.WidthMultiplier), 0f, 100f) * missFactor;
             var linePosition = totalPulses <= 1 ? 0f : (((pulseIndex - 1f) / (totalPulses - 1f)) - 0.5f) * lineLength;
             var lateral = width <= 0.01f ? 0f : UnityEngine.Random.Range(width * -0.5f, width * 0.5f);
 
@@ -9449,16 +9749,26 @@ namespace Oxide.Plugins
             }
 
             context.PayloadReleaseSchedule.Clear();
+            context.CompactReleaseSchedule = null;
+            context.PayloadScheduleError = "";
 
             string profileId;
             VisualProfileConfig profile;
             if (!TryResolveVisualProfileForRuntime(context, vehicle, deliveryProfile, out profileId, out profile))
             {
+                if (!ValidatePayloadTargetRestrictions(context, null, fallbackPayload))
+                {
+                    return 0;
+                }
                 return requestedCount;
             }
 
             context.ActiveVisualProfileId = profileId;
             context.ActiveVisualProfile = profile;
+            if (!ValidatePayloadTargetRestrictions(context, profile, fallbackPayload))
+            {
+                return 0;
+            }
 
             List<VisualPayloadEvent> compiledReleaseEvents = null;
             string compiledReleaseError = "";
@@ -9466,7 +9776,23 @@ namespace Oxide.Plugins
                 && visualProfileFile.SchemaVersion >= 2
                 && TryValidateCompiledReleaseEvents(profile, out compiledReleaseEvents, out compiledReleaseError);
             var hasManualEvents = profile.PayloadEvents != null && profile.PayloadEvents.Count > 0;
-            if (!hasCompiledReleaseEvents && !hasManualEvents && !string.Equals(profile.PayloadReleaseMode, "generated", StringComparison.OrdinalIgnoreCase))
+            List<GeneratedReleaseGroup> generatedGroups = null;
+            string generatedGroupError = "";
+            var hasGeneratedGroups = visualProfileFile != null
+                && visualProfileFile.SchemaVersion >= 3
+                && TryValidateGeneratedReleaseGroups(profile, out generatedGroups, out generatedGroupError);
+            var hasConfiguredGeneratedGroups = visualProfileFile != null
+                && visualProfileFile.SchemaVersion >= 3
+                && profile.GeneratedReleaseGroups != null
+                && profile.GeneratedReleaseGroups.Count > 0;
+            if (hasConfiguredGeneratedGroups && !hasGeneratedGroups)
+            {
+                context.PayloadScheduleError = string.IsNullOrWhiteSpace(generatedGroupError)
+                    ? "The compact payload schedule is invalid."
+                    : generatedGroupError;
+                return 0;
+            }
+            if (!hasCompiledReleaseEvents && !hasManualEvents && !hasGeneratedGroups && !string.Equals(profile.PayloadReleaseMode, "generated", StringComparison.OrdinalIgnoreCase))
             {
                 firstPayloadDelay = Mathf.Clamp(profile.FirstPayloadDelaySeconds, 0f, profile.DurationSeconds);
                 postReleaseDuration = ((Math.Max(1, requestedCount) - 1) * safeInterval) + safeFinishPadding;
@@ -9486,7 +9812,11 @@ namespace Oxide.Plugins
                 return 0;
             }
 
-            if (hasCompiledReleaseEvents)
+            if (hasGeneratedGroups)
+            {
+                BuildCompactPayloadReleaseSchedule(context, profile, generatedGroups, budget, safeFinishPadding);
+            }
+            else if (hasCompiledReleaseEvents)
             {
                 BuildCompiledPayloadReleaseSchedule(context, compiledReleaseEvents, budget);
             }
@@ -9499,7 +9829,7 @@ namespace Oxide.Plugins
                 BuildManualPayloadReleaseSchedule(context, profile, fallbackPayload, budget);
             }
 
-            if (context.PayloadReleaseSchedule.Count == 0)
+            if (context.PayloadReleaseSchedule.Count == 0 && context.CompactReleaseSchedule == null)
             {
                 return 0;
             }
@@ -9508,6 +9838,14 @@ namespace Oxide.Plugins
             {
                 context.PayloadReleaseSchedule[i].SequenceIndex = i + 1;
                 context.PayloadReleaseSchedule[i].TotalCount = context.PayloadReleaseSchedule.Count;
+            }
+
+            if (context.CompactReleaseSchedule != null)
+            {
+                firstPayloadDelay = Mathf.Clamp(GetNextCompactReleaseTime(context.CompactReleaseSchedule), 0f, profile.DurationSeconds);
+                finishDelay = Math.Max(profile.DurationSeconds, context.CompactReleaseSchedule.LatestCompletionTime);
+                postReleaseDuration = Math.Max(0.1f, finishDelay - firstPayloadDelay);
+                return context.CompactReleaseSchedule.TotalCount;
             }
 
             firstPayloadDelay = Mathf.Clamp(context.PayloadReleaseSchedule[0].Time, 0f, profile.DurationSeconds);
@@ -9531,6 +9869,62 @@ namespace Oxide.Plugins
             }
 
             return context.PayloadReleaseSchedule.Count;
+        }
+
+        private string GetPayloadScheduleFailure(AirstrikeCallContext context, string fallback)
+        {
+            return context != null && !string.IsNullOrWhiteSpace(context.PayloadScheduleError)
+                ? context.PayloadScheduleError
+                : fallback;
+        }
+
+        private bool ValidatePayloadTargetRestrictions(AirstrikeCallContext context, VisualProfileConfig profile, string fallbackPayload)
+        {
+            var requiresWater = string.Equals(fallbackPayload, "torpedo", StringComparison.OrdinalIgnoreCase);
+            if (profile != null)
+            {
+                requiresWater = ProfileContainsPayload(profile, "torpedo");
+            }
+            if (!requiresWater)
+            {
+                return true;
+            }
+            if (context != null && context.Target != null && WaterLevel.Test(context.Target.Position + Vector3.up * 0.25f, true, true))
+            {
+                return true;
+            }
+            if (context != null)
+            {
+                context.PayloadScheduleError = "Torpedo releases require a water target; the strike was rejected before its carrier started.";
+            }
+            return false;
+        }
+
+        private bool ProfileContainsPayload(VisualProfileConfig profile, string payloadId)
+        {
+            if (profile == null || string.IsNullOrWhiteSpace(payloadId)) return false;
+            if (profile.PayloadEvents != null)
+            {
+                foreach (var entry in profile.PayloadEvents)
+                {
+                    if (entry != null && string.Equals(entry.Payload, payloadId, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+            }
+            if (profile.CompiledReleaseEvents != null)
+            {
+                foreach (var entry in profile.CompiledReleaseEvents)
+                {
+                    if (entry != null && string.Equals(entry.Payload, payloadId, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+            }
+            if (profile.GeneratedReleaseGroups != null)
+            {
+                foreach (var group in profile.GeneratedReleaseGroups)
+                {
+                    if (group != null && group.Template != null && string.Equals(group.Template.Payload, payloadId, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+            }
+            return profile.ReleaseTemplate != null && string.Equals(profile.ReleaseTemplate.Payload, payloadId, StringComparison.OrdinalIgnoreCase);
         }
 
         private void BuildCompiledPayloadReleaseSchedule(AirstrikeCallContext context, List<VisualPayloadEvent> compiledEvents, int budget)
@@ -9659,6 +10053,143 @@ namespace Oxide.Plugins
             }
         }
 
+        private void BuildCompactPayloadReleaseSchedule(AirstrikeCallContext context, VisualProfileConfig profile, List<GeneratedReleaseGroup> groups, int budget, float fallbackFinishPadding)
+        {
+            if (context == null || profile == null || budget <= 0)
+            {
+                return;
+            }
+
+            var schedule = new CompactReleaseSchedule { Budget = budget };
+            var sourceOrder = 0;
+            if (profile.PayloadEvents != null)
+            {
+                foreach (var payloadEvent in profile.PayloadEvents)
+                {
+                    if (payloadEvent == null || payloadEvent.Time > profile.DurationSeconds)
+                    {
+                        continue;
+                    }
+                    schedule.Cursors.Add(new CompactReleaseCursor
+                    {
+                        ManualEvent = payloadEvent,
+                        SourceOrder = sourceOrder++,
+                        UnitIndex = 0,
+                        MaximumUnits = Math.Max(1, payloadEvent.Count),
+                        NextTime = payloadEvent.Time
+                    });
+                }
+            }
+
+            if (groups != null)
+            {
+                foreach (var group in groups)
+                {
+                    if (group == null)
+                    {
+                        continue;
+                    }
+                    var maximum = 0;
+                    for (var unit = 0; unit < group.MaximumUnits; unit++)
+                    {
+                        if (GetGeneratedGroupUnitTime(group, unit) > profile.DurationSeconds + 0.0001f)
+                        {
+                            break;
+                        }
+                        maximum++;
+                    }
+                    if (maximum <= 0)
+                    {
+                        continue;
+                    }
+                    schedule.Cursors.Add(new CompactReleaseCursor
+                    {
+                        Group = group,
+                        SourceOrder = sourceOrder++,
+                        UnitIndex = 0,
+                        MaximumUnits = maximum,
+                        NextTime = GetGeneratedGroupUnitTime(group, 0)
+                    });
+                }
+            }
+
+            var available = 0;
+            foreach (var cursor in schedule.Cursors)
+            {
+                available += cursor.MaximumUnits;
+            }
+            schedule.TotalCount = Math.Min(budget, available);
+            if (schedule.TotalCount <= 0)
+            {
+                return;
+            }
+
+            var simulation = new List<CompactReleaseCursor>();
+            foreach (var cursor in schedule.Cursors)
+            {
+                simulation.Add(new CompactReleaseCursor
+                {
+                    ManualEvent = cursor.ManualEvent,
+                    Group = cursor.Group,
+                    SourceOrder = cursor.SourceOrder,
+                    UnitIndex = 0,
+                    MaximumUnits = cursor.MaximumUnits,
+                    NextTime = cursor.NextTime
+                });
+            }
+            for (var index = 0; index < schedule.TotalCount; index++)
+            {
+                var cursor = GetNextCompactCursor(simulation);
+                if (cursor == null) break;
+                schedule.LatestTime = cursor.NextTime;
+                var template = cursor.Group == null ? cursor.ManualEvent : cursor.Group.Template;
+                var payload = GetReleasePayload(template, context?.Strike == null ? "" : context.Strike.Payload);
+                schedule.LatestCompletionTime = Math.Max(
+                    schedule.LatestCompletionTime,
+                    cursor.NextTime + GetPayloadEventFinishPadding(context, payload, template, fallbackFinishPadding));
+                AdvanceCompactCursor(cursor);
+            }
+            context.CompactReleaseSchedule = schedule;
+        }
+
+        private float GetGeneratedGroupUnitTime(GeneratedReleaseGroup group, int unitIndex)
+        {
+            var unitsPerRelease = Math.Max(1, group == null ? 1 : group.UnitsPerRelease);
+            var burstIndex = unitIndex / unitsPerRelease;
+            var withinBurst = unitIndex % unitsPerRelease;
+            return group.StartTime + (burstIndex * group.IntervalSeconds) + (withinBurst * group.UnitIntervalSeconds);
+        }
+
+        private CompactReleaseCursor GetNextCompactCursor(IList<CompactReleaseCursor> cursors)
+        {
+            CompactReleaseCursor selected = null;
+            if (cursors == null) return null;
+            foreach (var cursor in cursors)
+            {
+                if (cursor == null || cursor.UnitIndex >= cursor.MaximumUnits) continue;
+                if (selected == null || cursor.NextTime < selected.NextTime - 0.000001f
+                    || (Math.Abs(cursor.NextTime - selected.NextTime) <= 0.000001f && cursor.SourceOrder < selected.SourceOrder))
+                {
+                    selected = cursor;
+                }
+            }
+            return selected;
+        }
+
+        private float GetNextCompactReleaseTime(CompactReleaseSchedule schedule)
+        {
+            var cursor = schedule == null ? null : GetNextCompactCursor(schedule.Cursors);
+            return cursor == null ? 0f : cursor.NextTime;
+        }
+
+        private void AdvanceCompactCursor(CompactReleaseCursor cursor)
+        {
+            if (cursor == null) return;
+            cursor.UnitIndex++;
+            if (cursor.UnitIndex >= cursor.MaximumUnits) return;
+            cursor.NextTime = cursor.Group == null ? cursor.ManualEvent.Time : GetGeneratedGroupUnitTime(cursor.Group, cursor.UnitIndex);
+        }
+
         private VisualPayloadEvent ClonePayloadEvent(VisualPayloadEvent source)
         {
             if (source == null)
@@ -9679,6 +10210,8 @@ namespace Oxide.Plugins
                 TargetOffsetY = source.TargetOffsetY,
                 TargetOffsetZ = source.TargetOffsetZ,
                 SpreadRadius = source.SpreadRadius,
+                TargetingMode = source.TargetingMode,
+                AccuracyPercent = source.AccuracyPercent,
                 LaunchSpeed = source.LaunchSpeed,
                 FuseSeconds = source.FuseSeconds,
                 DamageScale = source.DamageScale,
@@ -9701,7 +10234,8 @@ namespace Oxide.Plugins
 
         private bool HasPayloadReleaseSchedule(AirstrikeCallContext context)
         {
-            return context != null && context.PayloadReleaseSchedule != null && context.PayloadReleaseSchedule.Count > 0;
+            return context != null && ((context.PayloadReleaseSchedule != null && context.PayloadReleaseSchedule.Count > 0)
+                || context.CompactReleaseSchedule != null);
         }
 
         private float GetPayloadReleaseFinishPadding(AirstrikeCallContext context, RuntimePayloadRelease release, float fallbackPadding)
@@ -9712,12 +10246,23 @@ namespace Oxide.Plugins
                 payload = NormalizePayloadId(context.Strike.Payload);
             }
 
+            return GetPayloadEventFinishPadding(context, payload, release == null ? null : release.Event, fallbackPadding);
+        }
+
+        private float GetPayloadEventFinishPadding(AirstrikeCallContext context, string payload, VisualPayloadEvent payloadEvent, float fallbackPadding)
+        {
+            payload = NormalizePayloadId(payload);
+            if (string.IsNullOrWhiteSpace(payload) && context?.Strike != null)
+            {
+                payload = NormalizePayloadId(context.Strike.Payload);
+            }
+
             DronePayloadSpec droneSpec;
             if (TryGetDronePayloadSpec(payload, out droneSpec))
             {
-                if (release?.Event != null && release.Event.FuseSeconds >= 0f && droneSpec.HasTimedFuse)
+                if (payloadEvent != null && payloadEvent.FuseSeconds >= 0f && droneSpec.HasTimedFuse)
                 {
-                    return Mathf.Clamp(release.Event.FuseSeconds, 0f, 120f) + 1.25f;
+                    return Mathf.Clamp(payloadEvent.FuseSeconds, 0f, 120f) + 1.25f;
                 }
 
                 return Math.Max(0.1f, droneSpec.FinishDelaySeconds);
@@ -9744,7 +10289,7 @@ namespace Oxide.Plugins
             HomingMissileSpec homingSpec;
             if (TryGetHomingMissileSpec(payload, out homingSpec))
             {
-                return GetReleaseTrackingSeconds(context == null ? null : context.Strike, release == null ? null : release.Event) + Math.Max(0.1f, homingSpec.FinishDelaySeconds);
+                return GetReleaseTrackingSeconds(context == null ? null : context.Strike, payloadEvent) + Math.Max(0.1f, homingSpec.FinishDelaySeconds);
             }
 
             MortarPayloadSpec mortarSpec;
@@ -10846,13 +11391,8 @@ namespace Oxide.Plugins
             }
             approach.Normalize();
 
-            var right = GetRightVector(approach);
-            var spread = Mathf.Clamp(spreadRadius, 0f, 100f);
-            var t = totalPayloads <= 1 ? 0.5f : Mathf.Clamp01((payloadIndex - 1f) / (totalPayloads - 1f));
-            var along = (t - 0.5f) * Mathf.Min(spread * 1.35f, 34f);
-            var lateral = UnityEngine.Random.Range(-Mathf.Min(spread * 0.45f, 10f), Mathf.Min(spread * 0.45f, 10f));
-            var forwardJitter = UnityEngine.Random.Range(-Mathf.Min(spread * 0.22f, 6f), Mathf.Min(spread * 0.22f, 6f));
-            return center + (approach * (along + forwardJitter)) + (right * lateral);
+            var spread = GetEffectiveStrikeAccuracyRadius(context == null ? null : context.Strike, spreadRadius);
+            return RandomAccuracySpreadPosition(center, spread);
         }
 
         private void StorePlannedImpactPosition(AirstrikeCallContext context, int payloadIndex, Vector3 position)
@@ -10874,21 +11414,11 @@ namespace Oxide.Plugins
 
             context.PlannedImpactPositions.Clear();
             context.PlannedDeliveryApproach = approach.sqrMagnitude <= 0.01f ? Vector3.forward : approach.normalized;
-            var right = GetRightVector(context.PlannedDeliveryApproach);
-            var spread = Mathf.Clamp(GetStrikeSpreadRadius(context.Strike), 0f, 100f);
-            var loiterRadius = config?.DeliveryVisuals == null ? 7f : Mathf.Clamp(config.DeliveryVisuals.DroneDropLoiterRadius, 0f, 30f);
-            var usableRadius = Mathf.Min(spread, Math.Max(1f, loiterRadius));
-            var randomPhase = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            var spread = GetEffectiveStrikeAccuracyRadius(context.Strike, GetStrikeSpreadRadius(context.Strike));
 
             for (var i = 1; i <= payloadCount; i++)
             {
-                var t = payloadCount <= 1 ? 0.5f : (i - 1f) / (payloadCount - 1f);
-                var weave = Mathf.Sin((t * Mathf.PI * 2f) + randomPhase) * usableRadius * 0.45f;
-                var sweep = (t - 0.5f) * usableRadius * 1.35f;
-                var randomAngle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-                var randomRadius = Mathf.Sqrt(UnityEngine.Random.value) * Mathf.Min(spread, usableRadius) * 0.45f;
-                var jitter = new Vector3(Mathf.Cos(randomAngle) * randomRadius, 0f, Mathf.Sin(randomAngle) * randomRadius);
-                var planned = target + (context.PlannedDeliveryApproach * sweep) + (right * weave) + jitter;
+                var planned = RandomAccuracySpreadPosition(target, spread);
                 StorePlannedImpactPosition(context, i, planned);
             }
         }
@@ -12782,6 +13312,16 @@ namespace Oxide.Plugins
 
             switch (payload.Trim().ToLowerInvariant())
             {
+                case "catapult_boulder":
+                    spec = new HeavyDropPayloadSpec
+                    {
+                        Id = "catapult_boulder",
+                        DisplayName = "catapult boulder",
+                        Prefab = CatapultBoulderProjectilePrefab,
+                        FinishDelaySeconds = HeavyDropFinishDelaySeconds
+                    };
+                    return true;
+
                 case "bee_catapult_bomb":
                     spec = new HeavyDropPayloadSpec
                     {
@@ -12858,6 +13398,43 @@ namespace Oxide.Plugins
                         ProjectileSpeed = 50f,
                         FinishDelaySeconds = RocketRunFinishDelaySeconds + 1.5f
                     };
+                    return true;
+
+                case "patrol_heli_rocket":
+                    spec = new RocketRunPayloadSpec { Id = "patrol_heli_rocket", DisplayName = "patrol-heli rocket", Prefab = PatrolHeliRocketPrefab, ProjectileSpeed = 55f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "patrol_heli_rocket_airburst":
+                    spec = new RocketRunPayloadSpec { Id = "patrol_heli_rocket_airburst", DisplayName = "patrol-heli airburst rocket", Prefab = PatrolHeliAirburstRocketPrefab, ProjectileSpeed = 55f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "patrol_heli_rocket_napalm":
+                    spec = new RocketRunPayloadSpec { Id = "patrol_heli_rocket_napalm", DisplayName = "patrol-heli napalm rocket", Prefab = PatrolHeliNapalmRocketPrefab, ProjectileSpeed = 50f, FinishDelaySeconds = RocketRunFinishDelaySeconds + 2f };
+                    return true;
+                case "sam_rocket":
+                    spec = new RocketRunPayloadSpec { Id = "sam_rocket", DisplayName = "SAM rocket", Prefab = SamRocketPrefab, ProjectileSpeed = 70f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "bradley_main_cannon":
+                    spec = new RocketRunPayloadSpec { Id = "bradley_main_cannon", DisplayName = "Bradley main-cannon shell", Prefab = BradleyMainCannonShellPrefab, ProjectileSpeed = 95f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "flame_turret_fireball":
+                    spec = new RocketRunPayloadSpec { Id = "flame_turret_fireball", DisplayName = "flame-turret fireball", Prefab = FlameTurretFireballPrefab, ProjectileSpeed = 24f, FinishDelaySeconds = RocketRunFinishDelaySeconds + 2f };
+                    return true;
+                case "cannon_ball":
+                    spec = new RocketRunPayloadSpec { Id = "cannon_ball", DisplayName = "cannon ball", Prefab = CannonBallPrefab, ProjectileSpeed = 42f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "ballista_hammerhead":
+                    spec = new RocketRunPayloadSpec { Id = "ballista_hammerhead", DisplayName = "ballista hammerhead bolt", Prefab = BallistaHammerheadPrefab, ProjectileSpeed = 65f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "ballista_incendiary":
+                    spec = new RocketRunPayloadSpec { Id = "ballista_incendiary", DisplayName = "ballista incendiary bolt", Prefab = BallistaIncendiaryPrefab, ProjectileSpeed = 60f, FinishDelaySeconds = RocketRunFinishDelaySeconds + 2f };
+                    return true;
+                case "ballista_piercer":
+                    spec = new RocketRunPayloadSpec { Id = "ballista_piercer", DisplayName = "ballista piercer bolt", Prefab = BallistaPiercerPrefab, ProjectileSpeed = 75f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "ballista_pitchfork":
+                    spec = new RocketRunPayloadSpec { Id = "ballista_pitchfork", DisplayName = "ballista pitchfork bolt", Prefab = BallistaPitchforkPrefab, ProjectileSpeed = 58f, FinishDelaySeconds = RocketRunFinishDelaySeconds };
+                    return true;
+                case "torpedo":
+                    spec = new RocketRunPayloadSpec { Id = "torpedo", DisplayName = "torpedo", Prefab = TorpedoPrefab, ProjectileSpeed = 25f, FinishDelaySeconds = RocketRunFinishDelaySeconds + 3f };
                     return true;
 
                 default:
@@ -12962,12 +13539,50 @@ namespace Oxide.Plugins
 
             switch (payload.Trim().ToLowerInvariant())
             {
+                case "patrol_heli_gun":
+                    spec = new A10StrafeSpec
+                    {
+                        Id = "patrol_heli_gun",
+                        DisplayName = "patrol-heli machine gun",
+                        BaseDamage = A10DefaultPulseBaseDamage,
+                        AttackEffect = PatrolHeliGunFireEffect,
+                        TracerEffect = PatrolHeliBulletEffect,
+                        ImpactEffect = BulletImpactEffect
+                    };
+                    return true;
+
+                case "bradley_coax_gun":
+                    spec = new A10StrafeSpec
+                    {
+                        Id = "bradley_coax_gun",
+                        DisplayName = "Bradley coax machine gun",
+                        BaseDamage = A10DefaultPulseBaseDamage,
+                        AttackEffect = BradleyCoaxGunFireEffect,
+                        TracerEffect = BradleyCoaxBulletEffect,
+                        ImpactEffect = BulletImpactEffect
+                    };
+                    return true;
+
+                case "autoturret_gun":
+                    spec = new A10StrafeSpec
+                    {
+                        Id = "autoturret_gun",
+                        DisplayName = "auto-turret gun",
+                        BaseDamage = A10DefaultPulseBaseDamage,
+                        AttackEffect = AutoTurretGunFireEffect,
+                        TracerEffect = AutoTurretBulletEffect,
+                        ImpactEffect = BulletImpactEffect
+                    };
+                    return true;
+
                 case "bradley_longbarrel_burst":
                     spec = new A10StrafeSpec
                     {
                         Id = "bradley_longbarrel_burst",
-                        DisplayName = "Bradley longbarrel",
-                        BaseDamage = A10DefaultPulseBaseDamage
+                        DisplayName = "legacy Bradley cannon pulse",
+                        BaseDamage = A10DefaultPulseBaseDamage,
+                        AttackEffect = BradleyMainCannonAttackEffect,
+                        ImpactEffect = BradleyMainCannonShellExplosionEffect
                     };
                     return true;
 
@@ -12983,12 +13598,71 @@ namespace Oxide.Plugins
                 return;
             }
 
+            if (context.CompactReleaseSchedule != null)
+            {
+                context.CompactReleaseSchedule.StartedAt = UnityEngine.Time.realtimeSinceStartup;
+                ScheduleNextCompactPayloadRelease(context, approach, callback);
+                return;
+            }
+
             var releases = new List<RuntimePayloadRelease>(context.PayloadReleaseSchedule);
             foreach (var release in releases)
             {
                 var scheduledRelease = release;
                 ScheduleSinglePayloadReleaseEvent(context, approach, scheduledRelease, callback);
             }
+        }
+
+        private void ScheduleNextCompactPayloadRelease(AirstrikeCallContext context, Vector3 approach, Action<bool, string> callback)
+        {
+            var schedule = context == null ? null : context.CompactReleaseSchedule;
+            if (schedule == null || schedule.Released >= schedule.TotalCount || !IsCallActive(context))
+            {
+                return;
+            }
+            var cursor = GetNextCompactCursor(schedule.Cursors);
+            if (cursor == null)
+            {
+                return;
+            }
+            var logicalTime = cursor.NextTime;
+            var elapsed = Mathf.Max(0f, UnityEngine.Time.realtimeSinceStartup - schedule.StartedAt);
+            ScheduleCallTimer(context, Mathf.Max(0f, logicalTime - elapsed), () =>
+            {
+                if (!IsCallActive(context) || context.CompactReleaseSchedule != schedule)
+                {
+                    return;
+                }
+                var unitIndex = cursor.UnitIndex;
+                var payloadEvent = ClonePayloadEvent(cursor.Group == null ? cursor.ManualEvent : cursor.Group.Template) ?? new VisualPayloadEvent();
+                payloadEvent.Time = logicalTime;
+                payloadEvent.Count = 1;
+                if (cursor.Group != null && cursor.Group.HardpointOffsets != null && cursor.Group.HardpointOffsets.Count > 0)
+                {
+                    var offset = cursor.Group.HardpointOffsets[unitIndex % cursor.Group.HardpointOffsets.Count];
+                    payloadEvent.CarrierOffsetX += offset.X;
+                    payloadEvent.CarrierOffsetY += offset.Y;
+                    payloadEvent.CarrierOffsetZ += offset.Z;
+                }
+                schedule.Released++;
+                var release = new RuntimePayloadRelease
+                {
+                    Event = payloadEvent,
+                    Payload = GetReleasePayload(payloadEvent, context.Strike == null ? "" : context.Strike.Payload),
+                    Time = logicalTime,
+                    SourceEventIndex = cursor.SourceOrder + 1,
+                    SequenceIndex = schedule.Released,
+                    TotalCount = schedule.TotalCount
+                };
+                AdvanceCompactCursor(cursor);
+                string error;
+                if (!TryExecutePayloadRelease(context, release, approach, out error))
+                {
+                    callback(false, error);
+                    return;
+                }
+                ScheduleNextCompactPayloadRelease(context, approach, callback);
+            });
         }
 
         private void ScheduleSinglePayloadReleaseEvent(AirstrikeCallContext context, Vector3 approach, RuntimePayloadRelease release, Action<bool, string> callback)
@@ -13157,10 +13831,11 @@ namespace Oxide.Plugins
                 approach.Normalize();
             }
 
-            var right = GetRightVector(approach);
             var center = context.Target.Position;
-            if (releaseEvent != null)
+            var simpleTargeting = IsSimpleTargeting(releaseEvent);
+            if (releaseEvent != null && !simpleTargeting)
             {
+                var right = GetRightVector(approach);
                 center += right * releaseEvent.TargetOffsetX;
                 center += Vector3.up * releaseEvent.TargetOffsetY;
                 center += approach * releaseEvent.TargetOffsetZ;
@@ -13169,6 +13844,11 @@ namespace Oxide.Plugins
             var spread = releaseEvent != null && releaseEvent.SpreadRadius >= 0f
                 ? releaseEvent.SpreadRadius
                 : fallbackSpreadRadius;
+            if (simpleTargeting)
+            {
+                spread = GetEffectiveAccuracyRadius(spread, releaseEvent == null ? 75f : releaseEvent.AccuracyPercent);
+                return ResolveImpactPosition(RandomAccuracySpreadPosition(center, spread));
+            }
             return ResolveImpactPosition(RandomSpreadPosition(center, spread));
         }
 
@@ -13189,10 +13869,17 @@ namespace Oxide.Plugins
                 approach.Normalize();
             }
 
-            var right = GetRightVector(approach);
             var center = basePoint;
+            if (IsSimpleTargeting(releaseEvent))
+            {
+                // Guided payloads keep their entity lock. Simple accuracy is only
+                // applied to unguided impact calculations.
+                return center;
+            }
+
             if (releaseEvent != null)
             {
+                var right = GetRightVector(approach);
                 center += right * releaseEvent.TargetOffsetX;
                 center += Vector3.up * releaseEvent.TargetOffsetY;
                 center += approach * releaseEvent.TargetOffsetZ;
@@ -13646,6 +14333,12 @@ namespace Oxide.Plugins
             var impact = releaseEvent == null
                 ? ResolveImpactPosition(GetRocketVolleyImpactPosition(context, approach, rocketIndex, totalRockets))
                 : GetReleaseTargetPosition(context, releaseEvent, approach, context.Target.Position, GetStrikeSpreadRadius(context.Strike));
+            if (string.Equals(spec.Id, "torpedo", StringComparison.OrdinalIgnoreCase)
+                && !WaterLevel.Test(impact + Vector3.up * 0.25f, true, true))
+            {
+                error = "Torpedo releases require a water target.";
+                return false;
+            }
             var spawn = EnsurePositionAboveTerrain(impact - (approach * RocketRunSpawnDistance) + (Vector3.up * RocketRunSpawnHeight), GetPayloadTerrainClearance());
             Vector3 carrierForward;
             Vector3 carrierVelocity;
@@ -13751,7 +14444,7 @@ namespace Oxide.Plugins
             }
 
             var impact = releaseEvent == null
-                ? ResolveImpactPosition(RandomSpreadPosition(context.Target.Position, GetStrikeSpreadRadius(context.Strike)))
+                ? ResolveImpactPosition(RandomStrikeSpreadPosition(context.Target.Position, context.Strike))
                 : GetReleaseTargetPosition(context, releaseEvent, approach, context.Target.Position, GetStrikeSpreadRadius(context.Strike));
             var launchJitter = new Vector3(
                 UnityEngine.Random.Range(-18f, 18f),
@@ -14243,7 +14936,7 @@ namespace Oxide.Plugins
 
             var approach = context.PlannedDeliveryApproach.sqrMagnitude <= 0.01f ? GetRocketApproachDirection(context) : context.PlannedDeliveryApproach;
             var impact = releaseEvent == null
-                ? ResolveImpactPosition(RandomSpreadPosition(context.Target.Position, GetStrikeSpreadRadius(context.Strike)))
+                ? ResolveImpactPosition(RandomStrikeSpreadPosition(context.Target.Position, context.Strike))
                 : GetReleaseTargetPosition(context, releaseEvent, approach, context.Target.Position, GetStrikeSpreadRadius(context.Strike));
             var spawn = EnsurePositionAboveTerrain(impact + Vector3.up * MortarShellSpawnHeight, GetPayloadTerrainClearance());
             Vector3 carrierForward;
@@ -14356,7 +15049,7 @@ namespace Oxide.Plugins
                 Vector3 carrierForward;
                 Vector3 carrierVelocity;
                 var hasCarrierFrame = TryGetCarrierReleaseFrame(context, releaseEvent, out carrierOrigin, out carrierForward, out carrierVelocity);
-                RunA10PulseEffects(impact, direction, pulseIndex, hasCarrierFrame, carrierOrigin);
+                RunA10PulseEffects(spec, impact, direction, pulseIndex, hasCarrierFrame, carrierOrigin);
 
                 int damagedCount;
                 ApplyA10DamagePulse(context, spec, impact, out damagedCount, releaseEvent);
@@ -14379,20 +15072,25 @@ namespace Oxide.Plugins
             }
         }
 
-        private void RunA10PulseEffects(Vector3 impact, Vector3 direction, int pulseIndex, bool hasMuzzleOrigin = false, Vector3 muzzleOrigin = default(Vector3))
+        private void RunA10PulseEffects(A10StrafeSpec spec, Vector3 impact, Vector3 direction, int pulseIndex, bool hasMuzzleOrigin = false, Vector3 muzzleOrigin = default(Vector3))
         {
             try
             {
                 var effectPosition = impact + Vector3.up * 0.1f;
-                Effect.server.Run(BulletImpactEffect, effectPosition);
+                Effect.server.Run(string.IsNullOrWhiteSpace(spec?.ImpactEffect) ? BulletImpactEffect : spec.ImpactEffect, effectPosition);
+
+                var muzzlePosition = hasMuzzleOrigin
+                    ? EnsurePositionAboveTerrain(muzzleOrigin, GetPayloadTerrainClearance())
+                    : EnsurePositionAboveTerrain(impact - (direction * 45f) + (Vector3.up * 32f), GetPayloadTerrainClearance());
+                if (!string.IsNullOrWhiteSpace(spec?.TracerEffect))
+                {
+                    var tracerDirection = impact - muzzlePosition;
+                    Effect.server.Run(spec.TracerEffect, muzzlePosition, tracerDirection.sqrMagnitude > 0.01f ? tracerDirection.normalized : direction, null, true);
+                }
 
                 if (pulseIndex == 1 || pulseIndex % A10MuzzleEffectInterval == 0)
                 {
-                    var muzzlePosition = hasMuzzleOrigin
-                        ? EnsurePositionAboveTerrain(muzzleOrigin, GetPayloadTerrainClearance())
-                        : EnsurePositionAboveTerrain(impact - (direction * 45f) + (Vector3.up * 32f), GetPayloadTerrainClearance());
-                    Effect.server.Run(BradleyMainCannonAttackEffect, muzzlePosition);
-                    Effect.server.Run(BradleyMainCannonShellExplosionEffect, effectPosition);
+                    Effect.server.Run(string.IsNullOrWhiteSpace(spec?.AttackEffect) ? PatrolHeliGunFireEffect : spec.AttackEffect, muzzlePosition);
                 }
             }
             catch (Exception ex)
@@ -14552,6 +15250,55 @@ namespace Oxide.Plugins
             var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
             var distance = Mathf.Sqrt(UnityEngine.Random.value) * radius;
             return center + new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+        }
+
+        private Vector3 RandomAccuracySpreadPosition(Vector3 center, float spreadRadius)
+        {
+            var radius = Mathf.Clamp(spreadRadius, 0f, 500f);
+            if (radius <= 0.01f)
+            {
+                return center;
+            }
+
+            var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            var distance = Mathf.Sqrt(UnityEngine.Random.value) * radius;
+            return center + new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
+        }
+
+        private Vector3 RandomStrikeSpreadPosition(Vector3 center, StrikeDefinition strike)
+        {
+            return RandomAccuracySpreadPosition(center, GetEffectiveStrikeAccuracyRadius(strike, GetStrikeSpreadRadius(strike)));
+        }
+
+        private float GetEffectiveStrikeAccuracyRadius(StrikeDefinition strike, float spreadRadius)
+        {
+            return GetEffectiveAccuracyRadius(spreadRadius, strike == null ? 75f : strike.AccuracyPercent);
+        }
+
+        private float GetEffectiveAccuracyRadius(float spreadRadius, float accuracyPercent)
+        {
+            var radius = Mathf.Clamp(spreadRadius, 0f, 500f);
+            var accuracy = Mathf.Clamp01(accuracyPercent / 100f);
+            return radius * (1f - accuracy);
+        }
+
+        private bool IsSimpleTargeting(VisualPayloadEvent payloadEvent)
+        {
+            return payloadEvent == null || string.Equals(NormalizeTargetingMode(payloadEvent.TargetingMode), "simple", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsValidTargetingMode(string value)
+        {
+            var mode = (value ?? "").Trim();
+            return string.Equals(mode, "simple", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mode, "advanced", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string NormalizeTargetingMode(string value)
+        {
+            return string.Equals((value ?? "").Trim(), "advanced", StringComparison.OrdinalIgnoreCase)
+                ? "advanced"
+                : "simple";
         }
 
         private float GetStrikeSpreadRadius(StrikeDefinition strike)
@@ -14813,6 +15560,9 @@ namespace Oxide.Plugins
             VisualProfileConfig profile;
             TryResolveVisualProfileForStrike(context.Strike, out profileId, out profile);
             var vehicle = NormalizeVisualProfileVehicle(profile == null ? "" : profile.Vehicle, context.Strike, null, GetDeliveryVisualProfileForStrike(context.Strike));
+            var canonicalVehicle = CanonicalWebsiteVehicle(vehicle);
+            var assetKey = WebsiteAssetKeyForVehicle(canonicalVehicle);
+            var carrierPrefab = WebsiteCarrierPrefabForVehicle(canonicalVehicle);
             var occurredAt = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
             var payload = new
             {
@@ -14829,14 +15579,19 @@ namespace Oxide.Plugins
                         y = Math.Round(context.Target.Position.y, 3),
                         z = Math.Round(context.Target.Position.z, 3),
                         profile_key = profileId ?? "",
-                        vehicle = vehicle ?? "",
+                        vehicle = canonicalVehicle,
                         payload = new
                         {
                             strikeId = context.Strike.Id ?? "",
                             strikeName = context.Strike.DisplayName ?? "",
                             callerId = context.CallerUserId.ToString(),
                             payload = context.Strike.Payload ?? "",
-                            delivery = context.Strike.Delivery ?? ""
+                            payloadFamily = WebsitePayloadFamily(context.Strike.Payload),
+                            delivery = context.Strike.Delivery ?? "",
+                            profileKey = profileId ?? "",
+                            canonicalVehicle = canonicalVehicle,
+                            assetKey = assetKey,
+                            runtimeCarrierPrefab = carrierPrefab
                         }
                     }
                 }
@@ -14868,6 +15623,83 @@ namespace Oxide.Plugins
                     PrintWarning("Website replay event could not be sent: " + ex.Message);
                 }
             }
+        }
+
+        private string CanonicalWebsiteVehicle(string vehicle)
+        {
+            var normalized = (vehicle ?? "").Trim().ToLowerInvariant();
+            switch (normalized)
+            {
+                case "a10":
+                case "f15":
+                    return "f15";
+                case "attack_heli":
+                case "patrol_heli":
+                case "patrol_helicopter":
+                    return "attack_heli";
+                case "cargo_plane":
+                    return "cargo_plane";
+                case "drone":
+                    return "drone";
+                default:
+                    return string.IsNullOrWhiteSpace(normalized) ? "f15" : normalized;
+            }
+        }
+
+        private string WebsiteAssetKeyForVehicle(string vehicle)
+        {
+            switch (CanonicalWebsiteVehicle(vehicle))
+            {
+                case "attack_heli":
+                    return "rust:patrol_helicopter";
+                case "cargo_plane":
+                    return "rust:cargo_plane";
+                case "drone":
+                    return "rust:drone";
+                case "f15":
+                    return "rust:f15";
+                default:
+                    return "";
+            }
+        }
+
+        private string WebsiteCarrierPrefabForVehicle(string vehicle)
+        {
+            switch (CanonicalWebsiteVehicle(vehicle))
+            {
+                case "attack_heli":
+                    return PatrolHelicopterVisualPrefab;
+                case "cargo_plane":
+                    return CargoPlaneVisualPrefab;
+                case "drone":
+                    return DroneVisualPrefab;
+                case "f15":
+                    return F15VisualPrefab;
+                default:
+                    return "";
+            }
+        }
+
+        private string WebsitePayloadFamily(string payload)
+        {
+            var normalized = (payload ?? "").Trim().ToLowerInvariant();
+            if (normalized.Contains("rocket") || normalized.Contains("missile") || normalized.Contains("mlrs"))
+            {
+                return "rocket_or_missile";
+            }
+            if (normalized.Contains("mortar") || normalized.Contains("artillery"))
+            {
+                return "artillery";
+            }
+            if (normalized.Contains("smoke") || normalized.Contains("flash"))
+            {
+                return "utility";
+            }
+            if (normalized.Contains("grenade") || normalized.Contains("bomb") || normalized.Contains("molotov") || normalized.Contains("bee"))
+            {
+                return "dropped_ordnance";
+            }
+            return string.IsNullOrWhiteSpace(normalized) ? "unknown" : normalized;
         }
 
         private string ResolveWebsiteReplaySharedSecret()
@@ -15491,7 +16323,7 @@ namespace Oxide.Plugins
             return DeliveryVisualProfile.RocketRun;
         }
 
-        private void ShowStrikeOverview(BasePlayer player)
+        private void ShowStrikeOverview(BasePlayer player, int preferredTier = 0)
         {
             var target = GetLatestTarget(player, false);
             if (target == null)
@@ -15509,10 +16341,10 @@ namespace Oxide.Plugins
                 return;
             }
 
-            ShowStrikeSelectionUi(player, target, strikes);
+            ShowStrikeSelectionUi(player, target, strikes, preferredTier);
         }
 
-        private void ShowStrikeSelectionUi(BasePlayer player, AirstrikeTarget target, List<StrikeDefinition> strikes)
+        private void ShowStrikeSelectionUi(BasePlayer player, AirstrikeTarget target, List<StrikeDefinition> strikes, int preferredTier = 0)
         {
             DestroyStrikeUi(player);
 
@@ -15521,15 +16353,16 @@ namespace Oxide.Plugins
             {
                 CursorEnabled = true,
                 Image = { Color = "0.05 0.06 0.07 0.92" },
-                RectTransform = { AnchorMin = "0.23 0.16", AnchorMax = "0.77 0.86" }
+                RectTransform = { AnchorMin = "0.19 0.12", AnchorMax = "0.81 0.88" }
             }, "Hud.Menu", StrikeUiName);
 
-            AddUiLabel(container, root, "Portable Airstrikes", 18, TextAnchor.MiddleLeft, "0.06 0.88", "0.70 0.98", "1 0.88 0.70 1");
+            AddUiLabel(container, root, "Portable Airstrikes", 20, TextAnchor.MiddleLeft, "0.05 0.90", "0.56 0.98", "1 0.88 0.70 1");
+            AddUiButton(container, root, "HOW IT WORKS", "portableairstrikes.ui.help " + Math.Max(1, preferredTier), "0.68 0.915", "0.88 0.975", "0.18 0.28 0.34 0.95", 11);
             AddUiButton(container, root, "X", "portableairstrikes.ui.close", "0.92 0.90", "0.98 0.98", "0.50 0.12 0.10 0.95", 14);
-            AddUiLabel(container, root, "Target: " + DescribeTarget(target), 12, TextAnchor.MiddleLeft, "0.06 0.81", "0.94 0.87", "0.85 0.90 0.92 1");
+            AddUiLabel(container, root, "TARGET  " + DescribeTarget(target), 12, TextAnchor.MiddleLeft, "0.05 0.83", "0.95 0.89", "0.85 0.90 0.92 1");
 
             var tokenCount = GetAirstrikeTokenCount(player);
-            AddUiLabel(container, root, "Items: " + tokenCount + " / " + config.AirstrikeItem.RequiredAmount + "   Balance: " + BuildBalanceSummary(player) + "   Default: " + GetDefaultStrikeSummary(player), 11, TextAnchor.MiddleLeft, "0.06 0.75", "0.94 0.80", "0.72 0.78 0.82 1");
+            AddUiLabel(container, root, "DEVICE CHARGES  " + tokenCount + " / " + config.AirstrikeItem.RequiredAmount + "     BALANCE  " + BuildBalanceSummary(player) + "     DEFAULT  " + GetDefaultStrikeSummary(player), 11, TextAnchor.MiddleLeft, "0.05 0.77", "0.95 0.82", "0.72 0.78 0.82 1");
 
             var visible = BuildVisibleStrikeList(player, strikes);
             if (visible.Count == 0)
@@ -15538,20 +16371,32 @@ namespace Oxide.Plugins
             }
             else
             {
+                var tiers = GetVisibleStrikeTiers(visible);
+                var selectedTier = tiers.Contains(preferredTier) ? preferredTier : tiers[0];
+                AddStrikeTierTabs(container, root, tiers, selectedTier);
+                var tierStrikes = new List<StrikeDefinition>();
+                foreach (var strike in visible)
+                {
+                    if (strike.Tier == selectedTier)
+                    {
+                        tierStrikes.Add(strike);
+                    }
+                }
+
                 var contentHeight = Math.Max(
                     StrikePickerMinimumScrollContentHeight,
-                    StrikePickerContentPaddingPixels * 2f + visible.Count * StrikePickerRowHeightPixels + Math.Max(0, visible.Count - 1) * StrikePickerRowGapPixels);
-                var scroll = AddUiScrollView(container, root, "0.06 0.12", "0.94 0.70", contentHeight);
-                for (var i = 0; i < visible.Count; i++)
+                    StrikePickerContentPaddingPixels * 2f + tierStrikes.Count * StrikePickerRowHeightPixels + Math.Max(0, tierStrikes.Count - 1) * StrikePickerRowGapPixels);
+                var scroll = AddUiScrollView(container, root, "0.05 0.11", "0.95 0.68", contentHeight);
+                for (var i = 0; i < tierStrikes.Count; i++)
                 {
-                    var strike = visible[i];
+                    var strike = tierStrikes[i];
                     var topOffset = StrikePickerContentPaddingPixels + i * (StrikePickerRowHeightPixels + StrikePickerRowGapPixels);
                     var bottomOffset = topOffset + StrikePickerRowHeightPixels;
-                    AddStrikeRowOffset(container, scroll, player, strike, topOffset, bottomOffset);
+                    AddStrikeRowOffset(container, scroll, player, strike, selectedTier, topOffset, bottomOffset);
                 }
             }
 
-            AddUiLabel(container, root, "Direct: /" + GetOpenCommand() + " <id>   Save default manually: /" + GetOpenCommand() + " default <id>", 10, TextAnchor.MiddleLeft, "0.06 0.03", "0.86 0.08", "0.62 0.66 0.70 1");
+            AddUiLabel(container, root, "Review DETAILS before selecting. Direct: /" + GetOpenCommand() + " <id>   Save default: /" + GetOpenCommand() + " default <id>", 10, TextAnchor.MiddleLeft, "0.05 0.03", "0.90 0.08", "0.62 0.66 0.70 1");
             RegisterUiBridge(player, StrikeUiName, true);
             CuiHelper.AddUi(player, container);
             ArmUiBridge(player, StrikeUiName, 0.5f);
@@ -15625,7 +16470,366 @@ namespace Oxide.Plugins
             return visible;
         }
 
-        private void AddStrikeRowOffset(CuiElementContainer container, string parent, BasePlayer player, StrikeDefinition strike, float topOffset, float bottomOffset)
+        private List<int> GetVisibleStrikeTiers(List<StrikeDefinition> strikes)
+        {
+            var tiers = new List<int>();
+            if (strikes == null)
+            {
+                return tiers;
+            }
+
+            foreach (var strike in strikes)
+            {
+                if (strike != null && !tiers.Contains(strike.Tier))
+                {
+                    tiers.Add(strike.Tier);
+                }
+            }
+
+            tiers.Sort();
+            return tiers;
+        }
+
+        private void AddStrikeTierTabs(CuiElementContainer container, string root, List<int> tiers, int selectedTier)
+        {
+            if (tiers == null || tiers.Count == 0)
+            {
+                return;
+            }
+
+            const float left = 0.05f;
+            const float right = 0.95f;
+            const float gap = 0.008f;
+            var width = ((right - left) - gap * (tiers.Count - 1)) / tiers.Count;
+            for (var i = 0; i < tiers.Count; i++)
+            {
+                var tier = tiers[i];
+                var xMin = left + i * (width + gap);
+                var xMax = xMin + width;
+                var selected = tier == selectedTier;
+                AddUiButton(container, root, "TIER " + tier, "portableairstrikes.ui.tier " + tier,
+                    FormatUiFloat(xMin) + " 0.70", FormatUiFloat(xMax) + " 0.755",
+                    selected ? "0.64 0.19 0.10 0.98" : "0.15 0.18 0.20 0.95", 11);
+            }
+        }
+
+        private void ShowStrikeHelpUi(BasePlayer player, int returnTier)
+        {
+            DestroyStrikeUi(player);
+            var container = new CuiElementContainer();
+            var root = container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                Image = { Color = "0.04 0.05 0.06 0.96" },
+                RectTransform = { AnchorMin = "0.27 0.20", AnchorMax = "0.73 0.80" }
+            }, "Hud.Menu", StrikeUiName);
+
+            AddUiLabel(container, root, "How the Airstrike Device Works", 20, TextAnchor.MiddleLeft, "0.07 0.86", "0.82 0.96", "1 0.88 0.70 1");
+            AddUiButton(container, root, "X", "portableairstrikes.ui.close", "0.89 0.88", "0.96 0.96", "0.50 0.12 0.10 0.95", 14);
+
+            var help = "1   EQUIP AND AIM\n"
+                + "Hold " + GetAirstrikeItemDisplayName() + " and aim at the ground or directly at a vehicle.\n\n"
+                + "2   PLACE A PING\n"
+                + "Place a ping while the device is equipped. The ping locks the target shown in the picker.\n\n"
+                + "3   CHOOSE A STRIKE\n"
+                + "Browse the relevant tiers, review profile details, then select a strike. A compatible saved default may be called automatically.\n\n"
+                + "4   CONFIRM AND CLEAR THE AREA\n"
+                + "Confirm the RP cost and device charge. Warning time begins after acceptance; use /" + GetOpenCommand() + " cancel before impact when cancellation is available.\n\n"
+                + "Targets must be " + FormatMeters(config.General.MinimumDistanceFromCaller) + " to " + FormatMeters(config.General.MaxCallRange)
+                + " from you and expire after " + FormatSeconds(config.General.MaxPingAgeSeconds) + ". Safe-zone and monument restrictions still apply.";
+            AddUiLabel(container, root, help, 12, TextAnchor.UpperLeft, "0.07 0.20", "0.93 0.82", "0.82 0.87 0.90 1");
+            AddUiButton(container, root, "BACK TO STRIKES", "portableairstrikes.ui.tier " + returnTier, "0.07 0.07", "0.46 0.15", "0.18 0.28 0.34 0.95", 12);
+            RegisterUiBridge(player, StrikeUiName, true);
+            CuiHelper.AddUi(player, container);
+            ArmUiBridge(player, StrikeUiName, 0.5f);
+        }
+
+        private void ShowStrikeDetailsUi(BasePlayer player, string strikeId, int returnTier, string requestedProfileId)
+        {
+            StrikeDefinition strike;
+            if (!TryGetStrike(strikeId, out strike) || strike == null || !strike.Enabled)
+            {
+                ShowStrikeOverview(player, returnTier);
+                return;
+            }
+
+            var assignments = GetEnabledStrikeProfileAssignments(strike);
+            if (assignments.Count == 0)
+            {
+                string resolvedId;
+                VisualProfileConfig resolvedProfile;
+                if (TryResolveVisualProfileForStrike(strike, out resolvedId, out resolvedProfile))
+                {
+                    assignments.Add(new StrikeProfileAssignment { ProfileId = resolvedId, Enabled = true });
+                }
+            }
+
+            var profileOccurrences = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var uniqueAssignments = new List<StrikeProfileAssignment>();
+            foreach (var assignment in assignments)
+            {
+                int occurrences;
+                if (profileOccurrences.TryGetValue(assignment.ProfileId, out occurrences))
+                {
+                    profileOccurrences[assignment.ProfileId] = occurrences + 1;
+                }
+                else
+                {
+                    profileOccurrences[assignment.ProfileId] = 1;
+                    uniqueAssignments.Add(assignment);
+                }
+            }
+            assignments = uniqueAssignments;
+
+            StrikeProfileAssignment selected = null;
+            foreach (var assignment in assignments)
+            {
+                if (selected == null || string.Equals(assignment.ProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase))
+                {
+                    selected = assignment;
+                }
+                if (string.Equals(assignment.ProfileId, requestedProfileId, StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+            }
+
+            DestroyStrikeUi(player);
+            var container = new CuiElementContainer();
+            var root = container.Add(new CuiPanel
+            {
+                CursorEnabled = true,
+                Image = { Color = "0.04 0.05 0.06 0.97" },
+                RectTransform = { AnchorMin = "0.20 0.13", AnchorMax = "0.80 0.87" }
+            }, "Hud.Menu", StrikeUiName);
+
+            AddUiLabel(container, root, strike.DisplayName, 20, TextAnchor.MiddleLeft, "0.05 0.90", "0.70 0.98", "1 0.88 0.70 1");
+            AddUiLabel(container, root, "TIER " + strike.Tier + "   |   " + GetFinalRPCost(player, strike) + " RP   |   " + FormatAcceptedTargetTypes(strike), 11, TextAnchor.MiddleLeft, "0.05 0.845", "0.82 0.90", "0.72 0.79 0.83 1");
+            AddUiButton(container, root, "X", "portableairstrikes.ui.close", "0.92 0.91", "0.98 0.98", "0.50 0.12 0.10 0.95", 14);
+
+            AddUiLabel(container, root,
+                "Warning " + FormatSeconds(GetWarningDelaySeconds(strike))
+                + "     Player cooldown " + FormatSeconds(strike.CooldownPerPlayerSeconds)
+                + "     Clan cooldown " + FormatSeconds(strike.CooldownPerClanSeconds)
+                + (strike.GlobalCooldownSeconds > 0f ? "     Global cooldown " + FormatSeconds(strike.GlobalCooldownSeconds) : ""),
+                10, TextAnchor.MiddleLeft, "0.05 0.79", "0.95 0.84", "0.70 0.76 0.80 1");
+
+            if (assignments.Count > 0)
+            {
+                AddProfileDetailTabs(container, root, strike, assignments, profileOccurrences, selected, returnTier);
+                VisualProfileConfig profile;
+                if (selected != null && TryGetVisualProfileById(selected.ProfileId, out profile))
+                {
+                    AddUiLabel(container, root, BuildProfileCombatSummary(strike, selected, profile, profileOccurrences[selected.ProfileId]), 11, TextAnchor.UpperLeft, "0.06 0.22", "0.94 0.67", "0.84 0.88 0.91 1");
+                }
+                else
+                {
+                    AddUiLabel(container, root, "This strike profile is not currently loaded.", 12, TextAnchor.MiddleCenter, "0.08 0.39", "0.92 0.56", "1 0.55 0.45 1");
+                }
+            }
+            else
+            {
+                AddUiLabel(container, root, BuildFallbackStrikeCombatSummary(strike), 11, TextAnchor.UpperLeft, "0.06 0.22", "0.94 0.70", "0.84 0.88 0.91 1");
+            }
+
+            var hasPermission = string.IsNullOrWhiteSpace(strike.PermissionRequired)
+                || permission.UserHasPermission(player.UserIDString, strike.PermissionRequired)
+                || IsAdmin(player);
+            var validation = hasPermission ? ValidateStrikeCall(player, strike.Id) : null;
+            var usable = hasPermission && validation != null && validation.Success;
+            AddUiButton(container, root, "BACK TO TIER " + returnTier, "portableairstrikes.ui.tier " + returnTier, "0.05 0.07", "0.35 0.15", "0.18 0.28 0.34 0.95", 11);
+            if (usable)
+            {
+                AddUiButton(container, root, "SELECT STRIKE", "portableairstrikes.ui.select " + strike.Id, "0.65 0.07", "0.95 0.15", "0.54 0.12 0.08 0.95", 12);
+            }
+            else
+            {
+                AddUiLabel(container, root, hasPermission && validation != null ? validation.UserMessage : "LOCKED", 10, TextAnchor.MiddleRight, "0.38 0.07", "0.95 0.15", "1 0.55 0.45 1");
+            }
+
+            RegisterUiBridge(player, StrikeUiName, true);
+            CuiHelper.AddUi(player, container);
+            ArmUiBridge(player, StrikeUiName, 0.5f);
+        }
+
+        private void AddProfileDetailTabs(CuiElementContainer container, string root, StrikeDefinition strike, List<StrikeProfileAssignment> assignments, Dictionary<string, int> profileOccurrences, StrikeProfileAssignment selected, int returnTier)
+        {
+            const float left = 0.05f;
+            const float right = 0.95f;
+            const float gap = 0.006f;
+            var width = ((right - left) - gap * Math.Max(0, assignments.Count - 1)) / Math.Max(1, assignments.Count);
+            for (var i = 0; i < assignments.Count; i++)
+            {
+                var assignment = assignments[i];
+                var xMin = left + i * (width + gap);
+                var xMax = xMin + width;
+                var isSelected = selected != null && string.Equals(selected.ProfileId, assignment.ProfileId, StringComparison.OrdinalIgnoreCase);
+                var occurrences = profileOccurrences != null && profileOccurrences.ContainsKey(assignment.ProfileId) ? profileOccurrences[assignment.ProfileId] : 1;
+                var label = HumanizeAirstrikeId(assignment.ProfileId) + (occurrences > 1 ? " x" + occurrences : "");
+                AddUiButton(container, root, ShortenAdminText(label, 20),
+                    "portableairstrikes.ui.details " + strike.Id + " " + returnTier + " " + assignment.ProfileId,
+                    FormatUiFloat(xMin) + " 0.70", FormatUiFloat(xMax) + " 0.765",
+                    isSelected ? "0.64 0.19 0.10 0.98" : "0.15 0.18 0.20 0.95", assignments.Count > 5 ? 9 : 10);
+            }
+        }
+
+        private string BuildProfileCombatSummary(StrikeDefinition strike, StrikeProfileAssignment assignment, VisualProfileConfig profile, int profileOccurrences)
+        {
+            var payloads = BuildProfilePayloadUiStats(strike, assignment, profile);
+            var builder = new StringBuilder();
+            builder.Append("DELIVERY PROFILE\n");
+            builder.Append(HumanizeAirstrikeId(assignment.ProfileId));
+            if (profileOccurrences > 1) builder.Append(" x").Append(profileOccurrences);
+            builder.Append("   |   ")
+                .Append(HumanizeAirstrikeId(profile.Vehicle)).Append(" carrier   |   ")
+                .Append(FormatSeconds(profile.DurationSeconds)).Append(" flight");
+            if (assignment.StartDelaySeconds > 0f)
+            {
+                builder.Append("   |   starts +").Append(FormatSeconds(assignment.StartDelaySeconds));
+            }
+            if (assignment.PayloadCountLimit > 0)
+            {
+                builder.Append("   |   payload cap ").Append(assignment.PayloadCountLimit);
+            }
+            builder.Append("\n\nORDNANCE\n");
+            if (payloads.Count == 0)
+            {
+                builder.Append("No authored ordnance details are available.");
+            }
+            else
+            {
+                foreach (var stats in payloads)
+                {
+                    builder.Append("- ").Append(GetPlayerPayloadName(stats.Payload)).Append(" x").Append(stats.Count * Math.Max(1, profileOccurrences)).Append("\n  ");
+                    builder.Append("Accuracy ").Append(FormatUiRange(stats.MinAccuracy, stats.MaxAccuracy, "%"));
+                    builder.Append("   Spread ").Append(FormatUiRange(stats.MinSpread, stats.MaxSpread, "m"));
+                    builder.Append("   Damage ").Append(FormatUiMultiplierRange(stats.MinDamage, stats.MaxDamage));
+                    builder.Append("   Vehicle ").Append(FormatUiMultiplierRange(stats.MinVehicleDamage, stats.MaxVehicleDamage));
+                    if (stats.MaxSplash >= 0f) builder.Append("   Splash ").Append(FormatFloat(stats.MaxSplash)).Append("m");
+                    if (stats.MaxImpact >= 0f) builder.Append("   Impact ").Append(FormatFloat(stats.MaxImpact)).Append("m");
+                    if (stats.MaxTrackingSeconds >= 0f) builder.Append("   Tracks ").Append(FormatSeconds(stats.MaxTrackingSeconds));
+                    if (stats.MaxTrackingDistance >= 0f) builder.Append(" / ").Append(FormatMeters(stats.MaxTrackingDistance));
+                    builder.Append("\n");
+                }
+            }
+            builder.Append("\nTarget offsets, carrier hardpoints, prefab paths, and editor-only values are intentionally hidden.");
+            return builder.ToString();
+        }
+
+        private List<ProfilePayloadUiStats> BuildProfilePayloadUiStats(StrikeDefinition strike, StrikeProfileAssignment assignment, VisualProfileConfig profile)
+        {
+            var result = new List<ProfilePayloadUiStats>();
+            var remaining = assignment != null && assignment.PayloadCountLimit > 0 ? assignment.PayloadCountLimit : int.MaxValue;
+            if (profile.GeneratedReleaseGroups != null && profile.GeneratedReleaseGroups.Count > 0)
+            {
+                foreach (var group in profile.GeneratedReleaseGroups)
+                {
+                    if (group != null) AddProfilePayloadUiEvent(result, group.Template, group.MaximumUnits, strike, ref remaining);
+                }
+                if (profile.PayloadEvents != null)
+                {
+                    foreach (var payloadEvent in profile.PayloadEvents) AddProfilePayloadUiEvent(result, payloadEvent, payloadEvent == null ? 0 : Math.Max(1, payloadEvent.Count), strike, ref remaining);
+                }
+            }
+            else if (profile.CompiledReleaseEvents != null && profile.CompiledReleaseEvents.Count > 0)
+            {
+                foreach (var payloadEvent in profile.CompiledReleaseEvents) AddProfilePayloadUiEvent(result, payloadEvent, payloadEvent == null ? 0 : Math.Max(1, payloadEvent.Count), strike, ref remaining);
+            }
+            else if (string.Equals(profile.PayloadReleaseMode, "generated", StringComparison.OrdinalIgnoreCase))
+            {
+                var count = profile.MaxPayloadCount > 0 ? profile.MaxPayloadCount : Math.Max(1, profile.ReleaseTemplate == null ? 1 : profile.ReleaseTemplate.Count);
+                AddProfilePayloadUiEvent(result, profile.ReleaseTemplate, count, strike, ref remaining);
+            }
+            else if (profile.PayloadEvents != null && profile.PayloadEvents.Count > 0)
+            {
+                foreach (var payloadEvent in profile.PayloadEvents) AddProfilePayloadUiEvent(result, payloadEvent, payloadEvent == null ? 0 : Math.Max(1, payloadEvent.Count), strike, ref remaining);
+            }
+            else
+            {
+                AddProfilePayloadUiEvent(result, null, GetFallbackPayloadCount(strike, strike.Payload), strike, ref remaining);
+            }
+            return result;
+        }
+
+        private void AddProfilePayloadUiEvent(List<ProfilePayloadUiStats> result, VisualPayloadEvent payloadEvent, int count, StrikeDefinition strike, ref int remaining)
+        {
+            if (count <= 0 || remaining <= 0) return;
+            count = Math.Min(count, remaining);
+            remaining -= count;
+            var payload = GetReleasePayload(payloadEvent, strike == null ? "" : strike.Payload);
+            ProfilePayloadUiStats stats = null;
+            foreach (var existing in result)
+            {
+                if (string.Equals(existing.Payload, payload, StringComparison.OrdinalIgnoreCase)) { stats = existing; break; }
+            }
+            if (stats == null)
+            {
+                stats = new ProfilePayloadUiStats { Payload = payload };
+                result.Add(stats);
+            }
+            stats.Count += count;
+            var accuracy = payloadEvent == null ? strike.AccuracyPercent : payloadEvent.AccuracyPercent;
+            var spread = payloadEvent == null || payloadEvent.SpreadRadius < 0f ? strike.SpreadRadius : payloadEvent.SpreadRadius;
+            var damage = (payloadEvent == null ? 1f : payloadEvent.DamageScale) * strike.DamageMultiplier;
+            var vehicle = payloadEvent == null || payloadEvent.VehicleDamageScale < 0f ? strike.VehicleDamageScale : payloadEvent.VehicleDamageScale;
+            vehicle *= strike.VehicleDamageMultiplier;
+            stats.MinAccuracy = Math.Min(stats.MinAccuracy, accuracy); stats.MaxAccuracy = Math.Max(stats.MaxAccuracy, accuracy);
+            stats.MinSpread = Math.Min(stats.MinSpread, spread); stats.MaxSpread = Math.Max(stats.MaxSpread, spread);
+            stats.MinDamage = Math.Min(stats.MinDamage, damage); stats.MaxDamage = Math.Max(stats.MaxDamage, damage);
+            stats.MinVehicleDamage = Math.Min(stats.MinVehicleDamage, vehicle); stats.MaxVehicleDamage = Math.Max(stats.MaxVehicleDamage, vehicle);
+            if (payloadEvent != null)
+            {
+                stats.MaxSplash = Math.Max(stats.MaxSplash, payloadEvent.SplashRadius);
+                stats.MaxImpact = Math.Max(stats.MaxImpact, payloadEvent.ImpactRadius);
+                stats.MaxTrackingSeconds = Math.Max(stats.MaxTrackingSeconds, payloadEvent.MaxTrackingSeconds);
+                stats.MaxTrackingDistance = Math.Max(stats.MaxTrackingDistance, payloadEvent.MaxTrackingDistance);
+            }
+        }
+
+        private string BuildFallbackStrikeCombatSummary(StrikeDefinition strike)
+        {
+            return "DELIVERY\n" + HumanizeAirstrikeId(strike.Delivery) + "\n\nORDNANCE\n- " + GetPlayerPayloadName(strike.Payload) + " x" + GetFallbackPayloadCount(strike, strike.Payload)
+                + "\n  Accuracy " + FormatFloat(strike.AccuracyPercent) + "%   Spread " + FormatFloat(strike.SpreadRadius) + "m   Damage x" + FormatFloat(strike.DamageMultiplier)
+                + "   Vehicle x" + FormatFloat(strike.VehicleDamageScale * strike.VehicleDamageMultiplier);
+        }
+
+        private string GetPlayerPayloadName(string payload)
+        {
+            DronePayloadSpec drone; if (TryGetDronePayloadSpec(payload, out drone)) return HumanizeAirstrikeId(drone.DisplayName);
+            HeavyDropPayloadSpec heavy; if (TryGetHeavyDropPayloadSpec(payload, out heavy)) return HumanizeAirstrikeId(heavy.DisplayName);
+            RocketRunPayloadSpec rocket; if (TryGetRocketPayloadSpec(payload, out rocket)) return HumanizeAirstrikeId(rocket.DisplayName);
+            MlrsPayloadSpec mlrs; if (TryGetMlrsPayloadSpec(payload, out mlrs)) return HumanizeAirstrikeId(mlrs.DisplayName);
+            HomingMissileSpec homing; if (TryGetHomingMissileSpec(payload, out homing)) return HumanizeAirstrikeId(homing.DisplayName);
+            MortarPayloadSpec mortar; if (TryGetMortarPayloadSpec(payload, out mortar)) return HumanizeAirstrikeId(mortar.DisplayName);
+            A10StrafeSpec a10; if (TryGetA10StrafeSpec(payload, out a10)) return HumanizeAirstrikeId(a10.DisplayName);
+            return HumanizeAirstrikeId(payload);
+        }
+
+        private string HumanizeAirstrikeId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "Unknown";
+            var words = value.Trim().Replace('_', ' ').Replace('-', ' ').Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i < words.Length; i++)
+            {
+                var upper = words[i].ToUpperInvariant();
+                if (upper == "A10" || upper == "MLRS" || upper == "HE" || upper == "HV" || upper == "F1" || upper == "SAM" || upper == "RP") words[i] = upper;
+                else words[i] = char.ToUpperInvariant(words[i][0]) + words[i].Substring(1).ToLowerInvariant();
+            }
+            return string.Join(" ", words);
+        }
+
+        private string FormatUiRange(float min, float max, string suffix)
+        {
+            if (min == float.MaxValue || max == float.MinValue) return "n/a";
+            return Math.Abs(max - min) < 0.01f ? FormatFloat(min) + suffix : FormatFloat(min) + "-" + FormatFloat(max) + suffix;
+        }
+
+        private string FormatUiMultiplierRange(float min, float max)
+        {
+            return "x" + FormatUiRange(min, max, "");
+        }
+
+        private void AddStrikeRowOffset(CuiElementContainer container, string parent, BasePlayer player, StrikeDefinition strike, int selectedTier, float topOffset, float bottomOffset)
         {
             var hasPermission = string.IsNullOrWhiteSpace(strike.PermissionRequired)
                 || permission.UserHasPermission(player.UserIDString, strike.PermissionRequired)
@@ -15645,17 +16849,18 @@ namespace Oxide.Plugins
                 }
             }, parent);
 
-            AddUiLabel(container, row, strike.DisplayName, 12, TextAnchor.MiddleLeft, "0.03 0.48", "0.50 0.92", usable ? "1 1 1 1" : "0.70 0.70 0.70 1");
-            AddUiLabel(container, row, strike.Id + "   T" + strike.Tier + "   " + GetFinalRPCost(player, strike) + " RP", 10, TextAnchor.MiddleLeft, "0.03 0.08", "0.54 0.46", "0.68 0.75 0.78 1");
+            AddUiLabel(container, row, strike.DisplayName, 13, TextAnchor.MiddleLeft, "0.025 0.51", "0.54 0.92", usable ? "1 1 1 1" : "0.70 0.70 0.70 1");
+            AddUiLabel(container, row, strike.Id + "   " + GetFinalRPCost(player, strike) + " RP   " + FormatAcceptedTargetTypes(strike), 10, TextAnchor.MiddleLeft, "0.025 0.10", "0.58 0.48", "0.68 0.75 0.78 1");
+            AddUiButton(container, row, "DETAILS", "portableairstrikes.ui.details " + strike.Id + " " + selectedTier, "0.59 0.20", "0.75 0.80", "0.19 0.29 0.35 0.95", 10);
 
             var status = !hasPermission ? "LOCKED" : usable ? "SELECT" : validation.UserMessage;
             if (usable)
             {
-                AddUiButton(container, row, status, "portableairstrikes.ui.select " + strike.Id, "0.72 0.18", "0.96 0.82", "0.54 0.12 0.08 0.95", 11);
+                AddUiButton(container, row, status, "portableairstrikes.ui.select " + strike.Id, "0.78 0.20", "0.97 0.80", "0.54 0.12 0.08 0.95", 11);
             }
             else
             {
-                AddUiLabel(container, row, status, 10, TextAnchor.MiddleRight, "0.46 0.16", "0.96 0.84", "1 0.55 0.45 1");
+                AddUiLabel(container, row, status, 10, TextAnchor.MiddleRight, "0.77 0.16", "0.97 0.84", "1 0.55 0.45 1");
             }
         }
 
@@ -18142,9 +19347,9 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            if (file.SchemaVersion != 1 && file.SchemaVersion != 2)
+            if (file.SchemaVersion != 1 && file.SchemaVersion != 2 && file.SchemaVersion != 3)
             {
-                error = "SchemaVersion must be 1 or 2.";
+                error = "SchemaVersion must be 1, 2, or 3.";
                 return false;
             }
 
@@ -18197,6 +19402,19 @@ namespace Oxide.Plugins
                     motionModes[profileId] = "legacy-v1";
                 }
 
+                List<GeneratedReleaseGroup> compactGroups = null;
+                string compactError = "";
+                if (file.SchemaVersion >= 3 && TryValidateGeneratedReleaseGroups(entry.Value, out compactGroups, out compactError))
+                {
+                    releaseModes[profileId] = "generated-v3";
+                    continue;
+                }
+                if (entry.Value.GeneratedReleaseGroups != null && entry.Value.GeneratedReleaseGroups.Count > 0)
+                {
+                    error = compactError;
+                    return false;
+                }
+
                 List<VisualPayloadEvent> compiledEvents = null;
                 string compiledReleaseError = "";
                 if (file.SchemaVersion >= 2 && TryValidateCompiledReleaseEvents(entry.Value, out compiledEvents, out compiledReleaseError))
@@ -18247,13 +19465,13 @@ namespace Oxide.Plugins
             }
 
             var releaseMode = (profile.PayloadReleaseMode ?? "").Trim().ToLowerInvariant();
-            if (releaseMode != "manual" && releaseMode != "generated")
+            if (releaseMode != "manual" && releaseMode != "generated" && releaseMode != "mixed")
             {
-                error = path + ".PayloadReleaseMode must be manual or generated.";
+                error = path + ".PayloadReleaseMode must be manual, generated, or mixed.";
                 return false;
             }
 
-            if (profile.MaxPayloadCount < 0 || profile.MaxPayloadCount > 200
+            if (profile.MaxPayloadCount < 0 || profile.MaxPayloadCount > MaxPayloadUnitsPerProfile
                 || !IsFinite(profile.PayloadReleaseIntervalSeconds) || profile.PayloadReleaseIntervalSeconds <= 0f || profile.PayloadReleaseIntervalSeconds > 30f)
             {
                 error = path + " has invalid release-count or interval settings.";
@@ -18453,6 +19671,63 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private bool TryValidateGeneratedReleaseGroups(VisualProfileConfig profile, out List<GeneratedReleaseGroup> groups, out string error)
+        {
+            groups = profile == null ? null : profile.GeneratedReleaseGroups;
+            error = "";
+            if (groups == null || groups.Count == 0) return false;
+            if (groups.Count > 40)
+            {
+                error = "GeneratedReleaseGroups exceeds the 40 group limit.";
+                return false;
+            }
+            var total = 0;
+            for (var index = 0; index < groups.Count; index++)
+            {
+                var group = groups[index];
+                var path = "GeneratedReleaseGroups[" + index + "]";
+                if (group == null
+                    || !IsFiniteInRange(group.StartTime, 0f, profile.DurationSeconds)
+                    || !IsFiniteInRange(group.IntervalSeconds, 0.001f, 30f)
+                    || !IsFiniteInRange(group.UnitIntervalSeconds, 0f, 30f)
+                    || group.UnitsPerRelease < 1 || group.UnitsPerRelease > 200
+                    || group.MaximumUnits < 1 || group.MaximumUnits > MaxPayloadUnitsPerProfile
+                    || (group.UnitsPerRelease * group.UnitIntervalSeconds) > group.IntervalSeconds + 0.0001f
+                    || GetGeneratedGroupUnitTime(group, group.MaximumUnits - 1) > profile.DurationSeconds + 0.0001f
+                    || !TryValidatePayloadEvent(group.Template, profile.DurationSeconds, false, true, path + ".Template", out error))
+                {
+                    if (string.IsNullOrWhiteSpace(error)) error = path + " contains invalid timing, count, or template data.";
+                    return false;
+                }
+                if (group.HardpointOffsets != null)
+                {
+                    foreach (var offset in group.HardpointOffsets)
+                    {
+                        if (offset == null || !IsFiniteInRange(offset.X, -250f, 250f)
+                            || !IsFiniteInRange(offset.Y, -250f, 250f) || !IsFiniteInRange(offset.Z, -250f, 250f))
+                        {
+                            error = path + ".HardpointOffsets contains an invalid offset.";
+                            return false;
+                        }
+                    }
+                }
+                total += group.MaximumUnits;
+            }
+            if (profile.PayloadEvents != null)
+            {
+                foreach (var entry in profile.PayloadEvents)
+                {
+                    total += entry == null ? 0 : Math.Max(1, entry.Count);
+                }
+            }
+            if (total > MaxPayloadUnitsPerProfile)
+            {
+                error = "Combined generated and manual release units exceed the " + MaxPayloadUnitsPerProfile + " unit limit.";
+                return false;
+            }
+            return true;
+        }
+
         private bool TryValidatePayloadEvent(VisualPayloadEvent payloadEvent, float duration, bool allowEmptyPayload, bool requirePerUnit, string path, out string error)
         {
             error = "";
@@ -18468,6 +19743,7 @@ namespace Oxide.Plugins
                 || !IsFiniteInRange(payloadEvent.TargetOffsetY, -500f, 500f)
                 || !IsFiniteInRange(payloadEvent.TargetOffsetZ, -500f, 500f)
                 || !IsValidOptionalFloat(payloadEvent.SpreadRadius, 0f, 250f)
+                || !IsFiniteInRange(payloadEvent.AccuracyPercent, 0f, 100f)
                 || !IsValidOptionalFloat(payloadEvent.LaunchSpeed, 0f, 500f)
                 || !IsValidOptionalFloat(payloadEvent.FuseSeconds, 0f, 120f)
                 || !IsFiniteInRange(payloadEvent.DamageScale, 0f, 10f)
@@ -18478,6 +19754,12 @@ namespace Oxide.Plugins
                 || !IsValidOptionalFloat(payloadEvent.MaxTrackingDistance, 0f, 3000f))
             {
                 error = path + " contains an invalid numeric value or count.";
+                return false;
+            }
+
+            if (!IsValidTargetingMode(payloadEvent.TargetingMode))
+            {
+                error = path + ".TargetingMode must be 'simple' or 'advanced'.";
                 return false;
             }
 
@@ -18541,6 +19823,22 @@ namespace Oxide.Plugins
                 case "hv_rocket":
                 case "rocket":
                 case "incendiary_rocket":
+                case "patrol_heli_gun":
+                case "patrol_heli_rocket":
+                case "patrol_heli_rocket_airburst":
+                case "patrol_heli_rocket_napalm":
+                case "bradley_coax_gun":
+                case "bradley_main_cannon":
+                case "autoturret_gun":
+                case "flame_turret_fireball":
+                case "sam_rocket":
+                case "cannon_ball":
+                case "catapult_boulder":
+                case "ballista_hammerhead":
+                case "ballista_incendiary":
+                case "ballista_piercer":
+                case "ballista_pitchfork":
+                case "torpedo":
                 case "mortar_he_payload":
                 case "mortar_frag_payload":
                 case "bradley_longbarrel_burst":
@@ -18649,7 +19947,7 @@ namespace Oxide.Plugins
             profile.FirstPayloadDelaySeconds = Mathf.Clamp(profile.FirstPayloadDelaySeconds < 0f ? 0f : profile.FirstPayloadDelaySeconds, 0f, profile.DurationSeconds);
             profile.RotationSmoothTimeSeconds = Mathf.Clamp(profile.RotationSmoothTimeSeconds <= 0f ? 0.12f : profile.RotationSmoothTimeSeconds, MinimumVisualRotationSmoothTimeSeconds, 2f);
             profile.PayloadReleaseMode = NormalizePayloadReleaseMode(profile.PayloadReleaseMode);
-            profile.MaxPayloadCount = Mathf.Clamp(profile.MaxPayloadCount, 0, 200);
+            profile.MaxPayloadCount = Mathf.Clamp(profile.MaxPayloadCount, 0, MaxPayloadUnitsPerProfile);
             profile.PayloadReleaseIntervalSeconds = Mathf.Clamp(profile.PayloadReleaseIntervalSeconds <= 0f ? DefaultPayloadReleaseIntervalSeconds : profile.PayloadReleaseIntervalSeconds, 0.01f, 30f);
             if (profile.ReleaseTemplate == null)
             {
@@ -18735,6 +20033,8 @@ namespace Oxide.Plugins
             payloadEvent.TargetOffsetY = Mathf.Clamp(payloadEvent.TargetOffsetY, -500f, 500f);
             payloadEvent.TargetOffsetZ = Mathf.Clamp(payloadEvent.TargetOffsetZ, -500f, 500f);
             payloadEvent.SpreadRadius = ClampOptional(payloadEvent.SpreadRadius, 0f, 250f);
+            payloadEvent.TargetingMode = NormalizeTargetingMode(payloadEvent.TargetingMode);
+            payloadEvent.AccuracyPercent = Mathf.Clamp(payloadEvent.AccuracyPercent, 0f, 100f);
             payloadEvent.LaunchSpeed = ClampOptional(payloadEvent.LaunchSpeed, 1f, 350f);
             payloadEvent.FuseSeconds = ClampOptional(payloadEvent.FuseSeconds, 0f, 120f);
             payloadEvent.DamageScale = NormalizeDamageScale(payloadEvent.DamageScale);
@@ -18784,9 +20084,8 @@ namespace Oxide.Plugins
 
         private string NormalizePayloadReleaseMode(string mode)
         {
-            return string.Equals((mode ?? "").Trim(), "generated", StringComparison.OrdinalIgnoreCase)
-                ? "generated"
-                : "manual";
+            var normalized = (mode ?? "").Trim().ToLowerInvariant();
+            return normalized == "generated" || normalized == "mixed" ? normalized : "manual";
         }
 
         private string NormalizePayloadId(string payload)
@@ -19505,8 +20804,9 @@ namespace Oxide.Plugins
             strike.BaseCount = Math.Max(1, strike.BaseCount);
             strike.MaxCount = Math.Max(strike.BaseCount, strike.MaxCount);
             strike.SpreadRadius = Mathf.Clamp(strike.SpreadRadius, 0f, 250f);
+            strike.AccuracyPercent = Mathf.Clamp(strike.AccuracyPercent, 0f, 100f);
             strike.SpreadMultiplier = NormalizePositiveMultiplier(strike.SpreadMultiplier);
-            strike.BurstCount = Mathf.Clamp(strike.BurstCount, 0, 80);
+            strike.BurstCount = Mathf.Clamp(strike.BurstCount, 0, MaxConfiguredA10BurstCount);
             strike.LineLength = Mathf.Clamp(strike.LineLength, 0f, 200f);
             strike.LineLengthMultiplier = NormalizePositiveMultiplier(strike.LineLengthMultiplier);
             strike.Width = Mathf.Clamp(strike.Width, 0f, 50f);
@@ -19916,7 +21216,7 @@ namespace Oxide.Plugins
                 DisplayName = "A-10 BRRRRT Run",
                 TargetType = "ground_ping",
                 Delivery = "a10_gun_run",
-                Payload = "bradley_longbarrel_burst",
+                Payload = "patrol_heli_gun",
                 Tier = 3,
                 RPCost = 1000,
                 PermissionRequired = "portableairstrikes.use.a10",

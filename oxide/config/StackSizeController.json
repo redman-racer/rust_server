@@ -1281,7 +1281,8 @@
     "raidlands.vehicle.token.solo_submarine": 100,
     "raidlands.vehicle.token.duo_submarine": 100,
     "raidlands.vehicle.token.snowmobile": 100,
-    "raidlands.vehicle.token.hot_air_balloon": 100
+    "raidlands.vehicle.token.hot_air_balloon": 100,
+    "raidlands.scientist.sentry": 5
   },
   "VersionNumber": {
     "Major": 4,

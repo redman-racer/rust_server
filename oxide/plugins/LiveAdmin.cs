@@ -1868,21 +1868,6 @@ if (field == "interval")
 config.AutoWipeIntervalDays = Math.Max(1, Math.Min(365, ToInt(value, config.AutoWipeIntervalDays)));
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 }
-[ConsoleCommand("liveadmin.managefield")]
-private void ManageFieldCommand(ConsoleSystem.Arg arg)
-{
-var player = arg.Player();
-if (player == null || !CanManageStaffGroups(player)) return;
-var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
-if (args.Length == 0) return;
-var state = GetState(player);
-var field = args[0].ToLowerInvariant();
-var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : string.Empty;
-if (field == "groupname") state.GroupCreateName = value.ToLowerInvariant();
-else if (field == "grouptitle") state.GroupCreateTitle = value;
-else if (field == "grouprank") state.GroupCreateRank = value;
-Draw(player);
-}
 else if (field == "cadence")
 {
 var cadence = NormalizeWipeCadence(value, config.AutoWipeUseWeeklySchedule);
@@ -2011,6 +1996,21 @@ NormalizeConfigLists();
 SaveConfig();
 SaveData();
 RefreshWipeViews(player);
+}
+[ConsoleCommand("liveadmin.managefield")]
+private void ManageFieldCommand(ConsoleSystem.Arg arg)
+{
+var player = arg.Player();
+if (player == null || !CanManageStaffGroups(player)) return;
+var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
+if (args.Length == 0) return;
+var state = GetState(player);
+var field = args[0].ToLowerInvariant();
+var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : string.Empty;
+if (field == "groupname") state.GroupCreateName = value.ToLowerInvariant();
+else if (field == "grouptitle") state.GroupCreateTitle = value;
+else if (field == "grouprank") state.GroupCreateRank = value;
+Draw(player);
 }
 [ConsoleCommand("liveadmin.registerperms")]
 private void RegisterPermsCommand(ConsoleSystem.Arg arg)
@@ -5260,7 +5260,7 @@ if (elapsed > 0) cpu = (float)Math.Max(0, Math.Min(GetCpuLimitPercent(), cpuMs /
 lastResourceSampleAt = now;
 lastCpuTime = currentProcess.TotalProcessorTime;
 var memory = currentProcess.WorkingSet64 / 1024f / 1024f;
-var disk = GetServerFolderSizeGiB();
+var disk = GetDiskUsedGiB();
 resourceHistory.Add(new ResourceSnapshot { Cpu = cpu, MemoryMb = memory, StorageUsed = disk, DiskGiB = disk, Time = Now() });
 if (resourceHistory.Count > 60) resourceHistory.RemoveRange(0, resourceHistory.Count - 60);
 if (refreshDashboard && (now - lastDashboardRefreshAt).TotalSeconds >= 30)
@@ -5356,7 +5356,6 @@ var root = Path.GetPathRoot(Interface.Oxide.RootDirectory);
 var drive = new DriveInfo(root);
 if (drive.TotalSize <= 0) return Math.Max(1f, resourceHistory.Count == 0 ? 1f : resourceHistory.Max(s => s.DiskGiB));
 var totalGiB = drive.TotalSize / 1024f / 1024f / 1024f;
-if (totalGiB > 500f && GetServerFolderSizeGiB() <= 50f) return 50f;
 return totalGiB;
 }
 catch
@@ -5364,7 +5363,7 @@ catch
 return Math.Max(1f, resourceHistory.Count == 0 ? 1f : resourceHistory.Max(s => s.DiskGiB));
 }
 }
-private float GetServerFolderSizeGiB()
+private float GetDiskUsedGiB()
 {
 try
 {
@@ -5373,18 +5372,10 @@ if ((DateTime.UtcNow - lastDiskSampleAt).TotalSeconds < 5)
 return cachedDiskGiB;
 }
 var root = Path.GetFullPath(Interface.Oxide.RootDirectory);
-long total = 0;
-foreach (var file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
-{
-try
-{
-total += new FileInfo(file).Length;
-}
-catch
-{
-}
-}
-cachedDiskGiB = total / 1024f / 1024f / 1024f;
+var driveRoot = Path.GetPathRoot(root);
+var drive = new DriveInfo(driveRoot);
+var usedBytes = Math.Max(0L, drive.TotalSize - drive.AvailableFreeSpace);
+cachedDiskGiB = usedBytes / 1024f / 1024f / 1024f;
 lastDiskSampleAt = DateTime.UtcNow;
 return cachedDiskGiB;
 }

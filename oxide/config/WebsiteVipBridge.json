@@ -55,7 +55,7 @@
   "KitSyncEnabled": true,
   "KitSyncIntervalSeconds": 180,
   "PermissionSyncEnabled": true,
-  "PermissionSyncIntervalSeconds": 180,
+  "PermissionSyncIntervalSeconds": 600,
   "PermissionSnapshotDebounceSeconds": 10,
   "PermissionSnapshotSettledDelaySeconds": 120,
   "KitDataBackupCount": 8,

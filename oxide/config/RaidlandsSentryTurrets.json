@@ -3,6 +3,14 @@
   "Sentry Item": {
     "Shortname": "autoturret",
     "Display Name": "Outpost Sentry Turret",
+    "Use Custom Item Definition": true,
+    "Allow Vanilla Fallback If Custom Item Definition Is Missing": true,
+    "Custom Shortname": "raidlands.scientist.sentry",
+    "Custom Item ID": -395118448,
+    "Icon File ID": 0,
+    "Icon PNG Data Path": "RaidlandsSentryTurrets/scientist-turret.png",
+    "Default Description": "Deploys a player-owned Scientist Sentry Turret.",
+    "Maximum Stack Size": 5,
     "Skin": 0,
     "Require Display Name Match": true
   },

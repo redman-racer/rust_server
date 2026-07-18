@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.6.2")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.8.1")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -23,6 +23,7 @@ namespace Oxide.Plugins
         private Timer syncTimer;
         private Timer statsTimer;
         private Timer pendingStatsTimer;
+        private Timer pendingRaidStatsSaveTimer;
         private Timer statusHeartbeatTimer;
         private Timer pendingStatusHeartbeatTimer;
         private Timer kitSyncTimer;
@@ -46,11 +47,13 @@ namespace Oxide.Plugins
         private const string RpPointDataFile = "WebsiteVipBridge/rp_point_requests";
         private const string DeletedGroupsDataFile = "WebsiteVipBridge/deleted_groups";
         private const string StorefrontOverridesDataFile = "WebsiteVipBridge/storefront_overrides";
+        private const string RaidStatsDataFile = "WebsiteVipBridge/raid_stats";
         private string secretsConfigSource;
         private RpPurchaseLedger rpPurchaseData;
         private RpPointLedger rpPointData;
         private DeletedGroupState deletedGroupState;
         private StorefrontOverrideState storefrontOverrideState;
+        private RaidStatsState raidStatsState;
         private bool rpPurchasePollInFlight;
         private bool rpPointPollInFlight;
         private readonly HashSet<string> rpResultPostsInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -59,6 +62,10 @@ namespace Oxide.Plugins
         private DateTime heatmapWindowStartedAt = DateTime.UtcNow;
         private DateTime lastHeatmapSyncAt = DateTime.MinValue;
         private bool heatmapEndpointMissing;
+        private DateTime lastStatsSyncAt = DateTime.MinValue;
+        private DateTime lastStatsSyncAttemptAt = DateTime.MinValue;
+        private string lastStatsSyncError = "";
+        private readonly Dictionary<string, DateTime> raidAttackDedup = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private bool isUnloading;
 
         [PluginReference]
@@ -290,11 +297,12 @@ namespace Oxide.Plugins
             public int StatsSyncIntervalSeconds = 300;
             public int StatsDebounceSeconds = 30;
             public int StatsBotSnapshotLimit = 0;
-            public bool BrandConfigSyncEnabled = false;
+            public bool RaidStatsEnabled = true;
+            public int RaidStatsSaveDebounceSeconds = 5;
+            public int RaidStatsAttackDedupSeconds = 15;
             public bool HeatmapEnabled = false;
             public int HeatmapSyncIntervalSeconds = 300;
             public int HeatmapBucketSize = 100;
-            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> HeatmapMetrics = new List<string>
             {
                 "player_deaths",
@@ -316,11 +324,10 @@ namespace Oxide.Plugins
             public bool KitSyncEnabled = true;
             public int KitSyncIntervalSeconds = 180;
             public bool PermissionSyncEnabled = true;
-            public int PermissionSyncIntervalSeconds = 180;
+            public int PermissionSyncIntervalSeconds = 600;
             public int PermissionSnapshotDebounceSeconds = 10;
             public int PermissionSnapshotSettledDelaySeconds = 120;
             public int KitDataBackupCount = 8;
-            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> KitPermissionManagedGroups = new List<string>
             {
                 "default",
@@ -340,7 +347,6 @@ namespace Oxide.Plugins
                 "claim_discord_member",
                 "claim_discord_booster"
             };
-            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> KitPermissionPrefixes = new List<string>
             {
                 "kits.",
@@ -348,7 +354,6 @@ namespace Oxide.Plugins
             };
             public string WipeKey = "";
             public string WipeStartedAt = "";
-            [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
             public List<string> ManagedGroups = new List<string>
             {
                 "rank_vip",
@@ -579,6 +584,7 @@ namespace Oxide.Plugins
             public string wipe_key;
             public string wipe_started_at;
             public string generated_at;
+            public bool bots_authoritative;
             public List<StatsPlayer> players = new List<StatsPlayer>();
             public List<StatsBot> bots = new List<StatsBot>();
         }
@@ -624,6 +630,67 @@ namespace Oxide.Plugins
             public int playtime_seconds;
             public int afk_seconds;
             public int reward_points;
+            public long raid_damage;
+            public long raid_damage_baseline;
+            public long rockets_used;
+            public long rockets_used_baseline;
+            public long c4_used;
+            public long c4_used_baseline;
+            public long satchels_used;
+            public long satchels_used_baseline;
+            public long explosive_ammo_used;
+            public long explosive_ammo_used_baseline;
+            public long tcs_destroyed;
+            public long tcs_destroyed_baseline;
+            public StatsAppearance appearance;
+        }
+
+        private class RaidCounters
+        {
+            public string display_name = "";
+            public long raid_damage;
+            public long rockets_used;
+            public long c4_used;
+            public long satchels_used;
+            public long explosive_ammo_used;
+            public long tcs_destroyed;
+
+            public RaidCounters Clone()
+            {
+                return new RaidCounters
+                {
+                    display_name = display_name ?? "",
+                    raid_damage = Math.Max(0L, raid_damage),
+                    rockets_used = Math.Max(0L, rockets_used),
+                    c4_used = Math.Max(0L, c4_used),
+                    satchels_used = Math.Max(0L, satchels_used),
+                    explosive_ammo_used = Math.Max(0L, explosive_ammo_used),
+                    tcs_destroyed = Math.Max(0L, tcs_destroyed)
+                };
+            }
+        }
+
+        private class RaidStatsState
+        {
+            public int schema_version = 1;
+            public string wipe_key = "";
+            public Dictionary<string, RaidCounters> players = new Dictionary<string, RaidCounters>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, RaidCounters> baselines = new Dictionary<string, RaidCounters>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class StatsAppearance
+        {
+            public string observed_at;
+            public List<StatsAppearanceItem> wear = new List<StatsAppearanceItem>();
+            public List<StatsAppearanceItem> belt_weapons = new List<StatsAppearanceItem>();
+            public StatsAppearanceItem active_weapon;
+        }
+
+        private class StatsAppearanceItem
+        {
+            public string slot;
+            public string shortname;
+            public string skin_id;
         }
 
         private class StatsBot
@@ -774,6 +841,16 @@ namespace Oxide.Plugins
                 config.StatsDebounceSeconds = defaults.StatsDebounceSeconds;
             }
 
+            if (config.RaidStatsSaveDebounceSeconds <= 0)
+            {
+                config.RaidStatsSaveDebounceSeconds = defaults.RaidStatsSaveDebounceSeconds;
+            }
+
+            if (config.RaidStatsAttackDedupSeconds <= 0)
+            {
+                config.RaidStatsAttackDedupSeconds = defaults.RaidStatsAttackDedupSeconds;
+            }
+
             if (config.HeatmapSyncIntervalSeconds <= 0)
             {
                 config.HeatmapSyncIntervalSeconds = defaults.HeatmapSyncIntervalSeconds;
@@ -880,10 +957,6 @@ namespace Oxide.Plugins
             }
 
             MergeStorefrontBundleDefaults(config.StorefrontBundles, defaults.StorefrontBundles);
-            config.HeatmapMetrics = DistinctConfigValues(config.HeatmapMetrics);
-            config.KitPermissionManagedGroups = DistinctConfigValues(config.KitPermissionManagedGroups);
-            config.KitPermissionPrefixes = DistinctConfigValues(config.KitPermissionPrefixes);
-            config.ManagedGroups = DistinctConfigValues(config.ManagedGroups);
             SaveConfig();
         }
 
@@ -892,33 +965,14 @@ namespace Oxide.Plugins
             Config.WriteObject(config, true);
         }
 
-        private static List<string> DistinctConfigValues(IEnumerable<string> values)
-        {
-            var result = new List<string>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var value in values ?? Enumerable.Empty<string>())
-            {
-                var normalized = (value ?? "").Trim();
-
-                if (normalized.Length > 0 && seen.Add(normalized))
-                {
-                    result.Add(normalized);
-                }
-            }
-
-            return result;
-        }
-
         private void OnServerInitialized()
         {
+            LoadRaidStats();
+            EnsureRaidStatsWipe(ResolveWipeKey(GetWipeStartedAt()));
             LoadDeletedGroupState();
             LoadStorefrontOverrides();
             EnsureManagedGroups(config.ManagedGroups);
-            if (config.BrandConfigSyncEnabled)
-            {
-                SyncBrandConfigs();
-            }
+            SyncBrandConfigs();
             LogBridgeSecretDiagnostics();
             SyncChanges();
             StartKitSync();
@@ -949,6 +1003,7 @@ namespace Oxide.Plugins
             syncTimer?.Destroy();
             statsTimer?.Destroy();
             pendingStatsTimer?.Destroy();
+            pendingRaidStatsSaveTimer?.Destroy();
             statusHeartbeatTimer?.Destroy();
             pendingStatusHeartbeatTimer?.Destroy();
             kitSyncTimer?.Destroy();
@@ -966,6 +1021,12 @@ namespace Oxide.Plugins
             SaveRpPointData();
             SaveDeletedGroupState();
             SaveStorefrontOverrides();
+            SaveRaidStats();
+        }
+
+        private void OnServerSave()
+        {
+            SaveRaidStats();
         }
 
         private void OnUserConnected(IPlayer player)
@@ -986,9 +1047,49 @@ namespace Oxide.Plugins
             QueueStatusHeartbeat();
         }
 
+        private void OnItemAddedToContainer(ItemContainer container, Item item)
+        {
+            QueueAppearanceStatsSync(container);
+        }
+
+        private void OnItemRemovedFromContainer(ItemContainer container, Item item)
+        {
+            QueueAppearanceStatsSync(container);
+        }
+
+        private void QueueAppearanceStatsSync(ItemContainer container)
+        {
+            var owner = container?.playerOwner;
+
+            if (owner == null || owner.inventory == null || !IsRealPlayerSteamId(owner.userID))
+            {
+                return;
+            }
+
+            if (container != owner.inventory.containerWear && container != owner.inventory.containerBelt)
+            {
+                return;
+            }
+
+            QueueStatsSync();
+        }
+
+        private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            TrackRaidDamage(entity, info);
+            return null;
+        }
+
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
         {
-            if (entity == null || !IsHeatmapEnabled())
+            if (entity == null)
+            {
+                return;
+            }
+
+            TrackDestroyedToolCupboard(entity, info);
+
+            if (!IsHeatmapEnabled())
             {
                 return;
             }
@@ -1290,27 +1391,37 @@ namespace Oxide.Plugins
             ReplyBridge(player, $"Status heartbeat enabled={config.StatusHeartbeatEnabled}, interval={interval}s, last success={last}. Current heartbeat requested.");
         }
 
-        [Command("websitevip.brand.status")]
-        private void BrandStatusCommand(IPlayer player, string command, string[] args)
+        [Command("websitevip.stats.sync")]
+        private void StatsSyncCommand(IPlayer player, string command, string[] args)
         {
             if (!CanRunBridgeCommand(player))
             {
                 return;
             }
 
-            ReplyBridge(player, $"Automatic brand config sync is {(config.BrandConfigSyncEnabled ? "enabled" : "disabled")}. SmartChatBot auto messages are never replaced by brand sync.");
+            SyncStatsSnapshot();
+            ReplyBridge(player, "Requested a signed player and raid stats snapshot.");
         }
 
-        [Command("websitevip.brand.sync")]
-        private void BrandSyncCommand(IPlayer player, string command, string[] args)
+        [Command("websitevip.stats.status")]
+        private void StatsStatusCommand(IPlayer player, string command, string[] args)
         {
             if (!CanRunBridgeCommand(player))
             {
                 return;
             }
 
-            var updated = SyncBrandConfigs();
-            ReplyBridge(player, $"Brand config sync completed; {updated} config file(s) changed.");
+            LoadRaidStats();
+            var wipeKey = ResolveWipeKey(GetWipeStartedAt());
+            EnsureRaidStatsWipe(wipeKey);
+            var last = lastStatsSyncAt == DateTime.MinValue
+                ? "never"
+                : lastStatsSyncAt.ToString("yyyy-MM-dd HH:mm:ss 'UTC'");
+            var error = string.IsNullOrWhiteSpace(lastStatsSyncError) ? "none" : lastStatsSyncError;
+            ReplyBridge(
+                player,
+                $"Stats enabled={config.StatsEnabled}, raid_stats={config.RaidStatsEnabled}, wipe={wipeKey}, raid_profiles={raidStatsState.players.Count}, interval={Math.Max(60, config.StatsSyncIntervalSeconds)}s, last_success={last}, last_error={error}."
+            );
         }
 
         [Command("websitevip.heatmap.sync")]
@@ -3262,7 +3373,20 @@ namespace Oxide.Plugins
             }
 
             pendingStatsTimer?.Destroy();
-            pendingStatsTimer = timer.Once(Math.Max(5, config.StatsDebounceSeconds), () => RunScheduled("Queued stats sync", SyncStatsSnapshot));
+            pendingStatsTimer = timer.Once(StatsQueueDelaySeconds(), () => RunScheduled("Queued stats sync", SyncStatsSnapshot));
+        }
+
+        private float StatsQueueDelaySeconds()
+        {
+            var delay = Math.Max(5, config.StatsDebounceSeconds);
+            if (lastStatsSyncAttemptAt == DateTime.MinValue)
+            {
+                return delay;
+            }
+
+            var interval = Math.Max(60, config.StatsSyncIntervalSeconds);
+            var elapsed = (DateTime.UtcNow - lastStatsSyncAttemptAt).TotalSeconds;
+            return (float)Math.Max(delay, interval - elapsed);
         }
 
         private void SyncStatsSnapshot()
@@ -3275,6 +3399,7 @@ namespace Oxide.Plugins
                 return;
             }
 
+            lastStatsSyncAttemptAt = DateTime.UtcNow;
             var snapshot = BuildStatsSnapshot();
             var body = JsonConvert.SerializeObject(snapshot);
             var url = $"{TrimSlash(config.ApiBaseUrl)}/api/server/stats-snapshot.php";
@@ -3283,6 +3408,7 @@ namespace Oxide.Plugins
             {
                 if (!IsSuccess(code, response, out var error))
                 {
+                    lastStatsSyncError = error ?? "request failed";
                     PrintWarning($"Stats snapshot sync failed: {error}");
                     return;
                 }
@@ -3291,11 +3417,20 @@ namespace Oxide.Plugins
 
                 if (payload == null || !payload.ok)
                 {
-                    PrintWarning($"Stats snapshot sync failed: {payload?.error ?? "invalid response"}");
+                    lastStatsSyncError = payload?.error ?? "invalid response";
+                    PrintWarning($"Stats snapshot sync failed: {lastStatsSyncError}");
                     return;
                 }
 
-                Puts($"Stats snapshot synced for {snapshot.players.Count} players and {snapshot.bots.Count} bots.");
+                lastStatsSyncAt = DateTime.UtcNow;
+                lastStatsSyncError = "";
+                var raidProfiles = snapshot.players.Count(player => player.raid_damage > player.raid_damage_baseline
+                    || player.rockets_used > player.rockets_used_baseline
+                    || player.c4_used > player.c4_used_baseline
+                    || player.satchels_used > player.satchels_used_baseline
+                    || player.explosive_ammo_used > player.explosive_ammo_used_baseline
+                    || player.tcs_destroyed > player.tcs_destroyed_baseline);
+                Puts($"Stats snapshot synced for {snapshot.players.Count} players, {raidProfiles} active raid profiles, and {snapshot.bots.Count} bots.");
             });
         }
 
@@ -3308,13 +3443,16 @@ namespace Oxide.Plugins
             AddPlaytimeStats(playersById);
             AddRewardPoints(playersById);
             AddConnectedPlayers(playersById);
-            var botStats = AddRoamBotStats(playersById);
+            AddRaidStats(playersById, ResolveWipeKey(wipeStartedAt));
+            bool botsAuthoritative;
+            var botStats = AddRoamBotStats(playersById, out botsAuthoritative);
 
             return new StatsSnapshot
             {
                 wipe_key = ResolveWipeKey(wipeStartedAt),
                 wipe_started_at = wipeStartedAt == DateTime.MinValue ? null : wipeStartedAt.ToUniversalTime().ToString("o"),
                 generated_at = DateTime.UtcNow.ToString("o"),
+                bots_authoritative = botsAuthoritative,
                 players = playersById.Values
                     .OrderByDescending(player => player.kills)
                     .ThenByDescending(player => player.playtime_seconds)
@@ -3429,13 +3567,451 @@ namespace Oxide.Plugins
 
                 var statsPlayer = EnsureStatsPlayer(playersById, player.Id);
                 statsPlayer.display_name = FirstNonEmpty(statsPlayer.display_name, player.Name);
+                var basePlayer = player.Object as BasePlayer;
+
+                if (basePlayer == null)
+                {
+                    ulong userId;
+                    if (ulong.TryParse(player.Id, out userId))
+                    {
+                        basePlayer = BasePlayer.FindByID(userId);
+                    }
+                }
+
+                statsPlayer.appearance = BuildStatsAppearance(basePlayer);
             }
         }
 
-        private List<StatsBot> AddRoamBotStats(Dictionary<string, StatsPlayer> playersById)
+        private StatsAppearance BuildStatsAppearance(BasePlayer player)
+        {
+            if (player == null || player.inventory == null)
+            {
+                return null;
+            }
+
+            var appearance = new StatsAppearance
+            {
+                observed_at = DateTime.UtcNow.ToString("o")
+            };
+
+            AddAppearanceItems(appearance.wear, player.inventory.containerWear, "wear", false);
+            AddAppearanceItems(appearance.belt_weapons, player.inventory.containerBelt, "belt", true);
+            appearance.active_weapon = BuildAppearanceItem(player.GetActiveItem(), "active", true);
+
+            return appearance.wear.Count > 0 || appearance.belt_weapons.Count > 0 || appearance.active_weapon != null
+                ? appearance
+                : null;
+        }
+
+        private void AddAppearanceItems(List<StatsAppearanceItem> target, ItemContainer container, string slotPrefix, bool weaponsOnly)
+        {
+            if (target == null || container?.itemList == null)
+            {
+                return;
+            }
+
+            foreach (var item in container.itemList.OrderBy(value => value?.position ?? int.MaxValue))
+            {
+                var appearanceItem = BuildAppearanceItem(item, $"{slotPrefix}-{item?.position ?? 0}", weaponsOnly);
+
+                if (appearanceItem != null)
+                {
+                    target.Add(appearanceItem);
+                }
+
+                if (target.Count >= 12)
+                {
+                    break;
+                }
+            }
+        }
+
+        private StatsAppearanceItem BuildAppearanceItem(Item item, string slot, bool weaponsOnly)
+        {
+            var shortname = item?.info?.shortname;
+
+            if (string.IsNullOrWhiteSpace(shortname))
+            {
+                return null;
+            }
+
+            if (weaponsOnly && item.GetHeldEntity() == null)
+            {
+                return null;
+            }
+
+            return new StatsAppearanceItem
+            {
+                slot = slot,
+                shortname = shortname,
+                skin_id = item.skin.ToString()
+            };
+        }
+
+        private void LoadRaidStats()
+        {
+            if (raidStatsState != null)
+            {
+                return;
+            }
+
+            raidStatsState = ReadDataFile<RaidStatsState>(RaidStatsDataFile) ?? new RaidStatsState();
+            raidStatsState.players = NormalizeRaidCounters(raidStatsState.players);
+            raidStatsState.baselines = NormalizeRaidCounters(raidStatsState.baselines);
+            raidStatsState.schema_version = 1;
+        }
+
+        private Dictionary<string, RaidCounters> NormalizeRaidCounters(Dictionary<string, RaidCounters> source)
+        {
+            var normalized = new Dictionary<string, RaidCounters>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in source ?? new Dictionary<string, RaidCounters>())
+            {
+                if (!IsSteamId64(entry.Key) || entry.Value == null)
+                {
+                    continue;
+                }
+
+                normalized[entry.Key] = entry.Value.Clone();
+            }
+
+            return normalized;
+        }
+
+        private void EnsureRaidStatsWipe(string wipeKey)
+        {
+            LoadRaidStats();
+            wipeKey = (wipeKey ?? "").Trim();
+
+            if (string.IsNullOrWhiteSpace(wipeKey))
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(raidStatsState.wipe_key))
+            {
+                raidStatsState.wipe_key = wipeKey;
+                QueueRaidStatsSave();
+                return;
+            }
+
+            if (string.Equals(raidStatsState.wipe_key, wipeKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            raidStatsState.baselines = raidStatsState.players.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value?.Clone() ?? new RaidCounters(),
+                StringComparer.OrdinalIgnoreCase
+            );
+            raidStatsState.wipe_key = wipeKey;
+            raidAttackDedup.Clear();
+            SaveRaidStats();
+            Puts($"Raid stats baseline advanced to wipe {wipeKey} for {raidStatsState.baselines.Count} tracked player(s).");
+        }
+
+        private void QueueRaidStatsSave()
+        {
+            if (isUnloading)
+            {
+                return;
+            }
+
+            pendingRaidStatsSaveTimer?.Destroy();
+            pendingRaidStatsSaveTimer = timer.Once(Math.Max(1, config.RaidStatsSaveDebounceSeconds), SaveRaidStats);
+        }
+
+        private void SaveRaidStats()
+        {
+            pendingRaidStatsSaveTimer?.Destroy();
+            pendingRaidStatsSaveTimer = null;
+
+            if (raidStatsState == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Interface.Oxide.DataFileSystem.WriteObject(RaidStatsDataFile, raidStatsState, true);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write data file {RaidStatsDataFile}: {ex.Message}");
+            }
+        }
+
+        private RaidCounters EnsureRaidCounters(ulong attackerId, string displayName = "")
+        {
+            LoadRaidStats();
+            var steamId = attackerId.ToString();
+            RaidCounters counters;
+
+            if (!raidStatsState.players.TryGetValue(steamId, out counters) || counters == null)
+            {
+                counters = new RaidCounters();
+                raidStatsState.players[steamId] = counters;
+            }
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+            {
+                counters.display_name = displayName.Trim();
+            }
+
+            return counters;
+        }
+
+        private void AddRaidStats(Dictionary<string, StatsPlayer> playersById, string wipeKey)
+        {
+            if (!config.RaidStatsEnabled)
+            {
+                return;
+            }
+
+            EnsureRaidStatsWipe(wipeKey);
+
+            foreach (var entry in raidStatsState.players)
+            {
+                if (!IsSteamId64(entry.Key) || entry.Value == null)
+                {
+                    continue;
+                }
+
+                RaidCounters baseline;
+                if (!raidStatsState.baselines.TryGetValue(entry.Key, out baseline) || baseline == null)
+                {
+                    baseline = new RaidCounters();
+                }
+
+                var source = entry.Value;
+                var player = EnsureStatsPlayer(playersById, entry.Key);
+                player.display_name = FirstNonEmpty(player.display_name, source.display_name);
+                player.raid_damage = Math.Max(0L, source.raid_damage);
+                player.raid_damage_baseline = Math.Min(player.raid_damage, Math.Max(0L, baseline.raid_damage));
+                player.rockets_used = Math.Max(0L, source.rockets_used);
+                player.rockets_used_baseline = Math.Min(player.rockets_used, Math.Max(0L, baseline.rockets_used));
+                player.c4_used = Math.Max(0L, source.c4_used);
+                player.c4_used_baseline = Math.Min(player.c4_used, Math.Max(0L, baseline.c4_used));
+                player.satchels_used = Math.Max(0L, source.satchels_used);
+                player.satchels_used_baseline = Math.Min(player.satchels_used, Math.Max(0L, baseline.satchels_used));
+                player.explosive_ammo_used = Math.Max(0L, source.explosive_ammo_used);
+                player.explosive_ammo_used_baseline = Math.Min(player.explosive_ammo_used, Math.Max(0L, baseline.explosive_ammo_used));
+                player.tcs_destroyed = Math.Max(0L, source.tcs_destroyed);
+                player.tcs_destroyed_baseline = Math.Min(player.tcs_destroyed, Math.Max(0L, baseline.tcs_destroyed));
+            }
+        }
+
+        private void TrackRaidDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.RaidStatsEnabled || entity == null || info == null || info.damageTypes == null)
+            {
+                return;
+            }
+
+            if (!(entity is BuildingBlock) && !(entity is DecayEntity))
+            {
+                return;
+            }
+
+            var ownerId = entity.OwnerID;
+            var attackerId = ResolveRaidAttackerId(info);
+
+            if (!IsRealPlayerSteamId(ownerId) || !IsRealPlayerSteamId(attackerId) || IsFriendlyRaidTarget(attackerId, ownerId) || IsMeleeRaidHit(info))
+            {
+                return;
+            }
+
+            var totalDamage = Mathf.Max(0f, info.damageTypes.Total());
+            if (totalDamage <= 0f || info.damageTypes.Get(Rust.DamageType.Decay) >= totalDamage - 0.01f)
+            {
+                return;
+            }
+
+            var creditedDamage = (long)Math.Round(Math.Min(Mathf.Max(0f, entity.Health()), totalDamage), MidpointRounding.AwayFromZero);
+            if (creditedDamage <= 0L)
+            {
+                return;
+            }
+
+            var attacker = BasePlayer.FindByID(attackerId) ?? BasePlayer.FindSleeping(attackerId);
+            var counters = EnsureRaidCounters(attackerId, attacker?.displayName ?? "");
+            counters.raid_damage = SaturatingAdd(counters.raid_damage, creditedDamage);
+
+            var attackKind = ResolveRaidAttackKind(info);
+            if (!string.IsNullOrWhiteSpace(attackKind) && MarkRaidAttackCounted(attackerId, attackKind, info))
+            {
+                switch (attackKind)
+                {
+                    case "rocket":
+                        counters.rockets_used = SaturatingAdd(counters.rockets_used, 1L);
+                        break;
+                    case "c4":
+                        counters.c4_used = SaturatingAdd(counters.c4_used, 1L);
+                        break;
+                    case "satchel":
+                        counters.satchels_used = SaturatingAdd(counters.satchels_used, 1L);
+                        break;
+                    case "explosive_ammo":
+                        counters.explosive_ammo_used = SaturatingAdd(counters.explosive_ammo_used, 1L);
+                        break;
+                }
+            }
+
+            QueueRaidStatsSave();
+            QueueRaidStatsSync();
+        }
+
+        private void TrackDestroyedToolCupboard(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!config.RaidStatsEnabled || !(entity is BuildingPrivlidge) || info == null)
+            {
+                return;
+            }
+
+            var ownerId = entity.OwnerID;
+            var attackerId = ResolveRaidAttackerId(info);
+            if (!IsRealPlayerSteamId(ownerId) || !IsRealPlayerSteamId(attackerId) || IsFriendlyRaidTarget(attackerId, ownerId))
+            {
+                return;
+            }
+
+            var attacker = BasePlayer.FindByID(attackerId) ?? BasePlayer.FindSleeping(attackerId);
+            var counters = EnsureRaidCounters(attackerId, attacker?.displayName ?? "");
+            counters.tcs_destroyed = SaturatingAdd(counters.tcs_destroyed, 1L);
+            QueueRaidStatsSave();
+            QueueRaidStatsSync();
+        }
+
+        private void QueueRaidStatsSync()
+        {
+            if (!config.StatsEnabled || !config.RaidStatsEnabled || !CanRequest() || pendingStatsTimer != null)
+            {
+                return;
+            }
+
+            pendingStatsTimer = timer.Once(StatsQueueDelaySeconds(), () => RunScheduled("Raid stats sync", SyncStatsSnapshot));
+        }
+
+        private ulong ResolveRaidAttackerId(HitInfo info)
+        {
+            if (info?.InitiatorPlayer != null && IsRealPlayerSteamId(info.InitiatorPlayer.userID))
+            {
+                return info.InitiatorPlayer.userID;
+            }
+
+            foreach (var candidate in new[] { info?.Initiator, info?.Weapon, info?.WeaponPrefab })
+            {
+                if (candidate != null && IsRealPlayerSteamId(candidate.OwnerID))
+                {
+                    return candidate.OwnerID;
+                }
+
+            }
+
+            return 0UL;
+        }
+
+        private bool IsFriendlyRaidTarget(ulong attackerId, ulong ownerId)
+        {
+            if (attackerId == ownerId)
+            {
+                return true;
+            }
+
+            try
+            {
+                var team = RelationshipManager.ServerInstance?.FindPlayersTeam(attackerId);
+                return team?.members != null && team.members.Contains(ownerId);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsMeleeRaidHit(HitInfo info)
+        {
+            return info?.Weapon?.GetComponent<BaseMelee>() != null
+                || info?.WeaponPrefab?.GetComponent<BaseMelee>() != null;
+        }
+
+        private string ResolveRaidAttackKind(HitInfo info)
+        {
+            var names = new[]
+            {
+                info?.ProjectilePrefab?.name,
+                info?.WeaponPrefab?.ShortPrefabName,
+                info?.Weapon?.ShortPrefabName,
+                info?.Initiator?.ShortPrefabName,
+                info?.WeaponPrefab?.GetItem()?.info?.shortname,
+                info?.Weapon?.GetItem()?.info?.shortname,
+                info?.Weapon?.GetComponent<BaseProjectile>()?.primaryMagazine?.ammoType?.shortname,
+                info?.WeaponPrefab?.GetComponent<BaseProjectile>()?.primaryMagazine?.ammoType?.shortname
+            };
+            var descriptor = string.Join(" ", names.Where(value => !string.IsNullOrWhiteSpace(value))).ToLowerInvariant();
+
+            if (descriptor.Contains("explosive.timed") || descriptor.Contains("timed.explosive") || descriptor.Contains("c4"))
+            {
+                return "c4";
+            }
+
+            if (descriptor.Contains("satchel"))
+            {
+                return "satchel";
+            }
+
+            if (descriptor.Contains("ammo.rifle.explosive") || descriptor.Contains("explosivebullet") || descriptor.Contains("explosive_ammo"))
+            {
+                return "explosive_ammo";
+            }
+
+            if (descriptor.Contains("rocket") || descriptor.Contains("mlrs"))
+            {
+                return "rocket";
+            }
+
+            return "";
+        }
+
+        private bool MarkRaidAttackCounted(ulong attackerId, string attackKind, HitInfo info)
+        {
+            var projectileId = info?.ProjectileID ?? 0;
+            var initiator = info?.Initiator;
+            var identity = initiator is BasePlayer ? 0UL : initiator?.net?.ID.Value ?? 0UL;
+            var key = projectileId > 0
+                ? $"{attackerId}:{attackKind}:projectile:{projectileId}"
+                : $"{attackerId}:{attackKind}:entity:{identity}";
+            var now = DateTime.UtcNow;
+            var cutoff = now.AddSeconds(-Math.Max(1, config.RaidStatsAttackDedupSeconds));
+
+            foreach (var expired in raidAttackDedup.Where(entry => entry.Value < cutoff).Select(entry => entry.Key).ToList())
+            {
+                raidAttackDedup.Remove(expired);
+            }
+
+            DateTime seenAt;
+            if (raidAttackDedup.TryGetValue(key, out seenAt) && seenAt >= cutoff)
+            {
+                return false;
+            }
+
+            raidAttackDedup[key] = now;
+            return true;
+        }
+
+        private static long SaturatingAdd(long value, long increment)
+        {
+            value = Math.Max(0L, value);
+            increment = Math.Max(0L, increment);
+            return value > long.MaxValue - increment ? long.MaxValue : value + increment;
+        }
+
+        private List<StatsBot> AddRoamBotStats(Dictionary<string, StatsPlayer> playersById, out bool authoritative)
         {
             var data = ReadDataFile<RoamBotStatsData>("RaidlandsRoamBots/stats");
             var bots = new List<StatsBot>();
+            authoritative = data != null;
 
             if (data == null)
             {
@@ -3505,10 +4081,13 @@ namespace Oxide.Plugins
                 .ToList();
 
             var limit = Math.Max(0, config.StatsBotSnapshotLimit);
+            if (limit > 0 && ordered.Count > limit)
+            {
+                authoritative = false;
+                return ordered.Take(limit).ToList();
+            }
 
-            return limit > 0 && ordered.Count > limit
-                ? ordered.Take(limit).ToList()
-                : ordered;
+            return ordered;
         }
 
         private void StartHeatmapSync()
@@ -5601,7 +6180,10 @@ namespace Oxide.Plugins
 
             if (Uri.TryCreate(trimmed, UriKind.Absolute, out uri))
             {
-                return string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase);
+                return string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)
+                    || (string.Equals(config.ServerId, "raidlands-dev", StringComparison.OrdinalIgnoreCase)
+                        && uri.IsLoopback
+                        && string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase));
             }
 
             return NormalizeAssetPath(trimmed).StartsWith("assets/media/kits/", StringComparison.OrdinalIgnoreCase);
@@ -5814,13 +6396,13 @@ namespace Oxide.Plugins
         private string ResolveWipeKey(DateTime wipeStartedAt)
         {
             var wipeKey = ResolveSecretValue(config.WipeKey);
+            var serverId = CleanWipeKeySegment(config.ServerId, "raidlands-main");
 
-            if (!string.IsNullOrWhiteSpace(wipeKey))
+            if (!string.IsNullOrWhiteSpace(wipeKey) && !IsGenericWipeKey(wipeKey, serverId))
             {
                 return wipeKey.Trim();
             }
 
-            var serverId = CleanWipeKeySegment(config.ServerId, "raidlands-main");
             var startedAt = wipeStartedAt == DateTime.MinValue ? GetWipeStartedAt() : wipeStartedAt.ToUniversalTime();
 
             if (startedAt != DateTime.MinValue)
@@ -5856,6 +6438,16 @@ namespace Oxide.Plugins
                 || ch == ':';
         }
 
+        private static bool IsGenericWipeKey(string wipeKey, string serverId)
+        {
+            var normalized = (wipeKey ?? "").Trim().ToLowerInvariant();
+            var normalizedServer = (serverId ?? "").Trim().ToLowerInvariant();
+            return normalized == "current"
+                || normalized == normalizedServer
+                || normalized == normalizedServer + "-current"
+                || normalized.EndsWith("-current", StringComparison.Ordinal);
+        }
+
         public string GetRaidlandsBrandAssetUrl(string key)
         {
             return BrandAssetUrl(key);
@@ -5872,7 +6464,7 @@ namespace Oxide.Plugins
             return TryGetBrandValue(key, out value) ? value : "";
         }
 
-        private int SyncBrandConfigs()
+        private void SyncBrandConfigs()
         {
             var updated = 0;
 
@@ -5888,8 +6480,6 @@ namespace Oxide.Plugins
             {
                 Puts($"Raidlands brand config sync updated {updated} config file(s).");
             }
-
-            return updated;
         }
 
         private int SyncJsonConfig(string configName, Action<JObject> apply)
@@ -5969,6 +6559,18 @@ namespace Oxide.Plugins
         {
             json["Chat Prefix"] = "<color=#ff3b3b>Raidlands</color> ";
             json["Show Chat Prefix"] = true;
+            json["Auto Messages"] = new JArray(
+                new JObject
+                {
+                    ["Permission"] = "smartchatbot.messages",
+                    ["Message Frequency"] = "5m",
+                    ["Auto Messages"] = new JArray(
+                        new JObject
+                        {
+                            ["Is Enabled"] = true,
+                            ["Message"] = "Visit https://raidlands.net/ for store perks, Discord, and live stats."
+                        })
+                });
         }
 
         private void ApplyKitsBrand(JObject json)

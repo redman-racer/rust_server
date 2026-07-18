@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteAirstrikeAnimationBridge", "Raidlands", "1.0.5")]
+    [Info("WebsiteAirstrikeAnimationBridge", "Raidlands", "1.0.6")]
     [Description("Synchronizes published Raidlands website airstrike animation bundles with PortableAirstrikes visual profiles.")]
     public class WebsiteAirstrikeAnimationBridge : RustPlugin
     {
@@ -869,9 +869,9 @@ namespace Oxide.Plugins
             }
 
             var schemaVersion = bundle.Value<int?>("SchemaVersion") ?? 0;
-            if (schemaVersion != 1 && schemaVersion != 2)
+            if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3)
             {
-                error = "Bundle SchemaVersion must be 1 or 2.";
+                error = "Bundle SchemaVersion must be 1, 2, or 3.";
                 return false;
             }
 

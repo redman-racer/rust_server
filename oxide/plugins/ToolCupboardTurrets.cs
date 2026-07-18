@@ -7,13 +7,13 @@ using System.Collections.Generic;
 namespace Oxide.Plugins
 {
     // Raidlands compatibility: shared authorization and empty-vehicle SAM filtering.
-    [Info("Tool Cupboard Turrets", "0x89A/Raidlands", "1.3.10")]
+    [Info("Tool Cupboard Turrets", "0x89A/Raidlands", "1.3.11")]
     [Description("Turrets only attack building blocked players")]
 
     class ToolCupboardTurrets : RustPlugin
     {
         [PluginReference]
-        private Plugin AutomaticAuthorization;
+        private Plugin AutomaticAuthorization, RaidlandsSentryTurrets;
 
         private const string turretsIgnore = "toolcupboardturrets.ignore";
         private const string turretsNeverIgnore = "toolcupboardturrets.neverIgnore";
@@ -49,6 +49,12 @@ namespace Oxide.Plugins
         object CanBeTargeted(BasePlayer player, BaseCombatEntity entity)
         {
             if (player == null || string.IsNullOrEmpty(player.UserIDString))
+                return null;
+
+            // RaidlandsSentryTurrets owns all targeting decisions for its NPC
+            // sentries. Returning a second value here can conflict with its LOS,
+            // vanish, and event attack-all rules.
+            if (IsRaidlandsManagedSentry(entity))
                 return null;
 
             if (permission.UserHasPermission(player.UserIDString, turretsIgnore))
@@ -87,6 +93,15 @@ namespace Oxide.Plugins
             }
 
             return null;
+        }
+
+        private bool IsRaidlandsManagedSentry(BaseEntity entity)
+        {
+            if (entity == null || RaidlandsSentryTurrets == null || !RaidlandsSentryTurrets.IsLoaded)
+                return false;
+
+            object result = RaidlandsSentryTurrets.Call("API_IsRaidlandsManagedSentry", entity);
+            return result is bool && (bool)result;
         }
 
         void OnSamSiteTargetScan(SamSite samsite, List<SamSite.ISamSiteTarget> targetList)

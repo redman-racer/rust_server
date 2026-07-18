@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Oxide.Core;
@@ -15,7 +17,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.3.81")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.4.4")]
     [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -24,6 +26,7 @@ namespace Oxide.Plugins
         private const string SpawnModeNearPlayers = "near_players";
         private const string SpawnModeRandom = "random";
         private const string TacticalBrainName = "playerlike_tactical_brain";
+        private const string LandNavigationScientistPrefab = "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_junkpile_pistol.prefab";
         private const string DecisionTraceDataFile = "RaidlandsRoamBots/decision_traces.jsonl";
         private const string ObservationTraceDataFile = "RaidlandsRoamBots/player_observation_traces.jsonl";
         private const string BehaviorModelDataFile = "RaidlandsRoamBots/behavior_models";
@@ -57,6 +60,16 @@ namespace Oxide.Plugins
         private const string LearningApplyGlobal = "global";
         private const string LearningApplyProfiles = "profiles";
         private const string LearningSourceAdminTesters = "admin_testers";
+        private const int CurrentConfigSchemaVersion = 2;
+        private const string ControllerModeLegacy = "legacy";
+        private const string ControllerModeV2Shadow = "v2_shadow";
+        private const string ControllerModeV2Canary = "v2_canary";
+        private const string ControllerModeV2Active = "v2_active";
+        private const string TrainingV2TraceDataFile = "RaidlandsRoamBots/training_v2_sequences.jsonl";
+        private const string TrainingV2OutcomeDataFile = "RaidlandsRoamBots/training_v2_outcomes.jsonl";
+        private const string TrainingV2ConsentDataFile = "RaidlandsRoamBots/training_v2/consent";
+        private const string V2EvaluationDataFile = "RaidlandsRoamBots/v2_evaluation.jsonl";
+        private const float V2FireAuthorizationLifetimeSeconds = 4f;
         private const string ObservationContextNone = "none";
         private const string ObservationContextNearestBotSample = "nearest_bot_sample";
         private const string ObservationContextCombatTarget = "combat_target";
@@ -83,6 +96,8 @@ namespace Oxide.Plugins
         private const string BotAvatarImagePrefix = "raidlands_roambot_avatar_";
         private const int AdminPanelMaximumPopulation = 500;
         private const int AdminLearningProfilePageSize = 4;
+        private const int PopulationRampBatchSize = 2;
+        private const float PopulationRampIntervalSeconds = 0.5f;
         private static readonly string[] SmokeOccluderPrefabTokens =
         {
             "grenade.smoke.deployed",
@@ -201,7 +216,14 @@ namespace Oxide.Plugins
         private readonly Dictionary<string, HashSet<string>> managedGroupsByEvent = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         private readonly List<DecisionTrace> pendingDecisionTraces = new List<DecisionTrace>();
         private readonly List<PlayerObservationTrace> pendingObservationTraces = new List<PlayerObservationTrace>();
+        private readonly List<TrainingSequenceV2> pendingTrainingV2Frames = new List<TrainingSequenceV2>();
+        private readonly List<DecisionOutcomeV2> pendingDecisionOutcomesV2 = new List<DecisionOutcomeV2>();
+        private readonly List<DecisionOutcomeAnchorV2> pendingDecisionOutcomeAnchorsV2 = new List<DecisionOutcomeAnchorV2>();
+        private readonly List<TrainingOutcomeAnchorV2> pendingTrainingOutcomeAnchorsV2 = new List<TrainingOutcomeAnchorV2>();
+        private readonly Dictionary<string, PrefabConformanceRecord> prefabConformanceV2 = new Dictionary<string, PrefabConformanceRecord>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<ulong, PlayerObservationEpisode> observationEpisodes = new Dictionary<ulong, PlayerObservationEpisode>();
+        private readonly Dictionary<ulong, TrainingSessionV2> trainingSessionsV2 = new Dictionary<ulong, TrainingSessionV2>();
+        private TrainingConsentDataV2 trainingConsentV2 = new TrainingConsentDataV2();
         private readonly Dictionary<string, PendingAdvisorDecision> pendingAdvisorDecisions = new Dictionary<string, PendingAdvisorDecision>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<ulong, PendingBotPlayerDeath> pendingBotPlayerDeaths = new Dictionary<ulong, PendingBotPlayerDeath>();
         private readonly Dictionary<ulong, RecentBotDeath> recentBotDeaths = new Dictionary<ulong, RecentBotDeath>();
@@ -210,11 +232,15 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, LastBotInfo> lastBotInfoByPlayer = new Dictionary<ulong, LastBotInfo>();
         private readonly Dictionary<string, float> recentBotChatInputs = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<BaseCombatEntity, MapMarkerGenericRadius> botMapMarkers = new Dictionary<BaseCombatEntity, MapMarkerGenericRadius>();
+        private readonly Dictionary<Vector3Int, BaseRestrictionCacheEntry> baseRestrictionCache = new Dictionary<Vector3Int, BaseRestrictionCacheEntry>();
+        private readonly Collider[] baseRestrictionColliderBuffer = new Collider[128];
         private readonly HashSet<string> missingSecretWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private AdvisorStats advisorStats = new AdvisorStats();
         private BotChatStats botChatStats = new BotChatStats();
         private BotChatQuotaData botChatQuota = new BotChatQuotaData();
         private BehaviorModelData behaviorModels = new BehaviorModelData();
+        private readonly V2Metrics v2Metrics = new V2Metrics();
+        private IBotBodyAdapter legacyScientistBodyAdapter;
         private Dictionary<string, string> secrets;
         private string secretsConfigSource;
         private IDecisionAdvisor decisionAdvisor;
@@ -229,17 +255,30 @@ namespace Oxide.Plugins
         private Timer decisionTraceSaveTimer;
         private Timer observationTraceSaveTimer;
         private Timer learningTimer;
+        private Timer combatMotorTimer;
+        private Timer trainingV2Timer;
+        private Timer trainingV2FlushTimer;
         private Timer saveTimer;
+        private Timer initializationTimer;
+        private Timer populationRampTimer;
+        private int initializationGeneration;
         private int teamSequence;
         private float spawnRetryBlockedUntil;
         private float nextPluginLogPruneAt;
         private float lastDecisionTracePruneCheckAt;
+        private float lastTrainingV2PruneCheckAt;
         private float lastBotChatSentAt;
         private float nextBotChatCleanupAt;
+        private float v2BudgetBreachStartedAt;
+        private int v2MotorScanOffset;
+        private long v2ShotSequence;
         private int pendingBotChatAiRequests;
 
         private class Configuration
         {
+            [JsonProperty("Config Schema Version")]
+            public int SchemaVersion;
+
             public bool Enabled = false;
 
             [JsonProperty("Target Population")]
@@ -299,9 +338,7 @@ namespace Oxide.Plugins
             [JsonProperty("Prefab Candidates In Order")]
             public List<string> PrefabCandidates = new List<string>
             {
-                "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_roam.prefab",
-                "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_full_any.prefab",
-                "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_junkpile_pistol.prefab"
+                LandNavigationScientistPrefab
             };
 
             public AIConfig AI = new AIConfig();
@@ -311,6 +348,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("Player Observation Learning")]
             public PlayerObservationLearningConfig Learning = new PlayerObservationLearningConfig();
+
+            [JsonProperty("Player-Like Controller V2")]
+            public PlayerLikeControllerV2Config ControllerV2 = new PlayerLikeControllerV2Config();
+
+            [JsonProperty("Training V2")]
+            public TrainingV2Config TrainingV2 = new TrainingV2Config();
 
             [JsonProperty("Bot Chat")]
             public BotChatConfig BotChat = new BotChatConfig();
@@ -1382,6 +1425,221 @@ namespace Oxide.Plugins
             public float HighConfidenceTargetContextThreshold = 0.75f;
         }
 
+        private class PlayerLikeControllerV2Config
+        {
+            [JsonProperty("Body Adapters")]
+            public BodyAdapterPolicyConfig BodyAdapters = new BodyAdapterPolicyConfig();
+
+            [JsonProperty("Mode")]
+            public string Mode = ControllerModeV2Shadow;
+
+            [JsonProperty("Canary Bot Count")]
+            public int CanaryBotCount = 5;
+
+            [JsonProperty("Canary Percent")]
+            public int CanaryPercent = 10;
+
+            [JsonProperty("Combat Motor Tick Seconds")]
+            public float CombatMotorTickSeconds = 0.0667f;
+
+            [JsonProperty("Mid Distance Motor Tick Seconds")]
+            public float MidDistanceMotorTickSeconds = 0.1f;
+
+            [JsonProperty("Far Distance Motor Tick Seconds")]
+            public float FarDistanceMotorTickSeconds = 0.25f;
+
+            [JsonProperty("Near Combat Distance")]
+            public float NearCombatDistance = 60f;
+
+            [JsonProperty("Mid Combat Distance")]
+            public float MidCombatDistance = 140f;
+
+            [JsonProperty("Require Verified Body Capabilities")]
+            public bool RequireVerifiedBodyCapabilities = true;
+
+            [JsonProperty("Require Mechanical Crouch")]
+            public bool RequireMechanicalCrouch = true;
+
+            [JsonProperty("Auto Rollback On Invariant Failure")]
+            public bool AutoRollbackOnInvariantFailure = true;
+
+            [JsonProperty("Respawn Tracked Bots On Plugin Reload")]
+            public bool RespawnTrackedBotsOnPluginReload = true;
+
+            [JsonProperty("Ownership Conflicts Before Rollback")]
+            public int OwnershipConflictsBeforeRollback = 3;
+
+            [JsonProperty("Maximum Consecutive Fire Failures")]
+            public int MaximumConsecutiveFireFailures = 8;
+
+            [JsonProperty("Path Failures Before Rollback")]
+            public int PathFailuresBeforeRollback = 8;
+
+            [JsonProperty("Maximum AI Milliseconds Per Motor Tick")]
+            public float MaximumAiMillisecondsPerMotorTick = 3.5f;
+
+            [JsonProperty("Sustained Budget Breach Seconds")]
+            public float SustainedBudgetBreachSeconds = 5f;
+
+            [JsonProperty("Reject Swimming Or Submerged Targets")]
+            public bool RejectSwimmingOrSubmergedTargets = true;
+
+            [JsonProperty("Block Water Surface Crossings")]
+            public bool BlockWaterSurfaceCrossings = true;
+
+            [JsonProperty("Water Segment Sample Step")]
+            public float WaterSegmentSampleStep = 1f;
+
+            [JsonProperty("Maximum Water Segment Samples")]
+            public int MaximumWaterSegmentSamples = 96;
+
+            [JsonProperty("Strict Decorative Foliage At All Ranges")]
+            public bool StrictDecorativeFoliageAtAllRanges = true;
+
+            [JsonProperty("Damage Authorization Veto")]
+            public bool DamageAuthorizationVeto = true;
+
+            [JsonProperty("Last Known Position Uncertainty Per Second")]
+            public float LastKnownPositionUncertaintyPerSecond = 0.8f;
+
+            [JsonProperty("Maximum Last Known Position Uncertainty")]
+            public float MaximumLastKnownPositionUncertainty = 12f;
+
+            [JsonProperty("Strafe Minimum Seconds")]
+            public float StrafeMinimumSeconds = 0.35f;
+
+            [JsonProperty("Strafe Maximum Seconds")]
+            public float StrafeMaximumSeconds = 1.15f;
+
+            [JsonProperty("Jiggle Segment Minimum Seconds")]
+            public float JiggleSegmentMinimumSeconds = 0.16f;
+
+            [JsonProperty("Jiggle Segment Maximum Seconds")]
+            public float JiggleSegmentMaximumSeconds = 0.34f;
+
+            [JsonProperty("Wide Swing Distance")]
+            public float WideSwingDistance = 5.5f;
+
+            [JsonProperty("Combat Strafe Distance")]
+            public float CombatStrafeDistance = 3.25f;
+
+            [JsonProperty("Aim Turn Degrees Per Second Casual")]
+            public float AimTurnDegreesPerSecondCasual = 150f;
+
+            [JsonProperty("Aim Turn Degrees Per Second Average")]
+            public float AimTurnDegreesPerSecondAverage = 230f;
+
+            [JsonProperty("Aim Turn Degrees Per Second Dangerous")]
+            public float AimTurnDegreesPerSecondDangerous = 320f;
+
+            [JsonProperty("Weapon Motor Profiles")]
+            public Dictionary<string, WeaponMotorProfile> WeaponMotorProfiles = DefaultWeaponMotorProfiles();
+        }
+
+        private class BodyAdapterPolicyConfig
+        {
+            [JsonProperty("Enabled Adapter Keys")]
+            public List<string> EnabledAdapterKeys = new List<string> { "legacy_scientist" };
+
+            [JsonProperty("Fail Closed Unsupported Prefabs")]
+            public bool FailClosedUnsupportedPrefabs = true;
+
+            [JsonProperty("Revalidate On Weapon Switch")]
+            public bool RevalidateOnWeaponSwitch = true;
+
+            [JsonProperty("Revalidate After Sleep Wake")]
+            public bool RevalidateAfterSleepWake = true;
+        }
+
+        private class WeaponMotorProfile
+        {
+            [JsonProperty("Minimum Burst Shots")]
+            public int MinimumBurstShots = 1;
+
+            [JsonProperty("Maximum Burst Shots")]
+            public int MaximumBurstShots = 5;
+
+            [JsonProperty("Minimum Shot Gap Seconds")]
+            public float MinimumShotGapSeconds = 0.1f;
+
+            [JsonProperty("Maximum Shot Gap Seconds")]
+            public float MaximumShotGapSeconds = 0.16f;
+
+            [JsonProperty("Minimum Burst Pause Seconds")]
+            public float MinimumBurstPauseSeconds = 0.18f;
+
+            [JsonProperty("Maximum Burst Pause Seconds")]
+            public float MaximumBurstPauseSeconds = 0.58f;
+
+            [JsonProperty("Move While Firing Chance")]
+            public float MoveWhileFiringChance = 0.72f;
+
+            [JsonProperty("Torso Aim Weight")]
+            public float TorsoAimWeight = 0.72f;
+        }
+
+        private static Dictionary<string, WeaponMotorProfile> DefaultWeaponMotorProfiles()
+        {
+            return new Dictionary<string, WeaponMotorProfile>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["default"] = new WeaponMotorProfile(),
+                ["rifle"] = new WeaponMotorProfile { MinimumBurstShots = 2, MaximumBurstShots = 6, MinimumShotGapSeconds = 0.095f, MaximumShotGapSeconds = 0.145f, MinimumBurstPauseSeconds = 0.2f, MaximumBurstPauseSeconds = 0.62f, MoveWhileFiringChance = 0.76f, TorsoAimWeight = 0.75f },
+                ["smg"] = new WeaponMotorProfile { MinimumBurstShots = 3, MaximumBurstShots = 9, MinimumShotGapSeconds = 0.07f, MaximumShotGapSeconds = 0.115f, MinimumBurstPauseSeconds = 0.16f, MaximumBurstPauseSeconds = 0.48f, MoveWhileFiringChance = 0.84f, TorsoAimWeight = 0.78f },
+                ["lmg"] = new WeaponMotorProfile { MinimumBurstShots = 4, MaximumBurstShots = 12, MinimumShotGapSeconds = 0.075f, MaximumShotGapSeconds = 0.115f, MinimumBurstPauseSeconds = 0.25f, MaximumBurstPauseSeconds = 0.72f, MoveWhileFiringChance = 0.58f, TorsoAimWeight = 0.8f },
+                ["pistol"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 4, MinimumShotGapSeconds = 0.16f, MaximumShotGapSeconds = 0.31f, MinimumBurstPauseSeconds = 0.22f, MaximumBurstPauseSeconds = 0.72f, MoveWhileFiringChance = 0.82f, TorsoAimWeight = 0.68f },
+                ["marksman"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 3, MinimumShotGapSeconds = 0.25f, MaximumShotGapSeconds = 0.46f, MinimumBurstPauseSeconds = 0.35f, MaximumBurstPauseSeconds = 0.9f, MoveWhileFiringChance = 0.5f, TorsoAimWeight = 0.65f },
+                ["sniper"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 1, MinimumShotGapSeconds = 0.8f, MaximumShotGapSeconds = 1.35f, MinimumBurstPauseSeconds = 0.35f, MaximumBurstPauseSeconds = 0.85f, MoveWhileFiringChance = 0.12f, TorsoAimWeight = 0.56f },
+                ["shotgun"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 2, MinimumShotGapSeconds = 0.7f, MaximumShotGapSeconds = 1.15f, MinimumBurstPauseSeconds = 0.25f, MaximumBurstPauseSeconds = 0.7f, MoveWhileFiringChance = 0.7f, TorsoAimWeight = 0.88f }
+            };
+        }
+
+        private class TrainingV2Config
+        {
+            public bool Enabled = false;
+
+            [JsonProperty("Schema Version")]
+            public int SchemaVersion = 2;
+
+            [JsonProperty("Opt In Only")]
+            public bool OptInOnly = true;
+
+            [JsonProperty("Opted In Player SteamIds")]
+            public List<string> OptedInPlayerSteamIds = new List<string>();
+
+            [JsonProperty("Sample Interval Seconds")]
+            public float SampleIntervalSeconds = 0.0667f;
+
+            [JsonProperty("Pseudonymize Player Ids")]
+            public bool PseudonymizePlayerIds = true;
+
+            [JsonProperty("Raw Retention Days")]
+            public int RawRetentionDays = 30;
+
+            [JsonProperty("Maximum Trace File Megabytes")]
+            public int MaximumTraceFileMegabytes = 256;
+
+            [JsonProperty("Maximum Buffered Frames")]
+            public int MaximumBufferedFrames = 1000;
+
+            [JsonProperty("Record Only During Bot Combat")]
+            public bool RecordOnlyDuringBotCombat = true;
+
+            [JsonProperty("Pre Roll Seconds")]
+            public float PreRollSeconds = 3f;
+
+            [JsonProperty("Combat Session Tail Seconds")]
+            public float CombatSessionTailSeconds = 10f;
+
+            [JsonProperty("Flush Interval Seconds")]
+            public float FlushIntervalSeconds = 2f;
+
+            [JsonProperty("Outcome Delays Seconds")]
+            public List<float> OutcomeDelaysSeconds = new List<float> { 3f, 5f, 10f };
+
+            [JsonProperty("Allow Automatic Live Training")]
+            public bool AllowAutomaticLiveTraining = false;
+        }
+
         private class AdminLearningDraft
         {
             public string PlayerQuery = "";
@@ -1772,6 +2030,31 @@ namespace Oxide.Plugins
             public int deaths;
         }
 
+        private enum ControllerMode
+        {
+            Legacy,
+            V2Shadow,
+            V2Canary,
+            V2Active
+        }
+
+        private enum MotorSkill
+        {
+            None,
+            Hold,
+            StrafeLeft,
+            StrafeRight,
+            JiggleLeft,
+            JiggleRight,
+            WideSwing,
+            Tuck,
+            PeekLeft,
+            PeekRight,
+            RetreatFire,
+            Heal,
+            Reload
+        }
+
         private class BotRuntime
         {
             public string BotKey;
@@ -1815,6 +2098,74 @@ namespace Oxide.Plugins
             public Vector3 HomePosition;
             public string Prefab;
             public string EntityType;
+            public ControllerMode ControllerMode = ControllerMode.Legacy;
+            public string ControllerModeReason = "legacy";
+            public string BodyAdapterKey = "none";
+            public BodyCapabilities BodyCapabilities = new BodyCapabilities();
+            public BotIntent Intent = new BotIntent();
+            public CombatFrame LastCombatFrame = new CombatFrame();
+            public StyleProfile Style = new StyleProfile();
+            public float NextCombatMotorAt;
+            public float NextOwnershipVerifyAt;
+            public int NativeOwnershipConflicts;
+            public int ConsecutiveOwnershipConflicts;
+            public int ConsecutiveFireFailures;
+            public string LastControllerInvariant = "none";
+            public string RollbackReason = "none";
+            public bool V2StanceTestPending;
+            public bool V2StanceTestComplete;
+            public float V2StandingEyeHeight;
+            public float V2StandingColliderHeight;
+            public float V2CrouchedEyeHeight;
+            public float V2CrouchedColliderHeight;
+            public float NextTriggerAt;
+            public int BurstShotsRemaining;
+            public int CurrentBurstSize;
+            public bool BurstMoveWhileFiring = true;
+            public float CurrentShotGap;
+            public Vector3 CurrentAimPoint;
+            public Vector2 CorrelatedAimError;
+            public Vector2 CorrelatedAimVelocity;
+            public Vector2 RecoilAimError;
+            public float NextAimNoiseAt;
+            public float LastMotorShotAt;
+            public float LastAuthorizedShotAt;
+            public FireAuthorization LastFireAuthorization;
+            public readonly List<FireAuthorization> PendingFireAuthorizations = new List<FireAuthorization>();
+            public float V2DamageVetoUntil;
+            public float ShootingUntil;
+            public bool PendingMotorTrigger;
+            public float PendingMotorTriggerUntil;
+            public int AuthorizedShots;
+            public int RejectedShots;
+            public int UnauthorizedHitsBlocked;
+            public Vector3 CurrentPeekLeftPoint;
+            public Vector3 CurrentPeekRightPoint;
+            public int PeekSide = 1;
+            public MotorSkill MotorSkill = MotorSkill.None;
+            public float MotorSkillUntil;
+            public int MotorDirection = 1;
+            public float NextMotorDirectionChangeAt;
+            public int RecentHeadHits;
+            public float RecentHeadHitWindowStartedAt;
+            public string LastHitBone = "none";
+            public float LastHitBoneAt;
+            public bool OriginalBodyStateCaptured;
+            public float OriginalAimConeScale = 1f;
+            public bool OriginalAgentStateCaptured;
+            public bool OriginalAgentUpdateRotation = true;
+            public bool V2Healing;
+            public bool V2MedicalUsed;
+            public float V2HealEquipReadyAt;
+            public float V2HealLockedUntil;
+            public Item V2PreviousActiveItem;
+            public Item V2MedicalItem;
+            public int V2MedicalAmountBefore;
+            public float LastDecisionTraceAt;
+            public string LastDecisionTraceAction = "";
+            public TacticalState LastDecisionTraceState;
+            public string LastOutcomeDecisionAction = "";
+            public float LastOutcomeDecisionAt;
 
             public TacticalState State;
             public TacticalState PreviousState;
@@ -1916,6 +2267,318 @@ namespace Oxide.Plugins
             public int ConsecutiveFailedPaths;
         }
 
+        private class BodyCapabilities
+        {
+            public int schema_version = 2;
+            public string adapter_key = "none";
+            public string prefab = "";
+            public string entity_type = "";
+            public string brain_type = "none";
+            public string navigator_type = "none";
+            public bool has_brain;
+            public bool has_navigator;
+            public bool has_navmesh_agent;
+            public bool has_attack_interface;
+            public bool supports_server_projectile;
+            public bool stance_test_complete;
+            public bool supports_mechanical_crouch;
+            public bool supports_authoritative_movement;
+            public bool supports_authoritative_fire;
+            public string failure_reason = "not_inspected";
+        }
+
+        private class BotIntent
+        {
+            public int schema_version = 2;
+            public string action = "none";
+            public MotorSkill motor_skill = MotorSkill.None;
+            public ulong target_id;
+            public Vector3 destination;
+            public Vector3 aim_point;
+            public bool wants_fire;
+            public bool wants_crouch;
+            public bool wants_reload;
+            public float committed_until;
+            public string reason = "none";
+            public float created_at;
+        }
+
+        private class CombatFrame
+        {
+            public int schema_version = 2;
+            public float captured_at;
+            public Vector3 position;
+            public Vector3 velocity;
+            public Vector3 view_forward;
+            public ulong target_id;
+            public Vector3 uncertain_target_position;
+            public float target_uncertainty_radius;
+            public float target_exposure;
+            public bool eye_visible;
+            public bool muzzle_clear;
+            public bool target_eligible;
+            public string eligibility_reason = "none";
+            public bool crouched;
+            public bool moving;
+            public bool firing;
+            public string weapon_class = "default";
+            public string motor_skill = "none";
+        }
+
+        private class FireAuthorization
+        {
+            public int schema_version = 2;
+            public long token_id;
+            public ulong bot_id;
+            public ulong target_id;
+            public float issued_at;
+            public float expires_at;
+            public Vector3 origin;
+            public Vector3 aim_point;
+            public Vector3 direction;
+            public float maximum_direction_error_degrees = 4f;
+            public float projectile_velocity;
+            public int pellet_count = 1;
+            public int observed_hit_callbacks;
+            public bool provisional;
+            public bool committed;
+            [JsonIgnore]
+            public BaseProjectile weapon;
+            public string eligibility_reason = "ready";
+            public string controller_mode = "legacy";
+            public bool consumed;
+        }
+
+        private class SkillTier
+        {
+            public int schema_version = 2;
+            public string key = "average";
+            public SkillDefinition mechanics = new SkillDefinition();
+        }
+
+        private class StyleProfile
+        {
+            public int schema_version = 2;
+            public string key = "default";
+            public float aggression = 0.5f;
+            public float strafe_preference = 0.7f;
+            public float jiggle_preference = 0.45f;
+            public float wide_swing_preference = 0.2f;
+            public float crouch_preference = 0.7f;
+            public float repeek_delay_scale = 1f;
+        }
+
+        private class TrainingSequenceV2
+        {
+            public int schema_version = 2;
+            public string record_type = "frame";
+            public string session_id = "";
+            public string source_player_key = "";
+            public string server_build = "";
+            public string map_key = "";
+            public string captured_at_utc = "";
+            public float captured_at;
+            public int frame_index;
+            public float session_time;
+            public Vector3 position;
+            public Vector3 velocity;
+            public Vector3 local_velocity;
+            public Vector3 view_forward;
+            public Vector3 view_angles;
+            public Vector3 view_angular_velocity;
+            public bool input_forward;
+            public bool input_backward;
+            public bool input_left;
+            public bool input_right;
+            public bool input_jump;
+            public bool input_crouch;
+            public bool input_sprint;
+            public bool input_fire;
+            public bool input_reload;
+            public bool input_use;
+            public bool input_attack2;
+            public string held_item = "";
+            public int ammo;
+            public float health_fraction;
+            public bool is_swimming;
+            public ulong combat_target_id;
+            public Vector3 target_relative_position;
+            public float target_distance;
+            public bool target_visible;
+            public float target_exposure;
+            public string target_context = "none";
+            public bool foliage_between;
+            public bool water_between;
+            public bool near_cover_edge;
+            public string derived_action = "hold";
+            public int nearby_allies;
+            public int nearby_enemies;
+            public int shots_since_last_frame;
+            public int damage_events_dealt_since_last_frame;
+            public int damage_events_taken_since_last_frame;
+            public string event_flags = "";
+            public string sequence_id = "";
+            public string sequence_label = "";
+            public float sequence_duration;
+            public int sequence_count;
+            public string session_reason = "";
+            public float outcome_delay_seconds;
+            public float outcome_health_delta;
+            public float outcome_distance_moved;
+            public float outcome_target_distance_delta;
+            public float outcome_exposure_delta;
+            public bool outcome_player_died;
+        }
+
+        private class TrainingSessionV2
+        {
+            public string SessionId = "";
+            public string PlayerKey = "";
+            public ulong PlayerId;
+            public float StartedAt;
+            public float LastCombatAt;
+            public float LastSampleAt;
+            public Vector3 LastPosition;
+            public Vector3 LastVelocity;
+            public int InputButtons;
+            public int PreviousInputButtons;
+            public int PendingPressedButtons;
+            public Vector3 AimAngles;
+            public Vector3 LastAimAngles;
+            public bool HasInput;
+            public int FrameIndex;
+            public int LastLateralDirection;
+            public float LastLateralChangeAt;
+            public int RecentReversalCount;
+            public float ReversalWindowStartedAt;
+            public float LastShotAt;
+            public float BurstStartedAt;
+            public int BurstShots;
+            public float LastPeekAt;
+            public float LastTuckAt;
+            public float LastTargetDistance;
+            public string LastDerivedAction = "hold";
+            public string LastSequenceLabel = "none";
+            public float LastSequenceAt;
+            public float LastExposure;
+            public bool WasNearCoverEdge;
+            public string TargetContext = "none";
+            public int PendingShots;
+            public int PendingDamageDealt;
+            public int PendingDamageTaken;
+            public readonly HashSet<string> PendingEvents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public BaseCombatEntity CombatTarget;
+            public float CombatTargetAt;
+            public readonly List<TrainingSequenceV2> PreRoll = new List<TrainingSequenceV2>();
+        }
+
+        private class PrefabConformanceRecord
+        {
+            public int schema_version = 2;
+            public string prefab = "";
+            public string adapter_key = "none";
+            public string entity_type = "none";
+            public string brain_type = "none";
+            public string navigator_type = "none";
+            public bool spawn_initialization;
+            public bool delayed_initialization;
+            public bool target_acquisition;
+            public bool weapon_switch;
+            public bool sleep_wake;
+            public bool wounded_death;
+            public bool stance_mechanical;
+            public bool single_shot_pipeline;
+            public bool ownership_clean = true;
+            public int ownership_conflicts;
+            public int fire_failures;
+            public string last_stage = "none";
+            public string last_result = "not_tested";
+            public string last_failure = "none";
+            public string updated_at_utc = "";
+        }
+
+        private class TrainingConsentDataV2
+        {
+            public int schema_version = 2;
+            public string hmac_salt = "";
+            public List<string> consented_player_steam_ids = new List<string>();
+        }
+
+        private class TrainingOutcomeAnchorV2
+        {
+            public ulong player_id;
+            public string session_id = "";
+            public string source_player_key = "";
+            public string sequence_id = "";
+            public string sequence_label = "";
+            public float due_at;
+            public float delay_seconds;
+            public float start_health;
+            public Vector3 start_position;
+            public float start_target_distance;
+            public float start_exposure;
+            [JsonIgnore]
+            public BaseCombatEntity target;
+        }
+
+        private class DecisionOutcomeAnchorV2
+        {
+            public string decision_id = "";
+            public string bot_key = "";
+            public BaseCombatEntity bot;
+            public float decided_at;
+            public float due_at;
+            public float delay_seconds;
+            public string action = "none";
+            public float start_health;
+            public Vector3 start_position;
+            public float start_exposure;
+            public bool start_had_los;
+        }
+
+        private class DecisionOutcomeV2
+        {
+            public int schema_version = 2;
+            public string decision_id = "";
+            public string bot_key = "";
+            public string action = "none";
+            public float delay_seconds;
+            public string captured_at_utc = "";
+            public bool bot_alive;
+            public float health_delta;
+            public float distance_moved;
+            public float exposure_delta;
+            public bool has_line_of_sight;
+            public int recent_head_hits;
+            public int path_failures;
+            public string controller_mode = "legacy";
+        }
+
+        private class V2Metrics
+        {
+            public long motor_ticks;
+            public long authorized_shots;
+            public long rejected_shots;
+            public long unauthorized_hits_blocked;
+            public long water_target_rejections;
+            public long water_crossing_rejections;
+            public long foliage_rejections;
+            public long muzzle_rejections;
+            public long native_ownership_conflicts;
+            public long controller_rollbacks;
+            public long training_frames;
+            public long training_frames_dropped;
+            public long training_flush_failures;
+            public long real_medical_uses;
+            public long motor_budget_breaches;
+        }
+
+        private class BaseRestrictionCacheEntry
+        {
+            public bool Restricted;
+            public float ExpiresAt;
+        }
+
         private class ManagedBotGroup
         {
             public string GroupId = "";
@@ -1957,6 +2620,18 @@ namespace Oxide.Plugins
             public string PreferredPrefab = "";
             public float QueuedAt;
             public string Reason = "";
+        }
+
+        private class WorldPopulationCensus
+        {
+            public int ServerEntities;
+            public int PlayerBodies;
+            public int LegacyNpcBodies;
+            public int Scientists;
+            public int TunnelDwellers;
+            public int UnderwaterDwellers;
+            public int Gen2Scientists;
+            public int OnlinePlayers;
         }
 
         private enum TacticalState
@@ -2074,8 +2749,11 @@ namespace Oxide.Plugins
             public int FoliageBlockerHits;
             public int SmokeBlockedProbePoints;
             public int SmokeBlockerHits;
+            public int WaterBlockedProbePoints;
+            public int WaterBlockerHits;
             public string BlockReason = "none";
             public Vector3 BestVisiblePoint;
+            public readonly List<Vector3> VisiblePoints = new List<Vector3>();
         }
 
         private class LastBotInfo
@@ -2107,6 +2785,8 @@ namespace Oxide.Plugins
             public Vector3 CoverPoint;
             public Vector3 TuckPoint;
             public Vector3 PeekPoint;
+            public Vector3 PeekLeftPoint;
+            public Vector3 PeekRightPoint;
             public string Source = "";
             public float Distance;
         }
@@ -2182,6 +2862,356 @@ namespace Oxide.Plugins
             public string BotKey = "";
             public int TeamId;
             public string UtilityType = "";
+        }
+
+        private interface IBotBodyAdapter
+        {
+            string Key { get; }
+            BodyCapabilities Inspect(BaseCombatEntity bot, BotRuntime runtime);
+            void Prepare(BaseCombatEntity bot, BotRuntime runtime, bool authoritative);
+            bool Move(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed);
+            bool TryFireSingleShot(BaseCombatEntity bot, BotRuntime runtime, Vector3 aimPoint, out string reason);
+            void StopFire(BaseCombatEntity bot, BotRuntime runtime);
+            bool SetCrouched(BaseCombatEntity bot, BotRuntime runtime, bool crouched, float now);
+            bool VerifyOwnership(BaseCombatEntity bot, BotRuntime runtime, out string conflict);
+        }
+
+        private class LegacyScientistBodyAdapter : IBotBodyAdapter
+        {
+            private readonly RaidlandsRoamBots owner;
+
+            public LegacyScientistBodyAdapter(RaidlandsRoamBots owner)
+            {
+                this.owner = owner;
+            }
+
+            public string Key => "legacy_scientist";
+
+            public BodyCapabilities Inspect(BaseCombatEntity bot, BotRuntime runtime)
+            {
+                var brain = bot?.GetComponent<BaseAIBrain>() ?? bot?.GetComponentInChildren<BaseAIBrain>();
+                var navigator = bot?.GetComponent<BaseNavigator>() ?? bot?.GetComponentInChildren<BaseNavigator>();
+                var agent = bot?.GetComponent<NavMeshAgent>() ?? bot?.GetComponentInChildren<NavMeshAgent>();
+                var projectile = owner.ActiveBaseProjectile(bot);
+                var capabilities = new BodyCapabilities
+                {
+                    adapter_key = Key,
+                    prefab = bot?.PrefabName ?? "",
+                    entity_type = owner.EntityTypeName(bot),
+                    brain_type = brain == null ? "none" : brain.GetType().FullName,
+                    navigator_type = navigator == null ? "none" : navigator.GetType().FullName,
+                    has_brain = brain != null,
+                    has_navigator = navigator != null,
+                    has_navmesh_agent = agent != null,
+                    has_attack_interface = owner.GetAttackInterface(bot) != null,
+                    supports_server_projectile = projectile != null && projectile.primaryMagazine != null,
+                    stance_test_complete = runtime?.V2StanceTestComplete == true,
+                    supports_mechanical_crouch = runtime?.V2StanceTestComplete == true && runtime.BodyCapabilities?.supports_mechanical_crouch == true,
+                    supports_authoritative_movement = navigator != null && agent != null && agent.enabled && agent.isOnNavMesh,
+                    supports_authoritative_fire = projectile != null && projectile.primaryMagazine != null,
+                    failure_reason = "ready"
+                };
+
+                if (!(bot is ScientistNPC))
+                {
+                    capabilities.failure_reason = "unsupported_entity_type";
+                }
+                else if (!capabilities.has_brain || !capabilities.has_navigator || !capabilities.has_navmesh_agent)
+                {
+                    capabilities.failure_reason = "missing_navigation_contract";
+                }
+                else if (!capabilities.supports_authoritative_movement)
+                {
+                    capabilities.failure_reason = "navigator_not_ready";
+                }
+                else if (!capabilities.supports_authoritative_fire)
+                {
+                    capabilities.failure_reason = "missing_server_projectile";
+                }
+                else if (runtime?.V2StanceTestComplete == true && owner.config.ControllerV2.RequireMechanicalCrouch && !capabilities.supports_mechanical_crouch)
+                {
+                    capabilities.failure_reason = "mechanical_crouch_unverified";
+                }
+
+                return capabilities;
+            }
+
+            public void Prepare(BaseCombatEntity bot, BotRuntime runtime, bool authoritative)
+            {
+                if (bot == null)
+                {
+                    return;
+                }
+
+                owner.SuppressScientistBodyAudio(bot);
+                var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
+
+                if (brain == null)
+                {
+                    return;
+                }
+
+                brain.AllowedToSleep = false;
+                brain.sleeping = false;
+                owner.SuppressBrainPlayerTargeting(bot, brain);
+
+                if (!authoritative)
+                {
+                    var legacyScientist = bot as global::HumanNPC;
+                    if (legacyScientist != null && runtime?.OriginalBodyStateCaptured == true)
+                    {
+                        legacyScientist.aimConeScale = runtime.OriginalAimConeScale;
+                    }
+
+                    brain.SetEnabled(true);
+                    brain.SetThinkMode(AIThinkMode.FixedUpdate);
+                    var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+                    if (navigator != null)
+                    {
+                        navigator.CanPathFindToChaseTargetIfNoMovePoint = true;
+                        navigator.CanUseRandomMovePointIfNonFound = true;
+                        navigator.FaceMoveTowardsTarget = true;
+                        owner.TryInvoke(navigator, "ClearFacingDirectionOverride");
+                    }
+
+                    var legacyAgent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+                    if (legacyAgent != null && runtime?.OriginalAgentStateCaptured == true)
+                    {
+                        legacyAgent.updateRotation = runtime.OriginalAgentUpdateRotation;
+                    }
+                    return;
+                }
+
+                brain.SwitchToState(AIState.Idle, 0);
+                brain.SetThinkMode(AIThinkMode.None);
+                brain.SetEnabled(false);
+
+                var v2Navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+                if (v2Navigator != null)
+                {
+                    v2Navigator.CanPathFindToChaseTargetIfNoMovePoint = false;
+                    v2Navigator.CanUseRandomMovePointIfNonFound = false;
+                    v2Navigator.FaceMoveTowardsTarget = false;
+                }
+
+                var v2Scientist = bot as global::HumanNPC;
+                if (v2Scientist != null)
+                {
+                    if (runtime != null && !runtime.OriginalBodyStateCaptured)
+                    {
+                        runtime.OriginalBodyStateCaptured = true;
+                        runtime.OriginalAimConeScale = v2Scientist.aimConeScale;
+                    }
+
+                    v2Scientist.aimConeScale = 0f;
+                }
+
+                var v2Agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+                if (v2Agent != null)
+                {
+                    if (runtime != null && !runtime.OriginalAgentStateCaptured)
+                    {
+                        runtime.OriginalAgentStateCaptured = true;
+                        runtime.OriginalAgentUpdateRotation = v2Agent.updateRotation;
+                    }
+
+                    v2Agent.updateRotation = false;
+                }
+            }
+
+            public bool Move(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed)
+            {
+                return owner.MoveBotToRaw(bot, runtime, destination, speed);
+            }
+
+            public bool TryFireSingleShot(BaseCombatEntity bot, BotRuntime runtime, Vector3 aimPoint, out string reason)
+            {
+                reason = "fire_failed";
+                var player = bot as BasePlayer;
+                var projectile = owner.ActiveBaseProjectile(bot);
+                var magazine = projectile?.primaryMagazine;
+
+                if (player == null || projectile == null || magazine == null)
+                {
+                    reason = "missing_server_projectile";
+                    return false;
+                }
+
+                if (magazine.contents <= 0)
+                {
+                    reason = "reload_required";
+                    return false;
+                }
+
+                if (projectile.ServerIsReloading() || projectile.HasAttackCooldown() || !projectile.CanAttack())
+                {
+                    reason = projectile.ServerIsReloading() ? "reloading" : "weapon_cooldown";
+                    return false;
+                }
+
+                var muzzle = owner.WeaponMuzzlePosition(bot);
+                var direction = aimPoint - muzzle;
+
+                if (muzzle == Vector3.zero || direction.sqrMagnitude <= 0.0001f)
+                {
+                    reason = "invalid_aim";
+                    return false;
+                }
+
+                var before = magazine.contents;
+                var origin = Matrix4x4.TRS(muzzle, Quaternion.LookRotation(direction.normalized, Vector3.up), Vector3.one);
+                var oldUseOwnerForward = projectile.useOwnerForward;
+                var oldAiming = projectile.aiming;
+                Exception serverUseException = null;
+
+                try
+                {
+                    projectile.useOwnerForward = false;
+                    projectile.aiming = true;
+                    projectile.ServerUse(new HeldEntityServerUseParams(1f, 1f, origin, true, false));
+                }
+                catch (Exception ex)
+                {
+                    serverUseException = ex;
+                }
+                finally
+                {
+                    projectile.useOwnerForward = oldUseOwnerForward;
+                    projectile.aiming = oldAiming;
+                }
+
+                if (magazine.contents >= before)
+                {
+                    reason = serverUseException == null
+                        ? "server_use_no_round_consumed"
+                        : $"server_use_failed:{serverUseException.GetType().Name}";
+                    return false;
+                }
+
+                reason = serverUseException == null ? "fired" : $"fired_after_exception:{serverUseException.GetType().Name}";
+                return true;
+            }
+
+            public void StopFire(BaseCombatEntity bot, BotRuntime runtime)
+            {
+                var attacker = owner.GetAttackInterface(bot);
+
+                if (attacker != null)
+                {
+                    owner.TryInvoke(attacker, "StopAttacking");
+                }
+
+                owner.TryInvoke(bot, "StopAttacking");
+                owner.SuppressBrainPlayerTargeting(bot);
+
+                if (runtime != null)
+                {
+                    runtime.IsShooting = false;
+                }
+            }
+
+            public bool SetCrouched(BaseCombatEntity bot, BotRuntime runtime, bool crouched, float now)
+            {
+                return owner.SetBotCrouchedMechanical(bot, runtime, crouched, now);
+            }
+
+            public bool VerifyOwnership(BaseCombatEntity bot, BotRuntime runtime, out string conflict)
+            {
+                conflict = "";
+
+                if (bot == null || runtime == null)
+                {
+                    conflict = "missing_runtime";
+                    return false;
+                }
+
+                var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
+                var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+
+                if (brain == null || navigator == null)
+                {
+                    conflict = "missing_body_component";
+                    return false;
+                }
+
+                var state = brain.CurrentState?.StateType ?? AIState.None;
+                if (brain.enabled)
+                {
+                    conflict = "native_brain_enabled";
+                    return false;
+                }
+
+                if (state == AIState.Chase || state == AIState.Attack || state == AIState.Combat || state == AIState.CombatStationary)
+                {
+                    conflict = $"native_state:{state}";
+                    return false;
+                }
+
+                if ((brain.SenseTypes & EntityType.Player) != 0 || brain.Senses != null && (brain.Senses.senseTypes & EntityType.Player) != 0)
+                {
+                    conflict = "native_player_sense";
+                    return false;
+                }
+
+                var memory = brain.Senses?.Memory;
+                if (memory != null
+                    && (memory.Players != null && memory.Players.Any(entity => entity is BasePlayer)
+                        || memory.Targets != null && memory.Targets.Any(entity => entity is BasePlayer)
+                        || memory.Threats != null && memory.Threats.Any(entity => entity is BasePlayer)))
+                {
+                    conflict = "native_target_memory";
+                    return false;
+                }
+
+                var attacker = owner.GetAttackInterface(bot);
+                if (attacker?.GetBestTarget() != null)
+                {
+                    conflict = "native_attack_target";
+                    return false;
+                }
+
+                if (navigator.CanPathFindToChaseTargetIfNoMovePoint
+                    || navigator.CanUseRandomMovePointIfNonFound
+                    || navigator.FaceMoveTowardsTarget)
+                {
+                    conflict = "native_navigator_policy";
+                    return false;
+                }
+
+                if (runtime.CurrentDestination != Vector3.zero
+                    && navigator.Destination != Vector3.zero
+                    && Vector3.Distance(runtime.CurrentDestination, navigator.Destination) > 3f)
+                {
+                    conflict = "native_destination_overwrite";
+                    return false;
+                }
+
+                var agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+                if (agent != null && agent.updateRotation)
+                {
+                    conflict = "native_rotation_overwrite";
+                    return false;
+                }
+                if (runtime.CurrentDestination != Vector3.zero
+                    && agent != null
+                    && agent.enabled
+                    && agent.isOnNavMesh
+                    && !float.IsInfinity(agent.destination.x)
+                    && Vector3.Distance(runtime.CurrentDestination, agent.destination) > 3f)
+                {
+                    conflict = "native_agent_destination_overwrite";
+                    return false;
+                }
+
+                var player = bot as BasePlayer;
+                if (player != null && owner.IsPlayerCrouched(player) != runtime.IsCrouching)
+                {
+                    conflict = "native_stance_overwrite";
+                    return false;
+                }
+
+                return true;
+            }
         }
 
         private interface IDecisionAdvisor
@@ -2445,7 +3475,7 @@ namespace Oxide.Plugins
 
         protected override void LoadDefaultConfig()
         {
-            config = new Configuration();
+            config = new Configuration { SchemaVersion = CurrentConfigSchemaVersion };
         }
 
         protected override void LoadConfig()
@@ -2460,7 +3490,7 @@ namespace Oxide.Plugins
             catch (Exception ex)
             {
                 PrintWarning($"Configuration was invalid; writing defaults. {ex.Message}");
-                config = new Configuration();
+                config = new Configuration { SchemaVersion = CurrentConfigSchemaVersion };
             }
 
             NormalizeConfig();
@@ -2494,6 +3524,7 @@ namespace Oxide.Plugins
         {
             permission.RegisterPermission(AdminPermission, this);
             permission.RegisterPermission(IgnorePermission, this);
+            legacyScientistBodyAdapter = new LegacyScientistBodyAdapter(this);
             LoadData();
             LoadBotChatQuota();
             LoadBehaviorModels();
@@ -2501,14 +3532,50 @@ namespace Oxide.Plugins
 
         private void OnServerInitialized()
         {
+            initializationGeneration++;
+            QueueInitializationStage(initializationGeneration, 0.1f, InitializeServicesStage);
+        }
+
+        private void QueueInitializationStage(int generation, float delaySeconds, Action<int> stage)
+        {
+            initializationTimer?.Destroy();
+            initializationTimer = timer.Once(Math.Max(0.05f, delaySeconds), () =>
+            {
+                initializationTimer = null;
+                if (generation != initializationGeneration || config == null)
+                {
+                    return;
+                }
+
+                stage(generation);
+            });
+        }
+
+        private void InitializeServicesStage(int generation)
+        {
             RefreshEligibleKits();
             RefreshDecisionAdvisor();
             RefreshLearningTimer();
+            RefreshTrainingV2Timer();
+            QueueInitializationStage(generation, 0.1f, InitializeAssetsStage);
+        }
+
+        private void InitializeAssetsStage(int generation)
+        {
             RegisterBotAvatarImages();
             MaybePruneDecisionTraceFile(DecisionTraceDataPath(), true);
+            QueueInitializationStage(generation, 0.1f, InitializeScoreboardsStage);
+        }
+
+        private void InitializeScoreboardsStage(int generation)
+        {
             CreateScoreboards();
             UpdateScoreboards();
+            QueueInitializationStage(generation, 0.1f, InitializeRuntimeStage);
+        }
 
+        private void InitializeRuntimeStage(int generation)
+        {
             if (!config.Enabled)
             {
                 BotLog("Raidlands roam bots are disabled. Config and data are ready; no bots will spawn until raidbots.enable is run.");
@@ -2520,6 +3587,10 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            initializationGeneration++;
+            initializationTimer?.Destroy();
+            initializationTimer = null;
+            StopTrainingV2(true);
             StopRuntime();
             DestroyDebugBotPanels();
             DestroyAdminPanels();
@@ -2532,7 +3603,9 @@ namespace Oxide.Plugins
             SaveBotChatQuota();
             learningTimer?.Destroy();
             learningTimer = null;
-            if (config?.Persistence?.KillBotsOnPluginUnload == true)
+            if (config?.Persistence?.KillBotsOnPluginUnload == true
+                || config?.ControllerV2?.RespawnTrackedBotsOnPluginReload == true
+                    && ParseControllerMode(config.ControllerV2.Mode) != ControllerMode.Legacy)
             {
                 KillAllBots(!config.Persistence.LeaveCorpses);
             }
@@ -2658,6 +3731,7 @@ namespace Oxide.Plugins
             perceptionTimer = timer.Every(Math.Max(0.1f, config.AI.PerceptionTickSeconds), PerceptionTick);
             brainTimer = timer.Every(Math.Max(0.15f, config.AI.DecisionTickSeconds), TacticalBrainTick);
             squadTimer = timer.Every(Math.Max(0.25f, config.AI.SquadTickSeconds), SquadTick);
+            combatMotorTimer = timer.Every(Math.Max(0.05f, config.ControllerV2.CombatMotorTickSeconds), CombatMotorTick);
             StartNameplateTimerIfEnabled();
             StartBotMapMarkerTimerIfEnabled();
             scoreboardTimer = timer.Every(Math.Max(15f, config.ScoreboardIntervalSeconds), UpdateScoreboards);
@@ -2669,6 +3743,8 @@ namespace Oxide.Plugins
         private void StopRuntime()
         {
             ClearAllBotCrouches();
+            populationRampTimer?.Destroy();
+            populationRampTimer = null;
             maintainTimer?.Destroy();
             maintainTimer = null;
             perceptionTimer?.Destroy();
@@ -2677,6 +3753,8 @@ namespace Oxide.Plugins
             brainTimer = null;
             squadTimer?.Destroy();
             squadTimer = null;
+            combatMotorTimer?.Destroy();
+            combatMotorTimer = null;
             nameplateTimer?.Destroy();
             nameplateTimer = null;
             mapMarkerTimer?.Destroy();
@@ -2693,7 +3771,22 @@ namespace Oxide.Plugins
 
         private void NormalizeConfig()
         {
-            var defaults = new Configuration();
+            var defaults = new Configuration { SchemaVersion = CurrentConfigSchemaVersion };
+            var loadedSchemaVersion = config.SchemaVersion;
+
+            if (loadedSchemaVersion < CurrentConfigSchemaVersion)
+            {
+                // V2 deliberately starts from a clean, non-learned baseline. The old
+                // aggregate profiles remain on disk for audit/export, but no longer
+                // replace skill tiers or steer live tactical scores after migration.
+                if (config.Learning != null)
+                {
+                    config.Learning.ApplyMode = LearningApplyShadow;
+                    config.Learning.PlayerProfileSpawnWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                config.SchemaVersion = CurrentConfigSchemaVersion;
+            }
             config.MinAllowedPopulation = Math.Max(0, config.MinAllowedPopulation);
             config.MaxAllowedPopulation = Math.Max(config.MinAllowedPopulation, config.MaxAllowedPopulation);
             config.TargetPopulation = Clamp(config.TargetPopulation, config.MinAllowedPopulation, config.MaxAllowedPopulation);
@@ -2883,6 +3976,8 @@ namespace Oxide.Plugins
                 .Where(prefab => !string.IsNullOrWhiteSpace(prefab))
                 .Select(prefab => prefab.Trim())
                 .Where(IsLegacyScientistBodyPrefab)
+                .Where(prefab => !config.Spawn.RequireLandSpawns
+                    || string.Equals(prefab, LandNavigationScientistPrefab, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -3146,6 +4241,77 @@ namespace Oxide.Plugins
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             config.Learning.PlayerProfileSpawnWeights = NormalizeProfileSpawnPercentages(config.Learning.PlayerProfileSpawnWeights);
+            // Legacy traces/models remain available for audit, but learned profiles
+            // cannot influence live V2 or legacy spawns during the clean baseline.
+            config.Learning.ApplyMode = LearningApplyShadow;
+            config.Learning.PlayerProfileSpawnWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            if (config.ControllerV2 == null)
+            {
+                config.ControllerV2 = defaults.ControllerV2;
+            }
+
+            config.ControllerV2.Mode = NormalizeControllerMode(config.ControllerV2.Mode);
+            if (config.ControllerV2.BodyAdapters == null)
+            {
+                config.ControllerV2.BodyAdapters = defaults.ControllerV2.BodyAdapters;
+            }
+            config.ControllerV2.BodyAdapters.EnabledAdapterKeys = (config.ControllerV2.BodyAdapters.EnabledAdapterKeys ?? defaults.ControllerV2.BodyAdapters.EnabledAdapterKeys)
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .Select(key => key.Trim().ToLowerInvariant())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            config.ControllerV2.CanaryBotCount = Clamp(config.ControllerV2.CanaryBotCount, 0, Math.Max(0, config.MaxAllowedPopulation));
+            config.ControllerV2.CanaryPercent = Clamp(config.ControllerV2.CanaryPercent, 0, 100);
+            config.ControllerV2.CombatMotorTickSeconds = Mathf.Clamp(config.ControllerV2.CombatMotorTickSeconds <= 0f ? defaults.ControllerV2.CombatMotorTickSeconds : config.ControllerV2.CombatMotorTickSeconds, 0.05f, 0.2f);
+            config.ControllerV2.MidDistanceMotorTickSeconds = Mathf.Clamp(config.ControllerV2.MidDistanceMotorTickSeconds <= 0f ? defaults.ControllerV2.MidDistanceMotorTickSeconds : config.ControllerV2.MidDistanceMotorTickSeconds, config.ControllerV2.CombatMotorTickSeconds, 0.5f);
+            config.ControllerV2.FarDistanceMotorTickSeconds = Mathf.Clamp(config.ControllerV2.FarDistanceMotorTickSeconds <= 0f ? defaults.ControllerV2.FarDistanceMotorTickSeconds : config.ControllerV2.FarDistanceMotorTickSeconds, config.ControllerV2.MidDistanceMotorTickSeconds, 1f);
+            config.ControllerV2.NearCombatDistance = Mathf.Clamp(config.ControllerV2.NearCombatDistance <= 0f ? defaults.ControllerV2.NearCombatDistance : config.ControllerV2.NearCombatDistance, 10f, 250f);
+            config.ControllerV2.MidCombatDistance = Mathf.Clamp(config.ControllerV2.MidCombatDistance <= 0f ? defaults.ControllerV2.MidCombatDistance : config.ControllerV2.MidCombatDistance, config.ControllerV2.NearCombatDistance, 500f);
+            config.ControllerV2.OwnershipConflictsBeforeRollback = Clamp(config.ControllerV2.OwnershipConflictsBeforeRollback, 1, 100);
+            config.ControllerV2.MaximumConsecutiveFireFailures = Clamp(config.ControllerV2.MaximumConsecutiveFireFailures, 1, 100);
+            config.ControllerV2.PathFailuresBeforeRollback = Clamp(config.ControllerV2.PathFailuresBeforeRollback <= 0 ? defaults.ControllerV2.PathFailuresBeforeRollback : config.ControllerV2.PathFailuresBeforeRollback, 1, 100);
+            config.ControllerV2.MaximumAiMillisecondsPerMotorTick = Mathf.Clamp(config.ControllerV2.MaximumAiMillisecondsPerMotorTick <= 0f ? defaults.ControllerV2.MaximumAiMillisecondsPerMotorTick : config.ControllerV2.MaximumAiMillisecondsPerMotorTick, 0.25f, 20f);
+            config.ControllerV2.SustainedBudgetBreachSeconds = Mathf.Clamp(config.ControllerV2.SustainedBudgetBreachSeconds <= 0f ? defaults.ControllerV2.SustainedBudgetBreachSeconds : config.ControllerV2.SustainedBudgetBreachSeconds, 1f, 60f);
+            config.ControllerV2.WaterSegmentSampleStep = Mathf.Clamp(config.ControllerV2.WaterSegmentSampleStep <= 0f ? defaults.ControllerV2.WaterSegmentSampleStep : config.ControllerV2.WaterSegmentSampleStep, 0.25f, 5f);
+            config.ControllerV2.MaximumWaterSegmentSamples = Clamp(config.ControllerV2.MaximumWaterSegmentSamples, 8, 256);
+            config.ControllerV2.LastKnownPositionUncertaintyPerSecond = Mathf.Clamp(config.ControllerV2.LastKnownPositionUncertaintyPerSecond, 0f, 5f);
+            config.ControllerV2.MaximumLastKnownPositionUncertainty = Mathf.Clamp(config.ControllerV2.MaximumLastKnownPositionUncertainty, 0f, 50f);
+            config.ControllerV2.StrafeMinimumSeconds = Mathf.Clamp(config.ControllerV2.StrafeMinimumSeconds, 0.1f, 3f);
+            config.ControllerV2.StrafeMaximumSeconds = Mathf.Clamp(config.ControllerV2.StrafeMaximumSeconds, config.ControllerV2.StrafeMinimumSeconds, 5f);
+            config.ControllerV2.JiggleSegmentMinimumSeconds = Mathf.Clamp(config.ControllerV2.JiggleSegmentMinimumSeconds, 0.1f, 1f);
+            config.ControllerV2.JiggleSegmentMaximumSeconds = Mathf.Clamp(config.ControllerV2.JiggleSegmentMaximumSeconds, config.ControllerV2.JiggleSegmentMinimumSeconds, 1.5f);
+            config.ControllerV2.WideSwingDistance = Mathf.Clamp(config.ControllerV2.WideSwingDistance, 2f, 12f);
+            config.ControllerV2.CombatStrafeDistance = Mathf.Clamp(config.ControllerV2.CombatStrafeDistance, 1f, 8f);
+            config.ControllerV2.AimTurnDegreesPerSecondCasual = Mathf.Clamp(config.ControllerV2.AimTurnDegreesPerSecondCasual, 45f, 720f);
+            config.ControllerV2.AimTurnDegreesPerSecondAverage = Mathf.Clamp(config.ControllerV2.AimTurnDegreesPerSecondAverage, config.ControllerV2.AimTurnDegreesPerSecondCasual, 720f);
+            config.ControllerV2.AimTurnDegreesPerSecondDangerous = Mathf.Clamp(config.ControllerV2.AimTurnDegreesPerSecondDangerous, config.ControllerV2.AimTurnDegreesPerSecondAverage, 1080f);
+            config.ControllerV2.WeaponMotorProfiles = NormalizeWeaponMotorProfiles(config.ControllerV2.WeaponMotorProfiles, defaults.ControllerV2.WeaponMotorProfiles);
+
+            if (config.TrainingV2 == null)
+            {
+                config.TrainingV2 = defaults.TrainingV2;
+            }
+
+            config.TrainingV2.SchemaVersion = 2;
+            config.TrainingV2.SampleIntervalSeconds = Mathf.Clamp(config.TrainingV2.SampleIntervalSeconds <= 0f ? defaults.TrainingV2.SampleIntervalSeconds : config.TrainingV2.SampleIntervalSeconds, 0.05f, 0.2f);
+            config.TrainingV2.RawRetentionDays = Clamp(config.TrainingV2.RawRetentionDays, 1, 365);
+            config.TrainingV2.MaximumTraceFileMegabytes = Clamp(config.TrainingV2.MaximumTraceFileMegabytes, 16, 4096);
+            config.TrainingV2.MaximumBufferedFrames = Clamp(config.TrainingV2.MaximumBufferedFrames, 100, 10000);
+            config.TrainingV2.OptedInPlayerSteamIds = (config.TrainingV2.OptedInPlayerSteamIds ?? new List<string>())
+                .Where(IsSteamId64)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            config.TrainingV2.OutcomeDelaysSeconds = (config.TrainingV2.OutcomeDelaysSeconds ?? defaults.TrainingV2.OutcomeDelaysSeconds)
+                .Where(value => value >= 1f && value <= 30f)
+                .Distinct()
+                .OrderBy(value => value)
+                .ToList();
+            if (config.TrainingV2.OutcomeDelaysSeconds.Count == 0)
+            {
+                config.TrainingV2.OutcomeDelaysSeconds = new List<float>(defaults.TrainingV2.OutcomeDelaysSeconds);
+            }
+            config.TrainingV2.AllowAutomaticLiveTraining = false;
 
             if (config.BotChat == null)
             {
@@ -3579,6 +4745,95 @@ namespace Oxide.Plugins
             return config?.BotIdentities ?? new List<BotIdentityConfig>();
         }
 
+        private BotIdentityConfig OverflowBotIdentity(int slot)
+        {
+            slot = Math.Max(1, slot);
+            return new BotIdentityConfig
+            {
+                BotId = $"roamer_slot_{slot.ToString("000", CultureInfo.InvariantCulture)}",
+                DisplayName = $"Roamer {slot.ToString("000", CultureInfo.InvariantCulture)}"
+            };
+        }
+
+        private int OverflowIdentityCapacity(int configuredIdentityCount)
+        {
+            var maximumActive = Math.Max(config?.MaxAllowedPopulation ?? 0,
+                config?.ManagedApi?.MaximumTotalActiveBots ?? 0);
+            return Math.Max(1, maximumActive - Math.Max(0, configuredIdentityCount));
+        }
+
+        private bool IsLegacyRandomBotKey(string value)
+        {
+            var key = (value ?? "").Trim();
+            if (key.Length != 10 || !key.StartsWith("roamer", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            int number;
+            return int.TryParse(key.Substring(6), NumberStyles.None, CultureInfo.InvariantCulture, out number)
+                && number >= 1000
+                && number <= 9999;
+        }
+
+        private int SaturatingStatAdd(int current, int increment)
+        {
+            var total = (long)Math.Max(0, current) + Math.Max(0, increment);
+            return total > int.MaxValue ? int.MaxValue : (int)total;
+        }
+
+        private int MigrateLegacyRandomBotStats()
+        {
+            if (data?.bots == null || data.bots.Count == 0)
+            {
+                return 0;
+            }
+
+            var legacyEntries = data.bots
+                .Where(entry => IsLegacyRandomBotKey(entry.Key)
+                    || IsLegacyRandomBotKey(entry.Value?.bot_key))
+                .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (legacyEntries.Count == 0)
+            {
+                return 0;
+            }
+
+            var configuredCount = ConfiguredBotIdentities()
+                .Where(identity => identity != null)
+                .Select(identity => BotKey(identity.BotId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var migrationSlotCount = Math.Max(1, TargetPopulation() - configuredCount);
+            migrationSlotCount = Math.Min(migrationSlotCount, OverflowIdentityCapacity(configuredCount));
+
+            foreach (var entry in legacyEntries)
+            {
+                var legacyKey = string.IsNullOrWhiteSpace(entry.Value?.bot_key) ? entry.Key : entry.Value.bot_key;
+                var identity = OverflowBotIdentity(StableBucket(legacyKey, migrationSlotCount) + 1);
+                BotStats target;
+                if (!data.bots.TryGetValue(identity.BotId, out target) || target == null)
+                {
+                    target = new BotStats { bot_key = identity.BotId, display_name = identity.DisplayName };
+                    data.bots[identity.BotId] = target;
+                }
+
+                var source = entry.Value;
+                if (source != null)
+                {
+                    target.spawns = SaturatingStatAdd(target.spawns, source.spawns);
+                    target.kills = SaturatingStatAdd(target.kills, source.kills);
+                    target.deaths = SaturatingStatAdd(target.deaths, source.deaths);
+                }
+
+                data.bots.Remove(entry.Key);
+            }
+
+            Puts($"Migrated {legacyEntries.Count} legacy random bot identity rows into {migrationSlotCount} stable overflow identity slot(s).");
+            return legacyEntries.Count;
+        }
+
         private void SeedConfiguredBotIdentityStats()
         {
             if (data?.bots == null)
@@ -3611,6 +4866,766 @@ namespace Oxide.Plugins
             }
         }
 
+        private void RefreshTrainingV2Timer()
+        {
+            trainingV2Timer?.Destroy();
+            trainingV2Timer = null;
+            trainingV2FlushTimer?.Destroy();
+            trainingV2FlushTimer = null;
+            Unsubscribe(nameof(OnPlayerInput));
+
+            if (config?.TrainingV2?.Enabled != true)
+            {
+                EndAllTrainingV2Sessions("capture_disabled");
+                FlushTrainingV2Frames();
+                return;
+            }
+
+            Subscribe(nameof(OnPlayerInput));
+            LoadTrainingConsentV2();
+            PruneTrainingV2TraceFiles(true);
+            var interval = Mathf.Clamp(config.TrainingV2.SampleIntervalSeconds, 0.05f, 0.2f);
+            trainingV2Timer = timer.Every(interval, TrainingV2Tick);
+        }
+
+        private void LoadTrainingConsentV2()
+        {
+            try
+            {
+                trainingConsentV2 = Interface.Oxide.DataFileSystem.ReadObject<TrainingConsentDataV2>(TrainingV2ConsentDataFile) ?? new TrainingConsentDataV2();
+            }
+            catch
+            {
+                trainingConsentV2 = new TrainingConsentDataV2();
+            }
+
+            if (string.IsNullOrWhiteSpace(trainingConsentV2.hmac_salt))
+            {
+                var bytes = new byte[32];
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(bytes);
+                }
+                trainingConsentV2.hmac_salt = Convert.ToBase64String(bytes);
+                SaveTrainingConsentV2();
+            }
+
+            trainingConsentV2.consented_player_steam_ids = (trainingConsentV2.consented_player_steam_ids ?? new List<string>())
+                .Where(IsSteamId64)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private void SaveTrainingConsentV2()
+        {
+            try
+            {
+                Interface.Oxide.DataFileSystem.WriteObject(TrainingV2ConsentDataFile, trainingConsentV2 ?? new TrainingConsentDataV2());
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not save Training V2 consent: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private void StopTrainingV2(bool finalize)
+        {
+            Unsubscribe(nameof(OnPlayerInput));
+            trainingV2Timer?.Destroy();
+            trainingV2Timer = null;
+            trainingV2FlushTimer?.Destroy();
+            trainingV2FlushTimer = null;
+            if (finalize)
+            {
+                EndAllTrainingV2Sessions("plugin_unload");
+            }
+            FlushTrainingV2Frames();
+            FlushDecisionOutcomesV2();
+            SaveTrainingConsentV2();
+        }
+
+        private bool ShouldTrackTrainingV2Player(BasePlayer player)
+        {
+            if (player == null || !IsRealPlayer(player) || !player.IsConnected || config?.TrainingV2?.Enabled != true)
+            {
+                return false;
+            }
+
+            var id = player.UserIDString;
+            var curated = config.TrainingV2.OptedInPlayerSteamIds?.Contains(id, StringComparer.OrdinalIgnoreCase) == true;
+            var consented = trainingConsentV2?.consented_player_steam_ids?.Contains(id, StringComparer.OrdinalIgnoreCase) == true;
+            return curated && (!config.TrainingV2.OptInOnly || consented);
+        }
+
+        private TrainingSessionV2 GetTrainingV2Session(BasePlayer player)
+        {
+            if (player == null || !ShouldTrackTrainingV2Player(player))
+            {
+                return null;
+            }
+
+            if (!trainingSessionsV2.TryGetValue(player.userID, out var session) || session == null)
+            {
+                var playerKey = TrainingV2PlayerKey(player);
+                if (string.IsNullOrWhiteSpace(playerKey))
+                {
+                    return null;
+                }
+                session = new TrainingSessionV2
+                {
+                    PlayerId = player.userID,
+                    PlayerKey = playerKey
+                };
+                trainingSessionsV2[player.userID] = session;
+            }
+
+            return session;
+        }
+
+        private string TrainingV2PlayerKey(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return "unknown";
+            }
+
+            if (config?.TrainingV2?.PseudonymizePlayerIds != true)
+            {
+                return player.UserIDString;
+            }
+
+            try
+            {
+                using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(trainingConsentV2?.hmac_salt ?? "raidlands-training-v2")))
+                {
+                    return BitConverter.ToString(hmac.ComputeHash(Encoding.UTF8.GetBytes(player.UserIDString))).Replace("-", "").Substring(0, 24).ToLowerInvariant();
+                }
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        private void BindTrainingV2Target(BasePlayer player, BaseCombatEntity target, string context)
+        {
+            var session = GetTrainingV2Session(player);
+            if (session == null || target == null)
+            {
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            session.CombatTarget = target;
+            session.CombatTargetAt = now;
+            session.LastCombatAt = now;
+            session.TargetContext = context ?? "combat";
+
+            if (session.StartedAt <= 0f)
+            {
+                session.SessionId = $"{DateTime.UtcNow:yyyyMMddHHmmss}_{session.PlayerKey}_{StableBucket(player.UserIDString + now.ToString(CultureInfo.InvariantCulture), 100000)}";
+                session.StartedAt = now;
+                foreach (var row in session.PreRoll)
+                {
+                    row.session_id = session.SessionId;
+                    QueueTrainingV2Frame(row);
+                }
+                session.PreRoll.Clear();
+            }
+        }
+
+        private void TrainingV2Tick()
+        {
+            var now = Time.realtimeSinceStartup;
+            ProcessTrainingV2OutcomeAnchors(now);
+            foreach (var player in BasePlayer.activePlayerList.ToList())
+            {
+                var session = GetTrainingV2Session(player);
+                if (session == null)
+                {
+                    continue;
+                }
+
+                if (!config.TrainingV2.RecordOnlyDuringBotCombat)
+                {
+                    session.LastCombatAt = now;
+                    session.TargetContext = "curated_session";
+                    if (session.StartedAt <= 0f)
+                    {
+                        session.SessionId = $"{DateTime.UtcNow:yyyyMMddHHmmss}_{session.PlayerKey}_{StableBucket(player.UserIDString + now.ToString(CultureInfo.InvariantCulture), 100000)}";
+                        session.StartedAt = now;
+                        foreach (var preRoll in session.PreRoll)
+                        {
+                            preRoll.session_id = session.SessionId;
+                            QueueTrainingV2Frame(preRoll);
+                        }
+                        session.PreRoll.Clear();
+                    }
+                }
+
+                foreach (var entry in activeBots)
+                {
+                    var runtime = entry.Value;
+                    if (runtime?.Memory?.Target == player && (IsV2Shadowing(runtime) || IsV2Actuating(runtime)))
+                    {
+                        BindTrainingV2Target(player, entry.Key, "bot_target");
+                        break;
+                    }
+                }
+
+                var frame = CaptureTrainingV2Frame(player, session, now);
+                if (session.StartedAt <= 0f)
+                {
+                    session.PreRoll.Add(frame);
+                    var cutoff = now - Math.Max(0f, config.TrainingV2.PreRollSeconds);
+                    session.PreRoll.RemoveAll(row => row.captured_at < cutoff);
+                }
+                else
+                {
+                    QueueTrainingV2Frame(frame);
+                    GenerateTrainingV2SequenceRecords(player, session, frame, now);
+                }
+
+                if (session.StartedAt > 0f && now - session.LastCombatAt > config.TrainingV2.CombatSessionTailSeconds)
+                {
+                    EndTrainingV2Session(session, "combat_tail_complete");
+                }
+            }
+        }
+
+        private TrainingSequenceV2 CaptureTrainingV2Frame(BasePlayer player, TrainingSessionV2 session, float now)
+        {
+            var position = player.transform.position;
+            var dt = session.LastSampleAt <= 0f ? config.TrainingV2.SampleIntervalSeconds : Math.Max(0.01f, now - session.LastSampleAt);
+            var velocity = session.LastSampleAt <= 0f || Vector3.Distance(position, session.LastPosition) > 12f
+                ? Vector3.zero
+                : (position - session.LastPosition) / dt;
+            var forward = Quaternion.Euler(session.AimAngles) * Vector3.forward;
+            var target = session.CombatTarget;
+            var targetPlayer = target as BasePlayer;
+            var visibility = targetPlayer == null ? null : TargetVisibility(target, player, 0.01f);
+            var exposure = visibility?.ExposedFraction ?? 0f;
+            var relative = target == null ? Vector3.zero : target.transform.position - position;
+            var buttons = session.InputButtons;
+            var lateral = InputButton(buttons, BUTTON.LEFT) ? -1 : InputButton(buttons, BUTTON.RIGHT) ? 1 : 0;
+            var action = TrainingV2DerivedAction(session, lateral, exposure, now);
+            var row = new TrainingSequenceV2
+            {
+                record_type = "frame",
+                schema_version = 2,
+                session_id = session.SessionId,
+                source_player_key = session.PlayerKey,
+                server_build = $"{Rust.Protocol.network}/{Rust.Protocol.save}",
+                map_key = $"{World.Size}/{World.Seed}/{ConVar.Server.levelurl ?? "procedural"}",
+                captured_at_utc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                captured_at = now,
+                frame_index = session.FrameIndex++,
+                session_time = session.StartedAt <= 0f ? 0f : now - session.StartedAt,
+                position = position,
+                velocity = velocity,
+                local_velocity = new Vector3(Vector3.Dot(velocity, player.transform.right), 0f, Vector3.Dot(velocity, player.transform.forward)),
+                view_forward = forward,
+                view_angles = session.AimAngles,
+                view_angular_velocity = session.HasInput ? new Vector3(Mathf.DeltaAngle(session.LastAimAngles.x, session.AimAngles.x) / dt, Mathf.DeltaAngle(session.LastAimAngles.y, session.AimAngles.y) / dt, 0f) : Vector3.zero,
+                input_forward = InputButton(buttons, BUTTON.FORWARD),
+                input_backward = InputButton(buttons, BUTTON.BACKWARD),
+                input_left = InputButton(buttons, BUTTON.LEFT),
+                input_right = InputButton(buttons, BUTTON.RIGHT),
+                input_jump = InputButton(buttons, BUTTON.JUMP),
+                input_crouch = InputButton(buttons, BUTTON.DUCK),
+                input_sprint = InputButton(buttons, BUTTON.SPRINT),
+                input_fire = InputButton(buttons, BUTTON.FIRE_PRIMARY),
+                input_reload = InputButton(buttons, BUTTON.RELOAD),
+                input_use = InputButton(buttons, BUTTON.USE),
+                input_attack2 = InputButton(buttons, BUTTON.FIRE_SECONDARY),
+                held_item = player.GetActiveItem()?.info?.shortname ?? "",
+                ammo = (player.GetActiveItem()?.GetHeldEntity() as BaseProjectile)?.primaryMagazine?.contents ?? 0,
+                health_fraction = Mathf.Clamp01(player.Health() / Math.Max(1f, player.MaxHealth())),
+                is_swimming = IsPlayerSwimmingOrSubmerged(player),
+                combat_target_id = target == null ? 0UL : CombatTargetId(target as BasePlayer),
+                target_relative_position = relative,
+                target_distance = relative.magnitude,
+                target_visible = visibility?.CanSee == true,
+                target_exposure = exposure,
+                target_context = session.TargetContext,
+                foliage_between = visibility != null && visibility.FoliageBlockedProbePoints > 0,
+                water_between = target != null && SegmentIntersectsWater(EyePosition(player), EyePosition(target), out _),
+                near_cover_edge = visibility != null && exposure > 0.01f && exposure < 0.99f,
+                derived_action = action,
+                nearby_allies = NearbyPlayerAllies(player, position, 45f),
+                nearby_enemies = NearbyTrainingEnemies(player, position, 45f),
+                shots_since_last_frame = session.PendingShots,
+                damage_events_dealt_since_last_frame = session.PendingDamageDealt,
+                damage_events_taken_since_last_frame = session.PendingDamageTaken,
+                event_flags = string.Join(",", session.PendingEvents.ToArray())
+            };
+
+            session.PendingShots = 0;
+            session.PendingDamageDealt = 0;
+            session.PendingDamageTaken = 0;
+            session.PendingEvents.Clear();
+            session.LastPosition = position;
+            session.LastVelocity = velocity;
+            session.LastAimAngles = session.AimAngles;
+            session.LastSampleAt = now;
+            session.HasInput = true;
+            session.LastExposure = exposure;
+            return row;
+        }
+
+        private bool InputButton(int buttons, BUTTON button)
+        {
+            return (buttons & (int)button) != 0;
+        }
+
+        private string TrainingV2DerivedAction(TrainingSessionV2 session, int lateral, float exposure, float now)
+        {
+            if (session == null)
+            {
+                return "hold";
+            }
+
+            if (lateral != 0 && session.LastLateralDirection != 0 && lateral != session.LastLateralDirection)
+            {
+                session.RecentReversalCount++;
+                session.LastLateralChangeAt = now;
+                return "strafe_reverse";
+            }
+
+            session.LastLateralDirection = lateral == 0 ? session.LastLateralDirection : lateral;
+            if (session.LastExposure <= 0.05f && exposure > 0.2f)
+            {
+                return "peek";
+            }
+            if (session.LastExposure > 0.2f && exposure <= 0.05f)
+            {
+                return "tuck";
+            }
+            return lateral == 0 ? "hold" : "strafe";
+        }
+
+        private int NearbyPlayerAllies(BasePlayer player, Vector3 position, float radius)
+        {
+            if (player == null || player.currentTeam == 0UL)
+            {
+                return 0;
+            }
+
+            return BasePlayer.activePlayerList.Count(other => other != null
+                && other != player
+                && IsRealPlayer(other)
+                && other.currentTeam == player.currentTeam
+                && Vector3.Distance(position, other.transform.position) <= radius);
+        }
+
+        private int NearbyTrainingEnemies(BasePlayer player, Vector3 position, float radius)
+        {
+            if (player == null)
+            {
+                return 0;
+            }
+
+            var botEnemies = activeBots.Count(entry => entry.Key != null
+                && IsLiveBot(entry.Key)
+                && Vector3.Distance(position, entry.Key.transform.position) <= radius
+                && (entry.Value?.Memory?.Target == player || entry.Value?.Memory?.TargetUserId == CombatTargetId(player)));
+            var playerEnemies = BasePlayer.activePlayerList.Count(other => other != null
+                && other != player
+                && IsRealPlayer(other)
+                && Vector3.Distance(position, other.transform.position) <= radius
+                && (player.currentTeam == 0UL || other.currentTeam != player.currentTeam));
+            return botEnemies + playerEnemies;
+        }
+
+        private void GenerateTrainingV2SequenceRecords(BasePlayer player, TrainingSessionV2 session, TrainingSequenceV2 frame, float now)
+        {
+            if (player == null || session == null || frame == null || string.IsNullOrWhiteSpace(session.SessionId))
+            {
+                return;
+            }
+
+            var flags = frame.event_flags ?? "";
+            var discreteLabel = "";
+            var duration = 0f;
+            var count = 1;
+
+            if (flags.IndexOf("heal", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discreteLabel = frame.target_exposure <= 0.2f ? "covered_heal" : "exposed_heal";
+            }
+            else if (flags.IndexOf("reload", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discreteLabel = "reload_window";
+            }
+            else if (flags.IndexOf("build", StringComparison.OrdinalIgnoreCase) >= 0
+                || flags.IndexOf("deploy", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                discreteLabel = "wall_placement";
+            }
+            else if (string.Equals(frame.derived_action, "strafe_reverse", StringComparison.OrdinalIgnoreCase))
+            {
+                if (session.ReversalWindowStartedAt <= 0f || now - session.ReversalWindowStartedAt > 1.5f)
+                {
+                    session.ReversalWindowStartedAt = now;
+                    session.RecentReversalCount = 1;
+                }
+
+                discreteLabel = session.RecentReversalCount >= 2 && (frame.near_cover_edge || session.WasNearCoverEdge)
+                    ? "jiggle"
+                    : "strafe_reversal";
+                count = Math.Max(1, session.RecentReversalCount);
+                duration = Math.Max(0f, now - session.ReversalWindowStartedAt);
+            }
+            else if (string.Equals(frame.derived_action, "peek", StringComparison.OrdinalIgnoreCase))
+            {
+                discreteLabel = session.LastTuckAt > 0f ? "repeek" : "peek";
+                duration = session.LastTuckAt > 0f ? Math.Max(0f, now - session.LastTuckAt) : 0f;
+                session.LastPeekAt = now;
+            }
+            else if (string.Equals(frame.derived_action, "tuck", StringComparison.OrdinalIgnoreCase))
+            {
+                discreteLabel = "tuck";
+                duration = session.LastPeekAt > 0f ? Math.Max(0f, now - session.LastPeekAt) : 0f;
+                session.LastTuckAt = now;
+            }
+            else if (frame.near_cover_edge && Math.Abs(frame.local_velocity.x) >= 2.5f && frame.target_exposure >= 0.35f)
+            {
+                discreteLabel = "wide_swing";
+            }
+            else if (frame.target_distance > 0.1f && session.LastTargetDistance > 0.1f)
+            {
+                var distanceDelta = frame.target_distance - session.LastTargetDistance;
+                if (distanceDelta <= -0.4f)
+                {
+                    discreteLabel = "push";
+                }
+                else if (distanceDelta >= 0.4f)
+                {
+                    discreteLabel = "retreat";
+                }
+                else if (frame.velocity.sqrMagnitude <= 0.25f)
+                {
+                    discreteLabel = "hold";
+                }
+            }
+
+            TrackTrainingV2Burst(player, session, frame, now);
+
+            var repeatSuppressed = string.Equals(discreteLabel, session.LastSequenceLabel, StringComparison.OrdinalIgnoreCase)
+                && now - session.LastSequenceAt < 0.35f
+                && discreteLabel != "strafe_reversal"
+                && discreteLabel != "jiggle";
+            if (!string.IsNullOrWhiteSpace(discreteLabel) && !repeatSuppressed)
+            {
+                EmitTrainingV2Sequence(player, session, frame, discreteLabel, duration, count, now);
+                session.LastSequenceLabel = discreteLabel;
+                session.LastSequenceAt = now;
+            }
+
+            session.LastTargetDistance = frame.target_distance;
+            session.LastDerivedAction = frame.derived_action ?? "hold";
+            session.WasNearCoverEdge = frame.near_cover_edge;
+        }
+
+        private void TrackTrainingV2Burst(BasePlayer player, TrainingSessionV2 session, TrainingSequenceV2 frame, float now)
+        {
+            if (frame.shots_since_last_frame > 0)
+            {
+                if (session.BurstShots <= 0 || session.LastShotAt <= 0f || now - session.LastShotAt > 0.4f)
+                {
+                    session.BurstStartedAt = now;
+                    session.BurstShots = 0;
+                }
+
+                session.BurstShots += frame.shots_since_last_frame;
+                session.LastShotAt = now;
+                return;
+            }
+
+            if (session.BurstShots > 0 && session.LastShotAt > 0f && now - session.LastShotAt > 0.4f)
+            {
+                EmitTrainingV2Sequence(player, session, frame, "burst", Math.Max(0f, session.LastShotAt - session.BurstStartedAt), session.BurstShots, now);
+                session.BurstShots = 0;
+                session.BurstStartedAt = 0f;
+            }
+        }
+
+        private void EmitTrainingV2Sequence(BasePlayer player, TrainingSessionV2 session, TrainingSequenceV2 frame, string label, float duration, int count, float now)
+        {
+            var sequenceId = $"{session.SessionId}:{session.FrameIndex}:{StableBucket(label + now.ToString("0.000", CultureInfo.InvariantCulture), 100000)}";
+            var row = new TrainingSequenceV2
+            {
+                schema_version = 2,
+                record_type = "sequence",
+                session_id = session.SessionId,
+                source_player_key = session.PlayerKey,
+                server_build = frame.server_build,
+                map_key = frame.map_key,
+                captured_at_utc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                captured_at = now,
+                frame_index = frame.frame_index,
+                session_time = frame.session_time,
+                position = frame.position,
+                velocity = frame.velocity,
+                view_forward = frame.view_forward,
+                combat_target_id = frame.combat_target_id,
+                target_distance = frame.target_distance,
+                target_visible = frame.target_visible,
+                target_exposure = frame.target_exposure,
+                target_context = frame.target_context,
+                foliage_between = frame.foliage_between,
+                water_between = frame.water_between,
+                near_cover_edge = frame.near_cover_edge,
+                event_flags = frame.event_flags,
+                sequence_id = sequenceId,
+                sequence_label = label,
+                sequence_duration = Math.Max(0f, duration),
+                sequence_count = Math.Max(1, count)
+            };
+            QueueTrainingV2Frame(row);
+
+            foreach (var delay in config.TrainingV2.OutcomeDelaysSeconds.Where(value => value > 0f).Distinct())
+            {
+                pendingTrainingOutcomeAnchorsV2.Add(new TrainingOutcomeAnchorV2
+                {
+                    player_id = player.userID,
+                    session_id = session.SessionId,
+                    source_player_key = session.PlayerKey,
+                    sequence_id = sequenceId,
+                    sequence_label = label,
+                    due_at = now + delay,
+                    delay_seconds = delay,
+                    start_health = player.Health(),
+                    start_position = player.transform.position,
+                    start_target_distance = frame.target_distance,
+                    start_exposure = frame.target_exposure,
+                    target = session.CombatTarget
+                });
+            }
+        }
+
+        private void ProcessTrainingV2OutcomeAnchors(float now)
+        {
+            foreach (var anchor in pendingTrainingOutcomeAnchorsV2.Where(candidate => candidate != null && candidate.due_at <= now).ToList())
+            {
+                pendingTrainingOutcomeAnchorsV2.Remove(anchor);
+                var player = BasePlayer.FindByID(anchor.player_id) ?? BasePlayer.FindSleeping(anchor.player_id);
+                trainingSessionsV2.TryGetValue(anchor.player_id, out var session);
+                var target = anchor.target ?? session?.CombatTarget;
+                var targetDistance = player == null || target == null ? anchor.start_target_distance : Vector3.Distance(player.transform.position, target.transform.position);
+                var exposure = anchor.start_exposure;
+                if (player != null && target is BasePlayer targetPlayer)
+                {
+                    exposure = TargetVisibility(targetPlayer, player, 0.01f).ExposedFraction;
+                }
+
+                QueueTrainingV2Frame(new TrainingSequenceV2
+                {
+                    schema_version = 2,
+                    record_type = "outcome",
+                    session_id = anchor.session_id,
+                    source_player_key = anchor.source_player_key,
+                    server_build = $"{Rust.Protocol.network}/{Rust.Protocol.save}",
+                    map_key = $"{World.Size}/{World.Seed}/{ConVar.Server.levelurl ?? "procedural"}",
+                    captured_at_utc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                    captured_at = now,
+                    sequence_id = anchor.sequence_id,
+                    sequence_label = anchor.sequence_label,
+                    outcome_delay_seconds = anchor.delay_seconds,
+                    outcome_health_delta = player == null ? -anchor.start_health : player.Health() - anchor.start_health,
+                    outcome_distance_moved = player == null ? 0f : Vector3.Distance(anchor.start_position, player.transform.position),
+                    outcome_target_distance_delta = targetDistance - anchor.start_target_distance,
+                    outcome_exposure_delta = exposure - anchor.start_exposure,
+                    outcome_player_died = player == null || player.IsDead()
+                });
+            }
+        }
+
+        private void RecordTrainingV2Event(BasePlayer player, string eventName, BaseCombatEntity target = null, int shots = 0, int dealt = 0, int taken = 0)
+        {
+            var session = GetTrainingV2Session(player);
+            if (session == null)
+            {
+                return;
+            }
+
+            session.PendingEvents.Add(eventName ?? "event");
+            session.PendingShots += Math.Max(0, shots);
+            session.PendingDamageDealt += Math.Max(0, dealt);
+            session.PendingDamageTaken += Math.Max(0, taken);
+            if (target != null)
+            {
+                BindTrainingV2Target(player, target, eventName);
+            }
+        }
+
+        private void EndTrainingV2Session(TrainingSessionV2 session, string reason)
+        {
+            if (session == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(session.SessionId))
+            {
+                QueueTrainingV2Frame(new TrainingSequenceV2
+                {
+                    schema_version = 2,
+                    record_type = "session_end",
+                    session_id = session.SessionId,
+                    source_player_key = session.PlayerKey,
+                    server_build = $"{Rust.Protocol.network}/{Rust.Protocol.save}",
+                    map_key = $"{World.Size}/{World.Seed}/{ConVar.Server.levelurl ?? "procedural"}",
+                    captured_at_utc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                    captured_at = Time.realtimeSinceStartup,
+                    frame_index = session.FrameIndex,
+                    session_time = Math.Max(0f, Time.realtimeSinceStartup - session.StartedAt),
+                    session_reason = reason ?? "ended",
+                    sequence_count = session.FrameIndex
+                });
+            }
+
+            session.PendingEvents.Add("session_end:" + reason);
+            session.SessionId = "";
+            session.StartedAt = 0f;
+            session.LastCombatAt = 0f;
+            session.CombatTarget = null;
+            session.PreRoll.Clear();
+            session.BurstShots = 0;
+            session.FrameIndex = 0;
+            session.LastSequenceLabel = "none";
+            session.LastSequenceAt = 0f;
+            session.LastTargetDistance = 0f;
+        }
+
+        private void EndAllTrainingV2Sessions(string reason)
+        {
+            foreach (var session in trainingSessionsV2.Values.ToList())
+            {
+                EndTrainingV2Session(session, reason);
+            }
+        }
+
+        private void QueueTrainingV2Frame(TrainingSequenceV2 row)
+        {
+            if (row == null || string.IsNullOrWhiteSpace(row.session_id))
+            {
+                return;
+            }
+
+            pendingTrainingV2Frames.Add(row);
+            v2Metrics.training_frames++;
+            if (pendingTrainingV2Frames.Count >= Math.Max(100, config.TrainingV2.MaximumBufferedFrames))
+            {
+                FlushTrainingV2Frames();
+            }
+            else if (trainingV2FlushTimer == null || trainingV2FlushTimer.Destroyed)
+            {
+                trainingV2FlushTimer = timer.Once(Math.Max(0.25f, config.TrainingV2.FlushIntervalSeconds), FlushTrainingV2Frames);
+            }
+        }
+
+        private void FlushTrainingV2Frames()
+        {
+            trainingV2FlushTimer = null;
+            if (pendingTrainingV2Frames.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingV2TraceDataFile);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.AppendAllLines(path, pendingTrainingV2Frames.Select(row => JsonConvert.SerializeObject(row, Formatting.None)).ToArray());
+                pendingTrainingV2Frames.Clear();
+                PruneTrainingV2TraceFiles(false);
+            }
+            catch (Exception ex)
+            {
+                v2Metrics.training_flush_failures++;
+                while (pendingTrainingV2Frames.Count > Math.Max(100, config.TrainingV2.MaximumBufferedFrames))
+                {
+                    pendingTrainingV2Frames.RemoveAt(0);
+                    v2Metrics.training_frames_dropped++;
+                }
+                PrintWarning($"Could not write Training V2 frames: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private void PruneTrainingV2TraceFiles(bool force)
+        {
+            var now = Time.realtimeSinceStartup;
+            if (!force && now - lastTrainingV2PruneCheckAt < 60f)
+            {
+                return;
+            }
+            lastTrainingV2PruneCheckAt = now;
+
+            try
+            {
+                var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingV2TraceDataFile);
+                if (!File.Exists(path))
+                {
+                    return;
+                }
+
+                var maxBytes = Math.Max(16L, config.TrainingV2.MaximumTraceFileMegabytes) * 1024L * 1024L;
+                var cutoff = DateTime.UtcNow.AddDays(-Math.Max(1, config.TrainingV2.RawRetentionDays));
+                var info = new FileInfo(path);
+                if (!force && info.Length <= maxBytes && info.LastWriteTimeUtc >= cutoff)
+                {
+                    return;
+                }
+
+                var temp = path + ".prune.tmp";
+                var retained = new Queue<string>();
+                long retainedBytes = 0L;
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+
+                    var keep = true;
+                    try
+                    {
+                        var json = JObject.Parse(line);
+                        var captured = (string)json["captured_at_utc"];
+                        if (DateTime.TryParse(captured, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var at) && at < cutoff)
+                        {
+                            keep = false;
+                        }
+                    }
+                    catch
+                    {
+                        keep = false;
+                    }
+
+                    if (!keep)
+                    {
+                        continue;
+                    }
+
+                    retained.Enqueue(line);
+                    retainedBytes += Encoding.UTF8.GetByteCount(line) + 2;
+                    while (retainedBytes > maxBytes && retained.Count > 0)
+                    {
+                        retainedBytes -= Encoding.UTF8.GetByteCount(retained.Dequeue()) + 2;
+                    }
+                }
+
+                File.WriteAllLines(temp, retained.ToArray());
+                File.Copy(temp, path, true);
+                File.Delete(temp);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not prune Training V2 traces: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
         private void LoadData()
         {
             try
@@ -3637,6 +5652,7 @@ namespace Oxide.Plugins
                 data.bot_clans = new Dictionary<string, BotClanStats>(StringComparer.OrdinalIgnoreCase);
             }
 
+            MigrateLegacyRandomBotStats();
             SeedConfiguredBotIdentityStats();
             SaveData();
         }
@@ -3787,6 +5803,108 @@ namespace Oxide.Plugins
                 default:
                     return LearningApplyOff;
             }
+        }
+
+        private string NormalizeControllerMode(string mode)
+        {
+            switch (NormalizeAdminKey(mode))
+            {
+                case ControllerModeLegacy:
+                    return ControllerModeLegacy;
+                case ControllerModeV2Canary:
+                    return ControllerModeV2Canary;
+                case ControllerModeV2Active:
+                    return ControllerModeV2Active;
+                case ControllerModeV2Shadow:
+                default:
+                    return ControllerModeV2Shadow;
+            }
+        }
+
+        private ControllerMode ParseControllerMode(string mode)
+        {
+            switch (NormalizeControllerMode(mode))
+            {
+                case ControllerModeLegacy:
+                    return ControllerMode.Legacy;
+                case ControllerModeV2Canary:
+                    return ControllerMode.V2Canary;
+                case ControllerModeV2Active:
+                    return ControllerMode.V2Active;
+                default:
+                    return ControllerMode.V2Shadow;
+            }
+        }
+
+        private string ControllerModeKey(ControllerMode mode)
+        {
+            switch (mode)
+            {
+                case ControllerMode.V2Canary:
+                    return ControllerModeV2Canary;
+                case ControllerMode.V2Active:
+                    return ControllerModeV2Active;
+                case ControllerMode.V2Shadow:
+                    return ControllerModeV2Shadow;
+                default:
+                    return ControllerModeLegacy;
+            }
+        }
+
+        private Dictionary<string, WeaponMotorProfile> NormalizeWeaponMotorProfiles(
+            Dictionary<string, WeaponMotorProfile> source,
+            Dictionary<string, WeaponMotorProfile> fallback)
+        {
+            var result = new Dictionary<string, WeaponMotorProfile>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in fallback ?? DefaultWeaponMotorProfiles())
+            {
+                result[NormalizeAdminKey(entry.Key)] = CloneAndNormalizeWeaponMotorProfile(entry.Value, new WeaponMotorProfile());
+            }
+
+            foreach (var entry in source ?? new Dictionary<string, WeaponMotorProfile>())
+            {
+                var key = NormalizeAdminKey(entry.Key);
+
+                if (string.IsNullOrWhiteSpace(key) || entry.Value == null)
+                {
+                    continue;
+                }
+
+                result.TryGetValue(key, out var defaultProfile);
+                result[key] = CloneAndNormalizeWeaponMotorProfile(entry.Value, defaultProfile ?? result["default"]);
+            }
+
+            if (!result.ContainsKey("default"))
+            {
+                result["default"] = new WeaponMotorProfile();
+            }
+
+            return result;
+        }
+
+        private WeaponMotorProfile CloneAndNormalizeWeaponMotorProfile(WeaponMotorProfile source, WeaponMotorProfile fallback)
+        {
+            source = source ?? fallback ?? new WeaponMotorProfile();
+            fallback = fallback ?? new WeaponMotorProfile();
+            var minimumBurst = Clamp(source.MinimumBurstShots <= 0 ? fallback.MinimumBurstShots : source.MinimumBurstShots, 1, 30);
+            var maximumBurst = Clamp(source.MaximumBurstShots <= 0 ? fallback.MaximumBurstShots : source.MaximumBurstShots, minimumBurst, 40);
+            var minimumGap = Mathf.Clamp(source.MinimumShotGapSeconds <= 0f ? fallback.MinimumShotGapSeconds : source.MinimumShotGapSeconds, 0.04f, 3f);
+            var maximumGap = Mathf.Clamp(source.MaximumShotGapSeconds <= 0f ? fallback.MaximumShotGapSeconds : source.MaximumShotGapSeconds, minimumGap, 4f);
+            var minimumPause = Mathf.Clamp(source.MinimumBurstPauseSeconds < 0f ? fallback.MinimumBurstPauseSeconds : source.MinimumBurstPauseSeconds, 0f, 5f);
+            var maximumPause = Mathf.Clamp(source.MaximumBurstPauseSeconds < 0f ? fallback.MaximumBurstPauseSeconds : source.MaximumBurstPauseSeconds, minimumPause, 8f);
+
+            return new WeaponMotorProfile
+            {
+                MinimumBurstShots = minimumBurst,
+                MaximumBurstShots = maximumBurst,
+                MinimumShotGapSeconds = minimumGap,
+                MaximumShotGapSeconds = maximumGap,
+                MinimumBurstPauseSeconds = minimumPause,
+                MaximumBurstPauseSeconds = maximumPause,
+                MoveWhileFiringChance = Mathf.Clamp01(source.MoveWhileFiringChance),
+                TorsoAimWeight = Mathf.Clamp01(source.TorsoAimWeight)
+            };
         }
 
         private string NormalizeProfileKey(string key)
@@ -5359,6 +7477,52 @@ namespace Oxide.Plugins
 
         private void MaintainPopulation()
         {
+            QueuePopulationRamp(0.1f);
+        }
+
+        private void QueuePopulationRamp(float delaySeconds)
+        {
+            if (config?.Enabled != true || populationRampTimer != null)
+            {
+                return;
+            }
+
+            populationRampTimer = timer.Once(Math.Max(0.05f, delaySeconds), PopulationRampTick);
+        }
+
+        private void PopulationRampTick()
+        {
+            populationRampTimer = null;
+
+            if (config?.Enabled != true)
+            {
+                return;
+            }
+
+            CleanupInactiveBots();
+            var before = AmbientBotCount();
+            MaintainPopulationBatch(PopulationRampBatchSize);
+            CleanupInactiveBots();
+
+            var target = Math.Min(TargetPopulation(), Math.Max(0, config.ManagedApi.MaximumTotalActiveBots - ManagedBotCount()));
+            var after = AmbientBotCount();
+            if (after >= target)
+            {
+                return;
+            }
+
+            var delay = PopulationRampIntervalSeconds;
+            if (after <= before)
+            {
+                delay = Math.Max(5f, Math.Min(config.MaintainIntervalSeconds, config.SpawnFailureRetrySeconds));
+                delay = Math.Max(delay, spawnRetryBlockedUntil - Time.realtimeSinceStartup);
+            }
+
+            QueuePopulationRamp(delay);
+        }
+
+        private void MaintainPopulationBatch(int maximumSpawns)
+        {
             CleanupInactiveBots();
 
             if (!config.Enabled)
@@ -5392,7 +7556,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var spawned = SpawnBots(missing, false);
+            var spawned = SpawnBots(Math.Min(missing, Math.Max(1, maximumSpawns)), false);
 
             if (spawned <= 0)
             {
@@ -5576,13 +7740,6 @@ namespace Oxide.Plugins
 
                 entity.Spawn();
 
-                if (!TryPlaceBotOnOwnNavmesh(bot, ref position))
-                {
-                    ThrottledWarning($"spawn-navmesh:{prefab}", $"Prefab {prefab} spawned but its navigator could not be placed on navmesh; trying the next candidate.");
-                    SafeKillSpawnAttempt(bot);
-                    continue;
-                }
-
                 if (IsBlockedLandPosition(position))
                 {
                     ThrottledWarning($"spawn-blocked:{prefab}", $"Prefab {prefab} spawned at {FormatVector(position)}, but that position is blocked by terrain, water, or safe-zone rules; trying the next candidate.");
@@ -5592,6 +7749,9 @@ namespace Oxide.Plugins
 
                 var runtime = ConfigureBot(bot, position, teamId, prefab, managedContext);
                 PrepareNpcBody(bot);
+                var navigationReadyAt = Time.realtimeSinceStartup + 3f;
+                runtime.NextDecisionAt = Math.Max(runtime.NextDecisionAt, navigationReadyAt);
+                runtime.NextPerceptionAt = Math.Max(runtime.NextPerceptionAt, navigationReadyAt);
                 if (actionBlockedUntil > Time.realtimeSinceStartup)
                 {
                     runtime.ActionBlockedUntil = actionBlockedUntil;
@@ -5609,9 +7769,9 @@ namespace Oxide.Plugins
                 else
                 {
                     runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition, runtime);
-                    MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
                 }
 
+                ScheduleSpawnNavigationInitialization(bot, runtime, holdInitialMovement, 0);
                 ScheduleBodyPrepare(bot);
 
                 if (config.Debug.DebugSpawnDetails)
@@ -5624,6 +7784,60 @@ namespace Oxide.Plugins
 
             ThrottledWarning("spawn-prefabs-failed", "None of the configured NPC prefabs could be created.");
             return null;
+        }
+
+        private void ScheduleSpawnNavigationInitialization(BaseCombatEntity bot, BotRuntime runtime, bool holdInitialMovement, int attempt)
+        {
+            var delay = attempt <= 0 ? 0.25f : 0.35f;
+
+            timer.Once(delay, () =>
+            {
+                if (!IsLiveBot(bot)
+                    || runtime == null
+                    || !activeBots.TryGetValue(bot, out var activeRuntime)
+                    || !ReferenceEquals(activeRuntime, runtime))
+                {
+                    return;
+                }
+
+                var position = bot.transform.position;
+
+                if (!TryValidateSpawnedBotOnOwnNavmesh(bot, ref position))
+                {
+                    if (attempt < 11)
+                    {
+                        ScheduleSpawnNavigationInitialization(bot, runtime, holdInitialMovement, attempt + 1);
+                        return;
+                    }
+
+                    DespawnBot(bot, "navigator did not initialize after delayed spawn retries");
+                    return;
+                }
+
+                var now = Time.realtimeSinceStartup;
+                runtime.SpawnPosition = position;
+                runtime.HomePosition = position;
+                runtime.Movement.LastPosition = position;
+                runtime.Movement.LastProgressAt = now;
+                runtime.Movement.IsStuck = false;
+                runtime.Movement.StuckSince = 0f;
+                runtime.ConsecutiveFailedPaths = 0;
+                FinalizeV2BodyConformance(bot, runtime);
+
+                if (holdInitialMovement)
+                {
+                    runtime.CurrentDestination = position;
+                    StopBotAttack(bot, runtime);
+                }
+                else
+                {
+                    runtime.CurrentDestination = FindRoamDestination(position, runtime);
+                    MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+                }
+
+                runtime.NextDecisionAt = Math.Min(runtime.NextDecisionAt, now + 0.15f);
+                runtime.NextPerceptionAt = Math.Min(runtime.NextPerceptionAt, now + 0.15f);
+            });
         }
 
         private IEnumerable<string> ActivePrefabCandidates(string preferredPrefab = "")
@@ -5781,6 +7995,7 @@ namespace Oxide.Plugins
             }
 
             RefreshCombatProfile(bot, runtime);
+            InitializeV2Runtime(bot, runtime);
             bot.SendNetworkUpdateImmediate();
 
             if (config?.Debug?.DebugBotMapMarkers == true)
@@ -5789,6 +8004,288 @@ namespace Oxide.Plugins
             }
 
             return runtime;
+        }
+
+        private void InitializeV2Runtime(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (bot == null || runtime == null)
+            {
+                return;
+            }
+
+            var configuredMode = ParseControllerMode(config?.ControllerV2?.Mode);
+            runtime.ControllerMode = ResolveSpawnControllerMode(configuredMode, runtime);
+            runtime.ControllerModeReason = configuredMode == ControllerMode.V2Canary
+                ? runtime.ControllerMode == ControllerMode.V2Canary ? "selected_canary" : "canary_shadow_control"
+                : ControllerModeKey(runtime.ControllerMode);
+            runtime.BodyAdapterKey = legacyScientistBodyAdapter?.Key ?? "none";
+            runtime.Style = DefaultStyleProfile(runtime);
+            runtime.NextCombatMotorAt = Time.realtimeSinceStartup + UnityEngine.Random.Range(0f, Math.Max(0.05f, config.ControllerV2.CombatMotorTickSeconds));
+            runtime.NextOwnershipVerifyAt = Time.realtimeSinceStartup + 0.25f;
+            runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime) ?? new BodyCapabilities { failure_reason = "adapter_missing" };
+            if (config.ControllerV2.BodyAdapters?.EnabledAdapterKeys?.Contains(runtime.BodyAdapterKey, StringComparer.OrdinalIgnoreCase) != true)
+            {
+                runtime.BodyCapabilities.failure_reason = "adapter_disabled";
+                if (IsV2Actuating(runtime))
+                {
+                    RollbackV2Bot(bot, runtime, "adapter_disabled");
+                }
+                return;
+            }
+            RecordPrefabConformance(bot, runtime, "spawn_initialization", runtime.BodyCapabilities.has_brain
+                && runtime.BodyCapabilities.has_navigator
+                && runtime.BodyCapabilities.has_navmesh_agent
+                && runtime.BodyCapabilities.supports_authoritative_fire, runtime.BodyCapabilities.failure_reason);
+
+            if (!IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+
+            if (!runtime.BodyCapabilities.has_brain
+                || !runtime.BodyCapabilities.has_navigator
+                || !runtime.BodyCapabilities.has_navmesh_agent
+                || !runtime.BodyCapabilities.supports_authoritative_fire)
+            {
+                RollbackV2Bot(bot, runtime, runtime.BodyCapabilities.failure_reason);
+                return;
+            }
+        }
+
+        private void FinalizeV2BodyConformance(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime) ?? new BodyCapabilities { failure_reason = "adapter_missing" };
+            RecordPrefabConformance(bot, runtime, "delayed_initialization",
+                runtime.BodyCapabilities.supports_authoritative_movement && runtime.BodyCapabilities.supports_authoritative_fire,
+                runtime.BodyCapabilities.failure_reason);
+
+            if (!runtime.BodyCapabilities.supports_authoritative_movement || !runtime.BodyCapabilities.supports_authoritative_fire)
+            {
+                RollbackV2Bot(bot, runtime, runtime.BodyCapabilities.failure_reason);
+                return;
+            }
+
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+
+            if (!runtime.V2StanceTestComplete && !runtime.V2StanceTestPending)
+            {
+                runtime.V2StanceTestPending = true;
+                timer.Once(0.25f, () => BeginV2StanceConformance(bot, runtime));
+            }
+        }
+
+        private ControllerMode ResolveSpawnControllerMode(ControllerMode configuredMode, BotRuntime runtime)
+        {
+            if (configuredMode != ControllerMode.V2Canary)
+            {
+                return configuredMode;
+            }
+
+            var activeCanaries = activeBots.Values.Count(candidate => candidate != null && candidate.ControllerMode == ControllerMode.V2Canary && string.Equals(candidate.RollbackReason, "none", StringComparison.OrdinalIgnoreCase));
+            var requestedCount = Math.Max(0, config.ControllerV2.CanaryBotCount);
+
+            // Count takes precedence so the five-bot rollout gate is exact. Percent
+            // allocation is available when the configured count is zero.
+            if (requestedCount > 0)
+            {
+                return activeCanaries < requestedCount ? ControllerMode.V2Canary : ControllerMode.V2Shadow;
+            }
+
+            var bucket = StableBucket(runtime?.BotKey ?? "", 100);
+            return bucket < config.ControllerV2.CanaryPercent ? ControllerMode.V2Canary : ControllerMode.V2Shadow;
+        }
+
+        private int StableBucket(string value, int bucketCount)
+        {
+            unchecked
+            {
+                uint hash = 2166136261;
+                foreach (var character in value ?? "")
+                {
+                    hash ^= character;
+                    hash *= 16777619;
+                }
+
+                return bucketCount <= 1 ? 0 : (int)(hash % (uint)bucketCount);
+            }
+        }
+
+        private StyleProfile DefaultStyleProfile(BotRuntime runtime)
+        {
+            var variation = StableBucket(runtime?.BotKey ?? "", 1000) / 999f;
+            return new StyleProfile
+            {
+                key = "builtin_balanced",
+                aggression = Mathf.Lerp(0.38f, 0.68f, variation),
+                strafe_preference = Mathf.Lerp(0.58f, 0.86f, 1f - variation * 0.5f),
+                jiggle_preference = Mathf.Lerp(0.28f, 0.62f, variation),
+                wide_swing_preference = Mathf.Lerp(0.12f, 0.38f, 1f - variation),
+                crouch_preference = Mathf.Lerp(0.52f, 0.82f, variation),
+                repeek_delay_scale = Mathf.Lerp(0.82f, 1.22f, variation)
+            };
+        }
+
+        private bool IsV2Actuating(BotRuntime runtime)
+        {
+            return runtime != null
+                && string.Equals(runtime.RollbackReason, "none", StringComparison.OrdinalIgnoreCase)
+                && (runtime.ControllerMode == ControllerMode.V2Canary || runtime.ControllerMode == ControllerMode.V2Active);
+        }
+
+        private bool IsV2Shadowing(BotRuntime runtime)
+        {
+            return runtime != null && runtime.ControllerMode == ControllerMode.V2Shadow;
+        }
+
+        private void BeginV2StanceConformance(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime) || !runtime.V2StanceTestPending)
+            {
+                return;
+            }
+
+            var player = bot as BasePlayer;
+
+            if (player == null)
+            {
+                RollbackV2Bot(bot, runtime, "stance_player_missing");
+                return;
+            }
+
+            runtime.V2StandingEyeHeight = EyePosition(player).y - player.transform.position.y;
+            runtime.V2StandingColliderHeight = SafeColliderHeight(player);
+            if (!SetBotCrouchedMechanical(bot, runtime, true, Time.realtimeSinceStartup))
+            {
+                runtime.V2StanceTestPending = false;
+                runtime.V2StanceTestComplete = true;
+                RecordPrefabConformance(bot, runtime, "stance_mechanical", false, "crouch_transition_failed");
+                RollbackV2Bot(bot, runtime, "mechanical_crouch_transition_failed");
+                return;
+            }
+
+            timer.Once(0.2f, () =>
+            {
+                if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime))
+                {
+                    return;
+                }
+
+                runtime.V2CrouchedEyeHeight = EyePosition(player).y - player.transform.position.y;
+                runtime.V2CrouchedColliderHeight = SafeColliderHeight(player);
+                var eyeLowered = runtime.V2StandingEyeHeight - runtime.V2CrouchedEyeHeight >= 0.15f;
+                var colliderLowered = runtime.V2StandingColliderHeight - runtime.V2CrouchedColliderHeight >= 0.15f;
+                var mechanicallyDucked = IsPlayerCrouched(player);
+                var stoodSuccessfully = SetBotCrouchedMechanical(bot, runtime, false, Time.realtimeSinceStartup)
+                    && !IsPlayerCrouched(player);
+                runtime.V2StanceTestPending = false;
+                runtime.V2StanceTestComplete = true;
+                runtime.BodyCapabilities.supports_mechanical_crouch = eyeLowered && colliderLowered && mechanicallyDucked && stoodSuccessfully;
+                runtime.BodyCapabilities.stance_test_complete = true;
+                runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime) ?? runtime.BodyCapabilities;
+                RecordPrefabConformance(bot, runtime, "stance_mechanical", runtime.BodyCapabilities.supports_mechanical_crouch,
+                    runtime.BodyCapabilities.supports_mechanical_crouch ? "ready" : "stance_geometry_unverified");
+
+                if (config.ControllerV2.RequireMechanicalCrouch && !runtime.BodyCapabilities.supports_mechanical_crouch)
+                {
+                    RollbackV2Bot(bot, runtime, "mechanical_crouch_unverified");
+                    return;
+                }
+
+                runtime.LastControllerInvariant = "conformance_ready";
+                legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+            });
+        }
+
+        private void RecordPrefabConformance(BaseCombatEntity bot, BotRuntime runtime, string stage, bool passed, string reason)
+        {
+            var prefab = runtime?.Prefab ?? bot?.PrefabName ?? "unknown";
+            if (!prefabConformanceV2.TryGetValue(prefab, out var record) || record == null)
+            {
+                record = new PrefabConformanceRecord { prefab = prefab };
+                prefabConformanceV2[prefab] = record;
+            }
+
+            var capabilities = runtime?.BodyCapabilities;
+            record.adapter_key = runtime?.BodyAdapterKey ?? capabilities?.adapter_key ?? "none";
+            record.entity_type = capabilities?.entity_type ?? EntityTypeName(bot);
+            record.brain_type = capabilities?.brain_type ?? "none";
+            record.navigator_type = capabilities?.navigator_type ?? "none";
+            record.last_stage = stage ?? "unknown";
+            record.last_result = passed ? "pass" : "fail";
+            record.last_failure = passed ? "none" : string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+            record.updated_at_utc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+            switch ((stage ?? "").ToLowerInvariant())
+            {
+                case "spawn_initialization": record.spawn_initialization = passed; break;
+                case "delayed_initialization": record.delayed_initialization = passed; break;
+                case "target_acquisition": record.target_acquisition = passed; break;
+                case "weapon_switch": record.weapon_switch = passed; break;
+                case "sleep_wake": record.sleep_wake = passed; break;
+                case "wounded":
+                case "recovered":
+                case "death": record.wounded_death = passed; break;
+                case "stance_mechanical": record.stance_mechanical = passed; break;
+                case "single_shot_pipeline": record.single_shot_pipeline = passed; break;
+                case "ownership":
+                    record.ownership_clean = passed;
+                    if (!passed) record.ownership_conflicts++;
+                    break;
+            }
+
+            if (!passed && (stage ?? "").IndexOf("fire", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                record.fire_failures++;
+            }
+        }
+
+        private float SafeColliderHeight(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return 0f;
+            }
+
+            try
+            {
+                return player.GetColliderBounds().size.y;
+            }
+            catch
+            {
+                return player.playerCollider == null ? 0f : player.playerCollider.height;
+            }
+        }
+
+        private void RollbackV2Bot(BaseCombatEntity bot, BotRuntime runtime, string reason)
+        {
+            if (runtime == null || !IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            runtime.RollbackReason = string.IsNullOrWhiteSpace(reason) ? "invariant_failure" : reason;
+            runtime.V2DamageVetoUntil = Math.Max(runtime.V2DamageVetoUntil,
+                runtime.PendingFireAuthorizations.Count == 0 ? Time.realtimeSinceStartup : runtime.PendingFireAuthorizations.Max(authorization => authorization?.expires_at ?? 0f));
+            runtime.ActionBlockedUntil = Math.Max(runtime.ActionBlockedUntil, runtime.V2DamageVetoUntil);
+            runtime.ActionBlockReason = "v2_damage_drain";
+            runtime.ControllerModeReason = $"rollback:{runtime.RollbackReason}";
+            runtime.LastControllerInvariant = runtime.ControllerModeReason;
+            runtime.ControllerMode = ControllerMode.Legacy;
+            runtime.BurstShotsRemaining = 0;
+            runtime.Intent = new BotIntent { reason = runtime.ControllerModeReason };
+            v2Metrics.controller_rollbacks++;
+            legacyScientistBodyAdapter?.StopFire(bot, runtime);
+            AbortV2Healing(bot, runtime, "controller_rollback", Time.realtimeSinceStartup, true);
+            SetBotCrouchedMechanical(bot, runtime, false, Time.realtimeSinceStartup);
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, false);
+            DebugWarning($"v2-rollback:{runtime.BotKey}", $"Rolled {runtime.DisplayName} back to legacy control: {runtime.RollbackReason}", 5f);
         }
 
         private bool ShouldApplyKit(BaseCombatEntity bot)
@@ -6690,37 +9187,86 @@ namespace Oxide.Plugins
             }
         }
 
-        private bool TryPlaceBotOnOwnNavmesh(BaseCombatEntity bot, ref Vector3 position)
+        private bool TryValidateSpawnedBotOnOwnNavmesh(BaseCombatEntity bot, ref Vector3 position)
         {
-            if (bot == null)
+            if (bot == null || bot.IsDestroyed)
             {
                 return false;
             }
 
-            var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
-
-            if (navigator != null)
+            try
             {
-                Vector3 nearest;
+                var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+                var agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
 
-                if (!navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f))
-                    || !IsAcceptableNavmeshPlacement(nearest, position))
+                if (navigator == null || agent == null)
                 {
-                    BotLog($"Rejected navigator placement for {ShortPrefab(bot.PrefabName)} near {FormatVector(position)} because its nearest agent-specific navmesh point was missing or did not match the land surface ({PositionDiagnostics(nearest)}).", "navmesh-placement-rejected", 30f);
                     return false;
                 }
 
-                // The entity was created directly at a validated Unity navmesh point. Calling
-                // BaseNavigator.PlaceOnNavMesh here performs a second NavMeshAgent.Warp and is
-                // the source of Rust's "Agent still not on navmesh after a warp" console flood.
-                // Validate the agent-specific surface, but let the spawned NPC initialize there.
+                Vector3 nearest;
+
+                if (!navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f))
+                    || !IsAcceptableSpawnNavmeshPlacement(nearest, position))
+                {
+                    return false;
+                }
+
+                // The original candidate came from Unity's shared navmesh. The
+                // scientist's agent may use a different polygon even when the two
+                // points are close. Attach the spawned NPC to the exact point found
+                // by its own BaseNavigator; otherwise CurrentNavigationType remains
+                // None and every later SetDestination call is discarded.
+                bot.transform.position = nearest;
+                bot.transform.hasChanged = true;
+                bot.SendNetworkUpdateImmediate();
+
+                if (!agent.enabled)
+                {
+                    agent.enabled = true;
+                }
+
+                // Use Rust's native navigator initialization. This is the placement
+                // path used by the last known roaming versions of this plugin; a
+                // direct Unity NavMeshAgent.Warp does not initialize BaseNavigator's
+                // navigation type and is rejected by these scientist prefabs.
+                var nativePlaced = navigator.PlaceOnNavMesh(0f);
+
+                if (!agent.enabled)
+                {
+                    agent.enabled = true;
+                }
+
+                if (!agent.isOnNavMesh && !agent.Warp(nearest))
+                {
+                    return false;
+                }
+
+                if (!nativePlaced && !agent.isOnNavMesh)
+                {
+                    return false;
+                }
+
+                agent.isStopped = false;
+
+                position = bot.transform.position;
+                bot.SendNetworkUpdateImmediate();
+                TryInvoke(navigator, "Think", 0.1f);
+                TryInvoke(navigator, "UpdateNavigation", 0.1f);
                 return !IsBlockedLandPosition(position);
             }
+            catch (Exception ex)
+            {
+                if (config?.Debug?.DebugSpawnDetails == true)
+                {
+                    DebugWarning($"spawn-navmesh-validation:{ShortPrefab(bot.PrefabName)}", $"Could not validate the initialized navmesh agent: {ex.GetType().Name}: {ex.Message}");
+                }
 
-            return false;
+                return false;
+            }
         }
 
-        private bool IsAcceptableNavmeshPlacement(Vector3 navPosition, Vector3 requestedPosition)
+        private bool IsAcceptableSpawnNavmeshPlacement(Vector3 navPosition, Vector3 requestedPosition)
         {
             if (navPosition == Vector3.zero || IsBlockedLandPosition(navPosition))
             {
@@ -6817,6 +9363,37 @@ namespace Oxide.Plugins
             var attackerRuntime = RuntimeFor(attackerEntity);
             var now = Time.realtimeSinceStartup;
             var damageTotal = HitDamageTotal(info);
+            var v2AuthorizedProjectile = false;
+
+            if (attackerRuntime != null
+                && IsProjectileHitInfo(info)
+                && !IsExplosionDamage(info)
+                && RequiresV2DamageAuthorization(attackerRuntime, now))
+            {
+                if (!ValidateV2DamageAuthorization(attackerEntity, attackerRuntime, victimPlayer, info, now, out var authorizationReason))
+                {
+                    if (info.damageTypes != null)
+                    {
+                        info.damageTypes.ScaleAll(0f);
+                    }
+
+                    attackerRuntime.UnauthorizedHitsBlocked++;
+                    attackerRuntime.LastFireBlockReason = authorizationReason;
+                    v2Metrics.unauthorized_hits_blocked++;
+                    if (IsV2Actuating(attackerRuntime) && config.ControllerV2.AutoRollbackOnInvariantFailure)
+                    {
+                        RollbackV2Bot(attackerEntity, attackerRuntime, $"forbidden_fire:{authorizationReason}");
+                    }
+                    return true;
+                }
+
+                v2AuthorizedProjectile = true;
+            }
+
+            if (victimRuntime != null && IsProjectileHitInfo(info))
+            {
+                RecordV2HitZone(victimRuntime, info, now);
+            }
 
             if (victimRuntime != null && attackerRuntime != null)
             {
@@ -6836,7 +9413,10 @@ namespace Oxide.Plugins
                 }
 
                 var attackerBot = attackerEntity as BasePlayer;
-                EnsureEnemyBotDamageFloor(victim, victimRuntime, attackerEntity, attackerRuntime, info);
+                if (!v2AuthorizedProjectile && !IsV2Actuating(attackerRuntime))
+                {
+                    EnsureEnemyBotDamageFloor(victim, victimRuntime, attackerEntity, attackerRuntime, info);
+                }
                 var adjustedDamageTotal = HitDamageTotal(info);
                 RecordDamageHookDiagnostics(
                     victimRuntime,
@@ -6885,6 +9465,7 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null && IsRealPlayer(attacker))
             {
+                RecordTrainingV2Event(attacker, $"damage_dealt:{info.boneArea.ToString().ToLowerInvariant()}", victim, dealt: 1);
                 RecordBotDamageHook(victimRuntime, "in", DamagePeerLabel(attackerEntity, null), damageTotal, "player_to_bot", now);
                 RememberDamageSource(victim, victimRuntime, attacker, now, info);
                 RecordLearningPlayerEvent(attacker, ActionIdString(TacticalActionId.AcquireVisibleTarget), now, damageDealt: damageTotal, targetEntity: victim, targetRuntime: victimRuntime);
@@ -6893,6 +9474,7 @@ namespace Oxide.Plugins
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer))
             {
+                RecordTrainingV2Event(victimPlayer, $"damage_taken:{info.boneArea.ToString().ToLowerInvariant()}", attackerEntity, taken: 1);
                 RecordBotDamageHook(attackerRuntime, "out", DamagePeerLabel(victim, null), damageTotal, "bot_to_player", now);
                 RememberDamageDealt(attackerEntity, attackerRuntime, victimPlayer, now);
                 RecordLearningPlayerEvent(victimPlayer, ActionIdString(TacticalActionId.RetreatToCover), now, damageTaken: damageTotal, targetEntity: attackerEntity, targetRuntime: attackerRuntime);
@@ -6907,6 +9489,123 @@ namespace Oxide.Plugins
             return null;
         }
 
+        private bool RequiresV2DamageAuthorization(BotRuntime runtime, float now)
+        {
+            return runtime != null
+                && config?.ControllerV2?.DamageAuthorizationVeto == true
+                && (IsV2Actuating(runtime)
+                    || runtime.V2DamageVetoUntil >= now
+                    || runtime.PendingFireAuthorizations.Any(authorization => authorization != null && authorization.expires_at >= now));
+        }
+
+        private bool ValidateV2DamageAuthorization(
+            BaseCombatEntity attackerEntity,
+            BotRuntime attackerRuntime,
+            BasePlayer victim,
+            HitInfo info,
+            float now,
+            out string reason)
+        {
+            reason = "unauthorized_shot";
+
+            if (attackerEntity == null || attackerRuntime == null || victim == null || info == null)
+            {
+                return false;
+            }
+
+            if (info.ProjectileID != 0)
+            {
+                reason = "native_control_conflict:projectile_id";
+                return false;
+            }
+
+            var victimRuntime = RuntimeFor(victim);
+            if (victimRuntime != null && !IsEnemyBot(attackerRuntime, victimRuntime))
+            {
+                reason = "friendly_fire";
+                return false;
+            }
+
+            var eligibility = victimRuntime == null ? TargetIneligibilityReason(victim) : "";
+            if (!string.IsNullOrEmpty(eligibility))
+            {
+                reason = eligibility;
+                return false;
+            }
+
+            var targetId = CombatTargetId(victim);
+            var actualOrigin = info.PointStart == Vector3.zero ? WeaponMuzzlePosition(attackerEntity) : info.PointStart;
+            var actualHit = info.HitPositionWorld;
+
+            if (actualHit == Vector3.zero)
+            {
+                actualHit = info.PointEnd == Vector3.zero ? EyePosition(victim) : info.PointEnd;
+            }
+
+            var actualDirection = actualHit - actualOrigin;
+            var weapon = info.Weapon as BaseProjectile;
+            var authorization = attackerRuntime.PendingFireAuthorizations
+                .Where(candidate => candidate != null
+                    && !candidate.consumed
+                    && candidate.observed_hit_callbacks < Math.Max(1, candidate.pellet_count)
+                    && candidate.issued_at <= now + 0.05f
+                    && candidate.expires_at >= now
+                    && candidate.target_id == targetId
+                    && (candidate.weapon == null || weapon == null || candidate.weapon == weapon)
+                    && Vector3.Distance(candidate.origin, actualOrigin) <= 1.5f
+                    && actualDirection.sqrMagnitude > 0.0001f
+                    && Vector3.Angle(candidate.direction, actualDirection.normalized) <= candidate.maximum_direction_error_degrees)
+                .OrderByDescending(candidate => candidate.issued_at)
+                .FirstOrDefault();
+
+            if (authorization == null)
+            {
+                reason = "unauthorized_shot:no_motor_token";
+                return false;
+            }
+
+            if (!IsTargetSightLineClear(attackerEntity, victim, actualOrigin, actualHit, out var blockReason, out _, true))
+            {
+                reason = string.Equals(blockReason, "solid", StringComparison.OrdinalIgnoreCase)
+                    ? "muzzle_blocked"
+                    : string.Equals(blockReason, "foliage", StringComparison.OrdinalIgnoreCase)
+                        ? "foliage_occluded"
+                        : blockReason;
+                return false;
+            }
+
+            authorization.observed_hit_callbacks++;
+            authorization.consumed = authorization.observed_hit_callbacks >= Math.Max(1, authorization.pellet_count);
+            authorization.eligibility_reason = "authorized_hit";
+            attackerRuntime.LastFireAuthorization = authorization;
+            reason = "authorized_hit";
+            return true;
+        }
+
+        private void RecordV2HitZone(BotRuntime runtime, HitInfo info, float now)
+        {
+            if (runtime == null || info == null)
+            {
+                return;
+            }
+
+            runtime.LastHitBone = info.boneArea.ToString().ToLowerInvariant();
+            runtime.LastHitBoneAt = now;
+
+            if (info.boneArea != HitArea.Head)
+            {
+                return;
+            }
+
+            if (runtime.RecentHeadHitWindowStartedAt <= 0f || now - runtime.RecentHeadHitWindowStartedAt > 5f)
+            {
+                runtime.RecentHeadHitWindowStartedAt = now;
+                runtime.RecentHeadHits = 0;
+            }
+
+            runtime.RecentHeadHits++;
+        }
+
         private void RememberDamageSource(BaseCombatEntity victim, BotRuntime victimRuntime, BasePlayer attacker, float now, HitInfo info = null)
         {
             if (victim == null || victimRuntime == null || attacker == null)
@@ -6916,7 +9615,7 @@ namespace Oxide.Plugins
 
             if (ShouldIgnoreRealPlayerTarget(attacker))
             {
-                ClearIgnoredPlayerTargetMemory(victim, victimRuntime, attacker, PlayerHasRoamBotIgnorePermission(attacker) ? "target_permission_ignored" : "target_invisible", now);
+                ClearIgnoredPlayerTargetMemory(victim, victimRuntime, attacker, TargetIneligibilityReason(attacker), now);
                 return;
             }
 
@@ -7090,9 +9789,9 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (ShouldIgnoreInvisiblePlayer(victim))
+            if (ShouldIgnoreRealPlayerTarget(victim))
             {
-                ClearIgnoredPlayerTargetMemory(attackerEntity, attackerRuntime, victim, "target_invisible", now);
+                ClearIgnoredPlayerTargetMemory(attackerEntity, attackerRuntime, victim, TargetIneligibilityReason(victim), now);
                 return;
             }
 
@@ -7106,6 +9805,254 @@ namespace Oxide.Plugins
             attackerRuntime.Memory.TargetConfidence = Math.Max(attackerRuntime.Memory.TargetConfidence, 0.85f);
         }
 
+        private object OnPlayerInput(BasePlayer player, InputState input)
+        {
+            if (config?.TrainingV2?.Enabled != true
+                || player == null
+                || input?.current == null
+                || !trainingSessionsV2.TryGetValue(player.userID, out var session)
+                || session == null)
+            {
+                return null;
+            }
+
+            session.PreviousInputButtons = session.InputButtons;
+            session.InputButtons = input.current.buttons;
+            session.PendingPressedButtons |= session.InputButtons & ~session.PreviousInputButtons;
+            session.LastAimAngles = session.AimAngles;
+            session.AimAngles = input.current.aimAngles;
+            session.HasInput = true;
+            return null;
+        }
+
+        [ChatCommand("raidbottraining")]
+        private void RaidBotTrainingCommand(BasePlayer player, string command, string[] args)
+        {
+            if (player == null)
+            {
+                return;
+            }
+
+            var action = args != null && args.Length > 0 ? args[0].ToLowerInvariant() : "status";
+            var id = player.UserIDString;
+
+            if (action == "optin")
+            {
+                if (!trainingConsentV2.consented_player_steam_ids.Contains(id, StringComparer.OrdinalIgnoreCase))
+                {
+                    trainingConsentV2.consented_player_steam_ids.Add(id);
+                }
+                SaveTrainingConsentV2();
+                player.ChatMessage("Raidbot Training V2 consent enabled. Capture still requires the configured curated tester allowlist.");
+                return;
+            }
+
+            if (action == "optout")
+            {
+                trainingConsentV2.consented_player_steam_ids.RemoveAll(value => string.Equals(value, id, StringComparison.OrdinalIgnoreCase));
+                if (trainingSessionsV2.TryGetValue(player.userID, out var session))
+                {
+                    EndTrainingV2Session(session, "player_optout");
+                    trainingSessionsV2.Remove(player.userID);
+                }
+                SaveTrainingConsentV2();
+                player.ChatMessage("Raidbot Training V2 consent disabled.");
+                return;
+            }
+
+            if (action == "erase" && args.Length > 1 && string.Equals(args[1], "confirm", StringComparison.OrdinalIgnoreCase))
+            {
+                var playerKey = TrainingV2PlayerKey(player);
+                pendingTrainingV2Frames.RemoveAll(row => string.Equals(row.source_player_key, playerKey, StringComparison.OrdinalIgnoreCase));
+                pendingTrainingOutcomeAnchorsV2.RemoveAll(anchor => string.Equals(anchor.source_player_key, playerKey, StringComparison.OrdinalIgnoreCase));
+                var erased = EraseTrainingV2PlayerData(playerKey, out var eraseReason);
+                player.ChatMessage(erased
+                    ? "Raidbot Training V2 data for this player was erased from the active trace store."
+                    : $"Buffered data was erased, but the trace store could not be rewritten: {eraseReason}.");
+                return;
+            }
+
+            player.ChatMessage($"Raidbot Training V2: enabled={config?.TrainingV2?.Enabled == true}, curated={config?.TrainingV2?.OptedInPlayerSteamIds?.Contains(id, StringComparer.OrdinalIgnoreCase) == true}, consented={trainingConsentV2.consented_player_steam_ids.Contains(id, StringComparer.OrdinalIgnoreCase)}, active={trainingSessionsV2.ContainsKey(player.userID)}.");
+        }
+
+        private bool EraseTrainingV2PlayerData(string playerKey, out string reason)
+        {
+            reason = "ready";
+            if (string.IsNullOrWhiteSpace(playerKey))
+            {
+                reason = "missing_player_key";
+                return false;
+            }
+
+            var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingV2TraceDataFile);
+            if (!File.Exists(path))
+            {
+                return true;
+            }
+
+            var temp = path + ".erase.tmp";
+            try
+            {
+                using (var reader = new StreamReader(path))
+                using (var writer = new StreamWriter(temp, false, Encoding.UTF8))
+                {
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        if (line.IndexOf($"\"source_player_key\":\"{playerKey}\"", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            writer.WriteLine(line);
+                        }
+                    }
+                }
+
+                File.Copy(temp, path, true);
+                File.Delete(temp);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = $"{ex.GetType().Name}:{ex.Message}";
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+                return false;
+            }
+        }
+
+        private object OnWeaponReload(BaseProjectile weapon, BasePlayer player)
+        {
+            if (player != null && IsRealPlayer(player))
+            {
+                RecordTrainingV2Event(player, "reload", null);
+            }
+            return null;
+        }
+
+        private object OnHealingItemUse(MedicalTool tool, BasePlayer fromPlayer, IMedicalToolTarget target)
+        {
+            if (fromPlayer != null && IsRealPlayer(fromPlayer))
+            {
+                RecordTrainingV2Event(fromPlayer, "heal", null);
+            }
+            return null;
+        }
+
+        private void OnActiveItemChanged(BasePlayer player, Item oldItem, Item newItem)
+        {
+            var runtime = RuntimeFor(player);
+            if (runtime != null
+                && config.ControllerV2.BodyAdapters.RevalidateOnWeaponSwitch
+                && (IsV2Actuating(runtime) || IsV2Shadowing(runtime)))
+            {
+                timer.Once(0.15f, () =>
+                {
+                    if (IsLiveBot(player) && ReferenceEquals(RuntimeFor(player), runtime))
+                    {
+                        RefreshV2BodyConformance(player, runtime, "weapon_switch", IsV2Actuating(runtime));
+                    }
+                });
+            }
+            else if (player != null && IsRealPlayer(player))
+            {
+                RecordTrainingV2Event(player, "weapon_switch", null);
+            }
+        }
+
+        private void OnPlayerSleep(BasePlayer player)
+        {
+            var runtime = RuntimeFor(player);
+            if (runtime != null && (IsV2Actuating(runtime) || IsV2Shadowing(runtime)))
+            {
+                RecordPrefabConformance(player, runtime, "sleep_wake", true, "sleep_observed");
+                legacyScientistBodyAdapter?.StopFire(player, runtime);
+            }
+        }
+
+        private void OnPlayerSleepEnded(BasePlayer player)
+        {
+            var runtime = RuntimeFor(player);
+            if (runtime == null
+                || !config.ControllerV2.BodyAdapters.RevalidateAfterSleepWake
+                || (!IsV2Actuating(runtime) && !IsV2Shadowing(runtime)))
+            {
+                return;
+            }
+
+            RefreshV2BodyConformance(player, runtime, "sleep_wake", IsV2Actuating(runtime));
+            if (IsV2Actuating(runtime) && runtime.CurrentDestination != Vector3.zero)
+            {
+                MoveBotTo(player, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+            }
+        }
+
+        private void OnPlayerWound(BasePlayer player, HitInfo info)
+        {
+            var runtime = RuntimeFor(player);
+            if (runtime == null || (!IsV2Actuating(runtime) && !IsV2Shadowing(runtime)))
+            {
+                return;
+            }
+
+            legacyScientistBodyAdapter?.StopFire(player, runtime);
+            RecordPrefabConformance(player, runtime, "wounded", true, "wounded_state_observed");
+        }
+
+        private void OnPlayerRecover(BasePlayer player)
+        {
+            var runtime = RuntimeFor(player);
+            if (runtime != null && (IsV2Actuating(runtime) || IsV2Shadowing(runtime)))
+            {
+                RefreshV2BodyConformance(player, runtime, "recovered", IsV2Actuating(runtime));
+            }
+        }
+
+        private void RefreshV2BodyConformance(BaseCombatEntity bot, BotRuntime runtime, string stage, bool authoritative)
+        {
+            if (bot == null || runtime == null)
+            {
+                return;
+            }
+
+            runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime) ?? new BodyCapabilities { failure_reason = "adapter_missing" };
+            var fireRequired = !runtime.V2Healing && runtime.MotorSkill != MotorSkill.Heal;
+            var passed = runtime.BodyCapabilities.supports_authoritative_movement
+                && (!fireRequired || runtime.BodyCapabilities.supports_authoritative_fire)
+                && (!config.ControllerV2.RequireMechanicalCrouch
+                    || !runtime.V2StanceTestComplete
+                    || runtime.BodyCapabilities.supports_mechanical_crouch);
+            RecordPrefabConformance(bot, runtime, stage, passed, runtime.BodyCapabilities.failure_reason);
+
+            if (!authoritative)
+            {
+                return;
+            }
+
+            if (!passed)
+            {
+                RollbackV2Bot(bot, runtime, $"{stage}:{runtime.BodyCapabilities.failure_reason}");
+                return;
+            }
+
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+        }
+
+        private void OnEntityBuilt(Planner planner, GameObject gameObject)
+        {
+            var player = planner?.GetOwnerPlayer();
+            if (player != null && IsRealPlayer(player))
+            {
+                RecordTrainingV2Event(player, "build", null);
+            }
+        }
+
+        private void OnItemDeployed(Deployer deployer, ItemModDeployable mod, BaseEntity entity)
+        {
+            var player = deployer?.GetOwnerPlayer();
+            if (player != null && IsRealPlayer(player))
+            {
+                RecordTrainingV2Event(player, "deploy", null);
+            }
+        }
+
         private void OnWeaponFired(BaseProjectile projectile, BasePlayer player, ItemModProjectile mod, ProtoBuf.ProjectileShoot projectileShoot)
         {
             var botRuntime = RuntimeFor(player);
@@ -7116,6 +10063,22 @@ namespace Oxide.Plugins
                 botRuntime.LastWeaponFiredAt = now;
                 botRuntime.WeaponFiredCount++;
                 NormalizeBotWeaponDamage(projectile, projectile?.GetItem()?.info?.shortname ?? "", botRuntime);
+
+                if (IsV2Actuating(botRuntime))
+                {
+                    botRuntime.LastControllerInvariant = "native_control_conflict:on_weapon_fired";
+                    botRuntime.NativeOwnershipConflicts++;
+                    botRuntime.ConsecutiveOwnershipConflicts++;
+                    v2Metrics.native_ownership_conflicts++;
+                    RecordPrefabConformance(player, botRuntime, "ownership", false, botRuntime.LastControllerInvariant);
+                    if (config.ControllerV2.AutoRollbackOnInvariantFailure
+                        && botRuntime.ConsecutiveOwnershipConflicts >= config.ControllerV2.OwnershipConflictsBeforeRollback)
+                    {
+                        RollbackV2Bot(player, botRuntime, botRuntime.LastControllerInvariant);
+                    }
+                    return;
+                }
+
                 ApplyBotAimError(projectileShoot, player, botRuntime, now);
                 return;
             }
@@ -7124,6 +10087,8 @@ namespace Oxide.Plugins
             {
                 return;
             }
+
+            RecordTrainingV2Event(player, "fire", null, 1);
 
             RecordLearningPlayerEvent(player, ActionIdString(TacticalActionId.AcquireVisibleTarget), now);
 
@@ -7164,6 +10129,12 @@ namespace Oxide.Plugins
             var victimEntity = info.HitEntity as BaseCombatEntity;
             var victimRuntime = RuntimeFor(victimEntity);
 
+            if (IsV2Actuating(attackerRuntime) || RequiresV2DamageAuthorization(attackerRuntime, now))
+            {
+                RecordBotPlayerAttack(attackerRuntime, DamagePeerLabel(victimEntity, victimRuntime), "v2_real_projectile", now);
+                return null;
+            }
+
             if (victimEntity == null)
             {
                 RecordBotPlayerAttack(attackerRuntime, "none", "no_hit_entity", now);
@@ -7173,6 +10144,14 @@ namespace Oxide.Plugins
             if (victimRuntime == null)
             {
                 RecordBotPlayerAttack(attackerRuntime, DamagePeerLabel(victimEntity, null), "untracked_hit", now);
+                return null;
+            }
+
+            if (IsV2Actuating(attackerRuntime))
+            {
+                // V2 damage is already produced by BaseProjectile.ServerUse and is
+                // authorized in OnEntityTakeDamage. Never schedule the legacy
+                // synthetic Hurt bridge for a V2 body.
                 return null;
             }
 
@@ -7358,6 +10337,10 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null)
             {
+                if (IsV2Actuating(victimRuntime) || IsV2Shadowing(victimRuntime))
+                {
+                    RecordPrefabConformance(victim, victimRuntime, "death", true, "death_cleanup_observed");
+                }
                 PrepareBotCorpseLoot(victimPlayer, victimRuntime);
                 TrackRecentBotDeath(victim, victimRuntime);
                 ClearBotCrouch(victim, victimRuntime, "death", now);
@@ -7377,6 +10360,7 @@ namespace Oxide.Plugins
 
                     if (IsRealPlayer(attacker) && attackerRuntime == null)
                     {
+                        RecordTrainingV2Event(attacker, "kill", victim);
                         RecordLearningPlayerEvent(attacker, ActionIdString(TacticalActionId.AcquireVisibleTarget), now, kill: true, targetEntity: victim, targetRuntime: victimRuntime);
                         var playerStats = EnsurePlayerStats(attacker);
                         playerStats.npc_kills++;
@@ -7401,6 +10385,7 @@ namespace Oxide.Plugins
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer) && !ShouldIgnoreRealPlayerTarget(victimPlayer))
             {
+                RecordTrainingV2Event(victimPlayer, "death", attackerEntity, taken: 1);
                 RecordLearningPlayerEvent(victimPlayer, ActionIdString(TacticalActionId.RetreatToCover), now, died: true, targetEntity: attackerEntity, targetRuntime: attackerRuntime);
                 var playerStats = EnsurePlayerStats(victimPlayer);
                 playerStats.deaths_by_npc++;
@@ -8711,6 +11696,7 @@ namespace Oxide.Plugins
             RefreshEligibleKits();
             RefreshDecisionAdvisor();
             RefreshLearningTimer();
+            RefreshTrainingV2Timer();
             MaybePruneDecisionTraceFile(DecisionTraceDataPath(), true);
 
             if (config.Enabled)
@@ -8775,9 +11761,23 @@ namespace Oxide.Plugins
             }
 
             RefreshEligibleKits();
+            CleanupInactiveBots();
 
             var anchors = SpawnAnchorPlayers();
             Reply(arg, $"Raidlands roam bot diag: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, brain={TacticalBrainName}, anchor={SpawnAnchorLabel()}, anchors={anchors.Count}, debugViewers={DebugUiViewerCount()}, target={TargetPopulation()}, ambient={AmbientBotCount()}, managed={ManagedBotCount()}/{config.ManagedApi.MaximumManagedBots}, active={activeBots.Count}, mapMarkers={BotMapMarkerStatus()}, requireLand={config.Spawn.RequireLandSpawns}, advisor={config.DecisionAdvisor.Provider}/{config.DecisionAdvisor.Mode}, chat={config.BotChat.Enabled}/{config.BotChat.AiRepliesEnabled}/{BotChatAiCallsInWindow()}/{config.BotChat.OpenAiCallsPerHour}.");
+
+            var liveOwnedBots = activeBots.Count(entry => IsLiveBot(entry.Key));
+            var configuredKeys = new HashSet<string>(ConfiguredBotIdentities()
+                .Where(identity => identity != null)
+                .Select(identity => BotKey(identity.BotId)), StringComparer.OrdinalIgnoreCase);
+            var statKeys = data?.bots?.Keys.ToList() ?? new List<string>();
+            var configuredStats = statKeys.Count(key => configuredKeys.Contains(BotKey(key)));
+            var overflowStats = statKeys.Count(key => (key ?? "").StartsWith("roamer_slot_", StringComparison.OrdinalIgnoreCase));
+            var legacyRandomStats = statKeys.Count(IsLegacyRandomBotKey);
+            Reply(arg, $"RoamBot ownership census: live-owned={liveOwnedBots}, registry={activeBots.Count}, stat-identities={statKeys.Count} (configured={configuredStats}, stable-overflow={overflowStats}, legacy-random={legacyRandomStats}). Stat identities are cumulative profiles, not live entities.");
+
+            var world = CaptureWorldPopulationCensus();
+            Reply(arg, $"World population census: server-entities={world.ServerEntities}, player-bodies={world.PlayerBodies}, online-players={world.OnlinePlayers}, legacy-npc-bodies={world.LegacyNpcBodies} (scientists={world.Scientists}, tunnel={world.TunnelDwellers}, underwater={world.UnderwaterDwellers}), gen2-scientists={world.Gen2Scientists}. Only live-owned above are RaidlandsRoamBots.");
 
             foreach (var anchor in anchors.Take(5))
             {
@@ -8797,6 +11797,274 @@ namespace Oxide.Plugins
             foreach (var entry in ActiveBotEntries().Take(5))
             {
                 Reply(arg, $"Active {entry.Value.DisplayName}: {BotRuntimeDiagnostics(entry.Key, entry.Value)}.");
+            }
+        }
+
+        [ConsoleCommand("raidbots.v2")]
+        private void CmdV2(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var action = (ArgString(arg, 0) ?? "status").Trim().ToLowerInvariant();
+            if (action == "status")
+            {
+                var modes = activeBots.Values.Where(runtime => runtime != null)
+                    .GroupBy(runtime => ControllerModeKey(runtime.ControllerMode))
+                    .OrderBy(group => group.Key)
+                    .Select(group => $"{group.Key}={group.Count()}");
+                Reply(arg, $"Raidlands AI V2: configured={config.ControllerV2.Mode}, active=[{string.Join(", ", modes)}], motorTicks={v2Metrics.motor_ticks}, shots={v2Metrics.authorized_shots}, rejected={v2Metrics.rejected_shots}, unauthorizedHitsBlocked={v2Metrics.unauthorized_hits_blocked}, waterTargets={v2Metrics.water_target_rejections}, waterCrossings={v2Metrics.water_crossing_rejections}, foliage={v2Metrics.foliage_rejections}, muzzle={v2Metrics.muzzle_rejections}, ownershipConflicts={v2Metrics.native_ownership_conflicts}, rollbacks={v2Metrics.controller_rollbacks}, budgetBreaches={v2Metrics.motor_budget_breaches}.");
+                return;
+            }
+
+            if (action == "inspect" || action == "rays" || action == "stance" || action == "cadence")
+            {
+                var query = ArgStringFrom(arg, 1);
+                var entries = FindV2DiagnosticBots(query).Take(10).ToList();
+                if (entries.Count == 0)
+                {
+                    Reply(arg, string.IsNullOrWhiteSpace(query) ? "No active Raidlands bots." : $"No active Raidlands bot matched '{query}'.");
+                    return;
+                }
+
+                foreach (var entry in entries)
+                {
+                    var bot = entry.Key;
+                    var runtime = entry.Value;
+                    if (action == "rays")
+                    {
+                        DrawV2PerceptionRays(arg?.Connection?.player as BasePlayer, bot, runtime);
+                        Reply(arg, $"{runtime.DisplayName}: eligibility={runtime.LastCombatFrame.eligibility_reason}, eyeVisible={runtime.LastCombatFrame.eye_visible}, exposure={runtime.LastCombatFrame.target_exposure:0.00}, muzzleClear={runtime.LastCombatFrame.muzzle_clear}, sight={runtime.LastSightReason}, fire={runtime.LastFireBlockReason}, aim={FormatVectorSafe(runtime.CurrentAimPoint)}.");
+                    }
+                    else if (action == "stance")
+                    {
+                        Reply(arg, $"{runtime.DisplayName}: crouched={runtime.IsCrouching}/{IsPlayerCrouched(bot as BasePlayer)}, verified={runtime.BodyCapabilities.stance_test_complete}/{runtime.BodyCapabilities.supports_mechanical_crouch}, eyes={runtime.V2StandingEyeHeight:0.00}->{runtime.V2CrouchedEyeHeight:0.00}, collider={runtime.V2StandingColliderHeight:0.00}->{runtime.V2CrouchedColliderHeight:0.00}, invariant={runtime.LastControllerInvariant}.");
+                    }
+                    else if (action == "cadence")
+                    {
+                        Reply(arg, $"{runtime.DisplayName}: weapon={runtime.Combat?.WeaponClass}/{runtime.Combat?.WeaponShortname}, authorized={runtime.AuthorizedShots}, rejected={runtime.RejectedShots}, burst={runtime.BurstShotsRemaining}/{runtime.CurrentBurstSize}, shotGap={runtime.CurrentShotGap:0.000}s, nextTrigger={Math.Max(0f, runtime.NextTriggerAt - Time.realtimeSinceStartup):0.000}s, nativeCallbacks={runtime.WeaponFiredCount}, failures={runtime.ConsecutiveFireFailures}.");
+                    }
+                    else
+                    {
+                        Reply(arg, $"{runtime.DisplayName}: mode={ControllerModeKey(runtime.ControllerMode)} reason={runtime.ControllerModeReason}, adapter={runtime.BodyAdapterKey}, capability={runtime.BodyCapabilities.failure_reason}, intent={JsonConvert.SerializeObject(runtime.Intent)}, ownership={runtime.NativeOwnershipConflicts}/{runtime.ConsecutiveOwnershipConflicts}, rollback={runtime.RollbackReason}.");
+                    }
+                }
+                return;
+            }
+
+            if (action == "prefabs" || action == "conformance")
+            {
+                if (prefabConformanceV2.Count == 0)
+                {
+                    Reply(arg, "No V2 prefab conformance observations have been recorded yet.");
+                    return;
+                }
+
+                foreach (var record in prefabConformanceV2.Values.OrderBy(value => value.prefab))
+                {
+                    Reply(arg, JsonConvert.SerializeObject(record, Formatting.None));
+                }
+                return;
+            }
+
+            if (action == "training")
+            {
+                var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingV2TraceDataFile);
+                var bytes = File.Exists(path) ? new FileInfo(path).Length : 0L;
+                Reply(arg, $"Training V2: enabled={config.TrainingV2.Enabled}, sessions={trainingSessionsV2.Values.Count(session => session.StartedAt > 0f)}, buffered={pendingTrainingV2Frames.Count}, outcomeAnchors={pendingTrainingOutcomeAnchorsV2.Count}, frames={v2Metrics.training_frames}, dropped={v2Metrics.training_frames_dropped}, flushFailures={v2Metrics.training_flush_failures}, trace={path} ({FormatFileSize(bytes)}).");
+                return;
+            }
+
+            if (action == "replay")
+            {
+                Reply(arg, EvaluateTrainingV2Replay());
+                return;
+            }
+
+            if (action == "mode" || action == "promote")
+            {
+                var requested = action == "promote" ? NextControllerPromotion(config.ControllerV2.Mode) : ArgString(arg, 1);
+                var normalized = NormalizeControllerMode(requested);
+                config.ControllerV2.Mode = normalized;
+                SaveConfig();
+                ApplyControllerModeToExistingBots(ParseControllerMode(normalized));
+                Reply(arg, $"Raidlands AI V2 mode is now {normalized}; existing tracked bots were reconciled to the requested rollout allocation.");
+                return;
+            }
+
+            if (action == "rollback")
+            {
+                var query = ArgStringFrom(arg, 1);
+                var entries = FindV2DiagnosticBots(string.Equals(query, "all", StringComparison.OrdinalIgnoreCase) ? "" : query).ToList();
+                var rolledBack = 0;
+                foreach (var entry in entries)
+                {
+                    if (IsV2Actuating(entry.Value))
+                    {
+                        RollbackV2Bot(entry.Key, entry.Value, "admin_rollback");
+                        rolledBack++;
+                    }
+                }
+                Reply(arg, $"Rolled {rolledBack} actuating V2 bot{(rolledBack == 1 ? "" : "s")} back to the versioned legacy controller.");
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.v2 status|inspect [bot]|rays [bot]|stance [bot]|cadence [bot]|prefabs|training|replay|mode <legacy|v2_shadow|v2_canary|v2_active>|promote|rollback [bot|all]");
+        }
+
+        private void DrawV2PerceptionRays(BasePlayer viewer, BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (viewer == null || bot == null || runtime == null)
+            {
+                return;
+            }
+
+            const float duration = 8f;
+            var target = runtime.Memory?.Target ?? ActiveRealPlayerForEngagement(runtime.Memory?.TargetUserId ?? 0UL);
+            var eye = EyePosition(bot);
+            var muzzle = WeaponMuzzlePosition(bot);
+            var aim = runtime.CurrentAimPoint;
+            if (aim == Vector3.zero && target != null)
+            {
+                aim = EyePosition(target);
+            }
+
+            if (aim != Vector3.zero)
+            {
+                viewer.SendConsoleCommand("ddraw.line", duration,
+                    runtime.LastCombatFrame.eye_visible ? Color.green : Color.red, eye, aim);
+                viewer.SendConsoleCommand("ddraw.line", duration,
+                    runtime.LastCombatFrame.muzzle_clear ? Color.cyan : new Color(1f, 0.5f, 0f), muzzle, aim);
+                viewer.SendConsoleCommand("ddraw.sphere", duration, Color.yellow, aim, 0.12f);
+            }
+
+            if (target != null)
+            {
+                foreach (var point in TargetProbePoints(target))
+                {
+                    viewer.SendConsoleCommand("ddraw.sphere", duration, Color.white, point, 0.055f);
+                }
+            }
+
+            viewer.SendConsoleCommand("ddraw.text", duration, Color.white, eye + Vector3.up * 0.25f,
+                $"{runtime.DisplayName}\n{runtime.LastCombatFrame.eligibility_reason}\n{runtime.LastFireBlockReason}");
+        }
+
+        private List<KeyValuePair<BaseCombatEntity, BotRuntime>> FindV2DiagnosticBots(string query)
+        {
+            query = (query ?? "").Trim();
+            return ActiveBotEntries()
+                .Where(entry => string.IsNullOrWhiteSpace(query)
+                    || (entry.Value?.BotKey ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0
+                    || (entry.Value?.DisplayName ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0
+                    || NetId(entry.Key).ToString(CultureInfo.InvariantCulture) == query)
+                .ToList();
+        }
+
+        private string NextControllerPromotion(string current)
+        {
+            switch (NormalizeControllerMode(current))
+            {
+                case ControllerModeLegacy: return ControllerModeV2Shadow;
+                case ControllerModeV2Shadow: return ControllerModeV2Canary;
+                case ControllerModeV2Canary: return ControllerModeV2Active;
+                default: return ControllerModeV2Active;
+            }
+        }
+
+        private void ApplyControllerModeToExistingBots(ControllerMode requested)
+        {
+            var entries = ActiveBotEntries().OrderBy(entry => entry.Value?.BotKey ?? "").ToList();
+            var canaryCount = config.ControllerV2.CanaryBotCount > 0
+                ? Math.Min(config.ControllerV2.CanaryBotCount, entries.Count)
+                : Mathf.CeilToInt(entries.Count * config.ControllerV2.CanaryPercent / 100f);
+
+            for (var index = 0; index < entries.Count; index++)
+            {
+                var bot = entries[index].Key;
+                var runtime = entries[index].Value;
+                var mode = requested == ControllerMode.V2Canary
+                    ? index < canaryCount ? ControllerMode.V2Canary : ControllerMode.V2Shadow
+                    : requested;
+
+                if (mode == ControllerMode.Legacy)
+                {
+                    if (IsV2Actuating(runtime))
+                    {
+                        RollbackV2Bot(bot, runtime, "admin_mode_legacy");
+                    }
+                    else
+                    {
+                        runtime.ControllerMode = ControllerMode.Legacy;
+                        runtime.ControllerModeReason = "admin_mode_legacy";
+                        legacyScientistBodyAdapter?.Prepare(bot, runtime, false);
+                    }
+                    continue;
+                }
+
+                runtime.RollbackReason = "none";
+                runtime.ControllerMode = mode;
+                runtime.ControllerModeReason = $"admin_mode:{ControllerModeKey(mode)}";
+                runtime.NextCombatMotorAt = Time.realtimeSinceStartup;
+                if (IsV2Actuating(runtime))
+                {
+                    legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+                    FinalizeV2BodyConformance(bot, runtime);
+                }
+            }
+        }
+
+        private string EvaluateTrainingV2Replay()
+        {
+            var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingV2TraceDataFile);
+            if (!File.Exists(path))
+            {
+                return "Training V2 replay evaluation: no trace file exists yet.";
+            }
+
+            try
+            {
+                var frames = 0;
+                var sequences = 0;
+                var outcomes = 0;
+                var trainSessions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var heldOutSessions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var players = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    JObject json;
+                    try { json = JObject.Parse(line); } catch { continue; }
+                    var type = ((string)json["record_type"] ?? "frame").ToLowerInvariant();
+                    var player = (string)json["source_player_key"] ?? "";
+                    var session = (string)json["session_id"] ?? "";
+                    if (!string.IsNullOrWhiteSpace(player)) players.Add(player);
+                    if (!string.IsNullOrWhiteSpace(session))
+                    {
+                        if (StableBucket(string.IsNullOrWhiteSpace(player) ? session : player, 100) < 20) heldOutSessions.Add(session);
+                        else trainSessions.Add(session);
+                    }
+                    if (type == "frame") frames++;
+                    else if (type == "sequence")
+                    {
+                        sequences++;
+                        var label = (string)json["sequence_label"] ?? "unknown";
+                        labels[label] = labels.TryGetValue(label, out var count) ? count + 1 : 1;
+                    }
+                    else if (type == "outcome") outcomes++;
+                }
+
+                var rare = string.Join(", ", labels.OrderBy(pair => pair.Value).Take(8).Select(pair => $"{pair.Key}={pair.Value}"));
+                return $"Training V2 replay evaluation: players={players.Count}, trainSessions={trainSessions.Count}, heldOutSessions={heldOutSessions.Count}, frames={frames}, sequences={sequences}, outcomes={outcomes}, rareLabels=[{rare}]. Split is deterministic by player/session; live retraining remains disabled.";
+            }
+            catch (Exception ex)
+            {
+                return $"Training V2 replay evaluation failed: {ex.GetType().Name}: {ex.Message}";
             }
         }
 
@@ -9908,6 +13176,43 @@ namespace Oxide.Plugins
         public object REBOT_IsBot(object entityIdOrEntity)
         {
             return BotRuntimeForApiObject(entityIdOrEntity) != null;
+        }
+
+        [HookMethod("REBOT_GetControllerMode")]
+        public object REBOT_GetControllerMode(object entityIdOrEntity)
+        {
+            var runtime = BotRuntimeForApiObject(entityIdOrEntity);
+            return runtime == null ? null : ControllerModeKey(runtime.ControllerMode);
+        }
+
+        [HookMethod("REBOT_GetCurrentIntent")]
+        public object REBOT_GetCurrentIntent(object entityIdOrEntity)
+        {
+            var runtime = BotRuntimeForApiObject(entityIdOrEntity);
+            return runtime?.Intent == null ? null : JObject.FromObject(runtime.Intent);
+        }
+
+        [HookMethod("REBOT_GetEligibilityReason")]
+        public object REBOT_GetEligibilityReason(object entityIdOrEntity)
+        {
+            var runtime = BotRuntimeForApiObject(entityIdOrEntity);
+            if (runtime == null)
+            {
+                return null;
+            }
+
+            var target = runtime.Memory?.Target;
+            var reason = target != null && RuntimeFor(target) == null ? TargetIneligibilityReason(target) : "";
+            return string.IsNullOrWhiteSpace(reason)
+                ? string.IsNullOrWhiteSpace(runtime.LastFireBlockReason) ? "eligible" : runtime.LastFireBlockReason
+                : reason;
+        }
+
+        [HookMethod("REBOT_GetBodyCapabilities")]
+        public object REBOT_GetBodyCapabilities(object entityIdOrEntity)
+        {
+            var runtime = BotRuntimeForApiObject(entityIdOrEntity);
+            return runtime?.BodyCapabilities == null ? null : JObject.FromObject(runtime.BodyCapabilities);
         }
 
         private Dictionary<string, object> SpawnManagedBotGroup(object requestJsonOrDictionary, bool forceSingle)
@@ -11099,12 +14404,19 @@ namespace Oxide.Plugins
                 }
             }
 
-            var fallbackName = $"Roamer{random.Next(1000, 9999).ToString(CultureInfo.InvariantCulture)}";
-            return new BotIdentityConfig
+            var overflowCapacity = OverflowIdentityCapacity(candidates.Count);
+            for (var slot = 1; slot <= overflowCapacity; slot++)
             {
-                BotId = BotKey(fallbackName),
-                DisplayName = fallbackName
-            };
+                var identity = OverflowBotIdentity(slot);
+                if (!activeKeys.Contains(identity.BotId))
+                {
+                    return identity;
+                }
+            }
+
+            // The active bot cap should make this unreachable. Keep the final key
+            // stable so a configuration mistake cannot recreate unbounded stats.
+            return OverflowBotIdentity(overflowCapacity);
         }
 
         private string CleanName(string value)
@@ -11487,21 +14799,47 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            var now = Time.realtimeSinceStartup;
+            const float cellSize = 2f;
+            var cacheKey = new Vector3Int(
+                Mathf.FloorToInt(position.x / cellSize),
+                Mathf.FloorToInt(position.y / cellSize),
+                Mathf.FloorToInt(position.z / cellSize));
+
+            if (baseRestrictionCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt >= now)
+            {
+                return cached.Restricted;
+            }
+
+            if (baseRestrictionCache.Count > 4096)
+            {
+                baseRestrictionCache.Clear();
+            }
+
             var radius = Math.Max(1f, config.AI.BaseAvoidanceRadius);
             var mask = LayerMask.GetMask("Construction", "Deployed");
-            var colliders = Physics.OverlapSphere(position, radius, mask, QueryTriggerInteraction.Collide);
+            var colliderCount = Physics.OverlapSphereNonAlloc(position, radius, baseRestrictionColliderBuffer, mask, QueryTriggerInteraction.Collide);
+            var restricted = false;
 
-            foreach (var collider in colliders)
+            for (var index = 0; index < colliderCount; index++)
             {
+                var collider = baseRestrictionColliderBuffer[index];
                 var entity = collider == null ? null : collider.GetComponentInParent<BaseEntity>();
 
                 if (IsPlayerBaseEntity(entity))
                 {
-                    return true;
+                    restricted = true;
+                    break;
                 }
             }
 
-            return false;
+            baseRestrictionCache[cacheKey] = new BaseRestrictionCacheEntry
+            {
+                Restricted = restricted,
+                ExpiresAt = now + 0.75f
+            };
+
+            return restricted;
         }
 
         private bool SegmentCrossesBaseRestrictedArea(Vector3 from, Vector3 to)
@@ -11694,6 +15032,17 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            // Current Rust terrain navmesh does not provide a stable agent-type-0
+            // surface for scientistnpc_roam or scientistnpc_full_any. Both bodies
+            // repeatedly detach after placement and leave navType=None. Repository
+            // live testing previously established junkpile_pistol as the compatible
+            // legacy scientist body for unrestricted land roaming.
+            if (config.Spawn.RequireLandSpawns
+                && !string.Equals(prefab.Trim(), LandNavigationScientistPrefab, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
             return IsLegacyScientistBodyPrefab(prefab);
         }
 
@@ -11728,7 +15077,7 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                entry.Value.NextPerceptionAt = now + Math.Max(0.1f, config.AI.PerceptionTickSeconds);
+                entry.Value.NextPerceptionAt = now + EffectivePerceptionInterval(entry.Key, entry.Value, now);
                 UpdatePerception(entry.Key, entry.Value, now);
             }
         }
@@ -11765,9 +15114,16 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                runtime.NextDecisionAt = now + Math.Max(0.15f, config.AI.DecisionTickSeconds);
+                runtime.NextDecisionAt = now + EffectiveDecisionInterval(bot, runtime, now);
                 UpdateRetreatPosture(bot, runtime, now);
-                UpdateMedicalHealing(bot, runtime, now);
+                if (IsV2Actuating(runtime))
+                {
+                    UpdateV2HealingIntent(bot, runtime, now);
+                }
+                else
+                {
+                    UpdateMedicalHealing(bot, runtime, now);
+                }
                 UpdateBotPosture(bot, runtime, now);
                 var request = BuildDecisionRequest(bot, runtime, now);
                 var candidates = BuildCandidateActions(bot, runtime, now);
@@ -11777,11 +15133,773 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                ApplyLearnedBehaviorScoring(bot, runtime, candidates, now);
+                if (IsV2Actuating(runtime) || IsV2Shadowing(runtime))
+                {
+                    ApplyBoundedStyleRanking(runtime, candidates);
+                }
+                else
+                {
+                    ApplyLearnedBehaviorScoring(bot, runtime, candidates, now);
+                }
                 request.CandidateActions = candidates;
                 var decision = DecideOrFallback(bot, runtime, request, candidates, now);
                 ExecuteDecision(bot, runtime, decision, now);
+                QueueDecisionOutcomesV2(bot, runtime, decision, now);
                 UpdateBotPosture(bot, runtime, now);
+            }
+        }
+
+        private void ApplyBoundedStyleRanking(BotRuntime runtime, List<TacticalActionCandidate> candidates)
+        {
+            if (runtime?.Style == null || candidates == null)
+            {
+                return;
+            }
+
+            foreach (var candidate in candidates.Where(value => value != null))
+            {
+                var delta = 0f;
+                switch (candidate.ActionId)
+                {
+                    case TacticalActionId.PushTarget:
+                    case TacticalActionId.SuppressTarget:
+                        delta = (runtime.Style.aggression - 0.5f) * 14f;
+                        break;
+                    case TacticalActionId.PeekLeft:
+                    case TacticalActionId.PeekRight:
+                        delta = (runtime.Style.jiggle_preference - 0.5f) * 10f;
+                        break;
+                    case TacticalActionId.WideSwing:
+                        delta = (runtime.Style.wide_swing_preference - 0.5f) * 14f;
+                        break;
+                    case TacticalActionId.RetreatToCover:
+                    case TacticalActionId.Tuck:
+                        delta = (0.5f - runtime.Style.aggression) * 10f;
+                        break;
+                }
+
+                // Styles only rank candidates already admitted by deterministic
+                // perception, path, cover, friendly-fire, and action legality rules.
+                candidate.HeuristicScore += Mathf.Clamp(delta, -7f, 7f);
+            }
+        }
+
+        private void CombatMotorTick()
+        {
+            var now = Time.realtimeSinceStartup;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var budgetMilliseconds = Math.Max(0.25f, config?.ControllerV2?.MaximumAiMillisecondsPerMotorTick ?? 3.5f);
+            var entries = activeBots.ToList();
+
+            PruneExpiredFireAuthorizations(now);
+            ProcessDecisionOutcomeAnchorsV2(now);
+
+            if (entries.Count == 0)
+            {
+                return;
+            }
+
+            var start = Mathf.Abs(v2MotorScanOffset++) % entries.Count;
+
+            for (var offset = 0; offset < entries.Count; offset++)
+            {
+                if (stopwatch.Elapsed.TotalMilliseconds >= budgetMilliseconds)
+                {
+                    v2Metrics.motor_budget_breaches++;
+                    if (v2BudgetBreachStartedAt <= 0f)
+                    {
+                        v2BudgetBreachStartedAt = now;
+                    }
+                    break;
+                }
+
+                var entry = entries[(start + offset) % entries.Count];
+                var bot = entry.Key;
+                var runtime = entry.Value;
+
+                if (!IsLiveBot(bot)
+                    || runtime == null
+                    || (!IsV2Actuating(runtime) && !IsV2Shadowing(runtime))
+                    || now < runtime.NextCombatMotorAt)
+                {
+                    continue;
+                }
+
+                var interval = EffectiveV2MotorInterval(bot, runtime);
+                runtime.NextCombatMotorAt = now + interval;
+                runtime.LastCombatFrame = CaptureV2CombatFrame(bot, runtime, now);
+                v2Metrics.motor_ticks++;
+
+                if (IsV2Shadowing(runtime))
+                {
+                    continue;
+                }
+
+                if (config.ControllerV2.RequireVerifiedBodyCapabilities
+                    && (!runtime.BodyCapabilities.supports_authoritative_movement
+                        || !runtime.BodyCapabilities.supports_authoritative_fire
+                        || config.ControllerV2.RequireMechanicalCrouch && !runtime.BodyCapabilities.supports_mechanical_crouch))
+                {
+                    continue;
+                }
+
+                if (now >= runtime.NextOwnershipVerifyAt)
+                {
+                    VerifyAndRestoreV2Ownership(bot, runtime, now);
+
+                    if (!IsV2Actuating(runtime))
+                    {
+                        continue;
+                    }
+                }
+
+                if (runtime.ConsecutiveFailedPaths >= config.ControllerV2.PathFailuresBeforeRollback)
+                {
+                    RollbackV2Bot(bot, runtime, "excessive_path_failures");
+                    continue;
+                }
+
+                if (!EnsureBotPositionUsable(bot, runtime, now) || IsBotActionBlocked(runtime, now))
+                {
+                    legacyScientistBodyAdapter?.StopFire(bot, runtime);
+                    continue;
+                }
+
+                UpdateV2HealingMotor(bot, runtime, now);
+
+                if (!runtime.V2Healing)
+                {
+                    UpdateV2MovementMotor(bot, runtime, now, interval);
+                    UpdateV2WeaponMotor(bot, runtime, now, interval);
+                }
+
+                if (runtime.IsShooting && now >= runtime.ShootingUntil)
+                {
+                    runtime.IsShooting = false;
+                }
+            }
+
+            if (stopwatch.Elapsed.TotalMilliseconds < budgetMilliseconds)
+            {
+                v2BudgetBreachStartedAt = 0f;
+            }
+            else if (v2BudgetBreachStartedAt > 0f
+                && now - v2BudgetBreachStartedAt >= config.ControllerV2.SustainedBudgetBreachSeconds)
+            {
+                foreach (var entry in activeBots.Where(candidate => IsV2Actuating(candidate.Value)).ToList())
+                {
+                    RollbackV2Bot(entry.Key, entry.Value, "sustained_motor_budget_breach");
+                }
+
+                v2BudgetBreachStartedAt = 0f;
+            }
+        }
+
+        private float EffectiveV2MotorInterval(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            var distance = runtime?.Memory?.Target != null
+                ? Vector3.Distance(bot.transform.position, runtime.Memory.Target.transform.position)
+                : DistanceToNearestRealPlayer(bot.transform.position);
+
+            if (distance < 0f || distance > config.ControllerV2.MidCombatDistance)
+            {
+                return config.ControllerV2.FarDistanceMotorTickSeconds;
+            }
+
+            return distance > config.ControllerV2.NearCombatDistance
+                ? config.ControllerV2.MidDistanceMotorTickSeconds
+                : config.ControllerV2.CombatMotorTickSeconds;
+        }
+
+        private CombatFrame CaptureV2CombatFrame(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            var target = runtime?.Memory?.Target;
+            var targetPlayer = target as BasePlayer;
+            var eligibility = targetPlayer == null || RuntimeFor(targetPlayer) != null ? "" : TargetIneligibilityReason(targetPlayer);
+            var lastKnownAge = runtime?.Memory?.LastSeenAt > 0f ? Math.Max(0f, now - runtime.Memory.LastSeenAt) : 0f;
+            var agent = bot?.GetComponent<NavMeshAgent>() ?? bot?.GetComponentInChildren<NavMeshAgent>();
+            var frame = new CombatFrame
+            {
+                captured_at = now,
+                position = bot == null ? Vector3.zero : bot.transform.position,
+                velocity = agent != null && agent.enabled && agent.isOnNavMesh ? agent.velocity : Vector3.zero,
+                view_forward = bot == null ? Vector3.forward : bot.transform.forward,
+                target_id = runtime?.Memory?.TargetUserId ?? 0UL,
+                uncertain_target_position = KnownThreatPosition(runtime),
+                target_uncertainty_radius = Mathf.Clamp(lastKnownAge * config.ControllerV2.LastKnownPositionUncertaintyPerSecond, 0f, config.ControllerV2.MaximumLastKnownPositionUncertainty),
+                target_exposure = runtime?.Memory?.TargetExposureFraction ?? 0f,
+                eye_visible = runtime?.Memory?.HasLineOfSight == true,
+                muzzle_clear = string.Equals(runtime?.LastFireBlockReason, "ready", StringComparison.OrdinalIgnoreCase),
+                target_eligible = string.IsNullOrEmpty(eligibility),
+                eligibility_reason = string.IsNullOrEmpty(eligibility) ? "eligible" : eligibility,
+                crouched = runtime?.IsCrouching == true,
+                moving = agent != null && agent.velocity.sqrMagnitude > 0.04f,
+                firing = runtime?.IsShooting == true,
+                weapon_class = runtime?.Combat?.WeaponClass ?? "default",
+                motor_skill = (runtime?.MotorSkill ?? MotorSkill.None).ToString().ToLowerInvariant()
+            };
+
+            return frame;
+        }
+
+        private void VerifyAndRestoreV2Ownership(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            runtime.NextOwnershipVerifyAt = now + 0.25f;
+
+            var conflict = "";
+            if (legacyScientistBodyAdapter != null && legacyScientistBodyAdapter.VerifyOwnership(bot, runtime, out conflict))
+            {
+                runtime.ConsecutiveOwnershipConflicts = 0;
+                runtime.LastControllerInvariant = "ownership_ready";
+                RecordPrefabConformance(bot, runtime, "ownership", true, "ready");
+                return;
+            }
+
+            runtime.NativeOwnershipConflicts++;
+            runtime.ConsecutiveOwnershipConflicts++;
+            runtime.LastControllerInvariant = $"native_control_conflict:{(string.IsNullOrWhiteSpace(conflict) ? "unknown" : conflict)}";
+            v2Metrics.native_ownership_conflicts++;
+            RecordPrefabConformance(bot, runtime, "ownership", false, runtime.LastControllerInvariant);
+            legacyScientistBodyAdapter?.StopFire(bot, runtime);
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+
+            if (runtime.CurrentDestination != Vector3.zero)
+            {
+                MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+            }
+
+            legacyScientistBodyAdapter?.SetCrouched(bot, runtime, runtime.Intent.wants_crouch || runtime.IsCrouching, now);
+
+            if (config.ControllerV2.AutoRollbackOnInvariantFailure
+                && runtime.ConsecutiveOwnershipConflicts >= config.ControllerV2.OwnershipConflictsBeforeRollback)
+            {
+                RollbackV2Bot(bot, runtime, runtime.LastControllerInvariant);
+            }
+        }
+
+        private void UpdateV2MovementMotor(BaseCombatEntity bot, BotRuntime runtime, float now, float deltaSeconds)
+        {
+            var target = runtime.Memory.Target;
+            var threatPosition = target == null ? KnownThreatPosition(runtime) : target.transform.position;
+
+            if (threatPosition != Vector3.zero)
+            {
+                SmoothFacePositionV2(bot, runtime, runtime.CurrentAimPoint == Vector3.zero ? threatPosition : runtime.CurrentAimPoint, deltaSeconds);
+            }
+
+            if (runtime.RecentHeadHitWindowStartedAt > 0f && now - runtime.RecentHeadHitWindowStartedAt > 5f)
+            {
+                runtime.RecentHeadHits = 0;
+                runtime.RecentHeadHitWindowStartedAt = 0f;
+            }
+
+            if (runtime.RecentHeadHits >= 2)
+            {
+                RequestBotCrouch(bot, runtime, "repeated-head-hits", now + 2.5f, now);
+                runtime.Intent.wants_crouch = true;
+                runtime.PeekSide *= -1;
+                runtime.IsPeeking = false;
+                runtime.NextPeekAt = now + UnityEngine.Random.Range(0.45f, 1.1f);
+                runtime.CurrentCover = Vector3.zero;
+                runtime.CurrentTuckPoint = Vector3.zero;
+                runtime.CurrentPeekPoint = Vector3.zero;
+                runtime.CurrentPeekLeftPoint = Vector3.zero;
+                runtime.CurrentPeekRightPoint = Vector3.zero;
+                runtime.NextCoverSearchAt = 0f;
+                runtime.DamageBarricadeAwareUntil = Math.Max(runtime.DamageBarricadeAwareUntil, now + config.AI.DamageWallReactionWindowSeconds);
+                runtime.RecentHeadHits = 0;
+                runtime.RecentHeadHitWindowStartedAt = 0f;
+            }
+
+            var atVerifiedEdge = target != null && IsVerifiedCoverEdge(bot, runtime, target);
+            if (atVerifiedEdge
+                && runtime.IsPeeking
+                && config.AI.AllowJigglePeeking
+                && (runtime.MotorSkill == MotorSkill.JiggleLeft
+                    || runtime.MotorSkill == MotorSkill.JiggleRight
+                    || UnityEngine.Random.value <= runtime.Style.jiggle_preference))
+            {
+                if (now >= runtime.NextMotorDirectionChangeAt)
+                {
+                    runtime.MotorDirection *= -1;
+                    var peek = runtime.PeekSide >= 0 ? runtime.CurrentPeekLeftPoint : runtime.CurrentPeekRightPoint;
+                    var destination = runtime.MotorDirection > 0 && peek != Vector3.zero ? peek : runtime.CurrentTuckPoint;
+                    runtime.MotorSkill = runtime.PeekSide >= 0 ? MotorSkill.JiggleLeft : MotorSkill.JiggleRight;
+                    runtime.MotorSkillUntil = now + UnityEngine.Random.Range(config.ControllerV2.JiggleSegmentMinimumSeconds, config.ControllerV2.JiggleSegmentMaximumSeconds);
+                    runtime.NextMotorDirectionChangeAt = runtime.MotorSkillUntil;
+
+                    if (destination != Vector3.zero)
+                    {
+                        MoveBotTo(bot, runtime, destination, BaseNavigator.NavigationSpeed.Fast);
+                    }
+                }
+
+                return;
+            }
+
+            if (target == null
+                || !runtime.Memory.HasLineOfSight
+                || runtime.State == TacticalState.Retreat
+                || runtime.State == TacticalState.Flank
+                || runtime.State == TacticalState.Push
+                || runtime.State == TacticalState.SearchLastKnown
+                || runtime.State == TacticalState.InvestigateSound)
+            {
+                return;
+            }
+
+            if (runtime.State != TacticalState.AcquireTarget && runtime.State != TacticalState.Suppress && runtime.State != TacticalState.FightFromCover)
+            {
+                return;
+            }
+
+            if (runtime.BurstShotsRemaining > 0 && !runtime.BurstMoveWhileFiring)
+            {
+                return;
+            }
+
+            if (now < runtime.NextMotorDirectionChangeAt || UnityEngine.Random.value > runtime.Style.strafe_preference)
+            {
+                return;
+            }
+
+            runtime.MotorDirection *= -1;
+            var toTarget = target.transform.position - bot.transform.position;
+            toTarget.y = 0f;
+
+            if (toTarget.sqrMagnitude <= 0.01f)
+            {
+                return;
+            }
+
+            var side = Vector3.Cross(Vector3.up, toTarget.normalized) * runtime.MotorDirection;
+            var candidate = bot.transform.position + side * config.ControllerV2.CombatStrafeDistance;
+            runtime.NextMotorDirectionChangeAt = now + UnityEngine.Random.Range(config.ControllerV2.StrafeMinimumSeconds, config.ControllerV2.StrafeMaximumSeconds);
+            runtime.MotorSkill = runtime.MotorDirection < 0 ? MotorSkill.StrafeLeft : MotorSkill.StrafeRight;
+            runtime.MotorSkillUntil = runtime.NextMotorDirectionChangeAt;
+
+            if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(4f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+            {
+                MoveBotTo(bot, runtime, sampled, BaseNavigator.NavigationSpeed.Fast);
+                FaceEntity(bot, target);
+            }
+        }
+
+        private bool IsVerifiedCoverEdge(BaseCombatEntity bot, BotRuntime runtime, BasePlayer target)
+        {
+            if (bot == null || runtime == null || target == null || runtime.CurrentTuckPoint == Vector3.zero)
+            {
+                return false;
+            }
+
+            var peek = runtime.PeekSide >= 0 ? runtime.CurrentPeekLeftPoint : runtime.CurrentPeekRightPoint;
+            if (peek == Vector3.zero)
+            {
+                return false;
+            }
+
+            var targetEye = EyePosition(target);
+            var tuckEye = runtime.CurrentTuckPoint + Vector3.up * (runtime.IsCrouching ? 1.05f : 1.55f);
+            var peekEye = peek + Vector3.up * (runtime.IsCrouching ? 1.05f : 1.55f);
+            return IsWorldLineBlocked(targetEye, tuckEye, target, bot)
+                && !IsWorldLineBlocked(targetEye, peekEye, target, bot)
+                && !SegmentIntersectsWater(peekEye, targetEye, out _);
+        }
+
+        private void UpdateV2WeaponMotor(BaseCombatEntity bot, BotRuntime runtime, float now, float deltaSeconds)
+        {
+            var target = runtime.Memory.Target;
+
+            if (target == null
+                || !runtime.Memory.HasLineOfSight
+                || !runtime.Intent.wants_fire
+                || now < runtime.NextReactionAllowedAt
+                || now < runtime.NextTriggerAt
+                || IsMedicalFireLocked(runtime, now))
+            {
+                if (target == null || !runtime.Memory.HasLineOfSight || !runtime.Intent.wants_fire)
+                {
+                    runtime.BurstShotsRemaining = 0;
+                    legacyScientistBodyAdapter?.StopFire(bot, runtime);
+                }
+                return;
+            }
+
+            var projectile = ActiveBaseProjectile(bot);
+            var magazine = projectile?.primaryMagazine;
+
+            if (projectile == null || magazine == null)
+            {
+                RegisterV2FireFailure(bot, runtime, "missing_server_projectile");
+                return;
+            }
+
+            if (magazine.contents <= 0)
+            {
+                TryStartV2Reload(bot, runtime, projectile, now);
+                return;
+            }
+
+            if (runtime.Intent.wants_reload)
+            {
+                runtime.Intent.wants_reload = false;
+                if (runtime.MotorSkill == MotorSkill.Reload)
+                {
+                    runtime.MotorSkill = MotorSkill.Hold;
+                }
+            }
+
+            if (!ShouldFireAtTarget(bot, runtime, target, now, true))
+            {
+                runtime.RejectedShots++;
+                v2Metrics.rejected_shots++;
+                legacyScientistBodyAdapter?.StopFire(bot, runtime);
+                return;
+            }
+
+            var profile = WeaponMotorProfileFor(runtime);
+            if (runtime.BurstShotsRemaining <= 0)
+            {
+                runtime.CurrentBurstSize = UnityEngine.Random.Range(Math.Max(1, profile.MinimumBurstShots), Math.Max(profile.MinimumBurstShots, profile.MaximumBurstShots) + 1);
+                runtime.BurstShotsRemaining = runtime.CurrentBurstSize;
+                runtime.BurstMoveWhileFiring = UnityEngine.Random.value <= profile.MoveWhileFiringChance;
+                runtime.CurrentShotGap = UnityEngine.Random.Range(profile.MinimumShotGapSeconds, profile.MaximumShotGapSeconds);
+            }
+
+            var muzzle = WeaponMuzzlePosition(bot);
+            var aimPoint = ApplyV2CorrelatedAimError(runtime, muzzle, runtime.CurrentAimPoint, now, deltaSeconds);
+            SmoothFacePositionV2(bot, runtime, aimPoint, deltaSeconds);
+
+            if (!MotorAimAligned(bot, aimPoint))
+            {
+                return;
+            }
+
+            if (!IsTargetSightLineClear(bot, target, muzzle, aimPoint, out var blockReason, out _, true))
+            {
+                BlockFire(runtime, string.Equals(blockReason, "solid", StringComparison.OrdinalIgnoreCase) ? "muzzle_blocked" : blockReason);
+                runtime.RejectedShots++;
+                v2Metrics.rejected_shots++;
+                return;
+            }
+
+            var ammoMod = magazine.ammoType?.GetComponent<ItemModProjectile>();
+            var projectileVelocity = Math.Max(1f, (ammoMod?.projectileVelocity ?? 300f) * Math.Max(0.01f, projectile.projectileVelocityScale));
+            var maximumTravelSeconds = 300f / projectileVelocity;
+            var authorization = new FireAuthorization
+            {
+                token_id = ++v2ShotSequence,
+                bot_id = CombatTargetId(bot as BasePlayer),
+                target_id = CombatTargetId(target),
+                issued_at = now,
+                expires_at = now + Math.Max(V2FireAuthorizationLifetimeSeconds, maximumTravelSeconds + 1f),
+                origin = muzzle,
+                aim_point = aimPoint,
+                direction = (aimPoint - muzzle).normalized,
+                maximum_direction_error_degrees = string.Equals(runtime.Combat?.WeaponClass, "shotgun", StringComparison.OrdinalIgnoreCase) ? 14f : 4f,
+                projectile_velocity = projectileVelocity,
+                pellet_count = Math.Max(1, ammoMod?.numProjectiles ?? 1),
+                provisional = true,
+                weapon = projectile,
+                eligibility_reason = "ready",
+                controller_mode = ControllerModeKey(runtime.ControllerMode)
+            };
+
+            runtime.LastFireAuthorization = authorization;
+            runtime.PendingFireAuthorizations.Add(authorization);
+            runtime.V2DamageVetoUntil = Math.Max(runtime.V2DamageVetoUntil, authorization.expires_at);
+            runtime.LastAuthorizedShotAt = now;
+            runtime.PendingMotorTrigger = true;
+            runtime.PendingMotorTriggerUntil = now + 0.2f;
+
+            var reason = "fire_failed";
+            if (legacyScientistBodyAdapter == null || !legacyScientistBodyAdapter.TryFireSingleShot(bot, runtime, aimPoint, out reason))
+            {
+                runtime.PendingMotorTrigger = false;
+                authorization.expires_at = now;
+                runtime.PendingFireAuthorizations.Remove(authorization);
+
+                if (string.Equals(reason, "reload_required", StringComparison.OrdinalIgnoreCase))
+                {
+                    TryStartV2Reload(bot, runtime, projectile, now);
+                }
+                else if (!string.Equals(reason, "weapon_cooldown", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(reason, "reloading", StringComparison.OrdinalIgnoreCase))
+                {
+                    RegisterV2FireFailure(bot, runtime, reason);
+                }
+                RecordPrefabConformance(bot, runtime, "single_shot_pipeline", false, reason);
+                return;
+            }
+
+            runtime.PendingMotorTrigger = false;
+            authorization.provisional = false;
+            authorization.committed = true;
+            runtime.ConsecutiveFireFailures = 0;
+            runtime.AuthorizedShots++;
+            runtime.IsShooting = true;
+            runtime.LastMotorShotAt = now;
+            runtime.LastShotAt = now;
+            runtime.BurstShotsRemaining--;
+            v2Metrics.authorized_shots++;
+            RecordPrefabConformance(bot, runtime, "single_shot_pipeline", true, "round_consumed");
+            var recoilScale = string.Equals(runtime.Combat?.WeaponClass, "lmg", StringComparison.OrdinalIgnoreCase) ? 1.25f
+                : string.Equals(runtime.Combat?.WeaponClass, "rifle", StringComparison.OrdinalIgnoreCase) ? 1f
+                : 0.7f;
+            runtime.RecoilAimError += new Vector2(UnityEngine.Random.Range(-0.35f, 0.35f), UnityEngine.Random.Range(0.25f, 0.75f)) * recoilScale;
+            runtime.RecoilAimError = Vector2.ClampMagnitude(runtime.RecoilAimError, 3.5f);
+
+            var mechanicalGap = Math.Max(0.04f, projectile.repeatDelay);
+            var shotGap = Math.Max(mechanicalGap, UnityEngine.Random.Range(profile.MinimumShotGapSeconds, profile.MaximumShotGapSeconds));
+            runtime.ShootingUntil = now + shotGap + 0.05f;
+            runtime.NextTriggerAt = now + shotGap;
+
+            if (runtime.BurstShotsRemaining <= 0)
+            {
+                runtime.NextTriggerAt += UnityEngine.Random.Range(profile.MinimumBurstPauseSeconds, profile.MaximumBurstPauseSeconds);
+            }
+        }
+
+        private void RegisterV2FireFailure(BaseCombatEntity bot, BotRuntime runtime, string reason)
+        {
+            runtime.ConsecutiveFireFailures++;
+            runtime.LastFireBlockReason = string.IsNullOrWhiteSpace(reason) ? "fire_failed" : reason;
+
+            if (config.ControllerV2.AutoRollbackOnInvariantFailure
+                && runtime.ConsecutiveFireFailures >= config.ControllerV2.MaximumConsecutiveFireFailures)
+            {
+                RollbackV2Bot(bot, runtime, $"fire_contract:{runtime.LastFireBlockReason}");
+            }
+        }
+
+        private bool TryStartV2Reload(BaseCombatEntity bot, BotRuntime runtime, BaseProjectile projectile, float now)
+        {
+            var player = bot as BasePlayer;
+            if (player?.inventory == null || projectile?.primaryMagazine == null)
+            {
+                return false;
+            }
+
+            runtime.Intent.wants_reload = true;
+            runtime.Intent.wants_fire = false;
+            runtime.MotorSkill = MotorSkill.Reload;
+            runtime.BurstShotsRemaining = 0;
+
+            if (projectile.ServerIsReloading())
+            {
+                runtime.NextTriggerAt = Math.Max(runtime.NextTriggerAt, now + 0.1f);
+                return true;
+            }
+
+            try
+            {
+                projectile.ServerTryReload(player.inventory);
+                runtime.NextTriggerAt = now + Math.Max(0.1f, projectile.GetReloadDuration());
+                return projectile.ServerIsReloading() || projectile.primaryMagazine.contents > 0;
+            }
+            catch (Exception ex)
+            {
+                runtime.LastControllerInvariant = $"reload_failed:{ex.GetType().Name}";
+                return false;
+            }
+        }
+
+        private WeaponMotorProfile WeaponMotorProfileFor(BotRuntime runtime)
+        {
+            var profiles = config?.ControllerV2?.WeaponMotorProfiles;
+            var key = runtime?.Combat?.WeaponClass ?? "default";
+
+            if (profiles != null && profiles.TryGetValue(key, out var profile) && profile != null)
+            {
+                return profile;
+            }
+
+            if (profiles != null && profiles.TryGetValue("default", out profile) && profile != null)
+            {
+                return profile;
+            }
+
+            return new WeaponMotorProfile();
+        }
+
+        private Vector3 SelectV2TargetPoint(BotRuntime runtime, VisionResult visibility, BasePlayer target)
+        {
+            if (target == null || visibility?.VisiblePoints == null || visibility.VisiblePoints.Count == 0)
+            {
+                return target == null ? Vector3.zero : EyePosition(target);
+            }
+
+            var profile = WeaponMotorProfileFor(runtime);
+            if (UnityEngine.Random.value <= profile.TorsoAimWeight)
+            {
+                var torsoHeight = target.transform.position.y + (target.IsDucked() ? 0.95f : 1.2f);
+                return visibility.VisiblePoints.OrderBy(point => Math.Abs(point.y - torsoHeight)).First();
+            }
+
+            return visibility.VisiblePoints.OrderByDescending(point => point.y).First();
+        }
+
+        private Vector3 ApplyV2CorrelatedAimError(BotRuntime runtime, Vector3 muzzle, Vector3 aimPoint, float now, float deltaSeconds)
+        {
+            var direction = aimPoint - muzzle;
+            if (direction.sqrMagnitude <= 0.0001f)
+            {
+                return aimPoint;
+            }
+
+            var errorMagnitude = AimErrorDegreesAt(runtime, now);
+            if (now >= runtime.NextAimNoiseAt)
+            {
+                runtime.CorrelatedAimVelocity = UnityEngine.Random.insideUnitCircle * errorMagnitude * 1.4f;
+                runtime.NextAimNoiseAt = now + UnityEngine.Random.Range(0.22f, 0.65f);
+            }
+
+            runtime.CorrelatedAimError += runtime.CorrelatedAimVelocity * Math.Max(0.01f, deltaSeconds);
+            runtime.CorrelatedAimError = Vector2.ClampMagnitude(runtime.CorrelatedAimError, Math.Max(0.05f, errorMagnitude));
+            runtime.CorrelatedAimError = Vector2.Lerp(runtime.CorrelatedAimError, Vector2.zero, Mathf.Clamp01(deltaSeconds * 0.65f));
+            runtime.CorrelatedAimVelocity = Vector2.Lerp(runtime.CorrelatedAimVelocity, Vector2.zero, Mathf.Clamp01(deltaSeconds * 1.1f));
+            var recoilCorrection = SkillWeightedValue(runtime, 1.8f, 3.8f, 6.5f);
+            runtime.RecoilAimError = Vector2.Lerp(runtime.RecoilAimError, Vector2.zero, Mathf.Clamp01(deltaSeconds * recoilCorrection));
+            var combinedError = runtime.CorrelatedAimError + runtime.RecoilAimError;
+            runtime.CurrentAimErrorDegrees = combinedError.magnitude;
+
+            var normalized = direction.normalized;
+            var right = Vector3.Cross(Vector3.up, normalized);
+            if (right.sqrMagnitude <= 0.0001f)
+            {
+                right = Vector3.right;
+            }
+
+            var adjusted = Quaternion.AngleAxis(combinedError.x, Vector3.up)
+                * Quaternion.AngleAxis(combinedError.y, right.normalized)
+                * normalized;
+            return muzzle + adjusted.normalized * direction.magnitude;
+        }
+
+        private bool MotorAimAligned(BaseCombatEntity bot, Vector3 aimPoint)
+        {
+            if (bot == null || aimPoint == Vector3.zero)
+            {
+                return false;
+            }
+
+            var desired = aimPoint - bot.transform.position;
+            desired.y = 0f;
+            var forward = bot.transform.forward;
+            forward.y = 0f;
+            return desired.sqrMagnitude > 0.001f
+                && forward.sqrMagnitude > 0.001f
+                && Vector3.Angle(forward, desired) <= 14f;
+        }
+
+        private void PruneExpiredFireAuthorizations(float now)
+        {
+            foreach (var runtime in activeBots.Values)
+            {
+                runtime?.PendingFireAuthorizations?.RemoveAll(authorization => authorization == null || authorization.expires_at < now);
+
+                if (runtime?.PendingMotorTrigger == true && runtime.PendingMotorTriggerUntil < now)
+                {
+                    runtime.PendingMotorTrigger = false;
+                }
+            }
+        }
+
+        private void QueueDecisionOutcomesV2(BaseCombatEntity bot, BotRuntime runtime, TacticalDecision decision, float now)
+        {
+            if (bot == null
+                || runtime == null
+                || decision?.Selected == null
+                || (!IsV2Actuating(runtime) && !IsV2Shadowing(runtime)))
+            {
+                return;
+            }
+
+            var action = decision.Selected.Id ?? ActionIdString(decision.Selected.ActionId);
+            if (string.Equals(action, runtime.LastOutcomeDecisionAction, StringComparison.OrdinalIgnoreCase)
+                && now - runtime.LastOutcomeDecisionAt < 5f)
+            {
+                return;
+            }
+
+            runtime.LastOutcomeDecisionAction = action;
+            runtime.LastOutcomeDecisionAt = now;
+            var decisionId = $"{runtime.BotKey}:{DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture)}";
+            var exposure = runtime.Memory.Target == null ? 0f : BotExposureFromThreat(bot, runtime.Memory.Target, runtime.IsCrouching);
+            var delays = config?.TrainingV2?.OutcomeDelaysSeconds ?? new List<float> { 3f, 5f, 10f };
+
+            foreach (var delay in delays.Where(value => value > 0f).Distinct())
+            {
+                pendingDecisionOutcomeAnchorsV2.Add(new DecisionOutcomeAnchorV2
+                {
+                    decision_id = decisionId,
+                    bot_key = runtime.BotKey,
+                    bot = bot,
+                    decided_at = now,
+                    due_at = now + delay,
+                    delay_seconds = delay,
+                    action = action,
+                    start_health = bot.Health(),
+                    start_position = bot.transform.position,
+                    start_exposure = exposure,
+                    start_had_los = runtime.Memory.HasLineOfSight
+                });
+            }
+        }
+
+        private void ProcessDecisionOutcomeAnchorsV2(float now)
+        {
+            foreach (var anchor in pendingDecisionOutcomeAnchorsV2.Where(candidate => candidate != null && candidate.due_at <= now).ToList())
+            {
+                pendingDecisionOutcomeAnchorsV2.Remove(anchor);
+                var bot = anchor.bot;
+                var live = IsLiveBot(bot);
+                var runtime = live ? RuntimeFor(bot) : null;
+                var currentExposure = live && runtime?.Memory?.Target != null
+                    ? BotExposureFromThreat(bot, runtime.Memory.Target, runtime.IsCrouching)
+                    : 0f;
+
+                pendingDecisionOutcomesV2.Add(new DecisionOutcomeV2
+                {
+                    decision_id = anchor.decision_id,
+                    bot_key = anchor.bot_key,
+                    action = anchor.action,
+                    delay_seconds = anchor.delay_seconds,
+                    captured_at_utc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                    bot_alive = live,
+                    health_delta = live ? bot.Health() - anchor.start_health : -anchor.start_health,
+                    distance_moved = live ? Vector3.Distance(anchor.start_position, bot.transform.position) : 0f,
+                    exposure_delta = currentExposure - anchor.start_exposure,
+                    has_line_of_sight = runtime?.Memory?.HasLineOfSight == true,
+                    recent_head_hits = runtime?.RecentHeadHits ?? 0,
+                    path_failures = runtime?.ConsecutiveFailedPaths ?? 0,
+                    controller_mode = runtime == null ? "ended" : ControllerModeKey(runtime.ControllerMode)
+                });
+            }
+
+            if (pendingDecisionOutcomesV2.Count >= 100)
+            {
+                FlushDecisionOutcomesV2();
+            }
+        }
+
+        private void FlushDecisionOutcomesV2()
+        {
+            if (pendingDecisionOutcomesV2.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, V2EvaluationDataFile);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.AppendAllLines(path, pendingDecisionOutcomesV2.Select(outcome => JsonConvert.SerializeObject(outcome, Formatting.None)).ToArray());
+                pendingDecisionOutcomesV2.Clear();
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write V2 evaluation outcomes: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
@@ -11799,6 +15917,69 @@ namespace Oxide.Plugins
 
             runtime.ActionBlockedUntil = 0f;
             runtime.ActionBlockReason = "none";
+            return false;
+        }
+
+        private float EffectivePerceptionInterval(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            var activeInterval = Math.Max(0.1f, config.AI.PerceptionTickSeconds);
+
+            if (NeedsHighFrequencyAi(bot, runtime, now))
+            {
+                return activeInterval;
+            }
+
+            return Math.Max(activeInterval, 0.75f);
+        }
+
+        private float EffectiveDecisionInterval(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            var activeInterval = Math.Max(0.15f, config.AI.DecisionTickSeconds);
+
+            if (NeedsHighFrequencyAi(bot, runtime, now))
+            {
+                return activeInterval;
+            }
+
+            return Math.Max(activeInterval, 1f);
+        }
+
+        private bool NeedsHighFrequencyAi(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            if (bot == null || runtime == null)
+            {
+                return false;
+            }
+
+            var memorySeconds = Math.Max(1f, config.AI.TargetMemorySeconds);
+
+            if (runtime.Memory.Target != null
+                || runtime.Memory.HasLineOfSight
+                || runtime.Movement.IsStuck
+                || runtime.IsInBaseRestrictedArea
+                || runtime.Memory.LastSeenAt > 0f && now - runtime.Memory.LastSeenAt <= memorySeconds
+                || runtime.Memory.LastHeardAt > 0f && now - runtime.Memory.LastHeardAt <= memorySeconds
+                || runtime.Memory.LastDamagedAt > 0f && now - runtime.Memory.LastDamagedAt <= memorySeconds)
+            {
+                return true;
+            }
+
+            var nearbyRange = Math.Max(config.AI.VisionRange + 25f, config.AI.CloseAwarenessRadius * 2f);
+            var nearbyRangeSquared = nearbyRange * nearbyRange;
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (IsRealPlayer(player)
+                    && player.IsConnected
+                    && !player.IsDead()
+                    && !player.IsSleeping()
+                    && !ShouldIgnoreRealPlayerTarget(player)
+                    && (player.transform.position - bot.transform.position).sqrMagnitude <= nearbyRangeSquared)
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
 
@@ -13539,6 +17720,11 @@ namespace Oxide.Plugins
 
         private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
+            if (player != null && trainingSessionsV2.TryGetValue(player.userID, out var trainingSession))
+            {
+                EndTrainingV2Session(trainingSession, "disconnect");
+                trainingSessionsV2.Remove(player.userID);
+            }
             DestroyDebugBotPanel(player);
             DestroyAdminPanel(player);
             if (player != null)
@@ -13745,11 +17931,11 @@ namespace Oxide.Plugins
 
         private void UpdatePerception(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
-            var ignoredTarget = IgnoredInvisibleMemoryPlayer(runtime);
+            var ignoredTarget = IneligibleMemoryPlayer(runtime, out var ignoredReason);
 
             if (ignoredTarget != null)
             {
-                ClearIgnoredPlayerTargetMemory(bot, runtime, ignoredTarget, "target_invisible", now);
+                ClearIgnoredPlayerTargetMemory(bot, runtime, ignoredTarget, ignoredReason, now);
             }
 
             var visible = FindBestVisibleTarget(bot, runtime, out var visibility);
@@ -13787,7 +17973,20 @@ namespace Oxide.Plugins
                     DebugLog($"perception-see:{runtime.BotKey}", $"{runtime.DisplayName} sees {PlayerName(visible)} exposure={visibility.ExposedFraction:0.00} probes={visibility.VisibleProbePoints}/{visibility.TotalProbePoints} at {FormatVector(visible.transform.position)}.");
                 }
 
-                if (runtime.IsShooting && !ShouldFireAtTarget(bot, runtime, visible, now, true))
+                if (IsV2Actuating(runtime) || IsV2Shadowing(runtime))
+                {
+                    runtime.Intent.target_id = visibleTargetId;
+                    runtime.Intent.wants_fire = now >= runtime.NextReactionAllowedAt && ShouldFireAtTarget(bot, runtime, visible, now, true);
+                    runtime.Intent.aim_point = runtime.CurrentAimPoint;
+                    runtime.Intent.reason = runtime.Intent.wants_fire ? "visible_target" : runtime.LastFireBlockReason;
+                    runtime.Intent.created_at = now;
+                }
+
+                if (IsV2Actuating(runtime))
+                {
+                    RecordPrefabConformance(bot, runtime, "target_acquisition", true, "plugin_target_only");
+                }
+                else if (runtime.IsShooting && !ShouldFireAtTarget(bot, runtime, visible, now, true))
                 {
                     StopBotAttack(bot, runtime);
                 }
@@ -13805,7 +18004,17 @@ namespace Oxide.Plugins
             runtime.Memory.TargetTotalProbePoints = visibility?.TotalProbePoints ?? 0;
             runtime.LastSightReason = DescribeVisionResult(visibility);
 
-            if (runtime.IsShooting && config.AI.RequireLineOfSightToShoot)
+            if (IsV2Actuating(runtime))
+            {
+                runtime.Intent.wants_fire = false;
+                runtime.Intent.reason = "no_visible_target";
+                legacyScientistBodyAdapter?.StopFire(bot, runtime);
+                // Never retain the live entity pointer once V2 loses sight. LastSeenPosition
+                // is the only positional evidence allowed to survive occlusion.
+                runtime.Memory.Target = null;
+            }
+
+            if (!IsV2Actuating(runtime) && runtime.IsShooting && config.AI.RequireLineOfSightToShoot)
             {
                 StopBotAttack(bot, runtime);
             }
@@ -13817,6 +18026,12 @@ namespace Oxide.Plugins
             var secondsSinceSeen = runtime.Memory.LastSeenAt <= 0f ? float.MaxValue : now - runtime.Memory.LastSeenAt;
             var secondsSinceHeard = runtime.Memory.LastHeardAt <= 0f ? float.MaxValue : now - runtime.Memory.LastHeardAt;
             var secondsSinceDamaged = runtime.Memory.LastDamagedAt <= 0f ? float.MaxValue : now - runtime.Memory.LastDamagedAt;
+            var freshestEvidenceAge = Math.Min(secondsSinceSeen, Math.Min(secondsSinceHeard, secondsSinceDamaged));
+            if (!float.IsInfinity(freshestEvidenceAge) && freshestEvidenceAge < float.MaxValue)
+            {
+                runtime.Memory.TargetConfidence = Math.Min(runtime.Memory.TargetConfidence,
+                    Mathf.Clamp01(1f - freshestEvidenceAge / Math.Max(0.1f, config.AI.TargetMemorySeconds)));
+            }
 
             if (runtime.Memory.Target != null && secondsSinceSeen > config.AI.TargetMemorySeconds)
             {
@@ -13831,6 +18046,10 @@ namespace Oxide.Plugins
             {
                 runtime.Memory.TargetUserId = 0;
                 runtime.Memory.TargetConfidence = 0f;
+                runtime.Memory.LastSeenPosition = Vector3.zero;
+                runtime.Memory.LastHeardPosition = Vector3.zero;
+                runtime.Memory.LastDamageSourcePosition = Vector3.zero;
+                runtime.Memory.LastDamageSourcePlayer = null;
             }
         }
 
@@ -14006,6 +18225,11 @@ namespace Oxide.Plugins
                         result.SmokeBlockedProbePoints++;
                         result.SmokeBlockerHits += blockerHits;
                     }
+                    else if (string.Equals(blockReason, "water_surface_crossing", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.WaterBlockedProbePoints++;
+                        result.WaterBlockerHits += blockerHits;
+                    }
                     else
                     {
                         result.SolidBlockedProbePoints++;
@@ -14015,6 +18239,7 @@ namespace Oxide.Plugins
                 }
 
                 result.VisibleProbePoints++;
+                result.VisiblePoints.Add(point);
 
                 if (result.BestVisiblePoint == Vector3.zero)
                 {
@@ -14032,7 +18257,9 @@ namespace Oxide.Plugins
             result.CanSee = result.VisibleProbePoints > 0 && result.ExposedFraction >= minimum;
             result.BlockReason = result.CanSee
                 ? "visible"
-                : result.SmokeBlockedProbePoints > 0
+                : result.WaterBlockedProbePoints > 0
+                    ? $"water_surface_crossing {result.WaterBlockedProbePoints}/{result.TotalProbePoints}"
+                    : result.SmokeBlockedProbePoints > 0
                     ? $"smoke {result.SmokeBlockedProbePoints}/{result.TotalProbePoints} hits={result.SmokeBlockerHits}"
                     : result.VisibleProbePoints > 0
                         ? $"exposure {result.VisibleProbePoints}/{result.TotalProbePoints}"
@@ -14059,15 +18286,20 @@ namespace Oxide.Plugins
         {
             var origin = player.transform.position;
             var right = player.transform.right;
+            var crouched = IsPlayerCrouched(player);
+            var upper = crouched ? 1.05f : 1.45f;
+            var torso = crouched ? 0.82f : 1.15f;
+            var legs = crouched ? 0.48f : 0.85f;
+            var sideHeight = crouched ? 0.88f : 1.25f;
 
             return new List<Vector3>
             {
                 EyePosition(player),
-                origin + Vector3.up * 1.45f,
-                origin + Vector3.up * 1.15f,
-                origin + Vector3.up * 0.85f,
-                origin + Vector3.up * 1.25f + right * 0.28f,
-                origin + Vector3.up * 1.25f - right * 0.28f
+                origin + Vector3.up * upper,
+                origin + Vector3.up * torso,
+                origin + Vector3.up * legs,
+                origin + Vector3.up * sideHeight + right * 0.28f,
+                origin + Vector3.up * sideHeight - right * 0.28f
             };
         }
 
@@ -14101,6 +18333,14 @@ namespace Oxide.Plugins
 
             if (!directLineClear)
             {
+                return false;
+            }
+
+            if (strictLineOfFire
+                && config?.ControllerV2?.BlockWaterSurfaceCrossings == true
+                && SegmentIntersectsWater(from, to, out blockerHits))
+            {
+                blockReason = "water_surface_crossing";
                 return false;
             }
 
@@ -14194,10 +18434,10 @@ namespace Oxide.Plugins
             }
 
             // Terrain splat sampling is a fallback for decorative bushes/forest detail
-            // that has no useful physics collider. Shooting uses a shorter grace distance
-            // and denser sampling than awareness.
+            // that has no useful physics collider. Strict fire has no close-range grace:
+            // a nearby colliderless bush is still concealment and must fail closed.
             var terrainGraceDistance = strictLineOfFire
-                ? Math.Min(10f, config.AI.MaximumClearVisionThroughFoliage)
+                ? config?.ControllerV2?.StrictDecorativeFoliageAtAllRanges == true ? 0f : Math.Min(10f, config.AI.MaximumClearVisionThroughFoliage)
                 : config.AI.MaximumClearVisionThroughFoliage;
 
             if (distance <= terrainGraceDistance)
@@ -14206,10 +18446,10 @@ namespace Oxide.Plugins
             }
 
             var terrainStep = strictLineOfFire
-                ? Math.Min(4f, config.AI.FoliageTerrainSampleStep)
+                ? Math.Min(1.5f, config.AI.FoliageTerrainSampleStep)
                 : config.AI.FoliageTerrainSampleStep;
             var terrainHitsRequired = strictLineOfFire
-                ? Clamp(config.AI.FoliageTerrainSamplesToBlockVision, 2, 3)
+                ? distance <= 6f ? 1 : Clamp(config.AI.FoliageTerrainSamplesToBlockVision, 2, 3)
                 : Math.Max(1, config.AI.FoliageTerrainSamplesToBlockVision);
             var terrainBlockers = FoliageTerrainSampleHits(
                 from,
@@ -14247,10 +18487,10 @@ namespace Oxide.Plugins
                 return 0;
             }
 
-            var step = Math.Max(3f, configuredStep);
-            var firstSampleDistance = Math.Max(step, clearDistance);
+            var step = Math.Max(0.75f, configuredStep);
+            var firstSampleDistance = Math.Max(step, clearDistance + 0.25f);
 
-            if (firstSampleDistance >= distance - 1f)
+            if (firstSampleDistance >= distance - 0.25f)
             {
                 return 0;
             }
@@ -14261,7 +18501,7 @@ namespace Oxide.Plugins
 
             // Start at the first valid sample instead of firstSampleDistance + step.
             // The old loop skipped one sample and often never reached its threshold.
-            for (var sampleDistance = firstSampleDistance; sampleDistance < distance - 1f && samples < 48; sampleDistance += step)
+            for (var sampleDistance = firstSampleDistance; sampleDistance < distance - 0.25f && samples < 96; sampleDistance += step)
             {
                 samples++;
                 var sample = from + direction * sampleDistance;
@@ -15257,10 +19497,26 @@ namespace Oxide.Plugins
                         {
                             candidates.Add(Candidate(TacticalActionId.Tuck, 84f, "low", "peek window expired; tuck back into cover", runtime.CurrentTuckPoint == Vector3.zero ? runtime.CurrentCover : runtime.CurrentTuckPoint, targetId, now));
                         }
-                        else if (!runtime.IsShooting && now >= runtime.NextPeekAt && runtime.CurrentPeekPoint != Vector3.zero)
+                        else if (!runtime.IsShooting
+                            && now >= runtime.NextPeekAt
+                            && (runtime.CurrentPeekLeftPoint != Vector3.zero || runtime.CurrentPeekRightPoint != Vector3.zero))
                         {
-                            var peekAction = UnityEngine.Random.value < 0.5f ? TacticalActionId.PeekLeft : TacticalActionId.PeekRight;
-                            candidates.Add(Candidate(peekAction, 66f + runtime.Skill.Aggression * 12f, "medium", "peek from current cover to re-check target", runtime.CurrentPeekPoint, targetId, now));
+                            var basePeekScore = 66f + runtime.Skill.Aggression * 12f;
+
+                            if (runtime.CurrentPeekLeftPoint != Vector3.zero)
+                            {
+                                candidates.Add(Candidate(TacticalActionId.PeekLeft, basePeekScore + (runtime.PeekSide >= 0 ? 4f : 0f), "medium", "verified left cover-edge peek", runtime.CurrentPeekLeftPoint, targetId, now));
+                            }
+
+                            if (runtime.CurrentPeekRightPoint != Vector3.zero)
+                            {
+                                candidates.Add(Candidate(TacticalActionId.PeekRight, basePeekScore + (runtime.PeekSide < 0 ? 4f : 0f), "medium", "verified right cover-edge peek", runtime.CurrentPeekRightPoint, targetId, now));
+                            }
+
+                            if (TryBuildWideSwingPoint(bot, runtime, target.transform.position, target, runtime.PeekSide, now, out var wideSwing))
+                            {
+                                candidates.Add(Candidate(TacticalActionId.WideSwing, 48f + runtime.Style.wide_swing_preference * 30f + runtime.Skill.Aggression * 8f, "high", "commit to a wider verified swing from cover", wideSwing, targetId, now));
+                            }
                         }
                     }
                     else if (now >= runtime.NextCoverSearchAt && TryFindCoverPlan(bot, runtime, target.transform.position, target, out var coverPlan))
@@ -16292,7 +20548,7 @@ namespace Oxide.Plugins
             decision.FallbackReason = decision.AdvisorRequested ? decision.AdvisorStatus : "heuristic_only";
             runtime.Decisions.LastFallbackReason = decision.FallbackReason;
 
-            if (config.DecisionAdvisor.LogDecisionTraces)
+            if (config.DecisionAdvisor.LogDecisionTraces && ShouldLogDecisionTrace(runtime, decision, now))
             {
                 QueueDecisionTrace(new DecisionTrace
                 {
@@ -16460,7 +20716,7 @@ namespace Oxide.Plugins
             {
                 var target = FindCombatTargetById(selected.TargetUserId);
 
-                if (target == null || target.IsDead() || target.IsSleeping() || RuntimeFor(target) == null && !target.IsConnected || ShouldIgnoreInvisiblePlayer(target))
+                if (target == null || target.IsDead() || target.IsSleeping() || RuntimeFor(target) == null && !target.IsConnected || ShouldIgnoreRealPlayerTarget(target))
                 {
                     return "advisor_target_invalid";
                 }
@@ -16737,6 +20993,17 @@ namespace Oxide.Plugins
 
         private void ExecuteTacticalAction(BaseCombatEntity bot, BotRuntime runtime, TacticalActionCandidate action, float now)
         {
+            if ((IsV2Actuating(runtime) || IsV2Shadowing(runtime)) && runtime.Intent.motor_skill != MotorSkill.Heal)
+            {
+                runtime.Intent.action = ActionIdString(action.ActionId);
+                runtime.Intent.destination = action.Destination;
+                runtime.Intent.target_id = action.TargetUserId;
+                runtime.Intent.created_at = now;
+                runtime.Intent.reason = action.ReasonFromCode ?? "tactical_action";
+                runtime.Intent.motor_skill = MotorSkillForAction(action.ActionId);
+                runtime.MotorSkill = runtime.Intent.motor_skill;
+            }
+
             switch (action.ActionId)
             {
                 case TacticalActionId.AcquireVisibleTarget:
@@ -16774,6 +21041,7 @@ namespace Oxide.Plugins
                 case TacticalActionId.PeekLeft:
                 case TacticalActionId.PeekRight:
                 case TacticalActionId.WideSwing:
+                    runtime.PeekSide = action.ActionId == TacticalActionId.PeekRight ? -1 : 1;
                     SetState(runtime, TacticalState.FightFromCover, now);
                     runtime.IsPeeking = true;
                     runtime.CurrentPeekPoint = action.Destination;
@@ -16789,9 +21057,9 @@ namespace Oxide.Plugins
                     SetState(runtime, TacticalState.FightFromCover, now);
                     runtime.IsPeeking = false;
                     runtime.CurrentTuckUntil = now + UnityEngine.Random.Range(config.AI.TuckMinSeconds, config.AI.TuckMaxSeconds);
-                    runtime.NextPeekAt = runtime.CurrentTuckUntil;
+                    runtime.NextPeekAt = now + (runtime.CurrentTuckUntil - now) * Math.Max(0.5f, runtime.Style?.repeek_delay_scale ?? 1f);
                     StopBotAttack(bot, runtime);
-                    ClearBotCrouch(bot, runtime, "tuck", now);
+                    RequestBotCrouch(bot, runtime, "tuck", runtime.CurrentTuckUntil, now);
                     runtime.CurrentDestination = action.Destination;
                     MoveBotTo(bot, runtime, action.Destination, BaseNavigator.NavigationSpeed.Fast);
                     break;
@@ -16878,6 +21146,8 @@ namespace Oxide.Plugins
                             runtime.CurrentCover = Vector3.zero;
                             runtime.CurrentTuckPoint = Vector3.zero;
                             runtime.CurrentPeekPoint = Vector3.zero;
+                            runtime.CurrentPeekLeftPoint = Vector3.zero;
+                            runtime.CurrentPeekRightPoint = Vector3.zero;
                             runtime.BarricadeCommittedUntil = 0f;
                             runtime.CurrentDestination = FindRetreatPosition(bot.transform.position, barricadeThreatPosition, runtime);
                             MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
@@ -16888,7 +21158,15 @@ namespace Oxide.Plugins
 
                         runtime.CurrentTuckPoint = holdPoint;
                         runtime.CurrentCover = runtime.CurrentTuckPoint;
-                        runtime.CurrentPeekPoint = BarricadePeekPoint(bot, runtime.CurrentTuckPoint, action.Destination, barricadeThreatPosition, runtime.Memory.Target, runtime, now);
+                        runtime.CurrentPeekLeftPoint = TryBuildPeekPoint(bot, runtime.CurrentTuckPoint, barricadeThreatPosition, runtime.Memory.Target, 1f, runtime, now, out var barricadeLeftPeek)
+                            ? barricadeLeftPeek
+                            : Vector3.zero;
+                        runtime.CurrentPeekRightPoint = TryBuildPeekPoint(bot, runtime.CurrentTuckPoint, barricadeThreatPosition, runtime.Memory.Target, -1f, runtime, now, out var barricadeRightPeek)
+                            ? barricadeRightPeek
+                            : Vector3.zero;
+                        runtime.CurrentPeekPoint = runtime.PeekSide >= 0
+                            ? runtime.CurrentPeekLeftPoint != Vector3.zero ? runtime.CurrentPeekLeftPoint : runtime.CurrentPeekRightPoint
+                            : runtime.CurrentPeekRightPoint != Vector3.zero ? runtime.CurrentPeekRightPoint : runtime.CurrentPeekLeftPoint;
                         runtime.CurrentDestination = runtime.CurrentTuckPoint;
                         runtime.IsPeeking = false;
                         runtime.CurrentTuckUntil = now + UnityEngine.Random.Range(config.AI.TuckMinSeconds, config.AI.TuckMaxSeconds);
@@ -16983,6 +21261,28 @@ namespace Oxide.Plugins
             }
         }
 
+        private MotorSkill MotorSkillForAction(TacticalActionId actionId)
+        {
+            switch (actionId)
+            {
+                case TacticalActionId.PeekLeft:
+                    return MotorSkill.PeekLeft;
+                case TacticalActionId.PeekRight:
+                    return MotorSkill.PeekRight;
+                case TacticalActionId.WideSwing:
+                    return MotorSkill.WideSwing;
+                case TacticalActionId.Tuck:
+                    return MotorSkill.Tuck;
+                case TacticalActionId.RetreatToCover:
+                    return MotorSkill.RetreatFire;
+                case TacticalActionId.AcquireVisibleTarget:
+                case TacticalActionId.SuppressTarget:
+                    return MotorSkill.Hold;
+                default:
+                    return MotorSkill.None;
+            }
+        }
+
         private void SetState(BotRuntime runtime, TacticalState state, float now)
         {
             if (runtime.State == state)
@@ -17022,6 +21322,29 @@ namespace Oxide.Plugins
             {
                 decisionTraceSaveTimer = timer.Once(5f, FlushDecisionTraces);
             }
+        }
+
+        private bool ShouldLogDecisionTrace(BotRuntime runtime, TacticalDecision decision, float now)
+        {
+            if (runtime == null || decision == null)
+            {
+                return false;
+            }
+
+            var action = decision.Selected?.Id ?? "none";
+            var changed = !string.Equals(runtime.LastDecisionTraceAction, action, StringComparison.OrdinalIgnoreCase)
+                || runtime.LastDecisionTraceState != runtime.State;
+            var heartbeatDue = runtime.LastDecisionTraceAt <= 0f || now - runtime.LastDecisionTraceAt >= 5f;
+
+            if (!decision.AdvisorRequested && !changed && !heartbeatDue)
+            {
+                return false;
+            }
+
+            runtime.LastDecisionTraceAt = now;
+            runtime.LastDecisionTraceAction = action;
+            runtime.LastDecisionTraceState = runtime.State;
+            return true;
         }
 
         private void FlushDecisionTraces()
@@ -17377,6 +21700,14 @@ namespace Oxide.Plugins
 
         private void PrepareNpcBody(BaseCombatEntity bot)
         {
+            var runtime = RuntimeFor(bot);
+
+            if (IsV2Actuating(runtime) && legacyScientistBodyAdapter != null)
+            {
+                legacyScientistBodyAdapter.Prepare(bot, runtime, true);
+                return;
+            }
+
             var brain = bot.GetComponent<BaseAIBrain>() ?? bot.GetComponentInChildren<BaseAIBrain>();
             SuppressScientistBodyAudio(bot);
 
@@ -17484,6 +21815,16 @@ namespace Oxide.Plugins
 
         private bool MoveBotTo(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed)
         {
+            if (IsV2Actuating(runtime) && legacyScientistBodyAdapter != null)
+            {
+                return legacyScientistBodyAdapter.Move(bot, runtime, destination, speed);
+            }
+
+            return MoveBotToRaw(bot, runtime, destination, speed);
+        }
+
+        private bool MoveBotToRaw(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed)
+        {
             if (bot == null || runtime == null || destination == Vector3.zero)
             {
                 return false;
@@ -17518,12 +21859,38 @@ namespace Oxide.Plugins
                 destination = utilityEscape;
             }
 
+            // Tactical positions are initially sampled from the map's shared land
+            // navmesh. Project the final point through this NPC prefab's navigator
+            // so scientist agents only receive destinations on a polygon they can
+            // actually use. This keeps the existing land-roaming choices while
+            // preventing apparently valid generic points from creating a dead path.
+            Vector3 navigatorDestination;
+
+            if (!TryResolveBotDestinationOnOwnNavmesh(bot, destination, out navigatorDestination))
+            {
+                runtime.ConsecutiveFailedPaths++;
+                runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, destination, "agent_navmesh_unreachable", now);
+                return false;
+            }
+
+            destination = navigatorDestination;
+
+            if (IsBlockedLandPosition(destination)
+                || (!runtime.IsInBaseRestrictedArea && SegmentCrossesBaseRestrictedArea(bot.transform.position, destination)))
+            {
+                runtime.ConsecutiveFailedPaths++;
+                runtime.Movement.SameActionFailures++;
+                RememberBadDestination(runtime, destination, "projected_destination_blocked", now);
+                return false;
+            }
+
             PrepareNpcBody(bot);
             var npcCommanded = false;
             var navigatorCommanded = false;
             var npc = bot as NPCPlayer;
 
-            if (npc != null)
+            if (npc != null && !IsV2Actuating(runtime))
             {
                 try
                 {
@@ -17542,12 +21909,16 @@ namespace Oxide.Plugins
             var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
             var previousDestination = runtime.CurrentDestination;
             var destinationChanged = previousDestination == Vector3.zero || Vector3.Distance(previousDestination, destination) > 2f;
-            navigatorCommanded = CommandNavigator(bot, navigator, destination, speed);
+            navigatorCommanded = CommandNavigator(bot, runtime, navigator, destination, speed);
             runtime.CurrentDestination = destination;
             runtime.Movement.LastCommandAt = now;
             runtime.Movement.LastCommandDestination = destination;
 
-            var movedOk = navigatorCommanded || npcCommanded;
+            // Accepted bot prefabs always have a BaseNavigator. NPCPlayer's void
+            // SetDestination method only means that the call did not throw; it does
+            // not mean a path was created. Treat the navigator's bool result as the
+            // authoritative movement result so failed paths reach stuck recovery.
+            var movedOk = navigator != null ? navigatorCommanded : npcCommanded;
 
             if (movedOk)
             {
@@ -17569,6 +21940,79 @@ namespace Oxide.Plugins
             return movedOk;
         }
 
+        private bool TryResolveBotDestinationOnOwnNavmesh(BaseCombatEntity bot, Vector3 requested, out Vector3 resolved)
+        {
+            resolved = Vector3.zero;
+
+            if (bot == null || bot.IsDestroyed || requested == Vector3.zero)
+            {
+                return false;
+            }
+
+            var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+            var agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+
+            if (navigator == null || agent == null)
+            {
+                return false;
+            }
+
+            if (!agent.enabled || !agent.isOnNavMesh)
+            {
+                var repairedPosition = bot.transform.position;
+
+                if (!TryValidateSpawnedBotOnOwnNavmesh(bot, ref repairedPosition))
+                {
+                    return false;
+                }
+
+                navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+                agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+
+                if (navigator == null || agent == null || !agent.enabled || !agent.isOnNavMesh)
+                {
+                    return false;
+                }
+            }
+
+            Vector3 nearest;
+            var sampleDistance = Math.Max(6f, config.Spawn.NavmeshSampleDistance);
+
+            try
+            {
+                if (!navigator.GetNearestNavmeshPosition(requested, out nearest, sampleDistance)
+                    || nearest == Vector3.zero
+                    || IsBlockedLandPosition(nearest)
+                    || Distance2D(nearest, requested) > sampleDistance)
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (config?.Debug?.DebugSpawnDetails == true)
+                {
+                    DebugWarning($"destination-navmesh:{ShortPrefab(bot.PrefabName)}", $"Could not resolve an agent-specific destination: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                return false;
+            }
+
+            // Avoid snapping between vertically stacked navmesh layers while still
+            // permitting normal terrain slopes and small physical-surface offsets.
+            var maximumVerticalSnap = Math.Max(
+                2f,
+                Math.Max(config.Spawn.MaximumBelowTerrainTolerance, config.Spawn.MaximumPhysicalSurfaceMismatch) + 1f);
+
+            if (Math.Abs(nearest.y - requested.y) > maximumVerticalSnap)
+            {
+                return false;
+            }
+
+            resolved = nearest;
+            return true;
+        }
+
         private void RecordSquadDestinationClaim(BotRuntime runtime, Vector3 destination)
         {
             if (runtime == null || destination == Vector3.zero)
@@ -17586,7 +22030,7 @@ namespace Oxide.Plugins
             board.DestinationClaims[runtime.BotKey] = destination;
         }
 
-        private bool CommandNavigator(BaseCombatEntity bot, BaseNavigator navigator, Vector3 destination, BaseNavigator.NavigationSpeed speed)
+        private bool CommandNavigator(BaseCombatEntity bot, BotRuntime runtime, BaseNavigator navigator, Vector3 destination, BaseNavigator.NavigationSpeed speed)
         {
             if (navigator == null)
             {
@@ -17595,18 +22039,28 @@ namespace Oxide.Plugins
 
             try
             {
-                navigator.CanPathFindToChaseTargetIfNoMovePoint = true;
-                navigator.CanUseRandomMovePointIfNonFound = true;
-                navigator.FaceMoveTowardsTarget = true;
+                var authoritative = IsV2Actuating(runtime);
+                navigator.CanPathFindToChaseTargetIfNoMovePoint = !authoritative;
+                navigator.CanUseRandomMovePointIfNonFound = !authoritative;
+                navigator.FaceMoveTowardsTarget = !authoritative;
                 navigator.FaceTargetChaseDistance = Math.Max(navigator.FaceTargetChaseDistance, 80f);
                 var stopDistance = Math.Min(navigator.StoppingDistance <= 0f ? config.AI.CoverArrivalDistance : navigator.StoppingDistance, config.AI.CoverArrivalDistance);
                 navigator.StoppingDistance = Mathf.Clamp(stopDistance, 0.75f, 3f);
                 navigator.SetCurrentSpeed(speed);
                 var moved = navigator.SetDestination(destination, speed, 0f, Math.Max(6f, config.Spawn.NavmeshSampleDistance));
+                var agentMoved = false;
+                var agent = bot?.GetComponent<NavMeshAgent>() ?? bot?.GetComponentInChildren<NavMeshAgent>();
+
+                if (!authoritative && agent != null && agent.enabled && agent.isOnNavMesh)
+                {
+                    agent.isStopped = false;
+                    agentMoved = agent.SetDestination(destination);
+                }
+
                 TryInvoke(navigator, "Think", 0.1f);
                 TryInvoke(navigator, "UpdateNavigation", 0.1f);
                 TryInvoke(navigator, "UpdateMovement", 0.1f);
-                return moved;
+                return moved || agentMoved;
             }
             catch (Exception ex)
             {
@@ -17634,6 +22088,14 @@ namespace Oxide.Plugins
                 return;
             }
 
+            var runtime = RuntimeFor(bot);
+
+            if (IsV2Actuating(runtime))
+            {
+                SmoothFacePositionV2(bot, runtime, position, Math.Max(0.05f, config.ControllerV2.CombatMotorTickSeconds));
+                return;
+            }
+
             var direction = position - bot.transform.position;
             direction.y = 0f;
 
@@ -17646,6 +22108,64 @@ namespace Oxide.Plugins
             bot.SendNetworkUpdateImmediate();
         }
 
+        private void SmoothFacePositionV2(BaseCombatEntity bot, BotRuntime runtime, Vector3 position, float deltaSeconds)
+        {
+            if (bot == null || runtime == null || position == Vector3.zero)
+            {
+                return;
+            }
+
+            var direction = position - WeaponMuzzlePosition(bot);
+            if (direction.sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            var flatDirection = direction;
+            flatDirection.y = 0f;
+            if (flatDirection.sqrMagnitude <= 0.0001f)
+            {
+                flatDirection = bot.transform.forward;
+            }
+
+            var turnRate = SkillWeightedValue(
+                runtime,
+                config.ControllerV2.AimTurnDegreesPerSecondCasual,
+                config.ControllerV2.AimTurnDegreesPerSecondAverage,
+                config.ControllerV2.AimTurnDegreesPerSecondDangerous);
+            var desired = Quaternion.LookRotation(flatDirection.normalized, Vector3.up);
+            bot.transform.rotation = Quaternion.RotateTowards(bot.transform.rotation, desired, Math.Max(1f, turnRate) * Math.Max(0.01f, deltaSeconds));
+
+            var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
+            if (navigator != null)
+            {
+                try
+                {
+                    navigator.SetFacingDirectionOverride(flatDirection.normalized);
+                }
+                catch
+                {
+                }
+            }
+
+            var player = bot as BasePlayer;
+            if (player?.eyes != null)
+            {
+                try
+                {
+                    var fullAim = Quaternion.LookRotation(direction.normalized, Vector3.up);
+                    player.eyes.NetworkUpdate(bot.transform.rotation);
+                    player.eyes.rotation = Quaternion.RotateTowards(player.eyes.rotation, fullAim, Math.Max(1f, turnRate) * Math.Max(0.01f, deltaSeconds));
+                    player.OverrideViewAngles(player.eyes.rotation.eulerAngles);
+                }
+                catch
+                {
+                }
+            }
+
+            bot.SendNetworkUpdate();
+        }
+
         private bool StartBotAttack(BaseCombatEntity bot, BotRuntime runtime, BasePlayer target)
         {
             if (bot == null || runtime == null || target == null || target.IsDead() || ShouldIgnoreSafeZonePlayer(target))
@@ -17655,9 +22175,9 @@ namespace Oxide.Plugins
 
             var now = Time.realtimeSinceStartup;
 
-            if (ShouldIgnoreInvisiblePlayer(target))
+            if (ShouldIgnoreRealPlayerTarget(target))
             {
-                ClearIgnoredPlayerTargetMemory(bot, runtime, target, "target_invisible", now);
+                ClearIgnoredPlayerTargetMemory(bot, runtime, target, TargetIneligibilityReason(target), now);
                 return false;
             }
 
@@ -17670,6 +22190,17 @@ namespace Oxide.Plugins
             {
                 StopBotAttack(bot, runtime);
                 return false;
+            }
+
+            if (IsV2Actuating(runtime))
+            {
+                StartAimWarmup(runtime, CombatTargetId(target), now);
+                runtime.Intent.target_id = CombatTargetId(target);
+                runtime.Intent.aim_point = runtime.CurrentAimPoint;
+                runtime.Intent.wants_fire = true;
+                runtime.Intent.reason = "trigger_requested";
+                runtime.Intent.created_at = now;
+                return true;
             }
 
             EnsureBotWeaponLoaded(bot);
@@ -17720,6 +22251,18 @@ namespace Oxide.Plugins
         {
             if (bot == null || runtime == null)
             {
+                return;
+            }
+
+            if (IsV2Actuating(runtime))
+            {
+                if (runtime.Intent != null)
+                {
+                    runtime.Intent.wants_fire = false;
+                }
+
+                runtime.BurstShotsRemaining = 0;
+                legacyScientistBodyAdapter?.StopFire(bot, runtime);
                 return;
             }
 
@@ -18352,6 +22895,9 @@ namespace Oxide.Plugins
             var distance = Math.Max(18f, config.AI.CoverSearchRadius);
             var angles = new[] { 0f, 25f, -25f, 50f, -50f, 85f, -85f, 135f, -135f, 180f };
 
+            var best = Vector3.zero;
+            var bestRisk = float.MaxValue;
+
             foreach (var angle in angles)
             {
                 var direction = Quaternion.Euler(0f, angle, 0f) * away;
@@ -18359,11 +22905,54 @@ namespace Oxide.Plugins
 
                 if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(12f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
                 {
-                    return sampled;
+                    if (runtime != null && IsSquadDestinationReserved(runtime, sampled, out _))
+                    {
+                        continue;
+                    }
+
+                    var risk = RetreatRouteExposureRisk(origin, sampled, threatPosition);
+                    risk += Mathf.Clamp01((distance - Vector3.Distance(sampled, threatPosition)) / Math.Max(1f, distance));
+
+                    if (risk < bestRisk)
+                    {
+                        bestRisk = risk;
+                        best = sampled;
+                    }
                 }
             }
 
-            return FindRoamDestination(origin, runtime);
+            if (best == Vector3.zero)
+            {
+                return FindRoamDestination(origin, runtime);
+            }
+
+            var holdRisk = RetreatRouteExposureRisk(origin, origin, threatPosition);
+            var threatEye = threatPosition + Vector3.up * 1.6f;
+            var bestProvidesCover = IsWorldLineBlocked(threatEye, best + Vector3.up * 1.2f);
+            if (!bestProvidesCover && bestRisk >= holdRisk - 0.05f)
+            {
+                return origin;
+            }
+            return bestRisk > holdRisk + 0.15f ? origin : best;
+        }
+
+        private float RetreatRouteExposureRisk(Vector3 origin, Vector3 destination, Vector3 threatPosition)
+        {
+            var threatEye = threatPosition + Vector3.up * 1.6f;
+            var distance = Vector3.Distance(origin, destination);
+            var samples = Mathf.Clamp(Mathf.CeilToInt(distance / 3f), 1, 16);
+            var exposed = 0f;
+
+            for (var index = 0; index <= samples; index++)
+            {
+                var point = Vector3.Lerp(origin, destination, samples <= 0 ? 1f : index / (float)samples) + Vector3.up * 1.2f;
+                if (!IsWorldLineBlocked(threatEye, point))
+                {
+                    exposed += 1f;
+                }
+            }
+
+            return exposed / (samples + 1f);
         }
 
         private void ApplyCoverPlan(BotRuntime runtime, CoverPlan plan)
@@ -18375,7 +22964,11 @@ namespace Oxide.Plugins
 
             runtime.CurrentCover = plan.CoverPoint;
             runtime.CurrentTuckPoint = plan.TuckPoint == Vector3.zero ? plan.CoverPoint : plan.TuckPoint;
-            runtime.CurrentPeekPoint = plan.PeekLeftPoint != Vector3.zero ? plan.PeekLeftPoint : plan.PeekRightPoint;
+            runtime.CurrentPeekLeftPoint = plan.PeekLeftPoint;
+            runtime.CurrentPeekRightPoint = plan.PeekRightPoint;
+            runtime.CurrentPeekPoint = runtime.PeekSide >= 0
+                ? plan.PeekLeftPoint != Vector3.zero ? plan.PeekLeftPoint : plan.PeekRightPoint
+                : plan.PeekRightPoint != Vector3.zero ? plan.PeekRightPoint : plan.PeekLeftPoint;
         }
 
         private bool IsAtCover(BaseCombatEntity bot, BotRuntime runtime)
@@ -18407,17 +23000,47 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            if (!runtime.Memory.HasLineOfSight)
+            var currentExposure = BotExposureFromThreat(bot, target, runtime.IsCrouching);
+            return currentExposure <= config.AI.EffectiveCoverMaxExposedFraction;
+        }
+
+        private float BotExposureFromThreat(BaseCombatEntity bot, BasePlayer threat, bool crouched)
+        {
+            var player = bot as BasePlayer;
+            if (player == null || threat == null)
             {
-                return true;
+                return 1f;
             }
 
-            if (runtime.Memory.TargetExposureFraction <= config.AI.EffectiveCoverMaxExposedFraction)
+            var origin = player.transform.position;
+            var eyeHeight = crouched ? 1.05f : 1.6f;
+            var torsoHeight = crouched ? 0.78f : 1.2f;
+            var points = new[]
             {
-                return true;
+                origin + Vector3.up * eyeHeight,
+                origin + Vector3.up * torsoHeight,
+                origin + Vector3.up * (crouched ? 0.5f : 0.85f),
+                origin + Vector3.up * torsoHeight + player.transform.right * 0.25f,
+                origin + Vector3.up * torsoHeight - player.transform.right * 0.25f
+            };
+            var visible = points.Count(point => IsTargetSightLineClear(threat, player, EyePosition(threat), point, out _, out _, true));
+            return visible / (float)points.Length;
+        }
+
+        private float SimulatedBotExposureFromThreat(Vector3 threatEye, Vector3 position, bool crouched, BasePlayer threat, BaseCombatEntity bot)
+        {
+            var heights = crouched ? new[] { 1.05f, 0.78f, 0.5f } : new[] { 1.6f, 1.2f, 0.85f };
+            var visible = 0;
+
+            foreach (var height in heights)
+            {
+                if (!IsWorldLineBlocked(threatEye, position + Vector3.up * height, threat, bot))
+                {
+                    visible++;
+                }
             }
 
-            return IsWorldLineBlocked(EyePosition(target), EyePosition(bot), target, bot);
+            return visible / (float)heights.Length;
         }
 
         private string CoverStatus(BaseCombatEntity bot, BotRuntime runtime)
@@ -18515,6 +23138,10 @@ namespace Oxide.Plugins
             runtime.NextCrouchDecisionAt = now + config.AI.CrouchCooldownSeconds;
 
             var chance = SkillWeightedChance(runtime, config.AI.ShootingCrouchChanceCasual, config.AI.ShootingCrouchChanceAverage, config.AI.ShootingCrouchChanceDangerous);
+            if (IsV2Actuating(runtime) || IsV2Shadowing(runtime))
+            {
+                chance = Mathf.Clamp01(chance * Mathf.Lerp(0.7f, 1.3f, runtime.Style?.crouch_preference ?? 0.5f));
+            }
 
             if (UnityEngine.Random.value > chance)
             {
@@ -18599,6 +23226,12 @@ namespace Oxide.Plugins
                 return;
             }
 
+            if (IsV2Actuating(runtime) && legacyScientistBodyAdapter != null)
+            {
+                legacyScientistBodyAdapter.SetCrouched(bot, runtime, crouched, now);
+                return;
+            }
+
             var player = bot as BasePlayer;
 
             if (player != null && !player.IsDestroyed)
@@ -18624,6 +23257,90 @@ namespace Oxide.Plugins
             {
                 runtime.CrouchReason = "none";
                 runtime.CrouchHoldUntil = 0f;
+            }
+        }
+
+        private bool SetBotCrouchedMechanical(BaseCombatEntity bot, BotRuntime runtime, bool crouched, float now)
+        {
+            var player = bot as BasePlayer;
+            var human = bot as global::HumanNPC;
+
+            if (player == null || human == null || player.IsDestroyed || runtime == null)
+            {
+                return false;
+            }
+
+            if (!crouched && IsPlayerCrouched(player) && !CanBotStandAtCurrentPosition(player))
+            {
+                runtime.LastControllerInvariant = "stand_blocked";
+                return false;
+            }
+
+            try
+            {
+                human.SetDucked(crouched);
+                player.modelState.SetFlag(ModelState.Flag.Ducked, crouched);
+                player.modelState.ducking = crouched ? 1f : 0f;
+
+                var collider = player.playerCollider;
+                var colliderInfo = crouched ? player.playerColliderDucked : player.playerColliderStanding;
+
+                if (collider != null)
+                {
+                    collider.height = colliderInfo.height;
+                    collider.radius = colliderInfo.radius;
+                    collider.center = colliderInfo.center;
+                }
+
+                if (player.eyes != null)
+                {
+                    player.eyes.NetworkUpdate(player.eyes.bodyRotation);
+                }
+
+                player.SendModelState(true);
+                player.SendNetworkUpdateImmediate();
+            }
+            catch (Exception ex)
+            {
+                runtime.LastControllerInvariant = $"stance_failed:{ex.GetType().Name}";
+                DebugWarning($"v2-stance:{runtime.BotKey}", $"Could not apply mechanical crouch={crouched} for {runtime.DisplayName}: {ex.GetType().Name}: {ex.Message}", 10f);
+                return false;
+            }
+
+            runtime.IsCrouching = crouched;
+            runtime.LastCrouchChangedAt = now;
+
+            if (!crouched)
+            {
+                runtime.CrouchReason = "none";
+                runtime.CrouchHoldUntil = 0f;
+            }
+
+            return IsPlayerCrouched(player) == crouched;
+        }
+
+        private bool CanBotStandAtCurrentPosition(BasePlayer player)
+        {
+            if (player?.playerCollider == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var info = player.playerColliderStanding;
+                var colliderTransform = player.playerCollider.transform;
+                var center = colliderTransform.TransformPoint(info.center);
+                var up = colliderTransform.up;
+                var halfLine = Mathf.Max(0f, info.height * 0.5f - info.radius);
+                var point0 = center - up * halfLine;
+                var point1 = center + up * halfLine;
+                var radius = Mathf.Max(0.05f, info.radius - 0.02f);
+                return !GamePhysics.CheckCapsule(point0, point1, radius, Rust.Layers.Solid, QueryTriggerInteraction.Ignore, player);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -19656,6 +24373,335 @@ namespace Oxide.Plugins
             ApplyPassiveCombatHeal(bot, runtime, now);
         }
 
+        private void UpdateV2HealingIntent(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            if (bot == null || runtime == null || !IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            if (runtime.V2Healing)
+            {
+                runtime.Intent.motor_skill = MotorSkill.Heal;
+                runtime.Intent.wants_fire = false;
+                runtime.Intent.wants_crouch = true;
+                return;
+            }
+
+            var maxHealth = BotMaxHealth(bot, runtime);
+            var healthFraction = maxHealth <= 0f ? 1f : Mathf.Clamp01(bot.Health() / maxHealth);
+            var shouldHeal = healthFraction < SyringeHealTargetFraction()
+                && (healthFraction <= config.AI.LowHealthCoverThreshold || runtime.LowHealthCoverAwareUntil > now);
+
+            if (!shouldHeal || now < runtime.NextSyringeHealAt)
+            {
+                if (runtime.Intent.motor_skill == MotorSkill.Heal)
+                {
+                    runtime.Intent.motor_skill = MotorSkill.None;
+                    runtime.Intent.reason = "heal_not_needed";
+                }
+                return;
+            }
+
+            if (!IsV2HealingCoverSafe(bot, runtime, out var healCoverReason))
+            {
+                runtime.Intent.reason = $"heal_waiting_for_verified_cover:{healCoverReason}";
+                runtime.Intent.wants_crouch = false;
+                return;
+            }
+
+            runtime.Intent.action = "covered_heal";
+            runtime.Intent.motor_skill = MotorSkill.Heal;
+            runtime.Intent.destination = runtime.CurrentTuckPoint == Vector3.zero ? runtime.CurrentCover : runtime.CurrentTuckPoint;
+            runtime.Intent.wants_fire = false;
+            runtime.Intent.wants_reload = false;
+            runtime.Intent.wants_crouch = true;
+            runtime.Intent.reason = "verified_cover_reserved";
+            runtime.Intent.created_at = now;
+            runtime.Intent.committed_until = now + Math.Max(1f, config.AI.SyringeFireLockSeconds);
+            StopBotAttack(bot, runtime);
+            RequestCoverHealCrouch(bot, runtime, now);
+        }
+
+        private void UpdateV2HealingMotor(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            var player = bot as BasePlayer;
+            if (player == null || runtime == null)
+            {
+                return;
+            }
+
+            if (!runtime.V2Healing)
+            {
+                if (runtime.Intent.motor_skill != MotorSkill.Heal)
+                {
+                    return;
+                }
+
+                if (!IsV2HealingCoverSafe(bot, runtime, out _)
+                    || runtime.LastDamageTakenAt > 0f && now - runtime.LastDamageTakenAt <= 0.75f)
+                {
+                    runtime.Intent.reason = "heal_aborted_exposed";
+                    runtime.Intent.motor_skill = MotorSkill.None;
+                    return;
+                }
+
+                var medicalItem = FindV2MedicalItem(player);
+                if (medicalItem == null)
+                {
+                    runtime.LastMedicalUseReason = "v2:no_native_medical_item";
+                    runtime.NextSyringeHealAt = now + 5f;
+                    runtime.Intent.motor_skill = MotorSkill.None;
+                    return;
+                }
+
+                runtime.V2PreviousActiveItem = player.GetActiveItem();
+                runtime.V2MedicalItem = medicalItem;
+                runtime.V2MedicalAmountBefore = medicalItem.amount;
+                runtime.V2MedicalUsed = false;
+                runtime.V2Healing = true;
+                runtime.V2HealEquipReadyAt = now + 0.05f;
+                runtime.MotorSkill = MotorSkill.Heal;
+                runtime.MedicalFireLockedUntil = now + Math.Max(0.5f, config.AI.SyringeFireLockSeconds);
+                legacyScientistBodyAdapter?.StopFire(bot, runtime);
+                RequestCoverHealCrouch(bot, runtime, now);
+                player.UpdateActiveItem(medicalItem.uid);
+                return;
+            }
+
+            if (!runtime.V2MedicalUsed
+                && (!IsV2HealingCoverSafe(bot, runtime, out _)
+                    || runtime.LastDamageTakenAt > 0f && now - runtime.LastDamageTakenAt <= 0.75f))
+            {
+                AbortV2Healing(bot, runtime, "exposed_before_use", now, true);
+                return;
+            }
+
+            if (runtime.V2MedicalUsed)
+            {
+                if (now >= runtime.V2HealLockedUntil)
+                {
+                    CompleteV2Healing(bot, runtime, now, "native_use_complete");
+                }
+                return;
+            }
+
+            if (now < runtime.V2HealEquipReadyAt)
+            {
+                return;
+            }
+
+            var item = runtime.V2MedicalItem;
+            if (item == null || item.amount <= 0)
+            {
+                AbortV2Healing(bot, runtime, "medical_item_lost", now, true);
+                return;
+            }
+
+            if (player.GetActiveItem() != item)
+            {
+                player.UpdateActiveItem(item.uid);
+                runtime.V2HealEquipReadyAt = now + 0.1f;
+                return;
+            }
+
+            var tool = player.GetHeldEntity() as MedicalTool;
+            if (tool == null
+                || tool.GetOwnerPlayer() != player
+                || !tool.IsDeployed()
+                || tool.HasAttackCooldown()
+                || item.info?.GetComponent<ItemModConsumable>() == null)
+            {
+                return;
+            }
+
+            var amountBefore = item.amount;
+            var actionLock = Math.Max(0.25f, Math.Max(tool.repeatDelay, tool.healDurationSelf));
+
+            try
+            {
+                tool.ServerUse(HeldEntityServerUseParams.Default);
+            }
+            catch (Exception ex)
+            {
+                runtime.LastMedicalUseReason = $"v2:native_use_failed:{ex.GetType().Name}";
+                AbortV2Healing(bot, runtime, runtime.LastMedicalUseReason, now, true);
+                return;
+            }
+
+            if (item.amount >= amountBefore)
+            {
+                AbortV2Healing(bot, runtime, "native_use_not_consumed", now, true);
+                return;
+            }
+
+            runtime.V2MedicalUsed = true;
+            runtime.V2HealLockedUntil = now + actionLock;
+            runtime.MedicalFireLockedUntil = runtime.V2HealLockedUntil;
+            runtime.NextSyringeHealAt = runtime.V2HealLockedUntil + config.AI.SyringeCooldownSeconds;
+            runtime.LastMedicalUseReason = $"v2:native:{item.info?.shortname ?? "medical"}";
+            runtime.Intent.committed_until = runtime.V2HealLockedUntil;
+            v2Metrics.real_medical_uses++;
+        }
+
+        private bool IsV2HealingCoverSafe(BaseCombatEntity bot, BotRuntime runtime, out string reason)
+        {
+            reason = "ready";
+            if (!IsEffectiveCover(bot, runtime, runtime?.Memory?.Target))
+            {
+                reason = "primary_angle_exposed";
+                return false;
+            }
+
+            foreach (var enemy in BasePlayer.activePlayerList
+                .Where(player => IsRealPlayer(player)
+                    && player.IsConnected
+                    && !player.IsDead()
+                    && !player.IsSleeping()
+                    && !ShouldIgnoreRealPlayerTarget(player)
+                    && Vector3.Distance(bot.transform.position, player.transform.position) <= 90f)
+                .OrderBy(player => Vector3.Distance(bot.transform.position, player.transform.position))
+                .Take(12))
+            {
+                if (runtime.Memory.Target == enemy)
+                {
+                    continue;
+                }
+
+                if (BotExposureFromThreat(bot, enemy, true) > config.AI.EffectiveCoverMaxExposedFraction)
+                {
+                    reason = $"flank_exposed:{CombatTargetId(enemy)}";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private Item FindV2MedicalItem(BasePlayer player)
+        {
+            if (player?.inventory == null)
+            {
+                return null;
+            }
+
+            var allowed = new HashSet<string>(config.AI.RealMedicalItemShortnames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in config.AI.BotMedicalLoadout ?? new Dictionary<string, int>())
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    allowed.Add(entry.Key.Trim());
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+            {
+                allowed.Add(config.AI.BotMedicalItemShortname.Trim());
+            }
+
+            Func<Item, bool> isNativeMedical = candidate => candidate != null
+                && candidate.amount > 0
+                && (allowed.Count == 0 || allowed.Contains(candidate.info?.shortname ?? ""))
+                && candidate.info?.GetComponent<ItemModConsumable>() != null
+                && candidate.GetHeldEntity() is MedicalTool;
+
+            var beltItem = player.inventory.containerBelt?.itemList?.FirstOrDefault(isNativeMedical);
+            if (beltItem != null)
+            {
+                return beltItem;
+            }
+
+            var mainItem = player.inventory.containerMain?.itemList?.FirstOrDefault(isNativeMedical);
+            if (mainItem != null && mainItem.MoveToContainer(player.inventory.containerBelt))
+            {
+                return mainItem;
+            }
+
+            return null;
+        }
+
+        private void AbortV2Healing(BaseCombatEntity bot, BotRuntime runtime, string reason, float now, bool restoreImmediately)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            runtime.LastMedicalUseReason = $"v2:aborted:{reason}";
+            runtime.Intent.wants_fire = false;
+            runtime.Intent.reason = runtime.LastMedicalUseReason;
+
+            if (runtime.V2MedicalUsed && !restoreImmediately && now < runtime.V2HealLockedUntil)
+            {
+                return;
+            }
+
+            RestoreV2PreviousWeapon(bot as BasePlayer, runtime);
+            runtime.V2Healing = false;
+            runtime.V2MedicalUsed = false;
+            runtime.V2MedicalItem = null;
+            runtime.V2PreviousActiveItem = null;
+            runtime.V2HealEquipReadyAt = 0f;
+            runtime.V2HealLockedUntil = 0f;
+            runtime.Intent.motor_skill = MotorSkill.None;
+            runtime.MotorSkill = MotorSkill.None;
+            runtime.NextSyringeHealAt = Math.Max(runtime.NextSyringeHealAt, now + 1f);
+        }
+
+        private void CompleteV2Healing(BaseCombatEntity bot, BotRuntime runtime, float now, string reason)
+        {
+            RestoreV2PreviousWeapon(bot as BasePlayer, runtime);
+            runtime.V2Healing = false;
+            runtime.V2MedicalUsed = false;
+            runtime.V2MedicalItem = null;
+            runtime.V2PreviousActiveItem = null;
+            runtime.V2HealEquipReadyAt = 0f;
+            runtime.V2HealLockedUntil = 0f;
+            runtime.Intent.motor_skill = MotorSkill.None;
+            runtime.Intent.wants_crouch = false;
+            runtime.Intent.reason = $"heal_complete:{reason}";
+            runtime.MotorSkill = MotorSkill.None;
+            runtime.LowHealthCoverAwareUntil = 0f;
+            ClearCrouchReason(bot, runtime, "cover-heal", "native-heal-complete", now);
+            if (runtime.Memory.Target != null && IsEffectiveCover(bot, runtime, runtime.Memory.Target)
+                && (runtime.CurrentPeekLeftPoint != Vector3.zero || runtime.CurrentPeekRightPoint != Vector3.zero))
+            {
+                runtime.IsPeeking = false;
+                runtime.NextPeekAt = now + UnityEngine.Random.Range(0.35f, 0.85f) * Math.Max(0.5f, runtime.Style?.repeek_delay_scale ?? 1f);
+                runtime.Intent.reason = "heal_complete:deliberate_repeek";
+            }
+            else
+            {
+                runtime.NextCoverSearchAt = 0f;
+                runtime.Intent.reason = "heal_complete:relocate";
+            }
+            RefreshCombatProfile(bot, runtime);
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, IsV2Actuating(runtime));
+        }
+
+        private void RestoreV2PreviousWeapon(BasePlayer player, BotRuntime runtime)
+        {
+            if (player == null || runtime == null)
+            {
+                return;
+            }
+
+            var previous = runtime.V2PreviousActiveItem;
+            if (previous != null && previous.amount > 0)
+            {
+                player.UpdateActiveItem(previous.uid);
+                return;
+            }
+
+            var fallback = player.inventory?.containerBelt?.itemList?
+                .FirstOrDefault(item => item?.GetHeldEntity() is BaseProjectile);
+
+            if (fallback != null)
+            {
+                player.UpdateActiveItem(fallback.uid);
+            }
+        }
+
         private void ApplyPassiveCombatHeal(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
             if (config.AI.PassiveCombatHealPerSecond <= 0f || IsMedicalFireLocked(runtime, now))
@@ -19900,7 +24946,7 @@ namespace Oxide.Plugins
                 return Vector3.zero;
             }
 
-            if (runtime.Memory.Target != null)
+            if (runtime.Memory.HasLineOfSight && runtime.Memory.Target != null)
             {
                 return runtime.Memory.Target.transform.position;
             }
@@ -19922,10 +24968,30 @@ namespace Oxide.Plugins
 
             if (runtime.Memory.LastDamagedAt > bestKnownAt && runtime.Memory.LastDamageSourcePosition != Vector3.zero)
             {
+                bestKnownAt = runtime.Memory.LastDamagedAt;
                 bestKnownPosition = runtime.Memory.LastDamageSourcePosition;
             }
 
-            return bestKnownPosition;
+            if (!IsV2Actuating(runtime) || bestKnownPosition == Vector3.zero || bestKnownAt <= 0f)
+            {
+                return bestKnownPosition;
+            }
+
+            var age = Math.Max(0f, Time.realtimeSinceStartup - bestKnownAt);
+            var radius = Mathf.Clamp(age * config.ControllerV2.LastKnownPositionUncertaintyPerSecond, 0f, config.ControllerV2.MaximumLastKnownPositionUncertainty);
+            runtime.LastCombatFrame.target_uncertainty_radius = radius;
+
+            if (radius <= 0.05f)
+            {
+                return bestKnownPosition;
+            }
+
+            var timeBucket = Mathf.FloorToInt(age / 1.5f);
+            var angleBucket = StableBucket($"{runtime.BotKey}:{runtime.Memory.TargetUserId}:{timeBucket}", 3600);
+            var distanceBucket = StableBucket($"{runtime.Memory.TargetUserId}:{runtime.BotKey}:{timeBucket}:r", 1000) / 999f;
+            var angle = angleBucket / 10f * Mathf.Deg2Rad;
+            var distance = radius * Mathf.Lerp(0.35f, 1f, distanceBucket);
+            return bestKnownPosition + new Vector3(Mathf.Cos(angle) * distance, 0f, Mathf.Sin(angle) * distance);
         }
 
         private bool TryFindFlankPosition(Vector3 origin, Vector3 threatPosition, float sideSign, BotRuntime runtime, float now, out Vector3 flankPoint)
@@ -20348,6 +25414,8 @@ namespace Oxide.Plugins
                     CoverPoint = holdPoint,
                     TuckPoint = holdPoint,
                     PeekPoint = peek,
+                    PeekLeftPoint = runtime.PeekSide >= 0 ? peek : Vector3.zero,
+                    PeekRightPoint = runtime.PeekSide < 0 ? peek : Vector3.zero,
                     Source = "existing_barricade",
                     Distance = distance
                 };
@@ -20447,6 +25515,8 @@ namespace Oxide.Plugins
                     CoverPoint = sampled,
                     TuckPoint = sampled,
                     PeekPoint = left != Vector3.zero ? left : right,
+                    PeekLeftPoint = left,
+                    PeekRightPoint = right,
                     Source = "natural_cover",
                     Distance = distanceFromBot
                 };
@@ -20465,6 +25535,8 @@ namespace Oxide.Plugins
             runtime.CurrentCover = plan.CoverPoint;
             runtime.CurrentTuckPoint = plan.TuckPoint == Vector3.zero ? plan.CoverPoint : plan.TuckPoint;
             runtime.CurrentPeekPoint = plan.PeekPoint;
+            runtime.CurrentPeekLeftPoint = plan.PeekLeftPoint;
+            runtime.CurrentPeekRightPoint = plan.PeekRightPoint;
             runtime.NextCoverSearchAt = now + config.AI.CoverRepositionCooldownSeconds;
             runtime.LastProtectionReason = $"{plan.Source} {plan.Distance:0.0}m";
         }
@@ -20580,7 +25652,25 @@ namespace Oxide.Plugins
                 }
 
                 var distanceFromBot = Vector3.Distance(origin, sampled);
-                var score = 80f - distanceFromBot * 1.25f + distanceToThreat * 0.35f;
+                var standingExposure = SimulatedBotExposureFromThreat(threatEye, sampled, false, target, bot);
+                var crouchedExposure = SimulatedBotExposureFromThreat(threatEye, sampled, true, target, bot);
+
+                if (crouchedExposure > config.AI.EffectiveCoverMaxExposedFraction)
+                {
+                    continue;
+                }
+
+                var routeRisk = RetreatRouteExposureRisk(origin, sampled, threatPosition);
+                var currentExposure = target == null ? 1f : BotExposureFromThreat(bot, target, runtime.IsCrouching);
+                var protectionGained = Mathf.Clamp01(currentExposure - crouchedExposure);
+                var score = 80f
+                    - distanceFromBot * 1.25f
+                    + distanceToThreat * 0.35f
+                    - standingExposure * 18f
+                    - crouchedExposure * 30f
+                    - routeRisk * 24f
+                    + protectionGained * 28f
+                    + (runtime.RecentHeadHits > 0 ? (standingExposure - crouchedExposure) * 18f : 0f);
                 var left = Vector3.zero;
                 var right = Vector3.zero;
 
@@ -20661,7 +25751,7 @@ namespace Oxide.Plugins
             {
                 var from = sampled + Vector3.up * 1.55f;
                 var points = TargetProbePoints(target);
-                var visiblePoints = points.Count(point => IsTargetSightLineClear(bot, target, from, point));
+                var visiblePoints = points.Count(point => IsTargetSightLineClear(bot, target, from, point, out _, out _, true));
                 var exposure = points.Count == 0 ? 0f : visiblePoints / (float)points.Count;
 
                 if (exposure < Math.Min(config.AI.MinimumExposedTargetFraction, 0.34f))
@@ -20671,6 +25761,56 @@ namespace Oxide.Plugins
             }
 
             peekPoint = sampled;
+            return true;
+        }
+
+        private bool TryBuildWideSwingPoint(
+            BaseCombatEntity bot,
+            BotRuntime runtime,
+            Vector3 threatPosition,
+            BasePlayer target,
+            int sideSign,
+            float now,
+            out Vector3 swingPoint)
+        {
+            swingPoint = Vector3.zero;
+
+            if (bot == null || runtime == null || target == null || runtime.CurrentTuckPoint == Vector3.zero)
+            {
+                return false;
+            }
+
+            if (!IsVerifiedCoverEdge(bot, runtime, target))
+            {
+                return false;
+            }
+
+            var toThreat = threatPosition - runtime.CurrentTuckPoint;
+            toThreat.y = 0f;
+            if (toThreat.sqrMagnitude <= 0.01f)
+            {
+                return false;
+            }
+
+            toThreat.Normalize();
+            var side = Vector3.Cross(Vector3.up, toThreat).normalized * (sideSign >= 0 ? 1f : -1f);
+            var candidate = runtime.CurrentTuckPoint
+                + side * config.ControllerV2.WideSwingDistance
+                + toThreat * Math.Min(2f, config.ControllerV2.WideSwingDistance * 0.25f);
+
+            if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+            {
+                return false;
+            }
+
+            var from = sampled + Vector3.up * 1.55f;
+            var visible = TargetProbePoints(target).Count(point => IsTargetSightLineClear(bot, target, from, point, out _, out _, true));
+            if (visible <= 0 || SegmentIntersectsWater(from, EyePosition(target), out _))
+            {
+                return false;
+            }
+
+            swingPoint = sampled;
             return true;
         }
 
@@ -21047,10 +26187,11 @@ namespace Oxide.Plugins
                 return BlockFire(runtime, "no_target");
             }
 
-            if (ShouldIgnoreInvisiblePlayer(target))
+            if (ShouldIgnoreRealPlayerTarget(target))
             {
-                ClearIgnoredPlayerTargetMemory(bot, runtime, target, "target_invisible", now);
-                return BlockFire(runtime, "target_invisible");
+                var reason = TargetIneligibilityReason(target);
+                ClearIgnoredPlayerTargetMemory(bot, runtime, target, reason, now);
+                return BlockFire(runtime, reason);
             }
 
             if (IsMedicalFireLocked(runtime, now))
@@ -21081,12 +26222,42 @@ namespace Oxide.Plugins
                 runtime.Memory.TargetExposureFraction = visibility.ExposedFraction;
                 runtime.Memory.TargetVisibleProbePoints = visibility.VisibleProbePoints;
                 runtime.Memory.TargetTotalProbePoints = visibility.TotalProbePoints;
-                return BlockFire(runtime, "no_los");
+                var visibilityReason = visibility.WaterBlockedProbePoints > 0
+                    ? "water_surface_crossing"
+                    : visibility.FoliageBlockedProbePoints > 0
+                        ? "foliage_occluded"
+                        : visibility.SmokeBlockedProbePoints > 0
+                            ? "smoke_occluded"
+                            : "no_los";
+                return BlockFire(runtime, visibilityReason);
             }
 
             runtime.Memory.TargetExposureFraction = visibility.ExposedFraction;
             runtime.Memory.TargetVisibleProbePoints = visibility.VisibleProbePoints;
             runtime.Memory.TargetTotalProbePoints = visibility.TotalProbePoints;
+
+            var aimPoint = IsV2Actuating(runtime)
+                ? SelectV2TargetPoint(runtime, visibility, target)
+                : visibility.BestVisiblePoint == Vector3.zero ? EyePosition(target) : visibility.BestVisiblePoint;
+            var muzzle = WeaponMuzzlePosition(bot);
+
+            if (muzzle == Vector3.zero)
+            {
+                muzzle = EyePosition(bot);
+            }
+
+            if (!IsTargetSightLineClear(bot, target, muzzle, aimPoint, out var muzzleBlockReason, out _, true))
+            {
+                var reason = string.Equals(muzzleBlockReason, "solid", StringComparison.OrdinalIgnoreCase)
+                    ? "muzzle_blocked"
+                    : string.Equals(muzzleBlockReason, "foliage", StringComparison.OrdinalIgnoreCase)
+                        ? "foliage_occluded"
+                        : muzzleBlockReason;
+
+                return BlockFire(runtime, reason);
+            }
+
+            runtime.CurrentAimPoint = aimPoint;
 
             var profile = RefreshCombatProfile(bot, runtime);
             var distance = Vector3.Distance(bot.transform.position, target.transform.position);
@@ -21107,6 +26278,23 @@ namespace Oxide.Plugins
                 runtime.LastFireBlockReason = reason;
             }
 
+            if (string.Equals(reason, "target_swimming", StringComparison.OrdinalIgnoreCase))
+            {
+                v2Metrics.water_target_rejections++;
+            }
+            else if (string.Equals(reason, "water_surface_crossing", StringComparison.OrdinalIgnoreCase))
+            {
+                v2Metrics.water_crossing_rejections++;
+            }
+            else if (string.Equals(reason, "foliage_occluded", StringComparison.OrdinalIgnoreCase))
+            {
+                v2Metrics.foliage_rejections++;
+            }
+            else if (string.Equals(reason, "muzzle_blocked", StringComparison.OrdinalIgnoreCase))
+            {
+                v2Metrics.muzzle_rejections++;
+            }
+
             return false;
         }
 
@@ -21116,9 +26304,59 @@ namespace Oxide.Plugins
             return player?.GetActiveItem()?.info?.shortname ?? "";
         }
 
+        private BaseProjectile ActiveBaseProjectile(BaseCombatEntity bot)
+        {
+            var player = bot as BasePlayer;
+            return player?.GetActiveItem()?.GetHeldEntity() as BaseProjectile;
+        }
+
+        private Vector3 WeaponMuzzlePosition(BaseCombatEntity bot)
+        {
+            var projectile = ActiveBaseProjectile(bot);
+
+            if (projectile != null)
+            {
+                try
+                {
+                    var muzzle = projectile.MuzzleTransform;
+
+                    if (muzzle != null)
+                    {
+                        return muzzle.position;
+                    }
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    if (projectile.MuzzlePoint != null)
+                    {
+                        return projectile.MuzzlePoint.position;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return EyePosition(bot);
+        }
+
         private float AmmoFraction(BaseCombatEntity bot)
         {
-            EnsureBotWeaponLoaded(bot);
+            var runtime = RuntimeFor(bot);
+
+            if (!IsV2Actuating(runtime))
+            {
+                EnsureBotWeaponLoaded(bot);
+            }
+
+            if (IsV2Actuating(runtime))
+            {
+                return ActiveWeaponMagazineFraction(bot);
+            }
 
             var attacker = GetAttackInterface(bot);
 
@@ -21143,7 +26381,10 @@ namespace Oxide.Plugins
 
         private bool HasAmmoToShoot(BaseCombatEntity bot)
         {
-            EnsureBotWeaponLoaded(bot);
+            if (!IsV2Actuating(RuntimeFor(bot)))
+            {
+                EnsureBotWeaponLoaded(bot);
+            }
             return AmmoFraction(bot) > MinimumAmmoFractionToShoot;
         }
 
@@ -21158,6 +26399,11 @@ namespace Oxide.Plugins
             var activeItem = player?.GetActiveItem();
             var projectile = activeItem?.GetHeldEntity() as BaseProjectile;
             var magazine = projectile?.primaryMagazine;
+
+            if (IsV2Actuating(RuntimeFor(bot)))
+            {
+                return magazine != null && magazine.contents > 0;
+            }
 
             if (projectile == null || magazine == null)
             {
@@ -21621,6 +26867,7 @@ namespace Oxide.Plugins
         private string LegacyNavDiagnostics(BaseCombatEntity bot, BotRuntime runtime = null)
         {
             var navigator = bot?.GetComponent<BaseNavigator>() ?? bot?.GetComponentInChildren<BaseNavigator>();
+            var agent = bot?.GetComponent<NavMeshAgent>() ?? bot?.GetComponentInChildren<NavMeshAgent>();
             var npc = bot as NPCPlayer;
             var parts = new List<string>();
 
@@ -21640,6 +26887,18 @@ namespace Oxide.Plugins
             else
             {
                 parts.Add("nav=missing");
+            }
+
+            if (agent != null)
+            {
+                parts.Add($"agentEnabled={SafeBool(() => agent.enabled)}");
+                parts.Add($"agentOnMesh={SafeBool(() => agent.isOnNavMesh)}");
+                parts.Add($"agentPath={SafeBool(() => agent.hasPath)}");
+                parts.Add($"agentPending={SafeBool(() => agent.pathPending)}");
+            }
+            else
+            {
+                parts.Add("agent=missing");
             }
 
             parts.Add(AiConVarStatus());
@@ -21863,7 +27122,112 @@ namespace Oxide.Plugins
 
         private bool ShouldIgnoreRealPlayerTarget(BasePlayer player)
         {
-            return IsRealPlayer(player) && (ShouldIgnoreSafeZonePlayer(player) || ShouldIgnoreInvisiblePlayer(player) || PlayerHasRoamBotIgnorePermission(player));
+            return IsRealPlayer(player) && !string.IsNullOrWhiteSpace(TargetIneligibilityReason(player));
+        }
+
+        private string TargetIneligibilityReason(BasePlayer player)
+        {
+            if (!IsRealPlayer(player))
+            {
+                return "";
+            }
+
+            if (ShouldIgnoreSafeZonePlayer(player))
+            {
+                return "target_safe_zone";
+            }
+
+            if (ShouldIgnoreInvisiblePlayer(player))
+            {
+                return "target_invisible";
+            }
+
+            if (PlayerHasRoamBotIgnorePermission(player))
+            {
+                return "target_permission_ignored";
+            }
+
+            if (config?.ControllerV2?.RejectSwimmingOrSubmergedTargets == true && IsPlayerSwimmingOrSubmerged(player))
+            {
+                return "target_swimming";
+            }
+
+            return "";
+        }
+
+        private bool IsPlayerSwimmingOrSubmerged(BasePlayer player)
+        {
+            if (player == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (player.IsSwimming() || player.IsHeadUnderwater())
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private bool SegmentIntersectsWater(Vector3 from, Vector3 to, out int waterSamples)
+        {
+            waterSamples = 0;
+
+            if (config?.ControllerV2?.BlockWaterSurfaceCrossings != true)
+            {
+                return false;
+            }
+
+            if ((to - from).sqrMagnitude <= 0.01f)
+            {
+                return false;
+            }
+
+            var delta = to - from;
+            var distance = delta.magnitude;
+            var requestedStep = Math.Max(0.25f, config.ControllerV2.WaterSegmentSampleStep);
+            var maximumSamples = Math.Max(2, config.ControllerV2.MaximumWaterSegmentSamples);
+            var sampleCount = Mathf.Clamp(Mathf.CeilToInt(distance / requestedStep), 2, maximumSamples);
+
+            try
+            {
+                // The segment overload is a cheap first pass, but it primarily samples
+                // near the segment midpoint. Follow it with bounded point samples so a
+                // localized river, pool, or deployable water volume cannot be skipped.
+                var segmentWater = WaterLevel.GetWaterInfo(from, to, 0.02f, true, true, null);
+                if (segmentWater.isValid && segmentWater.currentDepth > 0.01f)
+                {
+                    waterSamples = 1;
+                    return true;
+                }
+
+                for (var index = 1; index < sampleCount; index++)
+                {
+                    var point = Vector3.Lerp(from, to, index / (float)sampleCount);
+                    var pointWater = WaterLevel.GetWaterInfo(point, point, 0.02f, true, true, null);
+                    waterSamples++;
+
+                    if (pointWater.isValid && pointWater.currentDepth > 0.01f)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch
+            {
+                // Fairness checks fail closed if Rust changes the water API.
+                waterSamples = Math.Max(1, waterSamples);
+                return true;
+            }
         }
 
         private bool ShouldIgnoreInvisiblePlayer(BasePlayer player)
@@ -21910,8 +27274,9 @@ namespace Oxide.Plugins
             return BasePlayer.FindAwakeOrSleeping(id);
         }
 
-        private BasePlayer IgnoredInvisibleMemoryPlayer(BotRuntime runtime)
+        private BasePlayer IneligibleMemoryPlayer(BotRuntime runtime, out string reason)
         {
+            reason = "";
             var memory = runtime?.Memory;
 
             if (memory == null)
@@ -21919,13 +27284,19 @@ namespace Oxide.Plugins
                 return null;
             }
 
-            if (ShouldIgnoreInvisiblePlayer(memory.Target))
+            var targetReason = TargetIneligibilityReason(memory.Target);
+
+            if (!string.IsNullOrWhiteSpace(targetReason))
             {
+                reason = targetReason;
                 return memory.Target;
             }
 
-            if (ShouldIgnoreInvisiblePlayer(memory.LastDamageSourcePlayer))
+            var damageSourceReason = TargetIneligibilityReason(memory.LastDamageSourcePlayer);
+
+            if (!string.IsNullOrWhiteSpace(damageSourceReason))
             {
+                reason = damageSourceReason;
                 return memory.LastDamageSourcePlayer;
             }
 
@@ -21935,7 +27306,8 @@ namespace Oxide.Plugins
             }
 
             var target = BasePlayer.FindByID(memory.TargetUserId);
-            return ShouldIgnoreInvisiblePlayer(target) ? target : null;
+            reason = TargetIneligibilityReason(target);
+            return string.IsNullOrWhiteSpace(reason) ? null : target;
         }
 
         private void ClearTargetingForIgnoredPlayer(BasePlayer player, string reason)
@@ -23568,6 +28940,51 @@ namespace Oxide.Plugins
         private bool IsLiveBot(BaseCombatEntity bot)
         {
             return bot != null && !bot.IsDestroyed && !bot.IsDead();
+        }
+
+        private WorldPopulationCensus CaptureWorldPopulationCensus()
+        {
+            var census = new WorldPopulationCensus();
+
+            if (BaseNetworkable.serverEntities != null)
+            {
+                foreach (var entity in BaseNetworkable.serverEntities)
+                {
+                    if (entity == null || entity.IsDestroyed)
+                    {
+                        continue;
+                    }
+
+                    census.ServerEntities++;
+
+                    if (entity is BasePlayer)
+                    {
+                        census.PlayerBodies++;
+                    }
+
+                    var typeName = entity.GetType().Name;
+                    if (string.Equals(typeName, "ScientistNPC", StringComparison.Ordinal))
+                    {
+                        census.Scientists++;
+                    }
+                    else if (string.Equals(typeName, "TunnelDweller", StringComparison.Ordinal))
+                    {
+                        census.TunnelDwellers++;
+                    }
+                    else if (string.Equals(typeName, "UnderwaterDweller", StringComparison.Ordinal))
+                    {
+                        census.UnderwaterDwellers++;
+                    }
+                    else if (string.Equals(typeName, "ScientistNPC2", StringComparison.Ordinal))
+                    {
+                        census.Gen2Scientists++;
+                    }
+                }
+            }
+
+            census.LegacyNpcBodies = census.Scientists + census.TunnelDwellers + census.UnderwaterDwellers;
+            census.OnlinePlayers = BasePlayer.activePlayerList.Count(IsRealPlayer);
+            return census;
         }
 
         private BotRuntime RuntimeFor(BaseCombatEntity entity)

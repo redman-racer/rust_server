@@ -3,8 +3,9 @@
 
 
 
+
 {
-  "Use Permission": true,
+  "Use Permission": false,
   "Speed Multipliers": {
     "global": 10000.0,
     "furnace": 10000.0,
