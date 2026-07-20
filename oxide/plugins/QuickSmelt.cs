@@ -7,7 +7,7 @@ using Random = UnityEngine.Random;
 
 namespace Oxide.Plugins
 {
-    [Info("Quick Smelt", "misticos", "5.1.5")]
+    [Info("Quick Smelt", "misticos/Raidlands", "5.1.6")]
     [Description("Increases the speed of the furnace smelting")]
     class QuickSmelt : RustPlugin
     {
@@ -16,6 +16,9 @@ namespace Oxide.Plugins
         private static QuickSmelt _instance;
 
         private const string PermissionUse = "quicksmelt.use";
+        private const float DefaultCookInterval = 0.5f;
+        private const float MinimumCookInterval = 0.02f;
+        private const float MaximumSpeedMultiplier = DefaultCookInterval / MinimumCookInterval;
 
         #endregion
 
@@ -236,12 +239,13 @@ namespace Oxide.Plugins
             var oven = entity as BaseOven;
             if (oven != null)
             {
-                oven.gameObject.AddComponent<FurnaceController>();
+                if (oven.gameObject.GetComponent<FurnaceController>() == null)
+                    oven.gameObject.AddComponent<FurnaceController>();
                 return;
             }
 
             var mixingTable = entity as MixingTable;
-            if (mixingTable != null)
+            if (mixingTable != null && mixingTable.gameObject.GetComponent<MixingTableController>() == null)
                 mixingTable.gameObject.AddComponent<MixingTableController>();
         }
 
@@ -252,6 +256,9 @@ namespace Oxide.Plugins
 
             PrintDebug("OnOvenToggle called");
             var component = oven.gameObject.GetComponent<FurnaceController>();
+            if (component == null)
+                component = oven.gameObject.AddComponent<FurnaceController>();
+
             var canUse = CanUse(oven.OwnerID) || CanUse(player.userID);
             if (oven.IsOn())
             {
@@ -369,7 +376,11 @@ namespace Oxide.Plugins
                     !_config.SpeedMultipliers.TryGetValue("global", out modifierF))
                     modifierF = 1.0f;
 
-                _speedMultiplier = 0.5f / modifierF;
+                if (float.IsNaN(modifierF) || float.IsInfinity(modifierF) || modifierF <= 0f)
+                    modifierF = 1.0f;
+
+                modifierF = Mathf.Min(modifierF, MaximumSpeedMultiplier);
+                _speedMultiplier = Mathf.Max(MinimumCookInterval, DefaultCookInterval / modifierF);
                 _requiresFuel = !Furnace.ShortPrefabName.Contains("electric");
                 PrintDebug($"Oven controller attached: {Furnace.ShortPrefabName}, requires fuel: {_requiresFuel}");
 
@@ -377,19 +388,21 @@ namespace Oxide.Plugins
                     !_config.FuelSpeedMultipliers.TryGetValue("global", out modifierF))
                     modifierF = 1.0f;
 
-                _fuelSpeedMultiplier = modifierF;
+                _fuelSpeedMultiplier = float.IsNaN(modifierF) || float.IsInfinity(modifierF) || modifierF <= 0f
+                    ? 1.0f
+                    : modifierF;
 
                 if (!_config.FuelUsageMultipliers.TryGetValue(Furnace.ShortPrefabName, out modifierI) &&
                     !_config.FuelUsageMultipliers.TryGetValue("global", out modifierI))
                     modifierI = 1;
 
-                _fuelUsageMultiplier = modifierI;
+                _fuelUsageMultiplier = Math.Max(1, modifierI);
 
                 if (!_config.SmeltingFrequencies.TryGetValue(Furnace.ShortPrefabName, out modifierI) &&
                     !_config.SmeltingFrequencies.TryGetValue("global", out modifierI))
                     modifierI = 1;
 
-                _smeltingFrequency = modifierI;
+                _smeltingFrequency = Math.Max(1, modifierI);
 
                 if (!_config.OutputMultipliers.TryGetValue(Furnace.ShortPrefabName, out _outputModifiers) &&
                     !_config.OutputMultipliers.TryGetValue("global", out _outputModifiers))
@@ -668,7 +681,7 @@ namespace Oxide.Plugins
                 if (modifier <= 0f)
                     modifier = 1.0f;
 
-                _speedModifier = modifier;
+                _speedModifier = Mathf.Min(modifier, MaximumSpeedMultiplier);
                 PrintDebug($"Mixing table speed modifier ({Table.ShortPrefabName}): {_speedModifier}");
 
                 InvokeRepeating(CheckMixingState, 0.25f, 0.25f);

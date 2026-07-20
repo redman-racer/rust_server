@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("MultiHotbars", "OpenAI", "1.0.0")]
+    [Info("MultiHotbars", "OpenAI", "1.0.3")]
     [Description("Provides up to five switchable, MMO-style hotbar layouts using commands, key binds, or a GUI.")]
     public class MultiHotbars : RustPlugin
     {
@@ -220,9 +220,9 @@ namespace Oxide.Plugins
                 return;
 
             int barNumber;
-            if (!TryGetBarNumber(arg.Args, 0, out barNumber))
+            if (!TryGetBarNumber(arg.GetString(0), out barNumber))
             {
-                SendReply(player, $"Usage: hotbar.load <1-{_config.MaximumHotbars}>");
+                SendReply(player, $"Usage: hb.load <1-{_config.MaximumHotbars}>");
                 return;
             }
 
@@ -237,9 +237,9 @@ namespace Oxide.Plugins
                 return;
 
             int barNumber;
-            if (!TryGetBarNumber(arg.Args, 0, out barNumber))
+            if (!TryGetBarNumber(arg.GetString(0), out barNumber))
             {
-                SendReply(player, $"Usage: hotbar.save <1-{_config.MaximumHotbars}>");
+                SendReply(player, $"Usage: hb.save <1-{_config.MaximumHotbars}>");
                 return;
             }
 
@@ -287,6 +287,24 @@ namespace Oxide.Plugins
             DestroyUi(player);
         }
 
+        [ConsoleCommand("hb.load")]
+        private void ConsoleLoadAlias(ConsoleSystem.Arg arg) => ConsoleLoad(arg);
+
+        [ConsoleCommand("hb.save")]
+        private void ConsoleSaveAlias(ConsoleSystem.Arg arg) => ConsoleSave(arg);
+
+        [ConsoleCommand("hb.next")]
+        private void ConsoleNextAlias(ConsoleSystem.Arg arg) => ConsoleNext(arg);
+
+        [ConsoleCommand("hb.prev")]
+        private void ConsolePreviousAlias(ConsoleSystem.Arg arg) => ConsolePrevious(arg);
+
+        [ConsoleCommand("hb.ui")]
+        private void ConsoleUiAlias(ConsoleSystem.Arg arg) => ConsoleUi(arg);
+
+        [ConsoleCommand("hb.close")]
+        private void ConsoleCloseAlias(ConsoleSystem.Arg arg) => ConsoleClose(arg);
+
         #endregion
 
         #region Command Handling
@@ -302,7 +320,7 @@ namespace Oxide.Plugins
                     int barNumber;
                     if (!TryGetBarNumber(args, 0, out barNumber))
                     {
-                        SendReply(player, $"Usage: /hotbar load <1-{_config.MaximumHotbars}>");
+                        SendReply(player, $"Usage: /hb load <1-{_config.MaximumHotbars}>");
                         return;
                     }
 
@@ -315,7 +333,7 @@ namespace Oxide.Plugins
                     int barNumber;
                     if (!TryGetBarNumber(args, 0, out barNumber))
                     {
-                        SendReply(player, $"Usage: /hotbar save <1-{_config.MaximumHotbars}>");
+                        SendReply(player, $"Usage: /hb save <1-{_config.MaximumHotbars}>");
                         return;
                     }
 
@@ -328,7 +346,7 @@ namespace Oxide.Plugins
                     int barNumber;
                     if (!TryGetBarNumber(args, 0, out barNumber))
                     {
-                        SendReply(player, $"Usage: /hotbar clear <1-{_config.MaximumHotbars}>");
+                        SendReply(player, $"Usage: /hb clear <1-{_config.MaximumHotbars}>");
                         return;
                     }
 
@@ -358,10 +376,35 @@ namespace Oxide.Plugins
 
         private bool TryGetBarNumber(string[] args, int index, out int barNumber)
         {
+            return TryGetBarNumber(args != null && args.Length > index ? args[index] : null, out barNumber);
+        }
+
+        private bool TryGetBarNumber(string value, out int barNumber)
+        {
             barNumber = 0;
-            return args != null && args.Length > index &&
-                   int.TryParse(args[index], out barNumber) &&
+            return int.TryParse(value, out barNumber) &&
                    barNumber >= 1 && barNumber <= _config.MaximumHotbars;
+        }
+
+        private List<Item> GetInventoryItems(BasePlayer player)
+        {
+            var items = new List<Item>();
+            var inventory = player?.inventory;
+            if (inventory == null)
+                return items;
+
+            AddContainerItems(items, inventory.containerMain);
+            AddContainerItems(items, inventory.containerBelt);
+            AddContainerItems(items, inventory.containerWear);
+            return items;
+        }
+
+        private void AddContainerItems(List<Item> items, ItemContainer container)
+        {
+            if (container?.itemList == null)
+                return;
+
+            items.AddRange(container.itemList.Where(item => item != null));
         }
 
         private bool CanUse(BasePlayer player)
@@ -377,11 +420,11 @@ namespace Oxide.Plugins
         {
             SendReply(player,
                 $"<color=#74b9ff>MultiHotbars</color>\n" +
-                $"/hotbar save <1-{_config.MaximumHotbars}> - Save your current belt\n" +
-                $"/hotbar load <1-{_config.MaximumHotbars}> - Recall a saved belt\n" +
-                "/hotbar next | prev - Cycle bars\n" +
-                $"/hotbar clear <1-{_config.MaximumHotbars}> - Delete a saved bar\n" +
-                "/hotbar - Open or close the selector GUI");
+                $"/hb save <1-{_config.MaximumHotbars}> - Save your current belt\n" +
+                $"/hb load <1-{_config.MaximumHotbars}> - Recall a saved belt\n" +
+                "/hb next | prev - Cycle bars\n" +
+                $"/hb clear <1-{_config.MaximumHotbars}> - Delete a saved bar\n" +
+                "/hb - Open or close the selector GUI");
         }
 
         #endregion
@@ -451,11 +494,11 @@ namespace Oxide.Plugins
             HotbarData bar = GetBar(playerData, barNumber, false);
             if (bar == null)
             {
-                SendReply(player, $"Hotbar {barNumber} has not been saved yet. Use /hotbar save {barNumber}.");
+                SendReply(player, $"Hotbar {barNumber} has not been saved yet. Use /hb save {barNumber}.");
                 return;
             }
 
-            Item[] allItems = player.inventory.AllItems();
+            List<Item> allItems = GetInventoryItems(player);
             Dictionary<string, Item> itemsByUid = allItems
                 .Where(item => item != null)
                 .GroupBy(item => item.uid.ToString())
@@ -589,7 +632,7 @@ namespace Oxide.Plugins
                     Button =
                     {
                         Color = active ? _config.GuiActiveColor : _config.GuiInactiveColor,
-                        Command = $"hotbar.load {barNumber}"
+                        Command = $"hb.load {barNumber}"
                     },
                     RectTransform =
                     {
@@ -607,7 +650,7 @@ namespace Oxide.Plugins
 
             elements.Add(new CuiButton
             {
-                Button = { Color = "0.65 0.18 0.18 0.95", Command = "hotbar.close" },
+                Button = { Color = "0.65 0.18 0.18 0.95", Command = "hb.close" },
                 RectTransform = { AnchorMin = "0.89 0.10", AnchorMax = "0.99 0.90" },
                 Text = { Text = "X", FontSize = 13, Align = TextAnchor.MiddleCenter }
             }, UiName);

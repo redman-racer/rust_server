@@ -7,7 +7,7 @@ using Newtonsoft.Json;
 
 namespace Oxide.Plugins
 {
-    [Info("Compound Options", "FastBurst", "1.4.5")]
+    [Info("Compound Options", "FastBurst", "1.4.6")]
     [Description("Compound, Bandit Camp, and Apartment Complex monument options")]
     class CompoundOptions : RustPlugin
     {
@@ -58,6 +58,14 @@ namespace Oxide.Plugins
                 if (entity is NPCVendingMachine)
                 {
                     var vending = entity as NPCVendingMachine;
+                    bool isApartment = IsApartmentEntity(vending);
+                    bool shouldRestore = isApartment
+                        ? configData.General.disableApartmentVendingMachines || configData.General.allowCustomApartmentVendingMachines
+                        : configData.General.disableCompoundVendingMachines || configData.General.allowCustomCompoundVendingMachines;
+
+                    if (!shouldRestore)
+                        continue;
+
                     if (configData.General.allowConsoleOutput)
                         Puts($"Restoring default orders for {vending.ShortPrefabName}");
                     if (HasNpcVendingOrders(vending) && defaultOrders.VendingMachinesOrders != null)
@@ -993,14 +1001,6 @@ namespace Oxide.Plugins
                 return;
             }
 
-            AddVendingOrders(vending, true);
-            AddVendingOrders(vending);
-            NextTick(() =>
-            {
-                vending.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
-                vending.SendNetworkUpdateImmediate();
-            });
-
             bool isApartment = IsApartmentEntity(vending);
             bool disableVending = isApartment
                 ? configData.General.disableApartmentVendingMachines
@@ -1008,6 +1008,20 @@ namespace Oxide.Plugins
             bool allowCustomOrders = isApartment
                 ? configData.General.allowCustomApartmentVendingMachines
                 : configData.General.allowCustomCompoundVendingMachines;
+
+            // CustomVendingSetup is the authoritative owner of Outpost prices when both
+            // Compound vending options are disabled. Do not capture, install, or restore
+            // sell orders in that mode.
+            if (!disableVending && !allowCustomOrders)
+            {
+                return;
+            }
+
+            if (allowCustomOrders)
+            {
+                AddVendingOrders(vending, true);
+                AddVendingOrders(vending);
+            }
 
             if (disableVending)
             {
@@ -1019,6 +1033,15 @@ namespace Oxide.Plugins
                 vending.vendingOrders.orders = GetNewOrders(vending);
                 vending.InstallFromVendingOrders();
             }
+
+            NextTick(() =>
+            {
+                if (vending == null || vending.IsDestroyed)
+                    return;
+
+                vending.SendNetworkUpdate(BasePlayer.NetworkQueue.Update);
+                vending.SendNetworkUpdateImmediate();
+            });
         }
 
         private NPCVendingOrder.Entry[] GetDefaultOrders(NPCVendingMachine vending)
@@ -1256,7 +1279,7 @@ namespace Oxide.Plugins
                 General = new ConfigData.GeneralSettings
                 {
                     allowConsoleOutput = true,
-                    allowCustomCompoundVendingMachines = true,
+                    allowCustomCompoundVendingMachines = false,
                     allowCustomApartmentVendingMachines = true,
                     disallowBanditNPC = false,
                     disallowCompoundNPC = false,
@@ -1310,6 +1333,13 @@ namespace Oxide.Plugins
             else if (configData.Version < new Core.VersionNumber(1, 4, 1))
             {
                 configData.ApartmentPricing.MasterKeyPrice = baseConfig.ApartmentPricing.MasterKeyPrice;
+            }
+
+            if (configData.Version < new Core.VersionNumber(1, 4, 6))
+            {
+                // CustomVendingSetup owns monument vending offers. Keeping this legacy
+                // writer enabled causes its saved Compound orders to win again on restart.
+                configData.General.allowCustomCompoundVendingMachines = false;
             }
 
             configData.Version = Version;

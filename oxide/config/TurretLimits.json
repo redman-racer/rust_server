@@ -11,6 +11,9 @@
       "Flame Turret": {
         "Maximum": 100
       },
+      "Outpost Sentry Turret": {
+        "Maximum": 6
+      },
       "Sam Site Turret": {
         "Maximum": 6
       },

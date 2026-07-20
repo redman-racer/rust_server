@@ -2,16 +2,19 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
+using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
 
-    [Info("Turret Limits", "Whispers88, gsuberland", "1.2.3")]
-    [Description("Limits the number of autoturrets, flame turrets, and shotgun traps that can be deployed per building.")]
+    [Info("Turret Limits", "Whispers88, gsuberland", "1.3.0")]
+    [Description("Limits auto turrets, Outpost sentries, flame turrets, shotgun traps, and SAM sites per building.")]
 
     class TurretLimits : RustPlugin
     {
+        [PluginReference]
+        private Plugin RaidlandsSentryTurrets;
+
         private const string AutoTurretPrefabString = "autoturret";
         private const string FlameTurretPrefabString = "flameturret";
         private const string ShotgunTrapPrefabString = "guntrap";
@@ -28,6 +31,8 @@ namespace Oxide.Plugins
             public static int ShotgunTrapLimit = 3;
 
             public static int SamSiteLimit = 3;
+
+            public static int OutpostSentryLimit = 6;
 
             public static bool DisableAllTurrets = false;
             public static bool AllowAdminBypass = false;
@@ -55,6 +60,8 @@ namespace Oxide.Plugins
 
             GetConfig(ref Configuration.SamSiteLimit, "Limits", "Individual Control", "Sam Site Turret", "Maximum");
 
+            GetConfig(ref Configuration.OutpostSentryLimit, "Limits", "Individual Control", "Outpost Sentry Turret", "Maximum");
+
 
             SaveConfig();
         }
@@ -79,7 +86,8 @@ namespace Oxide.Plugins
 
                 ["TurretLimitReached_ShotgunTrap"] = "Shotgun trap limit reached. You have already deployed {0} or more shotgun traps in this base.",
 
-                ["TurretLimitReached_SamSite"] = "Sam Site Turret limit reached. You have already deployed {0} or more shotgun traps in this base.",
+                ["TurretLimitReached_SamSite"] = "Sam Site Turret limit reached. This base already has {0} or more SAM sites.",
+                ["TurretLimitReached_OutpostSentry"] = "Outpost Sentry Turret limit reached. This base already has {0} or more Outpost sentries.",
             }, this);
         }
 
@@ -117,14 +125,24 @@ namespace Oxide.Plugins
                     throw new Exception("Somehow multiple turret types were detected.");
                 }
                 var player = planner.GetOwnerPlayer();
+                if (player == null)
+                {
+                    return null;
+                }
+
                 if (!player.IsBuildingAuthed() || !target.entity?.GetBuildingPrivilege())
                 {
                     SendReply(player, lang.GetMessage("CannotDeployWithoutTC", this, player.IPlayer.Id));
                     return false;
                 }
                 var cupboard = target.entity?.GetBuildingPrivilege();
-                var building = cupboard.GetBuilding();
-                List<BaseEntity> nearby = new List<BaseEntity>();
+                var building = cupboard?.GetBuilding();
+                if (building == null)
+                {
+                    SendReply(player, lang.GetMessage("CannotDeployWithoutTC", this, player.IPlayer.Id));
+                    return false;
+                }
+
                 if (Configuration.AllowAdminBypass && player.IsAdmin)
                 {
                     SendReply(player, lang.GetMessage("NoAdminLimits", this, player.IPlayer.Id));
@@ -135,7 +153,7 @@ namespace Oxide.Plugins
                 if (Configuration.DisableAllTurrets)
                 {
                     SendReply(player, lang.GetMessage("TurretsDisabled", this, player.IPlayer.Id));
-                    return null;
+                    return false;
                 }
 
                 if (isFlameTurret)
@@ -158,31 +176,36 @@ namespace Oxide.Plugins
                 }
                 else if (isAutoTurret)
                 {
+                    bool isOutpostSentry = RaidlandsSentryTurrets?.Call("API_IsRaidlandsSentryItem", planner, player) as bool? == true;
                     int turrets = 0;
-                    Vis.Entities(player.transform.position, 30f, nearby, LayerMask.GetMask("Deployed"), QueryTriggerInteraction.Ignore);
-                    if (nearby == null) return null;
-                    foreach (var ent in nearby.Distinct().ToList())
+                    foreach (var ent in BaseNetworkable.serverEntities.OfType<AutoTurret>())
                     {
-                        if (ent is AutoTurret && ent.GetBuildingPrivilege().GetBuilding().ID == building.ID)
+                        if (ent == null || ent.IsDestroyed || ent.GetBuildingPrivilege()?.buildingID != building.ID)
+                        {
+                            continue;
+                        }
+
+                        bool managedOutpostSentry = RaidlandsSentryTurrets?.Call("API_IsRaidlandsManagedSentry", ent) as bool? == true;
+                        if (isOutpostSentry ? managedOutpostSentry : !managedOutpostSentry && !(ent is NPCAutoTurret))
                         {
                             turrets++;
                         }
-
                     }
-                    if (turrets >= Configuration.AutoTurretLimit)
+
+                    int limit = isOutpostSentry ? Configuration.OutpostSentryLimit : Configuration.AutoTurretLimit;
+                    if (turrets >= limit)
                     {
-                        SendReply(player, lang.GetMessage("TurretLimitReached_AutoTurret", this, player.IPlayer.Id), (turrets));
+                        string messageKey = isOutpostSentry ? "TurretLimitReached_OutpostSentry" : "TurretLimitReached_AutoTurret";
+                        SendReply(player, lang.GetMessage(messageKey, this, player.IPlayer.Id), turrets);
                         return false;
                     }
                 }
                 else if (isSamSite)
                 {
                     int samsites = 0;
-                    Vis.Entities(player.transform.position, 30f, nearby, LayerMask.GetMask("Deployed"), QueryTriggerInteraction.Ignore);
-                    if (nearby == null) return null;
-                    foreach (var ent in nearby.Distinct().ToList())
+                    foreach (var ent in BaseNetworkable.serverEntities.OfType<SamSite>())
                     {
-                        if (ent is SamSite && ent.GetBuildingPrivilege().GetBuilding().ID == building.ID)
+                        if (ent != null && !ent.IsDestroyed && ent.GetBuildingPrivilege()?.buildingID == building.ID)
                         {
                             samsites++;
                         }

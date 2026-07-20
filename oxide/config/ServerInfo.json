@@ -78,8 +78,8 @@
         "Pages": [],
         "SubTabs": [
           {
-            "ButtonText": "Common",
-            "HeaderText": "COMMON COMMANDS",
+            "ButtonText": "Essentials",
+            "HeaderText": "ESSENTIAL PLAYER COMMANDS",
             "Pages": [
               {
                 "TextLines": [
@@ -113,8 +113,8 @@
             "OxideGroup": ""
           },
           {
-            "ButtonText": "Travel",
-            "HeaderText": "TRAVEL AND HOMES",
+            "ButtonText": "Teleports",
+            "HeaderText": "TELEPORTS AND HOMES",
             "Pages": [
               {
                 "TextLines": [
@@ -159,8 +159,8 @@
             "OxideGroup": ""
           },
           {
-            "ButtonText": "Base",
-            "HeaderText": "BASE, BUILDING, AND DEFENSE",
+            "ButtonText": "Building",
+            "HeaderText": "BUILDING AND BASE MANAGEMENT",
             "Pages": [
               {
                 "TextLines": [
@@ -206,8 +206,8 @@
             "OxideGroup": ""
           },
           {
-            "ButtonText": "Econ",
-            "HeaderText": "ECONOMY AND PROGRESSION",
+            "ButtonText": "Rewards",
+            "HeaderText": "KITS, REWARDS, AND PROGRESSION",
             "Pages": [
               {
                 "TextLines": [
@@ -251,7 +251,7 @@
           },
           {
             "ButtonText": "Social",
-            "HeaderText": "SOCIAL, CLANS, AND LINKING",
+            "HeaderText": "CLANS, CHAT, TRADING, AND LINKING",
             "Pages": [
               {
                 "TextLines": [
@@ -296,8 +296,8 @@
             "OxideGroup": ""
           },
           {
-            "ButtonText": "Combat",
-            "HeaderText": "COMBAT AND SERVER FEEDBACK",
+            "ButtonText": "PvP",
+            "HeaderText": "PVP, RAIDING, AND WIPE INFORMATION",
             "Pages": [
               {
                 "TextLines": [
@@ -328,7 +328,7 @@
           },
           {
             "ButtonText": "Vehicles",
-            "HeaderText": "VEHICLE COMMANDS",
+            "HeaderText": "PERSONAL VEHICLE COMMANDS",
             "Pages": [
               {
                 "TextLines": [
@@ -372,8 +372,8 @@
             "OxideGroup": ""
           },
           {
-            "ButtonText": "Utility",
-            "HeaderText": "UTILITY COMMANDS",
+            "ButtonText": "Utilities",
+            "HeaderText": "PLAYER UTILITIES",
             "Pages": [
               {
                 "TextLines": [
@@ -420,7 +420,7 @@
           },
           {
             "ButtonText": "Staff",
-            "HeaderText": "STAFF AND INTEGRATION COMMANDS",
+            "HeaderText": "STAFF AND ADMINISTRATION TOOLS",
             "Pages": [
               {
                 "TextLines": [
@@ -540,8 +540,8 @@
     ],
     "CommandCatalog": [
       {
-        "ButtonText": "Common",
-        "HeaderText": "COMMON COMMANDS",
+        "ButtonText": "Essentials",
+        "HeaderText": "ESSENTIAL PLAYER COMMANDS",
         "Commands": [
           {
             "Enabled": true,
@@ -844,8 +844,8 @@
         ]
       },
       {
-        "ButtonText": "Travel",
-        "HeaderText": "TRAVEL AND HOMES",
+        "ButtonText": "Teleports",
+        "HeaderText": "TELEPORTS AND HOMES",
         "Commands": [
           {
             "Enabled": true,
@@ -1169,8 +1169,8 @@
         ]
       },
       {
-        "ButtonText": "Base",
-        "HeaderText": "BASE, BUILDING, AND DEFENSE",
+        "ButtonText": "Building",
+        "HeaderText": "BUILDING AND BASE MANAGEMENT",
         "Commands": [
           {
             "Enabled": true,
@@ -1458,8 +1458,8 @@
         ]
       },
       {
-        "ButtonText": "Econ",
-        "HeaderText": "ECONOMY AND PROGRESSION",
+        "ButtonText": "Rewards",
+        "HeaderText": "KITS, REWARDS, AND PROGRESSION",
         "Commands": [
           {
             "Enabled": true,
@@ -1626,7 +1626,7 @@
       },
       {
         "ButtonText": "Social",
-        "HeaderText": "SOCIAL, CLANS, AND LINKING",
+        "HeaderText": "CLANS, CHAT, TRADING, AND LINKING",
         "Commands": [
           {
             "Enabled": true,
@@ -1875,8 +1875,8 @@
         ]
       },
       {
-        "ButtonText": "Combat",
-        "HeaderText": "COMBAT AND SERVER FEEDBACK",
+        "ButtonText": "PvP",
+        "HeaderText": "PVP, RAIDING, AND WIPE INFORMATION",
         "Commands": [
           {
             "Enabled": true,
@@ -2000,7 +2000,7 @@
       },
       {
         "ButtonText": "Vehicles",
-        "HeaderText": "VEHICLE COMMANDS",
+        "HeaderText": "PERSONAL VEHICLE COMMANDS",
         "Commands": [
           {
             "Enabled": true,
@@ -2203,8 +2203,8 @@
         ]
       },
       {
-        "ButtonText": "Utility",
-        "HeaderText": "UTILITY COMMANDS",
+        "ButtonText": "Utilities",
+        "HeaderText": "PLAYER UTILITIES",
         "Commands": [
           {
             "Enabled": true,
@@ -2533,7 +2533,7 @@
       },
       {
         "ButtonText": "Staff",
-        "HeaderText": "STAFF AND INTEGRATION COMMANDS",
+        "HeaderText": "STAFF AND ADMINISTRATION TOOLS",
         "Commands": [
           {
             "Enabled": true,
@@ -3280,9 +3280,10 @@
       "admin",
       "owner"
     ],
-    "CommandCatalogUsesPluginLoadedChecks": false,
-    "CommandCatalogUsesPermissionChecks": false,
-    "CommandCatalogAdminsBypassPermissionChecks": true,
+    "CommandCatalogUsesPluginLoadedChecks": true,
+    "CommandCatalogUsesPermissionChecks": true,
+    "CommandCatalogAdminsBypassPermissionChecks": false,
+    "CommandCatalogVersion": 0,
     "ShowInfoOnPlayerInit": true,
     "ShowInfoOnlyOncePerRuntime": true,
     "TabToOpenByDefault": 0,

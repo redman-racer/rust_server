@@ -8,7 +8,7 @@ using Oxide.Core;
 
 namespace Oxide.Plugins
 {
-    [Info("Auto Pickup Barrel", "l3rady", "1.3")]
+    [Info("Auto Pickup Barrel", "l3rady/Raidlands", "1.3.1")]
     [Description("Allows players to pick up dropped loot from barrels and road signs on destroy automatically.")]
 
     public class AutoPickupBarrel : RustPlugin
@@ -178,16 +178,28 @@ namespace Oxide.Plugins
             {
                 NextTick(() =>
                 {
+                    // Multiple damage hooks can queue this callback before the first one
+                    // destroys the barrel. Never dispatch death hooks or Kill twice.
+                    if (LootEntContainer == null || LootEntContainer.IsDestroyed)
+                    {
+                        return;
+                    }
+
                     // Call the OnEntityDeath call back as some plugins hook this to award bonus for breaking barrels.
                     Interface.CallHook("OnEntityDeath", LootEntContainer, HitEntInfo);
+
+                    if (LootEntContainer == null || LootEntContainer.IsDestroyed)
+                    {
+                        return;
+                    }
 
                     // Kill the barrel/roadsign with or without gibs depending on permission
                     if (permission.UserHasPermission(player.UserIDString, $"AutoPickupBarrel.{AutoPickupPrefab}.NoGibs"))
                     {
-                        LootEntContainer?.Kill();
+                        LootEntContainer.Kill();
 
                     } else {
-                        LootEntContainer?.Kill(BaseNetworkable.DestroyMode.Gib);
+                        LootEntContainer.Kill(BaseNetworkable.DestroyMode.Gib);
 
                     }
                 });

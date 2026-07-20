@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Server Info", "FastBurst/Raidlands", "0.6.3")]
+    [Info("Server Info", "FastBurst/Raidlands", "0.7.0")]
     [Description("UI customizable server info with multiple tabs")]
     public sealed class ServerInfo : RustPlugin
     {
@@ -63,6 +63,7 @@ namespace Oxide.Plugins
             _settings = _settings ?? Settings.CreateDefault();
             _settings.StaffGroups = DistinctConfigValues(_settings.StaffGroups);
             _settings.AdminGroups = DistinctConfigValues(_settings.AdminGroups);
+            NormalizeCommandCatalog();
 
             foreach (var player in BasePlayer.activePlayerList)
                 AddHelpButton(player);
@@ -70,6 +71,208 @@ namespace Oxide.Plugins
             Config.Set("settings", _settings);
             SaveConfig();
         }
+
+        private void NormalizeCommandCatalog()
+        {
+            _settings.CommandCatalogUsesPluginLoadedChecks = true;
+            _settings.CommandCatalogUsesPermissionChecks = true;
+            _settings.CommandCatalogAdminsBypassPermissionChecks = false;
+
+            if (_settings.CommandCatalog == null)
+                return;
+
+            foreach (var command in _settings.CommandCatalog
+                .Where(category => category != null)
+                .SelectMany(category => category.Commands ?? new List<CommandEntry>())
+                .Where(command => command != null))
+            {
+                command.AdminBypassesPermissions = false;
+            }
+
+            if (_settings.CommandCatalogVersion >= 2)
+                return;
+
+            var categoryNames = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Common"] = new[] { "Essentials", "ESSENTIAL PLAYER COMMANDS" },
+                ["Travel"] = new[] { "Teleports", "TELEPORTS AND HOMES" },
+                ["Base"] = new[] { "Building", "BUILDING AND BASE MANAGEMENT" },
+                ["Econ"] = new[] { "Rewards", "KITS, REWARDS, AND PROGRESSION" },
+                ["Social"] = new[] { "Social", "CLANS, CHAT, TRADING, AND LINKING" },
+                ["Combat"] = new[] { "PvP", "PVP, RAIDING, AND WIPE INFORMATION" },
+                ["Vehicles"] = new[] { "Vehicles", "PERSONAL VEHICLE COMMANDS" },
+                ["Utility"] = new[] { "Utilities", "PLAYER UTILITIES" },
+                ["Staff"] = new[] { "Staff", "STAFF AND ADMINISTRATION TOOLS" }
+            };
+
+            foreach (var category in _settings.CommandCatalog.Where(value => value != null))
+            {
+                string[] names;
+                if (categoryNames.TryGetValue(category.ButtonText ?? string.Empty, out names))
+                {
+                    category.ButtonText = names[0];
+                    category.HeaderText = names[1];
+                }
+
+                foreach (var command in category.Commands ?? new List<CommandEntry>())
+                {
+                    ApplyCommandGuidance(command);
+                }
+            }
+
+            var essentials = _settings.CommandCatalog.FirstOrDefault(value => value != null && value.ButtonText == "Essentials");
+            if (essentials != null)
+            {
+                var essentialKeys = new HashSet<string>(new[] { "help", "commands", "info", "kit", "s", "tpr", "home", "clanhelp", "auth", "trade" }, StringComparer.OrdinalIgnoreCase);
+                essentials.Commands = essentials.Commands.Where(command => command != null && essentialKeys.Contains(command.Command ?? string.Empty)).ToList();
+            }
+
+            var pvp = _settings.CommandCatalog.FirstOrDefault(value => value != null && value.ButtonText == "PvP");
+            if (pvp != null)
+            {
+                pvp.Commands = pvp.Commands.Where(command => command != null &&
+                    !string.Equals(command.Command, "stats", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(command.Command, "leaderboard", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(command.Command, "gather", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(command.Command, "wipe", StringComparison.OrdinalIgnoreCase)).ToList();
+                pvp.Commands.Insert(0, CreateLeaderboardCommand());
+            }
+
+            _settings.CommandCatalogVersion = 2;
+        }
+
+        private static CommandEntry CreateLeaderboardCommand()
+        {
+            return new CommandEntry
+            {
+                Command = "lb",
+                Plugin = "RaidlandsLeaderboards",
+                Aliases = new List<string> { "lb", "leaderboard", "top", "stats" },
+                Description = "Open player and clan rankings. Usage: /lb; use /stats <player or Steam ID> for a profile.",
+                CheckPluginLoaded = true,
+                CheckPermissions = false
+            };
+        }
+
+        private static void ApplyCommandGuidance(CommandEntry command)
+        {
+            if (command == null || string.IsNullOrWhiteSpace(command.Command))
+                return;
+
+            string description;
+            if (CommandGuidance.TryGetValue(command.Command, out description))
+                command.Description = description;
+        }
+
+        private static readonly Dictionary<string, string> CommandGuidance = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["help"] = "Open the server help window. Usage: /help",
+            ["commands"] = "Open directly to this command index. Usage: /commands",
+            ["info"] = "Open the Raidlands server briefing. Usage: /info",
+            ["kit"] = "Browse or claim kits. Usage: /kit, then select an available kit.",
+            ["s"] = "Open the rewards shop. Usage: /s or /shop",
+            ["tpr"] = "Send a teleport request. Usage: /tpr <player>",
+            ["tpa"] = "Accept the latest teleport request. Usage: /tpa",
+            ["tpc"] = "Cancel your pending teleport. Usage: /tpc",
+            ["tpb"] = "Return to your previous teleport location. Usage: /tpb",
+            ["home"] = "Teleport to a saved home. Usage: /home <name>",
+            ["sethome"] = "Save your current position as a home. Usage: /sethome <name>",
+            ["listhomes"] = "List your saved homes. Usage: /listhomes",
+            ["removehome"] = "Delete one of your homes. Usage: /removehome <name>",
+            ["outpost"] = "Teleport to Outpost. Usage: /outpost",
+            ["bandit"] = "Teleport to Bandit Camp. Usage: /bandit",
+            ["tpt"] = "Toggle automatic team, clan, or friend teleport acceptance. Usage: /tpt",
+            ["tphelp"] = "Show teleport command help. Usage: /tphelp",
+            ["tpinfo"] = "Show your teleport limits and cooldowns. Usage: /tpinfo",
+            ["toggletpmarker"] = "Toggle teleport destination map markers. Usage: /toggletpmarker",
+            ["bgrade"] = "Choose automatic building upgrade grade. Usage: /bgrade <0-4>",
+            ["remove"] = "Start timed remover mode. Usage: /remove; look at an owned entity and attack it.",
+            ["bskin"] = "Choose the skin used for building blocks. Usage: /bskin",
+            ["skin"] = "Open the item skin selector for the held item. Usage: /skin",
+            ["br"] = "Toggle automatic base repair mode. Usage: /br",
+            ["tc"] = "View tool-cupboard ownership and limit information. Usage: /tc",
+            ["buildinglimits"] = "View your current entity and building limits. Usage: /buildinglimits",
+            ["ad"] = "Configure automatic door closing. Usage: /ad",
+            ["autoauth"] = "Configure automatic team, friend, and clan authorization. Usage: /autoauth",
+            ["sd"] = "Open Shared Doors controls. Usage: /sd",
+            ["turret"] = "Toggle the targeted turret. Usage: /turret while looking at it.",
+            ["turret.tc"] = "Toggle turrets covered by your TC. Usage: /turret.tc",
+            ["sam.tc"] = "Toggle SAM sites covered by your TC. Usage: /sam.tc",
+            ["playtime"] = "View your tracked playtime or the server top list. Usage: /playtime [top]",
+            ["refer"] = "Submit your one-time player referral. Usage: /refer <player>",
+            ["srnpc"] = "Open Server Rewards NPC controls when permitted. Usage: /srnpc",
+            ["xp"] = "Manage Server Rewards points when permitted. Usage: /xp, then follow the displayed subcommand help.",
+            ["clearrpdata"] = "Clear stored reward-point data. Usage: /clearrpdata (admin only).",
+            ["bpunlock"] = "Manage player blueprints. Usage: /bpunlock <player>; related tools include /bpreset and /bpremove.",
+            ["clanhelp"] = "Display available clan commands. Usage: /clanhelp",
+            ["clan"] = "Open clan management. Usage: /clan",
+            ["c"] = "Send a message to clan chat. Usage: /c <message>",
+            ["a"] = "Send a message to allied clans. Usage: /a <message>",
+            ["ally"] = "Manage clan alliances. Usage: /ally <invite|accept|decline|cancel> <clan>",
+            ["cinfo"] = "View clan details and members. Usage: /cinfo [clan tag]",
+            ["pm"] = "Send a private message. Usage: /pm <player> <message>; reply with /r <message>.",
+            ["trade"] = "Send or manage a safe trade request. Usage: /trade <player> or /trade accept",
+            ["trade accept"] = "Accept the pending trade request. Usage: /trade accept",
+            ["auth"] = "Link your Steam account to Discord. Usage: /auth",
+            ["deauth"] = "Remove your Discord account link. Usage: /deauth",
+            ["chat"] = "Open BetterChat administration when permitted. Usage: /chat",
+            ["dn"] = "Open Death Notes settings or help. Usage: /dn",
+            ["fr"] = "Use the RocketFire feature when permitted. Usage: /fr",
+            ["mymini"] = "Spawn your personal minicopter. Usage: /mymini",
+            ["fmini"] = "Fetch your minicopter to your position. Usage: /fmini",
+            ["nomini"] = "Despawn your minicopter. Usage: /nomini",
+            ["myheli"] = "Spawn your personal scrap transport helicopter. Usage: /myheli",
+            ["fheli"] = "Fetch your scrap transport helicopter. Usage: /fheli",
+            ["noheli"] = "Despawn your scrap transport helicopter. Usage: /noheli",
+            ["myattack"] = "Spawn your personal attack helicopter. Usage: /myattack",
+            ["fattack"] = "Fetch your attack helicopter. Usage: /fattack",
+            ["noattack"] = "Despawn your attack helicopter. Usage: /noattack",
+            ["backpack"] = "Open your personal backpack. Usage: /backpack",
+            ["backpack.next"] = "Open the next backpack page. Usage: /backpack.next",
+            ["backpack.previous"] = "Open the previous backpack page. Usage: /backpack.previous",
+            ["backpack.fetch"] = "Move backpack contents to your inventory when permitted. Usage: /backpack.fetch",
+            ["backpackgui"] = "Toggle the backpack HUD button. Usage: /backpackgui",
+            ["backpack.setgathermode"] = "Choose which gathered items enter your backpack. Usage: /backpack.setgathermode",
+            ["backpack.ui.togglegather"] = "Toggle backpack gather mode from the UI. Usage: /backpack.ui.togglegather",
+            ["backpack.ui.toggleretrieve"] = "Toggle backpack retrieval behavior. Usage: /backpack.ui.toggleretrieve",
+            ["viewbackpack"] = "Inspect another player's backpack. Usage: /viewbackpack <player or Steam ID>",
+            ["backpack.erase"] = "Erase a player's stored backpack. Usage: /backpack.erase <player or Steam ID>",
+            ["backpack.resize"] = "Change backpack capacity. Usage: /backpack.setsize <player> <size> or /backpack.addsize <player> <amount>.",
+            ["tod"] = "View current day and night settings. Usage: /tod",
+            ["sl"] = "Toggle the on-screen server logo. Usage: /sl",
+            ["ismelt"] = "Toggle instant-smelt behavior when permitted. Usage: /ismelt",
+            ["sortbutton"] = "Configure inventory sort-button behavior. Usage: /sortbutton",
+            ["tp"] = "Staff teleport tools. Usage: /tp <player>, /tp <player> <target>, or /tp <x> <y> <z>.",
+            ["homeadmin"] = "Inspect or clean player homes. Usage: /homehomes <player>; also /radiushome, /deletehome, /tphome, and /wipehomes.",
+            ["teleport.console"] = "Run advanced teleport tools. Usage: /teleport.toplayer, /teleport.topos, or /teleport.importhomes with the required arguments.",
+            ["ban"] = "Ban a player with a recorded reason. Usage: /ban <player or Steam ID> <reason>",
+            ["unban"] = "Remove a player ban. Usage: /unban <Steam ID>",
+            ["sa.check"] = "Run ServerArmour player checks and reports. Usage: /sa.check <player>",
+            ["sa.radar"] = "Toggle ServerArmour radar when permitted. Usage: /sa.radar",
+            ["arkan"] = "Open Arkan anti-cheat reports. Usage: /arkan or a listed report alias followed by its target.",
+            ["arkan.data"] = "Save, load, or clear Arkan data. Usage: /arkansave, /arkanload, or /arkanclear.",
+            ["guardian"] = "Open Guardian command help. Usage: /guardian or /g.help",
+            ["guardian.config"] = "View or edit Guardian configuration. Usage: /g.config",
+            ["guardian.ip"] = "Run Guardian IP tools. Usage: /g.ip <address or player>",
+            ["guardian.server"] = "Run Guardian server checks or view logs. Usage: /g.server or /g.log",
+            ["guardian.tp"] = "Use Guardian teleport tools. Usage: /g.tp <player> or /g.tpv <player>",
+            ["guardian.user"] = "Run a Guardian user check. Usage: /g.user <player or Steam ID>",
+            ["guardian.vpn"] = "Run a Guardian VPN check. Usage: /g.vpn <player or IP>",
+            ["god"] = "Toggle god mode for yourself or a target. Usage: /god [player]",
+            ["gods"] = "List players currently using god mode. Usage: /gods",
+            ["betterloot"] = "Open BetterLoot administration and data tools. Usage: /looty",
+            ["fancydrop"] = "Run administrative airdrop controls; use the listed subcommand and required target.",
+            ["timeofday.admin"] = "Manage day/night length, skipping, and time freezing with the listed commands.",
+            ["lockedcratetimer.conf"] = "Open locked-crate timer configuration. Usage: /lockedcratetimer.conf",
+            ["stacksizecontroller"] = "Manage stack sizes; use a listed subcommand followed by an item or category and size.",
+            ["dw"] = "Run Discord wipe notification administration. Usage: /dw, then follow its subcommand help.",
+            ["dcr.forcecheck"] = "Force a Discord role synchronization check. Usage: /dcr.forcecheck <player or Steam ID>",
+            ["placeholderapi"] = "List or test placeholders. Usage: /placeholderapi.list or /placeholderapi.test <placeholder>.",
+            ["customvendingsetup.ui"] = "Open the custom vending-machine editor. Usage: /customvendingsetup.ui while looking at a vending machine.",
+            ["testmessage"] = "Send the entity-limit test message. Usage: /testmessage",
+            ["ptt.restorenames"] = "Restore names stored by Playtime Tracker. Usage: /ptt.restorenames",
+            ["backpack.debug"] = "Run backpack diagnostics. Usage: /backpack.debug.size, /backpack.debug.capacity, or /backpack.debug.gather."
+        };
 
         void Unload()
         {
@@ -1250,9 +1453,10 @@ namespace Oxide.Plugins
                 CommandCatalog = new List<CommandCategory>();
                 StaffGroups = new List<string> { "admin", "moderator", "staff", "owner" };
                 AdminGroups = new List<string> { "admin", "owner" };
-                CommandCatalogUsesPluginLoadedChecks = false;
-                CommandCatalogUsesPermissionChecks = false;
-                CommandCatalogAdminsBypassPermissionChecks = true;
+                CommandCatalogUsesPluginLoadedChecks = true;
+                CommandCatalogUsesPermissionChecks = true;
+                CommandCatalogAdminsBypassPermissionChecks = false;
+                CommandCatalogVersion = 2;
                 ShowInfoOnPlayerInit = true;
                 ShowInfoOnlyOncePerRuntime = true;
                 TabToOpenByDefault = 0;
@@ -1289,6 +1493,7 @@ namespace Oxide.Plugins
             public bool CommandCatalogUsesPluginLoadedChecks { get; set; }
             public bool CommandCatalogUsesPermissionChecks { get; set; }
             public bool CommandCatalogAdminsBypassPermissionChecks { get; set; }
+            public int CommandCatalogVersion { get; set; }
             public bool ShowInfoOnPlayerInit { get; set; }
             public bool ShowInfoOnlyOncePerRuntime { get; set; }
 

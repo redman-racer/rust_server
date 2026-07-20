@@ -1,0 +1,16 @@
+{
+  "ApiBaseUrl": "https://raidlands.net",
+  "ServerId": "raidlands-main",
+  "SharedSecret": "${WEBSITE_VIP_SHARED_SECRET}",
+  "ExchangeIntervalSeconds": 30,
+  "RequestTimeoutSeconds": 20,
+  "MaximumBodyBytes": 1048576,
+  "StartupDelaySeconds": 10,
+  "MaximumBackoffSeconds": 300,
+  "VipModuleIntervalSeconds": 60,
+  "MapModuleIntervalSeconds": 120,
+  "ClanModuleIntervalSeconds": 30,
+  "SlowMapModuleIntervalSeconds": 300,
+  "SlowModuleThresholdMilliseconds": 75,
+  "AllowInsecureHttpForDevelopment": false
+}

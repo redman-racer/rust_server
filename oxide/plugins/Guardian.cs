@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Guardian", "WhiteDragon/Raidlands", "1.8.3")]
+    [Info("Guardian", "WhiteDragon/Raidlands", "1.8.4")]
     [Description("Protects the server from various annoyances, cheats, and macro attacks.")]
     class Guardian : CovalencePlugin
     {
@@ -10375,9 +10375,18 @@ namespace Oxide.Plugins
                 Load(userid).is_crippled;
 
             public static bool IsFriend(BasePlayer a, BasePlayer b) =>
-                IsFriend(a, b.userID);
-            public static bool IsFriend(BasePlayer player, ulong userid) =>
-                (_instance?.Friends?.Call<bool>("IsFriend", player.userID, userid) ?? false);
+                (a != null) && (b != null) && IsFriend(a, b.userID);
+            public static bool IsFriend(BasePlayer player, ulong userid)
+            {
+                if((player == null) || (userid == 0) || (_instance?.Friends == null))
+                {
+                    return false;
+                }
+
+                var result = _instance.Friends.Call("IsFriend", player.userID, userid);
+
+                return (result is bool) && (bool)result;
+            }
 
             public static bool IsInactive(BasePlayer player) =>
                 player.IsDead() || player.IsSleeping() || !player.IsConnected;

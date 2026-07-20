@@ -8,10 +8,11 @@ using Newtonsoft.Json.Linq;
 using Oxide.Core;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
+using Network;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-[Info("LiveAdmin", "Codex", "0.15.1")]
+[Info("LiveAdmin", "Codex", "0.16.1")]
 [Description("A live in-game staff admin panel for Rust/uMod servers.")]
 public class LiveAdmin : RustPlugin
 {
@@ -65,6 +66,12 @@ private const string PermChatManage = "liveadmin.chat.manage";
 private const string PermServerMaintenance = "liveadmin.server.maintenance";
 private const string PermServerMaintenanceBypass = "liveadmin.server.maintenance.bypass";
 private const string PermServerRestart = "liveadmin.server.restart";
+private const string PermBansView = "liveadmin.bans.view";
+private const string PermBansCreate = "liveadmin.bans.create";
+private const string PermBansTemporary = "liveadmin.bans.temporary";
+private const string PermBansRevoke = "liveadmin.bans.revoke";
+private const string PermCasesView = "liveadmin.cases.view";
+private const string PermCasesManage = "liveadmin.cases.manage";
 private StoredData storedData;
 private PluginConfig config;
 private readonly Dictionary<ulong, PanelState> states = new Dictionary<ulong, PanelState>();
@@ -95,6 +102,7 @@ public string PlayerDetailTab = "overview";
 public string StaffSubTab = "info";
 public string ChatSubTab = "monitor";
 public string ReportScope = "active";
+public string ModerationSubTab = "reports";
 public string StaffInventoryTab = "main";
 public bool StaffInventoryDetailOpen;
 public int StaffInventorySlot = -1;
@@ -110,16 +118,28 @@ public int ConfigPage;
 public int GroupDropdownPage;
 public int TicketPage;
 public int ChatPage;
+public int BanPage;
+public int CasePage;
 public string SelectedPlayerId;
 public string SelectedChatId;
 public string SelectedGroup;
 public string SelectedPlugin;
 public string SelectedConfigPlugin;
 public int SelectedReportId;
+public int SelectedCaseId;
 public string MuteDuration = "10m";
 public string MuteReason = "Staff action";
 public string NoteText = string.Empty;
 public string TicketNote = string.Empty;
+public string BanTargetId = string.Empty;
+public string BanDuration = "permanent";
+public string BanReason = "Banned by staff";
+public string CaseTargetId = string.Empty;
+public string CaseTitle = string.Empty;
+public string CaseSummary = string.Empty;
+public string CaseNote = string.Empty;
+public string BanFilter = string.Empty;
+public string CaseFilter = string.Empty;
 public string StaffReason = "Staff action";
 public string StaffMessage = "Please follow the server rules.";
 public string StaffItemShortname = "syringe.medical";
@@ -322,6 +342,8 @@ public List<ChatEntry> Chat = new List<ChatEntry>();
 public Dictionary<string, List<StaffNote>> Notes = new Dictionary<string, List<StaffNote>>();
 public List<TrackedMute> ActiveMutes = new List<TrackedMute>();
 public List<WarningEntry> Warnings = new List<WarningEntry>();
+public List<BanRecord> Bans = new List<BanRecord>();
+public List<ModerationCase> Cases = new List<ModerationCase>();
 public Dictionary<string, string> UserSkins = new Dictionary<string, string>();
 public Dictionary<string, PlayerProfile> PlayerProfiles = new Dictionary<string, PlayerProfile>();
 public string NextAutoWipeUtc;
@@ -339,6 +361,8 @@ public string ScheduledRestartUtc;
 public string ScheduledRestartReason;
 public string ScheduledRestartBy;
 public int NextReportId = 1;
+public int NextBanId = 1;
+public int NextCaseId = 1;
 }
 private class PlayerProfile
 {
@@ -411,6 +435,35 @@ public string TargetName;
 public string StaffId;
 public string StaffName;
 public string Reason;
+}
+private class BanRecord
+{
+public int Id;
+public string TargetId;
+public string TargetName;
+public string Reason;
+public string StaffId;
+public string StaffName;
+public string CreatedAt;
+public long ExpiresAtTicks;
+public bool Active = true;
+public string RevokedAt;
+public string RevokedBy;
+}
+private class ModerationCase
+{
+public int Id;
+public string TargetId;
+public string TargetName;
+public string Title;
+public string Summary;
+public string Status = "Open";
+public string CreatedAt;
+public string UpdatedAt;
+public string CreatedById;
+public string CreatedByName;
+public string AssignedTo;
+public List<TicketNote> Notes = new List<TicketNote>();
 }
 private class ReportEntry
 {
@@ -734,6 +787,7 @@ config.PlayerActions.RemoveAll(a => a != null && a.Label == "Mute 10m" && a.Comm
 MigratePlayerActions();
 DeduplicatePlayerActions();
 NormalizeRolePresets();
+MigrateModerationPresetPermissions();
 }
 private void MigrateConfig()
 {
@@ -744,6 +798,33 @@ AddMissingCommonPermissions();
 if (config.RolePresets == null || config.RolePresets.Count == 0) config.RolePresets = DefaultRolePresets();
 MigratePlayerActions();
 NormalizeRolePresets();
+MigrateModerationPresetPermissions();
+}
+private void MigrateModerationPresetPermissions()
+{
+if (config.RolePresets == null) return;
+foreach (var preset in config.RolePresets.Where(item => item != null))
+{
+if (preset.Permissions == null) preset.Permissions = new List<string>();
+var name = preset.Name ?? string.Empty;
+if (name.Equals("Owner", StringComparison.OrdinalIgnoreCase))
+{
+foreach (var permissionName in AllPermissionNames()) if (!preset.Permissions.Contains(permissionName)) preset.Permissions.Add(permissionName);
+continue;
+}
+if (name.IndexOf("Admin", StringComparison.OrdinalIgnoreCase) >= 0)
+{
+foreach (var permissionName in new[] { PermBansView, PermBansCreate, PermBansTemporary, PermBansRevoke, PermCasesView, PermCasesManage }) if (!preset.Permissions.Contains(permissionName)) preset.Permissions.Add(permissionName);
+}
+else if (name.Equals("Staff", StringComparison.OrdinalIgnoreCase) || name.Equals("Moderator", StringComparison.OrdinalIgnoreCase))
+{
+foreach (var permissionName in new[] { PermBansView, PermCasesView, PermCasesManage }) if (!preset.Permissions.Contains(permissionName)) preset.Permissions.Add(permissionName);
+}
+else if (name.Equals("Support Staff", StringComparison.OrdinalIgnoreCase) || name.Equals("Read Only", StringComparison.OrdinalIgnoreCase))
+{
+foreach (var permissionName in new[] { PermBansView, PermCasesView }) if (!preset.Permissions.Contains(permissionName)) preset.Permissions.Add(permissionName);
+}
+}
 }
 private void NormalizeConfigLists()
 {
@@ -866,6 +947,7 @@ storedData = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(Name);
 EnsureDataDefaults();
 Application.logMessageReceived += OnUnityLogMessage;
 StartMuteTimer();
+StartBanTimer();
 StartResourceMonitor();
 StartAutoWipeTimer();
 StartSpinTimer();
@@ -880,6 +962,8 @@ private void OnServerInitialized()
 {
 RegisterPermissions();
 ProcessExpiredMutes();
+ProcessExpiredBans();
+SyncNativeBans();
 SampleResources();
 EnsureNextAutoWipe();
 VerifyPendingWipe();
@@ -916,6 +1000,20 @@ LogPlayerActivity(player, "PlayerJoin", GetPlayerAddress(player));
 SaveData();
 RefreshOpenPanels("dashboard");
 ClearRuntimePlayerState(player);
+}
+private void OnUserBanned(string name, string id)
+{
+NextTick(SyncNativeBans);
+}
+private void OnUserUnbanned(string name, string id)
+{
+if (storedData?.Bans == null) return;
+foreach (var ban in storedData.Bans.Where(item => item != null && item.Active && item.TargetId == id))
+{
+ban.Active = false; ban.RevokedAt = Now(); ban.RevokedBy = "External unban";
+}
+SaveData();
+RefreshOpenPanels("reports");
 }
 private object OnPlayerChat(BasePlayer player, string message, ConVar.Chat.ChatChannel channel)
 {
@@ -1038,7 +1136,9 @@ PermStaffToolsTickets, PermServerInfo, PermServerQuickActions,
 PermServerWipeView, PermServerWipeManage, PermServerWipeForce,
 PermPluginsReload, PermPluginsConfigView, PermPluginsConfigEdit,
 PermPluginsConfigRestore, PermAuditView, PermAuditManage, PermChatView, PermChatManage,
-PermServerMaintenance, PermServerMaintenanceBypass, PermServerRestart
+PermServerMaintenance, PermServerMaintenanceBypass, PermServerRestart,
+PermBansView, PermBansCreate, PermBansTemporary, PermBansRevoke,
+PermCasesView, PermCasesManage
 };
 }
 private void SaveData()
@@ -1062,6 +1162,17 @@ if (storedData.Logs == null) storedData.Logs = new List<ActionLog>();
 if (storedData.Chat == null) storedData.Chat = new List<ChatEntry>();
 if (storedData.Notes == null) storedData.Notes = new Dictionary<string, List<StaffNote>>();
 if (storedData.ActiveMutes == null) storedData.ActiveMutes = new List<TrackedMute>();
+if (storedData.Bans == null) storedData.Bans = new List<BanRecord>();
+if (storedData.Cases == null) storedData.Cases = new List<ModerationCase>();
+foreach (var moderationCase in storedData.Cases.Where(item => item != null))
+{
+if (string.IsNullOrEmpty(moderationCase.Status)) moderationCase.Status = "Open";
+if (string.IsNullOrEmpty(moderationCase.CreatedAt)) moderationCase.CreatedAt = Now();
+if (string.IsNullOrEmpty(moderationCase.UpdatedAt)) moderationCase.UpdatedAt = moderationCase.CreatedAt;
+if (moderationCase.Notes == null) moderationCase.Notes = new List<TicketNote>();
+}
+storedData.NextBanId = Math.Max(storedData.NextBanId, storedData.Bans.Where(item => item != null).Select(item => item.Id).DefaultIfEmpty(0).Max() + 1);
+storedData.NextCaseId = Math.Max(storedData.NextCaseId, storedData.Cases.Where(item => item != null).Select(item => item.Id).DefaultIfEmpty(0).Max() + 1);
 if (storedData.Warnings == null) storedData.Warnings = new List<WarningEntry>();
 if (storedData.PlayerProfiles == null) storedData.PlayerProfiles = new Dictionary<string, PlayerProfile>();
 if (storedData.MaintenanceReason == null) storedData.MaintenanceReason = string.Empty;
@@ -1071,6 +1182,10 @@ if (string.IsNullOrEmpty(storedData.NextAutoWipeUtc)) storedData.NextAutoWipeUtc
 private void StartMuteTimer()
 {
 timer.Every(30f, ProcessExpiredMutes);
+}
+private void StartBanTimer()
+{
+timer.Every(30f, ProcessExpiredBans);
 }
 private void StartResourceMonitor()
 {
@@ -1540,8 +1655,8 @@ if (!CanAny(player, PermOwner, PermAuditManage))
 Reply(player, "You do not have access to LiveAdmin diagnostics.");
 return;
 }
-Reply(player, $"Version 0.14.0 | Config v{config.ConfigVersion} | Perms {registeredPermissions.Count}");
-Reply(player, $"Reports {storedData.Reports.Count} | Logs {storedData.Logs.Count} | Mutes {storedData.ActiveMutes.Count} | Panels {openPanels.Count}");
+Reply(player, $"Version 0.16.0 | Config v{config.ConfigVersion} | Perms {registeredPermissions.Count}");
+Reply(player, $"Reports {storedData.Reports.Count} | Cases {storedData.Cases.Count} | Bans {storedData.Bans.Count(item => item.Active)} | Logs {storedData.Logs.Count} | Mutes {storedData.ActiveMutes.Count} | Panels {openPanels.Count}");
 Reply(player, $"Frozen {frozenPositions.Count} | Passive {passivePlayers.Count} | Spinning {spinningPlayers.Count}");
 Reply(player, $"Backpacks {(Backpacks == null ? "missing" : "loaded")} | InventoryViewer {(InventoryViewer == null ? "missing" : "loaded")} | Vanish {(Vanish == null ? "missing" : "loaded")} | Godmode {(Godmode == null ? "missing" : "loaded")}");
 Reply(player, $"AutoWipe {config.AutoWipeEnabled} | Next {storedData.NextAutoWipeUtc} | SafeMode {config.SafeMode} | CommandSafety {config.EnableCommandSafety} | ForceDryRun {config.ForceWipeDryRunDefault}");
@@ -1581,6 +1696,10 @@ break;
 case "reportscope":
 state.ReportScope = CleanReportScope(Get(args, 1, "active"));
 state.TicketPage = 0;
+break;
+case "moderationtab":
+state.ModerationSubTab = Get(args, 1, "reports").ToLowerInvariant();
+if (state.ModerationSubTab != "bans" && state.ModerationSubTab != "cases") state.ModerationSubTab = "reports";
 break;
 case "consoletab":
 state.ConsoleTab = CleanConsoleTab(Get(args, 1, "all"));
@@ -1653,6 +1772,11 @@ state.PermissionPage = 0;
 break;
 case "selectreport":
 state.SelectedReportId = ToInt(Get(args, 1, "0"));
+state.Tab = "reports";
+break;
+case "selectcase":
+state.SelectedCaseId = ToInt(Get(args, 1, "0"));
+state.ModerationSubTab = "cases";
 state.Tab = "reports";
 break;
 case "selectchat":
@@ -2012,6 +2136,37 @@ else if (field == "grouptitle") state.GroupCreateTitle = value;
 else if (field == "grouprank") state.GroupCreateRank = value;
 Draw(player);
 }
+[ConsoleCommand("liveadmin.banfield")]
+private void BanFieldCommand(ConsoleSystem.Arg arg)
+{
+var player = arg.Player();
+if (player == null || !CanAny(player, PermOwner, PermBansCreate, PermBansTemporary)) return;
+var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
+if (args.Length == 0) return;
+var state = GetState(player);
+var field = args[0].ToLowerInvariant();
+var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : string.Empty;
+if (field == "target") state.BanTargetId = value;
+else if (field == "duration") state.BanDuration = value;
+else if (field == "reason") state.BanReason = value;
+Draw(player);
+}
+[ConsoleCommand("liveadmin.casefield")]
+private void CaseFieldCommand(ConsoleSystem.Arg arg)
+{
+var player = arg.Player();
+if (player == null || !CanAny(player, PermOwner, PermCasesManage)) return;
+var args = arg.Args == null ? new string[0] : arg.Args.Select(a => a.ToString()).ToArray();
+if (args.Length == 0) return;
+var state = GetState(player);
+var field = args[0].ToLowerInvariant();
+var value = args.Length > 1 ? string.Join(" ", args.Skip(1).ToArray()).Trim() : string.Empty;
+if (field == "target") state.CaseTargetId = value;
+else if (field == "title") state.CaseTitle = value;
+else if (field == "summary") state.CaseSummary = value;
+else if (field == "note") state.CaseNote = value;
+Draw(player);
+}
 [ConsoleCommand("liveadmin.registerperms")]
 private void RegisterPermsCommand(ConsoleSystem.Arg arg)
 {
@@ -2049,6 +2204,45 @@ break;
 case "ban":
 if (!CanBan(player) || BlockedBySafeMode(player, "ban", "Moderation") || IsRateLimited(player, "ban:" + target, 4.0) || !CanTargetPlayer(player, target, "ban")) return;
 RequireConfirm(player, "ban", target, "Banned by staff", $"Ban {NameOf(target)}?");
+break;
+case "createban":
+if (!CanAny(player, PermOwner, PermBansCreate) || BlockedBySafeMode(player, "createban", "Moderation") || IsRateLimited(player, "createban:" + state.BanTargetId, 3.0)) return;
+if (!IsValidSteamId(state.BanTargetId)) { Reply(player, "Enter a valid 17-digit Steam ID."); return; }
+if (!CanTargetPlayer(player, state.BanTargetId, "ban")) return;
+var requestedDuration = string.IsNullOrWhiteSpace(state.BanDuration) ? "permanent" : state.BanDuration.Trim();
+if (!IsPermanentDuration(requestedDuration) && !CanAny(player, PermOwner, PermBansTemporary)) { Reply(player, "You do not have permission to issue temporary bans."); return; }
+if (!TryParseBanDuration(requestedDuration, out var ignoredExpiry)) { Reply(player, "Duration must be permanent or a value such as 30m, 12h, 7d, or 2w."); return; }
+RequireConfirm(player, "createban", state.BanTargetId, requestedDuration + "||" + CleanCommandText(state.BanReason), $"Ban {NameOf(state.BanTargetId)} for {requestedDuration}?");
+break;
+case "revokeban":
+if (!CanAny(player, PermOwner, PermBansRevoke) || IsRateLimited(player, "revokeban:" + target, 2.0)) return;
+RequireConfirm(player, "revokeban", target, string.Empty, $"Revoke ban record #{target}?");
+break;
+case "createcase":
+if (!CanAny(player, PermOwner, PermCasesManage)) return;
+CreateModerationCase(player, state.CaseTargetId, state.CaseTitle, state.CaseSummary);
+break;
+case "casefromreport":
+if (!CanAny(player, PermOwner, PermCasesManage)) return;
+var sourceReport = storedData.Reports.FirstOrDefault(item => item != null && item.Id == ToInt(target));
+if (sourceReport != null)
+{
+CreateModerationCase(player, sourceReport.TargetId, $"Report #{sourceReport.Id}: {Shorten(sourceReport.Reason, 42)}", $"Escalated from report #{sourceReport.Id}. Reporter: {sourceReport.ReporterName}. {sourceReport.Reason}");
+state.ModerationSubTab = "cases";
+}
+break;
+case "casestatus":
+if (!CanAny(player, PermOwner, PermCasesManage)) return;
+SetCaseStatus(player, ToInt(target), value);
+break;
+case "caseassign":
+if (!CanAny(player, PermOwner, PermCasesManage)) return;
+AssignCase(player, ToInt(target));
+break;
+case "casenote":
+if (!CanAny(player, PermOwner, PermCasesManage)) return;
+AddCaseNote(player, ToInt(target), state.CaseNote);
+state.CaseNote = string.Empty;
 break;
 case "tpto":
 if (!Can(player, PermPlayersTeleport)) return;
@@ -2370,20 +2564,16 @@ Log(player, "Kick", target, value);
 }
 else if (action == "ban" && CanBan(player) && !BlockedBySafeMode(player, "ban", "Moderation") && CanTargetPlayer(player, target, "ban"))
 {
-var targetUserId = ToUlong(target);
-var targetPlayer = BasePlayer.FindByID(targetUserId) ?? BasePlayer.FindSleeping(targetUserId);
-if (targetUserId != 0)
-{
-if (targetUserId == player.userID)
-{
-Reply(player, "LiveAdmin will not ban your own active session from the panel.");
-return;
+ApplyBan(player, target, "permanent", value);
 }
-var targetName = targetPlayer?.displayName ?? NameOf(target);
-ServerUsers.Set(targetUserId, ServerUsers.UserGroup.Banned, targetName, value);
-if (targetPlayer != null && targetPlayer.IsConnected) targetPlayer.Kick(value);
-Log(player, "Ban", target, value);
+else if (action == "createban" && CanAny(player, PermOwner, PermBansCreate) && !BlockedBySafeMode(player, "createban", "Moderation"))
+{
+var parts = (value ?? string.Empty).Split(new[] { "||" }, 2, StringSplitOptions.None);
+ApplyBan(player, target, parts.Length > 0 ? parts[0] : "permanent", parts.Length > 1 ? parts[1] : "Banned by staff");
 }
+else if (action == "revokeban" && CanAny(player, PermOwner, PermBansRevoke))
+{
+RevokeBan(player, ToInt(target), false);
 }
 else if (action.StartsWith("plugin:") && CanReloadPlugins(player) && !BlockedBySafeMode(player, action, "Plugin"))
 {
@@ -2570,7 +2760,7 @@ DrawNavItem(container, player, state, "players", "assets/icons/occupied.png", "P
 DrawNavItem(container, player, state, "chat", "assets/icons/broadcast.png", "Chat", 0.645, ChatBadgeText());
 Label(container, $"{UiRoot}.Nav.ToolsLabel", $"{UiRoot}.Nav", "TOOLS", 7, "0.08 0.585", "0.92 0.625", TextAnchor.MiddleLeft);
 DrawNavItem(container, player, state, "staff", "assets/icons/authorize.png", "Staff Tools", 0.530);
-DrawNavItem(container, player, state, "reports", "assets/icons/warning.png", "Reports", 0.470, storedData.Reports.Count(r => r.Status != "Resolved").ToString());
+DrawNavItem(container, player, state, "reports", "assets/icons/warning.png", "Moderation", 0.470, (storedData.Reports.Count(r => r.Status != "Resolved") + storedData.Cases.Count(c => c != null && c.Status != "Closed")).ToString());
 DrawNavItem(container, player, state, "wipe", "assets/icons/refresh.png", "Wipe", 0.410);
 Label(container, $"{UiRoot}.Nav.ManageLabel", $"{UiRoot}.Nav", "MANAGEMENT", 7, "0.08 0.350", "0.92 0.390", TextAnchor.MiddleLeft);
 DrawNavItem(container, player, state, "manage", "assets/icons/workshop.png", "Manage", 0.295);
@@ -2610,7 +2800,7 @@ if (state.Tab == "players") return "players";
 if (state.Tab == "staff") return state.StaffSubTab == "groups" ? "staffgroups" : "staffplayers";
 if (state.Tab == "chat") return "chat";
 if (state.Tab == "console") return "console";
-if (state.Tab == "reports") return "reports";
+if (state.Tab == "reports") return state.ModerationSubTab == "bans" ? "bans" : state.ModerationSubTab == "cases" ? "cases" : "reports";
 if (state.Tab == "convars") return "convars";
 if (state.Tab == "manage" && state.SubTab == "groups") return "groups";
 if (state.Tab == "manage" && state.SubTab == "permissions") return "permissions";
@@ -2622,7 +2812,7 @@ private string CurrentFilterValue(PanelState state)
 if (state.Tab == "players" || state.Tab == "staff") return state.PlayerFilter;
 if (state.Tab == "chat") return state.ChatFilter;
 if (state.Tab == "console") return state.ConsoleFilter;
-if (state.Tab == "reports") return state.ReportFilter;
+if (state.Tab == "reports") return state.ModerationSubTab == "bans" ? state.BanFilter : state.ModerationSubTab == "cases" ? state.CaseFilter : state.ReportFilter;
 if (state.Tab == "convars") return state.ConVarFilter;
 if (state.Tab == "manage" && state.SubTab == "groups") return state.GroupFilter;
 if (state.Tab == "manage" && state.SubTab == "permissions") return state.PermissionFilter;
@@ -3615,7 +3805,14 @@ actionIndex++;
 }
 private void DrawReports(CuiElementContainer container, BasePlayer player, PanelState state)
 {
-Header(container, "Tickets");
+Header(container, "Moderation");
+if (!CanAny(player, PermReportsView, PermBansView, PermCasesView)) { NoAccess(container); return; }
+if (state.ModerationSubTab != "bans" && state.ModerationSubTab != "cases") state.ModerationSubTab = "reports";
+Button(container, $"{UiRoot}.Body.Moderation.Reports", $"{UiRoot}.Body", "Tickets", Can(player, PermReportsView) ? "liveadmin.ui moderationtab reports" : string.Empty, state.ModerationSubTab == "reports" ? config.AccentColor : "0.12 0.13 0.14 1", "0.70 0.925", "0.78 0.982", 8);
+Button(container, $"{UiRoot}.Body.Moderation.Cases", $"{UiRoot}.Body", "Cases", CanAny(player, PermOwner, PermCasesView) ? "liveadmin.ui moderationtab cases" : string.Empty, state.ModerationSubTab == "cases" ? config.AccentColor : "0.12 0.13 0.14 1", "0.79 0.925", "0.87 0.982", 8);
+Button(container, $"{UiRoot}.Body.Moderation.Bans", $"{UiRoot}.Body", "Bans", CanAny(player, PermOwner, PermBansView) ? "liveadmin.ui moderationtab bans" : string.Empty, state.ModerationSubTab == "bans" ? config.DangerColor : "0.12 0.13 0.14 1", "0.88 0.925", "0.96 0.982", 8);
+if (state.ModerationSubTab == "bans") { DrawBanCenter(container, player, state); return; }
+if (state.ModerationSubTab == "cases") { DrawCaseCenter(container, player, state); return; }
 if (!Can(player, PermReportsView)) { NoAccess(container); return; }
 state.ReportScope = CleanReportScope(state.ReportScope);
 Button(container, $"{UiRoot}.Body.Tickets.Scope.Active", $"{UiRoot}.Body", "Active", "liveadmin.ui reportscope active", state.ReportScope == "active" ? config.AccentColor : "0.12 0.13 0.14 1", "0.04 0.835", "0.15 0.895", 9);
@@ -3652,6 +3849,123 @@ return;
 }
 DrawTicketDetail(container, player, state, selected);
 }
+private void DrawBanCenter(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+if (!CanAny(player, PermOwner, PermBansView)) { NoAccess(container); return; }
+EnsureDataDefaults();
+var canCreate = CanAny(player, PermOwner, PermBansCreate);
+var canRevoke = CanAny(player, PermOwner, PermBansRevoke);
+Panel(container, $"{UiRoot}.Body.Bans.Create", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.72", "0.96 0.885");
+Label(container, $"{UiRoot}.Body.Bans.Create.Title", $"{UiRoot}.Body.Bans.Create", "ISSUE OFFLINE / ONLINE BAN", 10, "0.025 0.72", "0.30 0.96", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Bans.Create.TargetLabel", $"{UiRoot}.Body.Bans.Create", "Steam ID", 7, "0.025 0.46", "0.13 0.70", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Bans.Create.TargetBox", $"{UiRoot}.Body.Bans.Create", activeSkin.Input, "0.13 0.46", "0.39 0.70");
+Input(container, $"{UiRoot}.Body.Bans.Create.Target", $"{UiRoot}.Body.Bans.Create.TargetBox", state.BanTargetId, "liveadmin.banfield target", 8, "0.03 0", "0.97 1");
+Label(container, $"{UiRoot}.Body.Bans.Create.DurationLabel", $"{UiRoot}.Body.Bans.Create", "Duration", 7, "0.41 0.46", "0.50 0.70", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Bans.Create.DurationBox", $"{UiRoot}.Body.Bans.Create", activeSkin.Input, "0.50 0.46", "0.66 0.70");
+Input(container, $"{UiRoot}.Body.Bans.Create.Duration", $"{UiRoot}.Body.Bans.Create.DurationBox", state.BanDuration, "liveadmin.banfield duration", 8, "0.03 0", "0.97 1");
+Label(container, $"{UiRoot}.Body.Bans.Create.DurationHint", $"{UiRoot}.Body.Bans.Create", "permanent / 30m / 12h / 7d / 2w", 7, "0.68 0.46", "0.96 0.70", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Bans.Create.ReasonBox", $"{UiRoot}.Body.Bans.Create", activeSkin.Input, "0.025 0.10", "0.78 0.38");
+Input(container, $"{UiRoot}.Body.Bans.Create.Reason", $"{UiRoot}.Body.Bans.Create.ReasonBox", state.BanReason, "liveadmin.banfield reason", 8, "0.02 0", "0.98 1");
+Button(container, $"{UiRoot}.Body.Bans.Create.Apply", $"{UiRoot}.Body.Bans.Create", "Issue Ban", canCreate ? "liveadmin.ui act createban" : string.Empty, config.DangerColor, "0.81 0.10", "0.97 0.38", 9);
+var bans = storedData.Bans.Where(item => item != null && (MatchesFilter(item.TargetId, state.BanFilter) || MatchesFilter(item.TargetName, state.BanFilter) || MatchesFilter(item.Reason, state.BanFilter) || MatchesFilter(item.StaffName, state.BanFilter)))
+.OrderBy(item => item.Active ? 0 : 1).ThenByDescending(item => item.Id).ToList();
+DrawFilterStatus(container, $"{UiRoot}.Body", "Bans", state.BanFilter, "bans", "0.04 0.665", "0.96 0.71");
+Panel(container, $"{UiRoot}.Body.Bans.List", $"{UiRoot}.Body", "0.06 0.065 0.075 1", "0.04 0.10", "0.96 0.65");
+var pageSize = 7;
+state.BanPage = Math.Min(state.BanPage, Math.Max(0, (bans.Count - 1) / pageSize));
+var y = 0.86;
+foreach (var ban in bans.Skip(state.BanPage * pageSize).Take(pageSize))
+{
+var row = $"{UiRoot}.Body.Bans.Row.{ban.Id}";
+Panel(container, row, $"{UiRoot}.Body.Bans.List", ban.Active ? "0.24 0.08 0.07 0.92" : "0.09 0.10 0.11 0.92", $"0.025 {y}", $"0.975 {y + 0.095}");
+Label(container, $"{row}.Identity", row, $"#{ban.Id}  {Shorten(ban.TargetName, 20)}  {ban.TargetId}", 9, "0.02 0.50", "0.46 0.95", TextAnchor.MiddleLeft);
+Label(container, $"{row}.Meta", row, $"{(ban.Active ? BanExpiryText(ban) : "REVOKED")}  by {Shorten(ban.StaffName, 16)}  {Shorten(ban.Reason, 48)}", 7, "0.02 0.05", "0.78 0.50", TextAnchor.MiddleLeft);
+Button(container, $"{row}.Profile", row, "Profile", $"liveadmin.ui select {ban.TargetId}", config.AccentColor, "0.80 0.18", "0.88 0.82", 7);
+Button(container, $"{row}.Revoke", row, "Unban", ban.Active && canRevoke ? $"liveadmin.ui act revokeban {ban.Id}" : string.Empty, ban.Active ? config.SuccessColor : activeSkin.ButtonDisabled, "0.89 0.18", "0.98 0.82", 7);
+y -= 0.115;
+}
+MiniPager(container, $"{UiRoot}.Body.Bans.Pager", $"{UiRoot}.Body.Bans.List", state.BanPage, bans.Count, pageSize, "bans", "0.03 0.015", "0.97 0.095");
+}
+private void DrawCaseCenter(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+if (!CanAny(player, PermOwner, PermCasesView)) { NoAccess(container); return; }
+EnsureDataDefaults();
+var canManage = CanAny(player, PermOwner, PermCasesManage);
+var cases = storedData.Cases.Where(item => item != null && (MatchesFilter(item.TargetId, state.CaseFilter) || MatchesFilter(item.TargetName, state.CaseFilter) || MatchesFilter(item.Title, state.CaseFilter) || MatchesFilter(item.Summary, state.CaseFilter) || MatchesFilter(item.Status, state.CaseFilter)))
+.OrderBy(item => item.Status == "Closed" ? 1 : 0).ThenByDescending(item => item.Id).ToList();
+Panel(container, $"{UiRoot}.Body.Cases.Create", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.70", "0.96 0.885");
+Label(container, $"{UiRoot}.Body.Cases.Create.Heading", $"{UiRoot}.Body.Cases.Create", "OPEN A MODERATION CASE", 10, "0.025 0.72", "0.32 0.96", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Cases.Create.TargetLabel", $"{UiRoot}.Body.Cases.Create", "TARGET STEAM ID", 7, "0.025 0.48", "0.20 0.70", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Cases.Create.TargetBox", $"{UiRoot}.Body.Cases.Create", activeSkin.Input, "0.14 0.48", "0.35 0.70");
+Input(container, $"{UiRoot}.Body.Cases.Create.Target", $"{UiRoot}.Body.Cases.Create.TargetBox", state.CaseTargetId, "liveadmin.casefield target", 8, "0.03 0", "0.97 1");
+Label(container, $"{UiRoot}.Body.Cases.Create.TitleLabel", $"{UiRoot}.Body.Cases.Create", "CASE TITLE", 7, "0.37 0.48", "0.49 0.70", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Cases.Create.TitleBox", $"{UiRoot}.Body.Cases.Create", activeSkin.Input, "0.47 0.48", "0.78 0.70");
+Input(container, $"{UiRoot}.Body.Cases.Create.Title", $"{UiRoot}.Body.Cases.Create.TitleBox", state.CaseTitle, "liveadmin.casefield title", 8, "0.03 0", "0.97 1");
+Label(container, $"{UiRoot}.Body.Cases.Create.SummaryLabel", $"{UiRoot}.Body.Cases.Create", "SUMMARY", 7, "0.025 0.12", "0.14 0.38", TextAnchor.MiddleLeft);
+Panel(container, $"{UiRoot}.Body.Cases.Create.SummaryBox", $"{UiRoot}.Body.Cases.Create", activeSkin.Input, "0.14 0.12", "0.78 0.38");
+Input(container, $"{UiRoot}.Body.Cases.Create.Summary", $"{UiRoot}.Body.Cases.Create.SummaryBox", state.CaseSummary, "liveadmin.casefield summary", 8, "0.02 0", "0.98 1");
+Button(container, $"{UiRoot}.Body.Cases.Create.Apply", $"{UiRoot}.Body.Cases.Create", "Open Case", canManage ? "liveadmin.ui act createcase" : string.Empty, config.AccentColor, "0.81 0.12", "0.97 0.70", 9);
+DrawFilterStatus(container, $"{UiRoot}.Body", "Cases", state.CaseFilter, "cases", "0.04 0.635", "0.96 0.685");
+if (cases.Count == 0)
+{
+Panel(container, $"{UiRoot}.Body.Cases.Empty", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.10", "0.96 0.62");
+Label(container, $"{UiRoot}.Body.Cases.Empty.Title", $"{UiRoot}.Body.Cases.Empty", string.IsNullOrEmpty(state.CaseFilter) ? "No moderation cases yet" : "No cases match this filter", 14, "0.08 0.52", "0.92 0.66", TextAnchor.MiddleCenter);
+Label(container, $"{UiRoot}.Body.Cases.Empty.Hint", $"{UiRoot}.Body.Cases.Empty", string.IsNullOrEmpty(state.CaseFilter) ? "Open a case above or escalate an existing ticket to begin an investigation." : "Clear or change the Cases filter to see other investigations.", 9, "0.08 0.40", "0.92 0.52", TextAnchor.MiddleCenter);
+return;
+}
+Panel(container, $"{UiRoot}.Body.Cases.List", $"{UiRoot}.Body", "0.06 0.065 0.075 1", "0.04 0.10", "0.42 0.62");
+var pageSize = 6;
+state.CasePage = Math.Min(state.CasePage, Math.Max(0, (cases.Count - 1) / pageSize));
+var y = 0.80;
+foreach (var moderationCase in cases.Skip(state.CasePage * pageSize).Take(pageSize))
+{
+var color = moderationCase.Status == "Closed" ? "0.09 0.11 0.10 1" : moderationCase.Status == "Investigating" ? "0.20 0.15 0.06 1" : "0.09 0.15 0.22 1";
+Button(container, $"{UiRoot}.Body.Cases.Row.{moderationCase.Id}", $"{UiRoot}.Body.Cases.List", $"#{moderationCase.Id} [{moderationCase.Status}] {Shorten(moderationCase.TargetName, 16)}\n{Shorten(moderationCase.Title, 38)}", $"liveadmin.ui selectcase {moderationCase.Id}", color, $"0.03 {y}", $"0.97 {y + 0.105}", 8, TextAnchor.MiddleLeft);
+y -= 0.125;
+}
+MiniPager(container, $"{UiRoot}.Body.Cases.Pager", $"{UiRoot}.Body.Cases.List", state.CasePage, cases.Count, pageSize, "cases", "0.03 0.015", "0.97 0.095");
+var selected = cases.FirstOrDefault(item => item.Id == state.SelectedCaseId) ?? cases.FirstOrDefault();
+if (selected != null) state.SelectedCaseId = selected.Id;
+Panel(container, $"{UiRoot}.Body.Cases.Detail", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.45 0.10", "0.96 0.62");
+DrawCaseDetail(container, player, state, selected, canManage);
+}
+private void DrawCaseDetail(CuiElementContainer container, BasePlayer player, PanelState state, ModerationCase moderationCase, bool canManage)
+{
+var parent = $"{UiRoot}.Body.Cases.Detail";
+Label(container, $"{parent}.Title", parent, $"Case #{moderationCase.Id}: {Shorten(moderationCase.Title, 34)}", 13, "0.04 0.91", "0.72 0.99", TextAnchor.MiddleLeft);
+Label(container, $"{parent}.Status", parent, moderationCase.Status, 10, "0.74 0.91", "0.96 0.99", TextAnchor.MiddleRight);
+Label(container, $"{parent}.Target", parent, $"{moderationCase.TargetName}  {moderationCase.TargetId}", 8, "0.04 0.84", "0.72 0.91", TextAnchor.MiddleLeft);
+Button(container, $"{parent}.Profile", parent, "Profile", $"liveadmin.ui select {moderationCase.TargetId}", config.AccentColor, "0.78 0.84", "0.96 0.90", 7);
+Label(container, $"{parent}.Summary", parent, Shorten(moderationCase.Summary, 100), 8, "0.04 0.75", "0.96 0.83", TextAnchor.MiddleLeft);
+var reports = storedData.Reports.Count(item => item != null && item.TargetId == moderationCase.TargetId);
+var notes = storedData.Notes.TryGetValue(moderationCase.TargetId, out var playerNotes) && playerNotes != null ? playerNotes.Count : 0;
+var chats = storedData.Chat.Count(item => item != null && item.PlayerId == moderationCase.TargetId && (item.Blocked || item.Deleted));
+var warnings = storedData.Warnings.Count(item => item != null && item.TargetId == moderationCase.TargetId);
+var bans = storedData.Bans.Count(item => item != null && item.TargetId == moderationCase.TargetId);
+var punishments = storedData.Logs.Count(item => item != null && (item.Target == moderationCase.TargetId) && (item.Action == "Ban" || item.Action == "Kick" || item.Action == "Mute" || item.Action == "Warn"));
+Label(container, $"{parent}.Evidence", parent, $"EVIDENCE  Reports {reports}  Notes {notes}  Flagged chat {chats}  Warnings {warnings}  Bans {bans}  Punishments {punishments}", 8, "0.04 0.68", "0.96 0.75", TextAnchor.MiddleLeft);
+var recentReport = storedData.Reports.Where(item => item != null && item.TargetId == moderationCase.TargetId).OrderByDescending(item => item.Id).FirstOrDefault();
+var recentChat = storedData.Chat.Where(item => item != null && item.PlayerId == moderationCase.TargetId && (item.Blocked || item.Deleted)).OrderByDescending(item => item.Time).FirstOrDefault();
+var recentAction = storedData.Logs.Where(item => item != null && item.Target == moderationCase.TargetId).OrderByDescending(item => item.Time).FirstOrDefault();
+var evidencePreview = recentReport != null ? $"Report #{recentReport.Id}: {recentReport.Reason}" : recentChat != null ? $"Flagged chat: {recentChat.Message}" : recentAction != null ? $"Action: {recentAction.Action} {recentAction.Details}" : "No linked evidence captured yet.";
+Label(container, $"{parent}.EvidencePreview", parent, Shorten(evidencePreview, 92), 7, "0.04 0.635", "0.96 0.68", TextAnchor.MiddleLeft);
+Label(container, $"{parent}.Meta", parent, $"Opened {moderationCase.CreatedAt} by {moderationCase.CreatedByName}  Assigned {moderationCase.AssignedTo}", 7, "0.04 0.60", "0.96 0.635", TextAnchor.MiddleLeft);
+Button(container, $"{parent}.Assign", parent, "Assign Me", canManage ? $"liveadmin.ui act caseassign {moderationCase.Id}" : string.Empty, config.AccentColor, "0.04 0.53", "0.22 0.60", 7);
+Button(container, $"{parent}.Investigate", parent, "Investigate", canManage ? $"liveadmin.ui act casestatus {moderationCase.Id} Investigating" : string.Empty, config.WarningColor, "0.24 0.53", "0.45 0.60", 7);
+Button(container, $"{parent}.Close", parent, "Close", canManage ? $"liveadmin.ui act casestatus {moderationCase.Id} Closed" : string.Empty, config.SuccessColor, "0.47 0.53", "0.62 0.60", 7);
+Button(container, $"{parent}.Reopen", parent, "Reopen", canManage ? $"liveadmin.ui act casestatus {moderationCase.Id} Open" : string.Empty, activeSkin.Button, "0.64 0.53", "0.78 0.60", 7);
+Panel(container, $"{parent}.NoteBox", parent, activeSkin.Input, "0.04 0.42", "0.76 0.50");
+Input(container, $"{parent}.Note", $"{parent}.NoteBox", state.CaseNote, "liveadmin.casefield note", 8, "0.02 0", "0.98 1");
+Button(container, $"{parent}.NoteAdd", parent, "Add Note", canManage ? $"liveadmin.ui act casenote {moderationCase.Id}" : string.Empty, config.AccentColor, "0.79 0.42", "0.96 0.50", 7);
+var recent = (moderationCase.Notes ?? new List<TicketNote>()).OrderByDescending(item => item.Time).Take(3).ToList();
+var y = 0.31;
+foreach (var note in recent)
+{
+Panel(container, $"{parent}.Note.{SafeName(note.Time)}", parent, "0.10 0.11 0.12 1", $"0.04 {y}", $"0.96 {y + 0.08}");
+Label(container, $"{parent}.Note.{SafeName(note.Time)}.Text", $"{parent}.Note.{SafeName(note.Time)}", $"{note.Time} {note.StaffName}: {Shorten(note.Text, 66)}", 7, "0.02 0", "0.98 1", TextAnchor.MiddleLeft);
+y -= 0.095;
+}
+}
 private void DrawTicketRow(CuiElementContainer container, string parent, ReportEntry report, double y, bool compact)
 {
 var color = report.Status == "Resolved" ? "0.10 0.18 0.12 1" : report.Status == "Claimed" || report.Status == "Investigating" ? "0.13 0.18 0.28 1" : "0.25 0.18 0.09 1";
@@ -3674,7 +3988,8 @@ Button(container, $"{UiRoot}.Body.Tickets.Detail.ReporterProfile", $"{UiRoot}.Bo
 Button(container, $"{UiRoot}.Body.Tickets.Detail.ReporterTp", $"{UiRoot}.Body.Tickets.Detail", "TP Reporter", Can(player, PermPlayersTeleport) ? $"liveadmin.ui act tpto {report.ReporterId}" : string.Empty, config.WarningColor, "0.24 0.755", "0.38 0.81", 7);
 Button(container, $"{UiRoot}.Body.Tickets.Detail.TargetProfile", $"{UiRoot}.Body.Tickets.Detail", "Target Profile", $"liveadmin.ui select {report.TargetId}", config.AccentColor, "0.42 0.755", "0.60 0.81", 7);
 Button(container, $"{UiRoot}.Body.Tickets.Detail.TargetTp", $"{UiRoot}.Body.Tickets.Detail", "TP Target", Can(player, PermPlayersTeleport) ? $"liveadmin.ui act tpto {report.TargetId}" : string.Empty, config.WarningColor, "0.62 0.755", "0.76 0.81", 7);
-Label(container, $"{UiRoot}.Body.Tickets.Detail.Related", $"{UiRoot}.Body.Tickets.Detail", $"Related {storedData.Reports.Count(item => item.TargetId == report.TargetId)}   Warnings {storedData.Warnings.Count(item => item != null && item.TargetId == report.TargetId)}", 7, "0.78 0.755", "0.98 0.81", TextAnchor.MiddleRight);
+Button(container, $"{UiRoot}.Body.Tickets.Detail.MakeCase", $"{UiRoot}.Body.Tickets.Detail", "Open Case", CanAny(player, PermOwner, PermCasesManage) ? $"liveadmin.ui act casefromreport {report.Id}" : string.Empty, config.AccentColor, "0.78 0.755", "0.88 0.81", 7);
+Label(container, $"{UiRoot}.Body.Tickets.Detail.Related", $"{UiRoot}.Body.Tickets.Detail", $"Reports {storedData.Reports.Count(item => item.TargetId == report.TargetId)}  Warn {storedData.Warnings.Count(item => item != null && item.TargetId == report.TargetId)}", 7, "0.89 0.755", "0.99 0.81", TextAnchor.MiddleRight);
 Label(container, $"{UiRoot}.Body.Tickets.Detail.Reason", $"{UiRoot}.Body.Tickets.Detail", Shorten(report.Reason, 90), 9, "0.04 0.685", "0.96 0.745", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.Tickets.Detail.Meta", $"{UiRoot}.Body.Tickets.Detail", $"Age {ReportAgeText(report)}   Created {report.CreatedAt}   Updated {report.UpdatedAt}   Claimed {report.ClaimedBy}", 8, "0.04 0.635", "0.96 0.685", TextAnchor.MiddleLeft);
 Button(container, $"{UiRoot}.Body.Tickets.Detail.Claim", $"{UiRoot}.Body.Tickets.Detail", "Claim", canManage ? $"liveadmin.ui act reportstatus {report.Id} Claimed" : string.Empty, config.AccentColor, "0.04 0.57", "0.18 0.63", 8);
@@ -4561,7 +4876,7 @@ if (tab == "console") return CanUseQuickActions(player);
 if (tab == "players") return Can(player, PermPlayersView);
 if (tab == "staff") return CanAny(player, PermStaffToolsView, PermStaffToolsModerate, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups, PermStaffToolsTickets, PermStaffToolsFun, PermStaffToolsDangerous, PermPlayersInventoryView, PermPlayersNotes);
 if (tab == "chat") return CanViewChat(player);
-if (tab == "reports") return Can(player, PermReportsView);
+if (tab == "reports") return CanAny(player, PermReportsView, PermBansView, PermCasesView);
 if (tab == "manage") return Can(player, PermPluginsView) || Can(player, PermGroupsView) || Can(player, PermPermissionsView);
 if (tab == "convars") return CanEditServerInfo(player);
 if (tab == "wipe") return CanViewWipe(player);
@@ -4585,6 +4900,8 @@ if (target == "player") target = "players";
 if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
+if (target == "ban") target = "bans";
+if (target == "case") target = "cases";
 if (target == "chatmessage" || target == "chats") target = "chat";
 if (target == "console") target = "console";
 if (target == "convar") target = "convars";
@@ -4649,6 +4966,22 @@ state.Tab = "manage";
 state.SubTab = "plugins";
 return true;
 }
+if (target == "bans")
+{
+state.BanFilter = value;
+state.BanPage = 0;
+state.Tab = "reports";
+state.ModerationSubTab = "bans";
+return true;
+}
+if (target == "cases")
+{
+state.CaseFilter = value;
+state.CasePage = 0;
+state.Tab = "reports";
+state.ModerationSubTab = "cases";
+return true;
+}
 if (target == "configvalues")
 {
 state.ConfigFilter = value;
@@ -4690,6 +5023,8 @@ if (target == "player") target = "players";
 if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
+if (target == "ban") target = "bans";
+if (target == "case") target = "cases";
 if (target == "chatmessage" || target == "chats") target = "chat";
 if (target == "console") target = "console";
 if (target == "convar") target = "convars";
@@ -4702,6 +5037,8 @@ if (target == "all")
 {
 state.PlayerFilter = string.Empty;
 state.ReportFilter = string.Empty;
+state.BanFilter = string.Empty;
+state.CaseFilter = string.Empty;
 state.ChatFilter = string.Empty;
 state.ConsoleFilter = string.Empty;
 state.ConVarFilter = string.Empty;
@@ -4738,10 +5075,20 @@ else if (target == "staffgroups")
 state.GroupFilter = string.Empty;
 state.GroupPage = 0;
 }
-else if (target == "reports" || (target == "current" && state.Tab == "reports"))
+else if (target == "reports" || (target == "current" && state.Tab == "reports" && state.ModerationSubTab == "reports"))
 {
 state.ReportFilter = string.Empty;
 state.TicketPage = 0;
+}
+else if (target == "bans" || (target == "current" && state.Tab == "reports" && state.ModerationSubTab == "bans"))
+{
+state.BanFilter = string.Empty;
+state.BanPage = 0;
+}
+else if (target == "cases" || (target == "current" && state.Tab == "reports" && state.ModerationSubTab == "cases"))
+{
+state.CaseFilter = string.Empty;
+state.CasePage = 0;
 }
 else if (target == "chat" || (target == "current" && state.Tab == "chat"))
 {
@@ -4780,12 +5127,16 @@ state.PermissionPage = 0;
 state.GroupDropdownPage = 0;
 state.TicketPage = 0;
 state.ChatPage = 0;
+state.BanPage = 0;
+state.CasePage = 0;
 }
 private void ChangePage(PanelState state, string pageKey, int delta)
 {
 if (pageKey == "players") state.PlayerPage = Math.Max(0, state.PlayerPage + delta);
 else if (pageKey == "staffgroups") state.GroupPage = Math.Max(0, state.GroupPage + delta);
 else if (pageKey == "tickets") state.TicketPage = Math.Max(0, state.TicketPage + delta);
+else if (pageKey == "bans") state.BanPage = Math.Max(0, state.BanPage + delta);
+else if (pageKey == "cases") state.CasePage = Math.Max(0, state.CasePage + delta);
 else if (pageKey == "chat") state.ChatPage = Math.Max(0, state.ChatPage + delta);
 else if (pageKey == "plugins") state.PluginPage = Math.Max(0, state.PluginPage + delta);
 else if (pageKey == "config") state.ConfigPage = Math.Max(0, state.ConfigPage + delta);
@@ -6046,9 +6397,7 @@ Log(actor, "StaffKick", target.UserIDString, reason);
 else if (action == "ban")
 {
 if (BlockedBySafeMode(actor, "ban", "Moderation")) return;
-ServerUsers.Set(target.userID, ServerUsers.UserGroup.Banned, target.displayName, reason);
-target.Kick(reason);
-Log(actor, "StaffBan", target.UserIDString, reason);
+ApplyBan(actor, target.UserIDString, "permanent", reason);
 }
 SaveData();
 RefreshOpenPanels("staff");
@@ -6257,14 +6606,11 @@ return false;
 }
 private void OpenLootPanel(BasePlayer actor)
 {
+if (actor == null || actor.net?.connection == null) return;
 try
 {
-var method = typeof(BasePlayer).GetMethods().FirstOrDefault(m => m.Name == "ClientRPCPlayer" && m.GetParameters().Length == 4);
-if (method != null)
-{
-method.Invoke(actor, new object[] { null, actor, "RPC_OpenLootPanel", "generic" });
+actor.ClientRPC(RpcTarget.Player("RPC_OpenLootPanel", actor), "generic");
 return;
-}
 }
 catch
 {
@@ -6578,6 +6924,139 @@ RunUnmuteAction(mute);
 }
 storedData.ActiveMutes.RemoveAll(m => m == null || m.ExpiresAtTicks <= now);
 SaveData();
+}
+private bool IsValidSteamId(string value)
+{
+return !string.IsNullOrWhiteSpace(value) && value.Length == 17 && ulong.TryParse(value, out var id) && id >= 76561190000000000UL;
+}
+private bool IsPermanentDuration(string value)
+{
+return string.IsNullOrWhiteSpace(value) || value.Equals("permanent", StringComparison.OrdinalIgnoreCase) || value.Equals("perm", StringComparison.OrdinalIgnoreCase) || value == "0";
+}
+private bool TryParseBanDuration(string value, out DateTime expiresAt)
+{
+expiresAt = DateTime.MaxValue;
+if (IsPermanentDuration(value)) return true;
+var span = ParseDuration(value);
+if (span <= TimeSpan.Zero || span.TotalDays > 3650) return false;
+expiresAt = DateTime.UtcNow.Add(span);
+return true;
+}
+private string BanExpiryText(BanRecord ban)
+{
+if (ban == null || !ban.Active) return "REVOKED";
+if (ban.ExpiresAtTicks <= 0 || ban.ExpiresAtTicks == DateTime.MaxValue.Ticks) return "PERMANENT";
+var remaining = new DateTime(ban.ExpiresAtTicks, DateTimeKind.Utc) - DateTime.UtcNow;
+if (remaining <= TimeSpan.Zero) return "EXPIRING";
+if (remaining.TotalDays >= 1) return $"{Math.Ceiling(remaining.TotalDays):0}d left";
+if (remaining.TotalHours >= 1) return $"{Math.Ceiling(remaining.TotalHours):0}h left";
+return $"{Math.Max(1, Math.Ceiling(remaining.TotalMinutes)):0}m left";
+}
+private void ApplyBan(BasePlayer actor, string targetId, string duration, string reason)
+{
+if (!IsValidSteamId(targetId) || !TryParseBanDuration(duration, out var expiresAt)) { Reply(actor, "Invalid Steam ID or ban duration."); return; }
+var targetUserId = ToUlong(targetId);
+if (actor != null && targetUserId == actor.userID) { Reply(actor, "LiveAdmin will not ban your own active session."); return; }
+var targetPlayer = BasePlayer.FindByID(targetUserId) ?? BasePlayer.FindSleeping(targetUserId);
+var profile = GetPlayerProfile(targetId);
+var targetName = targetPlayer?.displayName ?? profile?.Name ?? targetId;
+reason = string.IsNullOrWhiteSpace(reason) ? "Banned by staff" : reason.Trim();
+ServerUsers.Set(targetUserId, ServerUsers.UserGroup.Banned, targetName, reason);
+if (targetPlayer != null && targetPlayer.IsConnected) targetPlayer.Kick(reason);
+storedData.Bans.RemoveAll(item => item != null && item.TargetId == targetId && item.Active);
+storedData.Bans.Add(new BanRecord
+{
+Id = storedData.NextBanId++, TargetId = targetId, TargetName = targetName, Reason = reason,
+StaffId = actor?.UserIDString ?? "server", StaffName = actor?.displayName ?? "Server",
+CreatedAt = Now(), ExpiresAtTicks = IsPermanentDuration(duration) ? DateTime.MaxValue.Ticks : expiresAt.Ticks, Active = true
+});
+Log(actor, "Ban", targetId, $"Duration={duration}; Reason={reason}");
+SaveData();
+RefreshOpenPanels("reports");
+}
+private void RevokeBan(BasePlayer actor, int banId, bool expired)
+{
+var ban = storedData.Bans.FirstOrDefault(item => item != null && item.Id == banId && item.Active);
+if (ban == null) return;
+ServerUsers.Remove(ToUlong(ban.TargetId));
+ban.Active = false;
+ban.RevokedAt = Now();
+ban.RevokedBy = expired ? "Automatic expiry" : actor?.displayName ?? "Server";
+Log(actor, expired ? "BanExpired" : "Unban", ban.TargetId, ban.Reason);
+SaveData();
+RefreshOpenPanels("reports");
+}
+private void ProcessExpiredBans()
+{
+if (storedData?.Bans == null) return;
+var now = DateTime.UtcNow.Ticks;
+foreach (var ban in storedData.Bans.Where(item => item != null && item.Active && item.ExpiresAtTicks > 0 && item.ExpiresAtTicks != DateTime.MaxValue.Ticks && item.ExpiresAtTicks <= now).ToList())
+RevokeBan(null, ban.Id, true);
+}
+private void SyncNativeBans()
+{
+EnsureDataDefaults();
+foreach (var user in ServerUsers.GetAll(ServerUsers.UserGroup.Banned).Where(item => item != null && !item.IsExpired))
+{
+var targetId = user.steamid.ToString();
+if (storedData.Bans.Any(item => item != null && item.Active && item.TargetId == targetId)) continue;
+var expires = user.expiry > 0 ? new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(user.expiry).Ticks : DateTime.MaxValue.Ticks;
+storedData.Bans.Add(new BanRecord
+{
+Id = storedData.NextBanId++, TargetId = targetId, TargetName = string.IsNullOrEmpty(user.username) ? targetId : user.username,
+Reason = string.IsNullOrEmpty(user.notes) ? "Native server ban" : user.notes, StaffId = "server", StaffName = "Imported",
+CreatedAt = Now(), ExpiresAtTicks = expires, Active = true
+});
+}
+SaveData();
+}
+private void CreateModerationCase(BasePlayer actor, string targetId, string title, string summary)
+{
+if (!IsValidSteamId(targetId)) { Reply(actor, "Enter a valid 17-digit target Steam ID."); return; }
+if (string.IsNullOrWhiteSpace(title)) { Reply(actor, "Enter a case title."); return; }
+var profile = GetPlayerProfile(targetId);
+var targetPlayer = BasePlayer.FindByID(ToUlong(targetId)) ?? BasePlayer.FindSleeping(ToUlong(targetId));
+var moderationCase = new ModerationCase
+{
+Id = storedData.NextCaseId++, TargetId = targetId, TargetName = targetPlayer?.displayName ?? profile?.Name ?? targetId,
+Title = title.Trim(), Summary = string.IsNullOrWhiteSpace(summary) ? "No initial summary." : summary.Trim(),
+Status = "Open", CreatedAt = Now(), UpdatedAt = Now(), CreatedById = actor.UserIDString, CreatedByName = actor.displayName,
+Notes = new List<TicketNote>()
+};
+storedData.Cases.Add(moderationCase);
+var state = GetState(actor);
+state.SelectedCaseId = moderationCase.Id;
+state.CaseTargetId = string.Empty; state.CaseTitle = string.Empty; state.CaseSummary = string.Empty;
+Log(actor, "CaseOpened", targetId, $"#{moderationCase.Id} {moderationCase.Title}");
+SaveData();
+RefreshOpenPanels("reports");
+}
+private void SetCaseStatus(BasePlayer actor, int caseId, string status)
+{
+var moderationCase = storedData.Cases.FirstOrDefault(item => item != null && item.Id == caseId);
+if (moderationCase == null) return;
+if (status != "Open" && status != "Investigating" && status != "Closed") status = "Open";
+moderationCase.Status = status; moderationCase.UpdatedAt = Now();
+Log(actor, "CaseStatus", moderationCase.TargetId, $"#{caseId} {status}");
+SaveData(); RefreshOpenPanels("reports");
+}
+private void AssignCase(BasePlayer actor, int caseId)
+{
+var moderationCase = storedData.Cases.FirstOrDefault(item => item != null && item.Id == caseId);
+if (moderationCase == null) return;
+moderationCase.AssignedTo = actor.displayName; moderationCase.Status = "Investigating"; moderationCase.UpdatedAt = Now();
+Log(actor, "CaseAssigned", moderationCase.TargetId, $"#{caseId}");
+SaveData(); RefreshOpenPanels("reports");
+}
+private void AddCaseNote(BasePlayer actor, int caseId, string text)
+{
+var moderationCase = storedData.Cases.FirstOrDefault(item => item != null && item.Id == caseId);
+text = CleanCommandText(text);
+if (moderationCase == null || string.IsNullOrWhiteSpace(text)) { Reply(actor, "Enter a case note first."); return; }
+moderationCase.Notes.Add(new TicketNote { Time = Now(), StaffId = actor.UserIDString, StaffName = actor.displayName, Text = text });
+moderationCase.UpdatedAt = Now();
+Log(actor, "CaseNote", moderationCase.TargetId, $"#{caseId} {text}");
+SaveData(); RefreshOpenPanels("reports");
 }
 private void RunUnmuteAction(TrackedMute mute)
 {

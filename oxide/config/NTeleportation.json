@@ -11,7 +11,7 @@
     },
     "Interrupt TP": {
       "Interrupt Teleport At Specific Monuments": [],
-      "Above Water": true,
+      "Above Water": false,
       "Under Water": false,
       "Balloon": true,
       "Boats": false,
@@ -19,7 +19,7 @@
       "Cold": false,
       "Excavator": true,
       "Hot": false,
-      "Hostile": false,
+      "Hostile": true,
       "Hostile Includes Towns": true,
       "Hurt": true,
       "Junkpiles": false,
@@ -29,7 +29,7 @@
       "Mounted": true,
       "Oil Rig": true,
       "Safe Zone": false,
-      "Swimming": true,
+      "Swimming": false,
       "Fall": true
     },
     "Auto Wake Up After Teleport": true,
@@ -176,17 +176,17 @@
       "nteleportation.ultimate": 0
     },
     "Location Radius": 25,
-    "Force On Top Of Foundation": false,
+    "Force On Top Of Foundation": true,
     "Check Foundation For Owner": true,
     "Use Friends": false,
     "Use Clans": true,
-    "Use Teams": false,
+    "Use Teams": true,
     "Usable Out Of Building Blocked": true,
     "Usable Into Building Blocked": false,
     "Usable From Safe Zone Only": false,
     "Bypass Cooldown From Within Safe Zone": false,
     "Allow Cupboard Owner When Building Blocked": true,
-    "Allow Cupboard Ally When Building Blocked": false,
+    "Allow Cupboard Ally When Building Blocked": true,
     "Allow Cupboard Non-Ally When Building Blocked": false,
     "Block For No Cupboard": true,
     "Allow Iceberg": true,
@@ -203,7 +203,7 @@
   "TPT": {
     "Use Friends": false,
     "Use Clans": true,
-    "Use Teams": false,
+    "Use Teams": true,
     "Allow Cave": true,
     "Enabled Color": "green",
     "Disabled Color": "red"
@@ -231,7 +231,7 @@
     "Countdown": 10,
     "Daily Limit": 9999,
     "VIP Daily Limits": {
-      "nteleportation.vip": 5
+      "nteleportation.vip": 5000
     },
     "VIP Cooldowns": {
       "nteleportation.vip": 9,
@@ -336,7 +336,7 @@
       "Countdown": 10,
       "Daily Limit": 9999,
       "VIP Daily Limits": {
-        "nteleportation.vip": -1
+        "nteleportation.vip": 5000
       },
       "VIP Cooldowns": {
         "nteleportation.vip": 9,

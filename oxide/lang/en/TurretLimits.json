@@ -5,5 +5,6 @@
   "TurretLimitReached_AutoTurret": "Autoturret limit reached. You have already deployed {0} or more autoturrets in this base.",
   "TurretLimitReached_FlameTurret": "Flame turret limit reached. You have already deployed {0} or more flame turrets in this base.",
   "TurretLimitReached_ShotgunTrap": "Shotgun trap limit reached. You have already deployed {0} or more shotgun traps in this base.",
-  "TurretLimitReached_SamSite": "Sam Site Turret limit reached. You have already deployed {0} or more shotgun traps in this base."
+  "TurretLimitReached_SamSite": "Sam Site Turret limit reached. This base already has {0} or more SAM sites.",
+  "TurretLimitReached_OutpostSentry": "Outpost Sentry Turret limit reached. This base already has {0} or more Outpost sentries."
 }

@@ -12,7 +12,7 @@ using RaycastHit = UnityEngine.RaycastHit;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.1.0")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.1.1")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
@@ -1958,6 +1958,11 @@ namespace Oxide.Plugins
         private bool API_IsRaidlandsManagedSentry(BaseEntity entity)
         {
             return IsManagedNpcSentry(entity);
+        }
+
+        private bool API_IsRaidlandsSentryItem(BaseEntity heldEntity, BasePlayer player)
+        {
+            return ResolveSourceItem(player, heldEntity) != null;
         }
 
         private ulong API_GetRaidlandsSentryOwner(BaseEntity entity)

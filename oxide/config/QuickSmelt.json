@@ -7,17 +7,17 @@
 {
   "Use Permission": false,
   "Speed Multipliers": {
-    "global": 10000.0,
-    "furnace": 10000.0,
-    "furnace.large": 10000.0,
-    "electric.furnace": 100000.0,
-    "campfire": 10000.0,
-    "bbq": 10000.0,
-    "small.oil.refinery": 10000.0,
-    "cooking.bench": 10000.0,
-    "pie.bench": 10000.0,
-    "mixingtable": 10000.0,
-    "mixingtable.deployed": 10000.0
+    "global": 25.0,
+    "furnace": 25.0,
+    "furnace.large": 25.0,
+    "electric.furnace": 25.0,
+    "campfire": 25.0,
+    "bbq": 25.0,
+    "small.oil.refinery": 25.0,
+    "cooking.bench": 25.0,
+    "pie.bench": 25.0,
+    "mixingtable": 25.0,
+    "mixingtable.deployed": 25.0
   },
   "Fuel Usage Speed Multipliers": {
     "global": 1.0,

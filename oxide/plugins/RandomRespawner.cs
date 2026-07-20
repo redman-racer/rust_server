@@ -11,7 +11,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Random Respawner", "Egor Blagov/Arainrr/Tryhard", "1.2.8")]
+    [Info("Random Respawner", "Egor Blagov/Arainrr/Tryhard/Raidlands", "1.3.0")]
     [Description("Plugin respawns player in random place")]
     internal class RandomRespawner : RustPlugin
     {
@@ -19,6 +19,10 @@ namespace Oxide.Plugins
         private Coroutine findSpawnPosCoroutine;
         private readonly List<Collider> colliders = new List<Collider>();
         private readonly List<Vector3> spawnPositionCache = new List<Vector3>();
+        private const float SpawnGroundOffset = 0.1f;
+        private const float TerrainHeightTolerance = 0.75f;
+        private const float PlayerClearanceRadius = 0.4f;
+        private const int PlayerClearanceMask = Layers.Mask.World | Layers.Mask.Construction | Layers.Mask.Deployed;
 
         private BasePlayer.SpawnPoint reusableSpawnPoint = new BasePlayer.SpawnPoint
         {
@@ -124,19 +128,14 @@ namespace Oxide.Plugins
         private bool TestPos(ref Vector3 randomPos)
         {
             RaycastHit hitInfo;
-            if (!Physics.Raycast(randomPos + Vector3.up * 300f, Vector3.down, out hitInfo, 400f, Layers.Solid) ||
-                hitInfo.GetEntity() != null)
+            var terrainHeight = TerrainMeta.HeightMap.GetHeight(randomPos);
+            var terrainProbe = new Vector3(randomPos.x, terrainHeight + 2f, randomPos.z);
+            if (!Physics.Raycast(terrainProbe, Vector3.down, out hitInfo, 4f, Layers.Mask.Terrain, QueryTriggerInteraction.Ignore))
             {
                 return false;
             }
 
-            var collider = hitInfo.collider;
-            if (collider != null && collider.material.name.Contains("rock", CompareOptions.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-            
-            randomPos.y = hitInfo.point.y + 0.1f;
+            randomPos.y = hitInfo.point.y + SpawnGroundOffset;
 
             var slope = GetPosSlope(randomPos);
             if (slope < configData.minSlope || slope > configData.maxSlope)
@@ -208,6 +207,11 @@ namespace Oxide.Plugins
 
         private bool TestPosAgain(Vector3 spawnPos)
         {
+            if (!IsNaturalTerrainPosition(spawnPos) || !HasPlayerClearance(spawnPos))
+            {
+                return false;
+            }
+
             if (WaterLevel.Test(spawnPos, true, true))
             {
                 return false;
@@ -219,6 +223,10 @@ namespace Oxide.Plugins
             {
                 switch (collider.gameObject.layer)
                 {
+                    case (int)Layer.Construction:
+                    case (int)Layer.Deployed:
+                        return false;
+
                     case (int)Layer.Prevent_Building:
                         if (configData.preventSpawnAtMonument)
                         {
@@ -277,6 +285,26 @@ namespace Oxide.Plugins
             }
 
             return true;
+        }
+
+        private static bool IsNaturalTerrainPosition(Vector3 position)
+        {
+            if (TerrainMeta.HeightMap == null)
+            {
+                return false;
+            }
+
+            var expectedHeight = TerrainMeta.HeightMap.GetHeight(position) + SpawnGroundOffset;
+            return Mathf.Abs(position.y - expectedHeight) <= TerrainHeightTolerance;
+        }
+
+        private bool HasPlayerClearance(Vector3 position)
+        {
+            var clearHeight = Mathf.Max(2f, configData.minimumClearHeight);
+            var capsuleBottom = position + Vector3.up * 0.55f;
+            var capsuleTop = position + Vector3.up * (clearHeight - PlayerClearanceRadius);
+            return !Physics.CheckCapsule(capsuleBottom, capsuleTop, PlayerClearanceRadius,
+                PlayerClearanceMask, QueryTriggerInteraction.Ignore);
         }
 
         private void UpdateConfig()
@@ -339,6 +367,9 @@ namespace Oxide.Plugins
 
             [JsonProperty(PropertyName = "Maximum Slope")]
             public float maxSlope = 60f;
+
+            [JsonProperty(PropertyName = "Minimum Clear Height Above Spawn")]
+            public float minimumClearHeight = 6f;
 
             [JsonProperty(PropertyName = "Biome Settings")]
             public Dictionary<TerrainBiome.Enum, bool> biomes = new Dictionary<TerrainBiome.Enum, bool>();

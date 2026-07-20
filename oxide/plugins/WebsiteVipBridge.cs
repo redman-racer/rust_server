@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("WebsiteVipBridge", "Raidlands", "1.8.1")]
+    [Info("WebsiteVipBridge", "Raidlands", "1.8.2")]
     [Description("Syncs website VIP entitlements and player stats between Raidlands.net and the Rust server.")]
     public class WebsiteVipBridge : CovalencePlugin
     {
@@ -6517,11 +6517,6 @@ namespace Oxide.Plugins
         {
             var ui = EnsureObject(json, "UI");
             ui["BackgroundMainURL"] = new JArray(FirstNonEmpty(BrandAssetUrl("SimpleLogo"), FirstNonEmpty(BrandAssetUrl("NavLogo"), BrandAssetUrl("Logo"))));
-            ui["GUIAnchorMin"] = "0.795 0.015";
-            ui["GUIAnchorMax"] = "0.84 0.095";
-            ui["AutoWidthFromImage"] = true;
-            ui["ImageAspectRatio"] = 1.0;
-            ui["ScreenAspectRatio"] = 1.77778;
         }
 
         private void ApplyServerInfoBrand(JObject json)
