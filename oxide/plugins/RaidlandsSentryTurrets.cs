@@ -12,7 +12,7 @@ using RaycastHit = UnityEngine.RaycastHit;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsSentryTurrets", "Raidlands", "1.1.1")]
+    [Info("RaidlandsSentryTurrets", "Raidlands", "1.1.5")]
     [Description("Converts specially named auto turret items into player-deployed Outpost sentry turrets.")]
     public class RaidlandsSentryTurrets : RustPlugin
     {
@@ -25,9 +25,10 @@ namespace Oxide.Plugins
         private const string SimpleSwitchPrefab = "assets/prefabs/io/electric/switches/simpleswitch/simpleswitch.prefab";
         private const string SimpleSwitchShortPrefab = "simpleswitch";
         private const string OwnerlessManageConfirmation = "confirm";
+        private const float RoamBotTargetScanIntervalSeconds = 0.25f;
 
         [PluginReference]
-        private Plugin Clans, CustomItemDefinitions, Friends, RemoverTool, TurretSwitches, Vanish;
+        private Plugin Clans, CustomItemDefinitions, Friends, RaidlandsRoamBots, RemoverTool, TurretSwitches, Vanish;
 
         private Configuration config;
         private readonly HashSet<ulong> handledTurretIds = new HashSet<ulong>();
@@ -414,6 +415,7 @@ namespace Oxide.Plugins
             }
 
             StartSupportLossMonitor();
+            StartRoamBotTargetMonitor();
         }
 
         private void OnPluginLoaded(Plugin plugin)
@@ -781,9 +783,23 @@ namespace Oxide.Plugins
             return CheckManagedSentryTarget(turret, entity, "OnTurretTarget");
         }
 
-        private object CanBeTargeted(BasePlayer player, BaseCombatEntity entity)
+        private object CanBeTargeted(BaseCombatEntity target, AutoTurret turret)
         {
-            return CheckManagedSentryTarget(entity as AutoTurret, player, "CanBeTargeted");
+            var blocked = CheckManagedSentryTarget(turret, target, "CanBeTargeted");
+            if (blocked != null)
+            {
+                return blocked;
+            }
+
+            // NPCAutoTurret's native filtering can ignore scientist-backed
+            // player bodies. Explicit eligibility is required for RoamBots;
+            // OnTurretTarget still enforces the managed sentry LOS rules.
+            if (IsManagedNpcSentry(turret) && IsRaidlandsRoamBot(target))
+            {
+                return true;
+            }
+
+            return null;
         }
 
         private void OnVanishDisappear(BasePlayer player)
@@ -892,6 +908,19 @@ namespace Oxide.Plugins
                 ValidateTargetingSettings(config.Targeting);
             }
 
+            if (turret.authorizedPlayers.Contains(player.userID))
+            {
+                ClearTurretTargetIfTargeting(turret, player);
+                return true;
+            }
+
+            var buildingPrivilege = turret.GetBuildingPrivilege();
+            if (buildingPrivilege != null && buildingPrivilege.authorizedPlayers.Contains(player.userID))
+            {
+                ClearTurretTargetIfTargeting(turret, player);
+                return true;
+            }
+
             if (config.Targeting.IgnoreVanishedPlayers && IsPlayerVanished(player))
             {
                 ClearTurretTarget(turret);
@@ -938,6 +967,17 @@ namespace Oxide.Plugins
             {
                 return false;
             }
+        }
+
+        private bool IsRaidlandsRoamBot(BaseEntity entity)
+        {
+            if (entity == null || RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
+            {
+                return false;
+            }
+
+            var result = RaidlandsRoamBots.Call("API_IsRaidlandsRoamBot", entity);
+            return result is bool && (bool)result;
         }
 
         private bool HasClearSentryLineOfSight(AutoTurret turret, BasePlayer player)
@@ -988,42 +1028,50 @@ namespace Oxide.Plugins
 
         private bool IsSentrySightLineBlocked(AutoTurret turret, BasePlayer player, Vector3 from, Vector3 to)
         {
-            if (from == Vector3.zero || to == Vector3.zero)
+            var delta = to - from;
+            var distance = delta.magnitude;
+            if (from == Vector3.zero || to == Vector3.zero || distance <= 0.001f)
             {
                 return true;
             }
 
-            RaycastHit hit;
-            if (!Physics.Linecast(from, to, out hit, TargetLineOfSightMask, QueryTriggerInteraction.Ignore))
+            var hits = Physics.RaycastAll(from, delta.normalized, distance, TargetLineOfSightMask, QueryTriggerInteraction.Ignore);
+            foreach (var hit in hits)
             {
-                return false;
+                if (IsSightLineEndpointHit(hit, turret) || IsSightLineEndpointHit(hit, player))
+                {
+                    continue;
+                }
+
+                return true;
             }
 
-            var hitEntity = hit.GetEntity();
-            return !IsEntityOrChildOf(hitEntity, turret) && !IsEntityOrChildOf(hitEntity, player);
+            return false;
         }
 
-        private bool IsEntityOrChildOf(BaseEntity entity, BaseEntity parent)
+        private bool IsSightLineEndpointHit(RaycastHit hit, BaseEntity endpoint)
         {
-            if (entity == null || parent == null)
+            if (endpoint == null)
             {
                 return false;
             }
 
-            if (entity == parent)
+            var colliderTransform = hit.collider?.transform;
+            if (colliderTransform != null
+                && (colliderTransform == endpoint.transform || colliderTransform.IsChildOf(endpoint.transform)))
             {
                 return true;
             }
 
-            var current = entity.GetParentEntity();
-            while (current != null)
+            var entity = hit.GetEntity();
+            for (var depth = 0; entity != null && depth < 8; depth++)
             {
-                if (current == parent)
+                if (entity == endpoint)
                 {
                     return true;
                 }
 
-                current = current.GetParentEntity();
+                entity = entity.GetParentEntity();
             }
 
             return false;
@@ -1391,6 +1439,76 @@ namespace Oxide.Plugins
             }
 
             timer.Every(settings.CheckIntervalSeconds, CheckTrackedSentrySupports);
+        }
+
+        private void StartRoamBotTargetMonitor()
+        {
+            timer.Every(RoamBotTargetScanIntervalSeconds, AcquireRaidlandsRoamBotTargets);
+        }
+
+        private void AcquireRaidlandsRoamBotTargets()
+        {
+            if (config == null || !config.Enabled || RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
+            {
+                return;
+            }
+
+            foreach (var serverEntity in BaseNetworkable.serverEntities)
+            {
+                var turret = serverEntity as AutoTurret;
+                if (turret == null || turret.IsDestroyed || !IsManagedNpcSentry(turret) || !turret.IsOnline())
+                {
+                    continue;
+                }
+
+                var currentRaidBotTarget = turret.target as BasePlayer;
+                if (currentRaidBotTarget != null
+                    && IsRaidlandsRoamBot(currentRaidBotTarget)
+                    && ShouldBlockManagedSentryTarget(turret, currentRaidBotTarget, "roambot_monitor"))
+                {
+                    ClearTurretTarget(turret);
+                }
+
+                if (turret.target != null)
+                {
+                    continue;
+                }
+
+                TryAcquireRaidlandsRoamBotTarget(turret);
+            }
+        }
+
+        private void TryAcquireRaidlandsRoamBotTarget(AutoTurret turret)
+        {
+            var candidates = turret?.targetTrigger?.entityContents;
+            if (candidates == null || candidates.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var candidateEntity in candidates)
+            {
+                var candidate = candidateEntity as BasePlayer;
+                if (candidate == null || candidate.IsDestroyed || !candidate.IsAlive() || !IsRaidlandsRoamBot(candidate))
+                {
+                    continue;
+                }
+
+                if (!turret.ShouldTarget(candidate) || !turret.InFiringArc(candidate) || ShouldBlockManagedSentryTarget(turret, candidate, "roambot_scan"))
+                {
+                    continue;
+                }
+
+                // NPCAutoTurret.Ignore() hard-codes ScientistNPC as ignored before
+                // Rust reaches CanBeTargeted. Setting only the verified RoamBot
+                // candidate here bypasses that native scientist exclusion while
+                // leaving authorization and all other NPC targeting unchanged.
+                turret.SetTarget(candidate);
+                if (turret.target == candidate)
+                {
+                    return;
+                }
+            }
         }
 
         private void CheckTrackedSentrySupports()

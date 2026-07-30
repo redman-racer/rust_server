@@ -1,0 +1,9 @@
+{
+  "Items": [
+    { "ShortName": "scrap", "MinimumAmount": 15, "MaximumAmount": 40, "Chance": 1.0 },
+    { "ShortName": "metal.fragments", "MinimumAmount": 250, "MaximumAmount": 750, "Chance": 0.8 },
+    { "ShortName": "gunpowder", "MinimumAmount": 50, "MaximumAmount": 150, "Chance": 0.65 },
+    { "ShortName": "roadsigns", "MinimumAmount": 2, "MaximumAmount": 6, "Chance": 0.45 },
+    { "ShortName": "techparts", "MinimumAmount": 1, "MaximumAmount": 3, "Chance": 0.35 }
+  ]
+}

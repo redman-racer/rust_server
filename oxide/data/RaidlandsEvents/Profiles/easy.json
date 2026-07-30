@@ -1,0 +1,17 @@
+{
+  "SchemaVersion": 1,
+  "Id": "easy",
+  "DisplayName": "Easy Raid",
+  "Difficulty": "Easy",
+  "Enabled": true,
+  "BuildingFiles": [ "ababmxking-1", "grandpa-1" ],
+  "LootFile": "easy",
+  "EventDurationMinutes": 120.0,
+  "AllowPVP": true,
+  "EventRadiusMeters": 90.0,
+  "MinimumItemsPerContainer": 2,
+  "MaximumItemsPerContainer": 4,
+  "PreventDuplicateItems": true,
+  "StackSizeLimit": 0,
+  "ContainerLootFiles": {}
+}

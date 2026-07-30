@@ -1,0 +1,10 @@
+{
+  "Items": [
+    { "ShortName": "scrap", "MinimumAmount": 75, "MaximumAmount": 150, "Chance": 1.0 },
+    { "ShortName": "metal.refined", "MinimumAmount": 25, "MaximumAmount": 75, "Chance": 0.9 },
+    { "ShortName": "explosives", "MinimumAmount": 2, "MaximumAmount": 8, "Chance": 0.65 },
+    { "ShortName": "ammo.rifle", "MinimumAmount": 64, "MaximumAmount": 128, "Chance": 0.75 },
+    { "ShortName": "rifle.ak", "MinimumAmount": 1, "MaximumAmount": 1, "Chance": 0.25 },
+    { "ShortName": "explosive.timed", "MinimumAmount": 1, "MaximumAmount": 2, "Chance": 0.18 }
+  ]
+}

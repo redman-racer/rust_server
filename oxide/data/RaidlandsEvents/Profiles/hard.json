@@ -1,0 +1,17 @@
+{
+  "SchemaVersion": 1,
+  "Id": "hard",
+  "DisplayName": "Hard Raid",
+  "Difficulty": "Hard",
+  "Enabled": true,
+  "BuildingFiles": [ "raidlands_kastro_mini_hard" ],
+  "LootFile": "hard",
+  "EventDurationMinutes": 240.0,
+  "AllowPVP": true,
+  "EventRadiusMeters": 115.0,
+  "MinimumItemsPerContainer": 4,
+  "MaximumItemsPerContainer": 7,
+  "PreventDuplicateItems": true,
+  "StackSizeLimit": 0,
+  "ContainerLootFiles": {}
+}

@@ -16,8 +16,8 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsEvents", "Raidlands", "0.5.3")]
-    [Description("Raidlands raid-base event manager with automatic spawning, durable rewards, history, and dedicated leaderboards.")]
+    [Info("RaidlandsEvents", "Raidlands", "0.6.2")]
+    [Description("Raidlands raid-base event manager with automatic spawning, difficulty profiles, portable loot, durable rewards, history, and dedicated leaderboards.")]
     public class RaidlandsEvents : RustPlugin
     {
         private const string AdminPermission = "raidlandsevents.admin";
@@ -31,6 +31,9 @@ namespace Oxide.Plugins
         private const string EventHistoryDataFileName = "RaidlandsEvents/history";
         private const string RewardLedgerDataFileName = "RaidlandsEvents/pending_rewards";
         private const string RewardProfilesDirectory = "RaidlandsEvents/reward_profiles/";
+        private const string RaidProfileDirectory = "RaidlandsEvents/Profiles/";
+        private const string RaidBaseListDirectory = "RaidlandsEvents/Bases/";
+        private const string RaidLootDirectory = "RaidlandsEvents/Loot/";
         private const string DefaultRewardProfileId = "default_raid_base";
         private const int RewardProfileSchemaVersion = 1;
         private const int EventDataSchemaVersion = 1;
@@ -42,6 +45,15 @@ namespace Oxide.Plugins
         private const string EventsManagerUi = "RaidlandsEvents.EventsManagerUi";
         private const string EventsManagerAutomaticUi = "RaidlandsEvents.EventsManagerUi.Automatic";
         private const string EventsManagerWorkspaceUi = "RaidlandsEvents.EventsManagerUi.Workspace";
+        private const string UiAccent = "0.12 0.58 0.55 1";
+        private const string UiAccentAlt = "0.08 0.38 0.46 1";
+        private const string UiSuccess = "0.24 0.68 0.36 1";
+        private const string UiWarning = "0.96 0.62 0.18 1";
+        private const string UiDanger = "0.82 0.20 0.18 1";
+        private const string UiSurface = "0.06 0.065 0.075 0.98";
+        private const string UiSurfaceRaised = "0.08 0.09 0.10 0.98";
+        private const string UiRow = "0.075 0.08 0.09 0.94";
+        private const string UiMuted = "0.12 0.13 0.14 0.88";
         private const float NativeMarkerBaseRadius = 0.015f;
         private const float NativeMarkerRadiusPerMeter = 0.004f;
 
@@ -52,7 +64,7 @@ namespace Oxide.Plugins
         private static readonly int PreventBuildingLayer = LayerMask.GetMask("Prevent Building");
 
         [PluginReference]
-        private Plugin CopyPaste, RaidlandsSentryTurrets, Clans;
+        private Plugin CopyPaste, RaidlandsSentryTurrets, RaidlandsRoamBots, Clans;
 
         [PluginReference]
         private Plugin ServerRewards;
@@ -63,6 +75,8 @@ namespace Oxide.Plugins
         private EventHistoryStore historyData = new EventHistoryStore();
         private RewardLedgerStore rewardLedger = new RewardLedgerStore();
         private readonly Dictionary<string, RewardProfile> rewardProfiles = new Dictionary<string, RewardProfile>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, RaidBaseProfile> raidProfiles = new Dictionary<string, RaidBaseProfile>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, RaidLootTable> raidLootTables = new Dictionary<string, RaidLootTable>(StringComparer.OrdinalIgnoreCase);
         private Timer autoSpawnTimer;
         private Timer automaticSearchTimer;
         private Timer spawnGridBuildTimer;
@@ -85,6 +99,8 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, int> uiRenderGenerations = new Dictionary<ulong, int>();
         private readonly Dictionary<ulong, string> uiScoreModalInstances = new Dictionary<ulong, string>();
         private readonly Dictionary<ulong, LootEditorState> lootEditors = new Dictionary<ulong, LootEditorState>();
+        private readonly Dictionary<ulong, string> uiPendingStopConfirmations = new Dictionary<ulong, string>();
+        private readonly Dictionary<ulong, string> uiFeedbackMessages = new Dictionary<ulong, string>();
         private readonly HashSet<string> pendingPasteInstances = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<MonumentZone> monumentZones = new List<MonumentZone>();
         private bool monumentZonesLoaded;
@@ -94,6 +110,8 @@ namespace Oxide.Plugins
         private long automaticSearchRejectedCandidates;
         private string automaticSearchLastRejection;
         private SpawnGridCache spawnGridCache = new SpawnGridCache();
+        private CleanupJob cleanupJob;
+        private int cleanupJobGeneration;
         private readonly Dictionary<int, double> spawnGridTemporaryUntil = new Dictionary<int, double>();
         private readonly HashSet<int> spawnGridReserved = new HashSet<int>();
         private readonly HashSet<string> spawnGridLayoutRejections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -151,6 +169,9 @@ namespace Oxide.Plugins
             [JsonProperty("Cleanup")]
             public CleanupConfig Cleanup = new CleanupConfig();
 
+            [JsonProperty("Raidable Bases Compatibility")]
+            public RaidableBasesCompatibilityConfig RaidableBasesCompatibility = new RaidableBasesCompatibilityConfig();
+
             [JsonProperty("Chat Prefix")]
             public string ChatPrefix = "<color=#ce422b>[Raidlands]</color>";
         }
@@ -204,6 +225,171 @@ namespace Oxide.Plugins
 
             [JsonProperty("Weight")]
             public float Weight = 1f;
+        }
+
+        private class RaidableBasesCompatibilityConfig
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Use Profiles For Automatic Events")]
+            public bool UseProfilesForAutomaticEvents = true;
+
+            [JsonProperty("Enabled Difficulties", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public List<string> EnabledDifficulties = new List<string> { "Easy", "Medium", "Hard", "Nightmare" };
+
+            [JsonProperty("Default Profile By Difficulty")]
+            public Dictionary<string, string> DefaultProfileByDifficulty = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Easy"] = "easy",
+                ["Medium"] = "medium",
+                ["Hard"] = "hard",
+                ["Nightmare"] = "nightmare"
+            };
+
+            [JsonProperty("Difficulty Weights")]
+            public Dictionary<string, float> DifficultyWeights = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Easy"] = 40f,
+                ["Medium"] = 30f,
+                ["Hard"] = 20f,
+                ["Nightmare"] = 10f
+            };
+
+            [JsonProperty("Profile Event Duration Minutes")]
+            public float DefaultEventDurationMinutes = 180f;
+
+            [JsonProperty("RoamBot Guards")]
+            public RoamBotGuardConfig RoamBotGuards = new RoamBotGuardConfig();
+
+            [JsonProperty("Debug Logging")]
+            public bool DebugLogging;
+        }
+
+        private class RoamBotGuardConfig
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Spawn Delay Seconds")]
+            public float SpawnDelaySeconds = 3f;
+
+            [JsonProperty("Count By Difficulty")]
+            public Dictionary<string, int> CountByDifficulty = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Easy"] = 3,
+                ["Medium"] = 5,
+                ["Hard"] = 7,
+                ["Nightmare"] = 10
+            };
+
+            [JsonProperty("Health Multiplier By Difficulty")]
+            public Dictionary<string, float> HealthMultiplierByDifficulty = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Easy"] = 0.85f,
+                ["Medium"] = 1f,
+                ["Hard"] = 1.15f,
+                ["Nightmare"] = 1.35f
+            };
+
+            [JsonProperty("Leash Radius By Difficulty")]
+            public Dictionary<string, float> LeashRadiusByDifficulty = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Easy"] = 55f,
+                ["Medium"] = 65f,
+                ["Hard"] = 75f,
+                ["Nightmare"] = 90f
+            };
+
+            [JsonProperty("Guard Profile")]
+            public string Profile = "raidguard";
+
+            [JsonProperty("Allow Ambient Kit Selection")]
+            public bool AllowAmbientKitSelection = true;
+
+            [JsonProperty("Authorize On Tool Cupboard")]
+            public bool AuthorizeOnToolCupboard = true;
+
+            [JsonProperty("Authorize On Auto Turrets")]
+            public bool AuthorizeOnAutoTurrets = true;
+        }
+
+        private class RaidBaseProfile
+        {
+            [JsonProperty("SchemaVersion")]
+            public int SchemaVersion = 1;
+
+            [JsonProperty("Id")]
+            public string Id;
+
+            [JsonProperty("DisplayName")]
+            public string DisplayName;
+
+            [JsonProperty("Difficulty")]
+            public string Difficulty = "Easy";
+
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("BuildingFiles", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public List<string> BuildingFiles = new List<string>();
+
+            [JsonProperty("LootFile")]
+            public string LootFile;
+
+            [JsonProperty("EventDurationMinutes")]
+            public float EventDurationMinutes;
+
+            [JsonProperty("AllowPVP")]
+            public bool AllowPvp = true;
+
+            [JsonProperty("EventRadiusMeters")]
+            public float EventRadiusMeters = 90f;
+
+            [JsonProperty("MinimumItemsPerContainer")]
+            public int MinimumItemsPerContainer = 2;
+
+            [JsonProperty("MaximumItemsPerContainer")]
+            public int MaximumItemsPerContainer = 6;
+
+            [JsonProperty("PreventDuplicateItems")]
+            public bool PreventDuplicateItems = true;
+
+            [JsonProperty("StackSizeLimit")]
+            public int StackSizeLimit;
+
+            [JsonProperty("ContainerLootFiles")]
+            public Dictionary<string, string> ContainerLootFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class RaidLootTable
+        {
+            public string Id;
+            public string SourcePath;
+            public List<RaidLootEntry> Items = new List<RaidLootEntry>();
+            public Dictionary<string, List<RaidLootEntry>> Containers = new Dictionary<string, List<RaidLootEntry>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class RaidLootEntry
+        {
+            public string ShortName;
+            public int MinimumAmount = 1;
+            public int MaximumAmount = 1;
+            public float Chance = 1f;
+            public bool Blueprint;
+            public ulong SkinId;
+        }
+
+        private class RaidBaseListFile
+        {
+            [JsonProperty("Profile")]
+            public string Profile;
+
+            [JsonProperty("Difficulty")]
+            public string Difficulty;
+
+            [JsonProperty("Buildings", ObjectCreationHandling = ObjectCreationHandling.Replace)]
+            public List<string> Buildings = new List<string>();
         }
 
         private class AutoSpawnConfig
@@ -310,6 +496,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Candidate Checks Per Slice")]
             public int CandidateChecksPerSlice = 25;
+
+            [JsonProperty("Runtime Candidate Checks Per Spawn")]
+            public int RuntimeCandidateChecksPerSpawn = 500;
 
             [JsonProperty("Temporary Rejection Retry Seconds")]
             public float TemporaryRejectionRetrySeconds = 60f;
@@ -638,6 +827,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Forced Cleanup Timeout Seconds")]
             public float ForcedCleanupTimeoutSeconds = 10800f;
+
+            [JsonProperty("Entities Per Tick")]
+            public int EntitiesPerTick = 25;
         }
 
         private class StoredData
@@ -813,6 +1005,18 @@ namespace Oxide.Plugins
             [JsonProperty("ProviderType")]
             public string ProviderType = "CopyPaste";
 
+            [JsonProperty("ProfileId")]
+            public string ProfileId;
+
+            [JsonProperty("Difficulty")]
+            public string Difficulty;
+
+            [JsonProperty("LootFile")]
+            public string LootFile;
+
+            [JsonProperty("AllowPVP")]
+            public bool AllowPvp = true;
+
             [JsonProperty("IsAnnounced")]
             public bool IsAnnounced = true;
 
@@ -824,6 +1028,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("ToolCupboardId")]
             public ulong ToolCupboardId;
+
+            [JsonProperty("RoamBotGuardGroupId")]
+            public string RoamBotGuardGroupId;
+
+            [JsonProperty("RoamBotGuardEntityIds")]
+            public List<ulong> RoamBotGuardEntityIds = new List<ulong>();
 
             [JsonProperty("HadToolCupboardInLayout")]
             public bool HadToolCupboardInLayout;
@@ -920,6 +1130,34 @@ namespace Oxide.Plugins
 
             [JsonProperty("Adaptive Maximum Water Depth Meters")]
             public float AdaptiveMaximumWaterDepthMeters;
+        }
+
+        private class CleanupJob
+        {
+            public int Generation;
+            public string Reason;
+            public readonly List<CleanupWorkItem> Items = new List<CleanupWorkItem>();
+            public readonly HashSet<string> InstanceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public readonly HashSet<ulong> RequesterUserIds = new HashSet<ulong>();
+            public int CurrentItemIndex;
+            public int CompletedInstances;
+            public int TotalEntities;
+            public int ProcessedEntities;
+            public int DespawnedEntities;
+            public bool HadAutomaticEvent;
+            public double StartedUnix;
+            public double LastUiRefreshUnix;
+        }
+
+        private class CleanupWorkItem
+        {
+            public string InstanceId;
+            public string Reason;
+            public bool PreserveRaidCompletionLoot;
+            public List<ulong> EntityIds = new List<ulong>();
+            public int NextEntityIndex;
+            public int ReleasedLoot;
+            public bool Prepared;
         }
 
         private class GroundFootprintCell
@@ -1555,6 +1793,8 @@ namespace Oxide.Plugins
             if (config.Rewards == null) config.Rewards = defaults.Rewards;
             if (config.Leaderboard == null) config.Leaderboard = defaults.Leaderboard;
             if (config.Cleanup == null) config.Cleanup = defaults.Cleanup;
+            if (config.RaidableBasesCompatibility == null)
+                config.RaidableBasesCompatibility = defaults.RaidableBasesCompatibility;
             if (string.IsNullOrWhiteSpace(config.ServerId)) config.ServerId = defaults.ServerId;
             config.ServerId = CleanStableId(config.ServerId, defaults.ServerId);
             if (string.IsNullOrWhiteSpace(config.ChatPrefix)) config.ChatPrefix = defaults.ChatPrefix;
@@ -1611,12 +1851,14 @@ namespace Oxide.Plugins
             config.SpawnGrid.CellSize = Mathf.Clamp(config.SpawnGrid.CellSize, 5f, 100f);
             config.SpawnGrid.BuildBudgetMilliseconds = Mathf.Clamp(config.SpawnGrid.BuildBudgetMilliseconds, 0.1f, 5f);
             config.SpawnGrid.CandidateChecksPerSlice = Mathf.Clamp(config.SpawnGrid.CandidateChecksPerSlice, 1, 250);
+            config.SpawnGrid.RuntimeCandidateChecksPerSpawn = Mathf.Clamp(
+                config.SpawnGrid.RuntimeCandidateChecksPerSpawn, 50, 2000);
             config.SpawnGrid.TemporaryRejectionRetrySeconds = Mathf.Clamp(config.SpawnGrid.TemporaryRejectionRetrySeconds, 5f, 3600f);
             config.SpawnGrid.MinimumHealthyCandidateCount = Math.Max(0, config.SpawnGrid.MinimumHealthyCandidateCount);
 
             if (config.Paste.CopyPasteArguments == null)
                 config.Paste.CopyPasteArguments = defaults.Paste.CopyPasteArguments;
-            EnsureCopyPasteArgumentDefault("stability", "false");
+            SetCopyPasteArgument("stability", "false");
             config.Paste.RandomRotationDegreesStep = Mathf.Max(0f, config.Paste.RandomRotationDegreesStep);
             config.Paste.GroundClearance = Mathf.Clamp(config.Paste.GroundClearance, 0f, 1.4f);
             if (config.Paste.AdaptiveFoundations == null)
@@ -1718,15 +1960,77 @@ namespace Oxide.Plugins
 
             config.Cleanup.CompletionCleanupDelaySeconds = Mathf.Max(0f, config.Cleanup.CompletionCleanupDelaySeconds);
             config.Cleanup.ForcedCleanupTimeoutSeconds = Mathf.Max(60f, config.Cleanup.ForcedCleanupTimeoutSeconds);
+            config.Cleanup.EntitiesPerTick = Mathf.Clamp(config.Cleanup.EntitiesPerTick, 1, 250);
+
+            var compatibility = config.RaidableBasesCompatibility;
+            if (compatibility.EnabledDifficulties == null)
+                compatibility.EnabledDifficulties = defaults.RaidableBasesCompatibility.EnabledDifficulties;
+            compatibility.EnabledDifficulties = compatibility.EnabledDifficulties
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(NormalizeDifficulty)
+                .Where(value => value != null)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (compatibility.DefaultProfileByDifficulty == null)
+                compatibility.DefaultProfileByDifficulty = defaults.RaidableBasesCompatibility.DefaultProfileByDifficulty;
+            if (compatibility.DifficultyWeights == null)
+                compatibility.DifficultyWeights = defaults.RaidableBasesCompatibility.DifficultyWeights;
+            compatibility.DifficultyWeights = compatibility.DifficultyWeights
+                .Where(entry => NormalizeDifficulty(entry.Key) != null && entry.Value > 0f)
+                .ToDictionary(entry => NormalizeDifficulty(entry.Key), entry => Mathf.Clamp(entry.Value, 0.01f, 10000f), StringComparer.OrdinalIgnoreCase);
+            compatibility.DefaultEventDurationMinutes = Mathf.Clamp(compatibility.DefaultEventDurationMinutes, 5f, 10080f);
+            if (compatibility.RoamBotGuards == null)
+                compatibility.RoamBotGuards = defaults.RaidableBasesCompatibility.RoamBotGuards;
+            var guards = compatibility.RoamBotGuards;
+            guards.SpawnDelaySeconds = Mathf.Clamp(guards.SpawnDelaySeconds, 0f, 60f);
+            guards.Profile = string.IsNullOrWhiteSpace(guards.Profile) ? "raidguard" : guards.Profile.Trim();
+            guards.CountByDifficulty = NormalizeDifficultyIntMap(guards.CountByDifficulty,
+                defaults.RaidableBasesCompatibility.RoamBotGuards.CountByDifficulty, 0, 20);
+            guards.HealthMultiplierByDifficulty = NormalizeDifficultyFloatMap(guards.HealthMultiplierByDifficulty,
+                defaults.RaidableBasesCompatibility.RoamBotGuards.HealthMultiplierByDifficulty, 0.1f, 5f);
+            guards.LeashRadiusByDifficulty = NormalizeDifficultyFloatMap(guards.LeashRadiusByDifficulty,
+                defaults.RaidableBasesCompatibility.RoamBotGuards.LeashRadiusByDifficulty, 15f, 250f);
         }
 
-        private void EnsureCopyPasteArgumentDefault(string name, string value)
+        private static Dictionary<string, int> NormalizeDifficultyIntMap(Dictionary<string, int> source,
+            Dictionary<string, int> defaults, int minimum, int maximum)
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var difficulty in new[] { "Easy", "Medium", "Hard", "Nightmare" })
+            {
+                int value;
+                if (source == null || !source.TryGetValue(difficulty, out value))
+                    value = defaults[difficulty];
+                result[difficulty] = Mathf.Clamp(value, minimum, maximum);
+            }
+            return result;
+        }
+
+        private static Dictionary<string, float> NormalizeDifficultyFloatMap(Dictionary<string, float> source,
+            Dictionary<string, float> defaults, float minimum, float maximum)
+        {
+            var result = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            foreach (var difficulty in new[] { "Easy", "Medium", "Hard", "Nightmare" })
+            {
+                float value;
+                if (source == null || !source.TryGetValue(difficulty, out value))
+                    value = defaults[difficulty];
+                result[difficulty] = Mathf.Clamp(value, minimum, maximum);
+            }
+            return result;
+        }
+
+        private void SetCopyPasteArgument(string name, string value)
         {
             var arguments = (config?.Paste?.CopyPasteArguments ?? new string[0]).ToList();
             for (var index = 0; index + 1 < arguments.Count; index += 2)
             {
-                if (string.Equals(arguments[index], name, StringComparison.OrdinalIgnoreCase))
-                    return;
+                if (!string.Equals(arguments[index], name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                arguments[index + 1] = value;
+                config.Paste.CopyPasteArguments = arguments.ToArray();
+                return;
             }
 
             arguments.Add(name);
@@ -1743,24 +2047,30 @@ namespace Oxide.Plugins
             permission.RegisterPermission(RewardsPermission, this);
             LoadData();
             LoadRewardSystemData();
+            LoadRaidableCompatibilityData();
         }
 
         private void OnServerInitialized()
         {
             RebuildEntityIndex();
             ManageActiveEventSentries();
+            foreach (var active in data.ActiveRaidBases.Values.Where(value => value != null && value.Status != "cleaning"))
+                ConfigureKastroDefenses(active.LayoutId, active.EntityIds);
             ScanLayouts(true);
+            EnsureProfileLayoutsInAutomaticConfig();
             EnsureAutomaticBaseLayouts();
             InitializeSpawnGrid(false);
             ReconcileAutomaticSpawnQueue();
             SaveData();
             RestoreMarkers();
+            ResumeInterruptedCleanup();
             ScheduleAutoSpawn();
             ScheduleAutomaticLocationSearch();
             StartExpiryTimer();
             ResumeCompletedInstanceCleanup();
             timer.Once(5f, () => RetryRewardTransactions(null, false));
             timer.Once(7f, () => RetryPendingPurchaseRefunds());
+            timer.Once(8f, ReconcileActiveEventGuards);
         }
 
         private void OnPluginLoaded(Plugin plugin)
@@ -1783,6 +2093,9 @@ namespace Oxide.Plugins
 
             if (string.Equals(plugin.Name, "RaidlandsSentryTurrets", StringComparison.OrdinalIgnoreCase))
                 timer.Once(0.5f, () => ManageActiveEventSentries());
+
+            if (string.Equals(plugin.Name, "RaidlandsRoamBots", StringComparison.OrdinalIgnoreCase))
+                timer.Once(2f, ReconcileActiveEventGuards);
         }
 
         private void Unload()
@@ -1795,7 +2108,7 @@ namespace Oxide.Plugins
 
             if (config?.Cleanup?.CleanupOnUnload == true)
             {
-                CleanupAll("plugin unload");
+                CleanupAllImmediate("plugin unload");
             }
             else
             {
@@ -1945,6 +2258,8 @@ namespace Oxide.Plugins
 
             if (active.EntityIds == null)
                 active.EntityIds = new List<ulong>();
+            if (active.RoamBotGuardEntityIds == null)
+                active.RoamBotGuardEntityIds = new List<ulong>();
             if (active.Scores == null)
                 active.Scores = new Dictionary<string, RaidBaseScoreEntry>(StringComparer.OrdinalIgnoreCase);
             if (active.PaidRewards == null)
@@ -2112,6 +2427,367 @@ namespace Oxide.Plugins
                     PrintWarning($"Could not load reward profile {Path.GetFileName(file)}: {exception.Message}");
                 }
             }
+        }
+
+        private void LoadRaidableCompatibilityData()
+        {
+            raidProfiles.Clear();
+            raidLootTables.Clear();
+
+            foreach (var file in GetJsonFiles(RaidProfileDirectory))
+            {
+                try
+                {
+                    var profile = JsonConvert.DeserializeObject<RaidBaseProfile>(File.ReadAllText(file));
+                    if (profile == null)
+                        throw new JsonException("profile is empty");
+                    profile.Id = CleanStableId(string.IsNullOrWhiteSpace(profile.Id) ? Path.GetFileNameWithoutExtension(file) : profile.Id, "profile");
+                    profile.DisplayName = string.IsNullOrWhiteSpace(profile.DisplayName) ? profile.Id : profile.DisplayName.Trim();
+                    profile.Difficulty = NormalizeDifficulty(profile.Difficulty) ?? "Easy";
+                    profile.LootFile = CleanOptionalFileId(profile.LootFile);
+                    profile.EventDurationMinutes = Mathf.Clamp(profile.EventDurationMinutes, 0f, 10080f);
+                    profile.EventRadiusMeters = Mathf.Clamp(profile.EventRadiusMeters, 20f, 500f);
+                    profile.MinimumItemsPerContainer = Mathf.Clamp(profile.MinimumItemsPerContainer, 0, 48);
+                    profile.MaximumItemsPerContainer = Mathf.Clamp(profile.MaximumItemsPerContainer, profile.MinimumItemsPerContainer, 48);
+                    profile.StackSizeLimit = Math.Max(0, profile.StackSizeLimit);
+                    profile.BuildingFiles = NormalizeFileIds(profile.BuildingFiles);
+                    if (profile.ContainerLootFiles == null)
+                        profile.ContainerLootFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    profile.ContainerLootFiles = profile.ContainerLootFiles
+                        .Where(entry => !string.IsNullOrWhiteSpace(entry.Key) && !string.IsNullOrWhiteSpace(entry.Value))
+                        .ToDictionary(entry => entry.Key.Trim().ToLowerInvariant(), entry => CleanOptionalFileId(entry.Value), StringComparer.OrdinalIgnoreCase);
+                    raidProfiles[profile.Id] = profile;
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning($"Could not load raid profile {Path.GetFileName(file)}: {exception.Message}");
+                }
+            }
+
+            foreach (var file in GetJsonFiles(RaidBaseListDirectory))
+            {
+                try
+                {
+                    var list = JsonConvert.DeserializeObject<RaidBaseListFile>(File.ReadAllText(file));
+                    if (list == null)
+                        continue;
+                    var profileId = CleanStableId(string.IsNullOrWhiteSpace(list.Profile) ? Path.GetFileNameWithoutExtension(file) : list.Profile, "profile");
+                    RaidBaseProfile profile;
+                    if (!raidProfiles.TryGetValue(profileId, out profile))
+                    {
+                        profile = new RaidBaseProfile
+                        {
+                            Id = profileId,
+                            DisplayName = profileId,
+                            Difficulty = NormalizeDifficulty(list.Difficulty) ?? NormalizeDifficulty(Path.GetFileNameWithoutExtension(file)) ?? "Easy"
+                        };
+                        raidProfiles[profileId] = profile;
+                    }
+                    profile.BuildingFiles = NormalizeFileIds(profile.BuildingFiles.Concat(list.Buildings ?? new List<string>()));
+                }
+                catch (Exception exception)
+                {
+                    PrintWarning($"Could not load base list {Path.GetFileName(file)}: {exception.Message}");
+                }
+            }
+
+            foreach (var file in GetJsonFiles(RaidLootDirectory))
+            {
+                RaidLootTable table;
+                string error;
+                if (TryReadLootTable(file, out table, out error))
+                    raidLootTables[table.Id] = table;
+                else
+                    PrintWarning($"Could not import loot file {Path.GetFileName(file)}: {error}");
+            }
+
+            if (config?.RaidableBasesCompatibility?.DebugLogging == true)
+                Puts($"Raidable compatibility loaded profiles={raidProfiles.Count}, lootTables={raidLootTables.Count}.");
+        }
+
+        private string[] GetJsonFiles(string relativeDirectory)
+        {
+            try
+            {
+                return (Interface.Oxide.DataFileSystem.GetFiles(relativeDirectory) ?? Array.Empty<string>())
+                    .Where(path => path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            catch
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        private static string CleanOptionalFileId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+            return Path.GetFileNameWithoutExtension(value.Trim()).ToLowerInvariant();
+        }
+
+        private static List<string> NormalizeFileIds(IEnumerable<string> values)
+        {
+            return (values ?? Enumerable.Empty<string>())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => Path.GetFileNameWithoutExtension(value.Trim()))
+                .Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string NormalizeDifficulty(string value)
+        {
+            switch ((value ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "easy": return "Easy";
+                case "medium":
+                case "normal": return "Medium";
+                case "hard": return "Hard";
+                case "nightmare":
+                case "expert": return "Nightmare";
+                default: return null;
+            }
+        }
+
+        private bool TryReadLootTable(string path, out RaidLootTable table, out string error)
+        {
+            table = null;
+            error = null;
+            try
+            {
+                var root = JToken.Parse(File.ReadAllText(path));
+                table = new RaidLootTable
+                {
+                    Id = CleanStableId(Path.GetFileNameWithoutExtension(path), "loot"),
+                    SourcePath = path
+                };
+
+                var array = root as JArray;
+                if (array != null)
+                    ParseLootArray(array, table.Items, errorPrefix: "items");
+                else
+                {
+                    var obj = root as JObject;
+                    if (obj == null)
+                        throw new JsonException("root must be an array or object");
+                    var itemsToken = GetPropertyIgnoreCase(obj, "Items", "Loot", "entries", "Base Loot", "BaseLoot");
+                    if (itemsToken is JArray)
+                        ParseLootArray((JArray)itemsToken, table.Items, "items");
+
+                    var containers = GetPropertyIgnoreCase(obj, "Containers", "ContainerLoot", "Container Loot") as JObject;
+                    if (containers != null)
+                    {
+                        foreach (var property in containers.Properties())
+                        {
+                            var entries = new List<RaidLootEntry>();
+                            var containerArray = property.Value as JArray;
+                            if (containerArray == null)
+                                throw new JsonException($"container '{property.Name}' must be an array");
+                            ParseLootArray(containerArray, entries, "container " + property.Name);
+                            table.Containers[property.Name.Trim().ToLowerInvariant()] = entries;
+                        }
+                    }
+                }
+
+                if (table.Items.Count == 0 && table.Containers.Count == 0)
+                    throw new JsonException("no loot entries were found");
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = exception.Message;
+                table = null;
+                return false;
+            }
+        }
+
+        private void ParseLootArray(JArray array, List<RaidLootEntry> destination, string errorPrefix)
+        {
+            for (var index = 0; index < array.Count; index++)
+            {
+                var obj = array[index] as JObject;
+                if (obj == null)
+                    throw new JsonException($"{errorPrefix}[{index}] must be an object");
+                var shortName = ReadString(obj, "ShortName", "shortname", "Item", "item", "Name", "name");
+                var definition = ItemManager.FindItemDefinition(shortName);
+                if (definition == null)
+                    throw new JsonException($"{errorPrefix}[{index}] has invalid Rust item shortname '{shortName ?? ""}'");
+                var minimum = ReadInt(obj, 1, "MinimumAmount", "MinAmount", "amountMin", "min", "Amount", "amount");
+                var maximum = ReadInt(obj, minimum, "MaximumAmount", "MaxAmount", "amountMax", "max", "Amount", "amount");
+                if (minimum <= 0 || maximum < minimum)
+                    throw new JsonException($"{errorPrefix}[{index}] has invalid amount range {minimum}-{maximum}");
+                var chance = ReadFloat(obj, 1f, "Chance", "chance", "Probability", "probability", "Percent", "percent");
+                if (chance > 1f) chance /= 100f;
+                destination.Add(new RaidLootEntry
+                {
+                    ShortName = definition.shortname,
+                    MinimumAmount = minimum,
+                    MaximumAmount = maximum,
+                    Chance = Mathf.Clamp01(chance),
+                    Blueprint = ReadBool(obj, false, "Blueprint", "blueprint", "IsBlueprint", "isBlueprint"),
+                    SkinId = ReadUlong(obj, 0, "SkinId", "skinId", "Skin", "skin")
+                });
+            }
+        }
+
+        private static JToken GetPropertyIgnoreCase(JObject obj, params string[] names)
+        {
+            foreach (var property in obj.Properties())
+                if (names.Any(name => string.Equals(name, property.Name, StringComparison.OrdinalIgnoreCase)))
+                    return property.Value;
+            return null;
+        }
+
+        private static string ReadString(JObject obj, params string[] names)
+        {
+            var token = GetPropertyIgnoreCase(obj, names);
+            return token == null || token.Type == JTokenType.Null ? null : token.ToString().Trim();
+        }
+
+        private static int ReadInt(JObject obj, int fallback, params string[] names)
+        {
+            int value;
+            var token = GetPropertyIgnoreCase(obj, names);
+            return token != null && int.TryParse(token.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value) ? value : fallback;
+        }
+
+        private static float ReadFloat(JObject obj, float fallback, params string[] names)
+        {
+            float value;
+            var token = GetPropertyIgnoreCase(obj, names);
+            return token != null && float.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value) ? value : fallback;
+        }
+
+        private static ulong ReadUlong(JObject obj, ulong fallback, params string[] names)
+        {
+            ulong value;
+            var token = GetPropertyIgnoreCase(obj, names);
+            return token != null && ulong.TryParse(token.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value) ? value : fallback;
+        }
+
+        private static bool ReadBool(JObject obj, bool fallback, params string[] names)
+        {
+            bool value;
+            var token = GetPropertyIgnoreCase(obj, names);
+            return token != null && bool.TryParse(token.ToString(), out value) ? value : fallback;
+        }
+
+        private void EnsureProfileLayoutsInAutomaticConfig()
+        {
+            if (config?.RaidableBasesCompatibility?.Enabled != true
+                || !config.RaidableBasesCompatibility.UseProfilesForAutomaticEvents)
+                return;
+            var changed = false;
+            foreach (var profile in raidProfiles.Values.Where(IsProfileEnabled).OrderBy(value => value.Id))
+            {
+                float difficultyWeight;
+                if (!config.RaidableBasesCompatibility.DifficultyWeights.TryGetValue(profile.Difficulty, out difficultyWeight))
+                    difficultyWeight = 1f;
+                var perBuildingWeight = Mathf.Max(0.1f, difficultyWeight / Math.Max(1, profile.BuildingFiles.Count));
+                foreach (var layoutId in profile.BuildingFiles)
+                {
+                    if (config.EventTypes.AutomaticBases.Layouts.Any(entry => entry != null && entry.LayoutId.Equals(layoutId, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+                    config.EventTypes.AutomaticBases.Layouts.Add(new WeightedLayoutConfig { LayoutId = layoutId, Enabled = true, Weight = perBuildingWeight });
+                    changed = true;
+                }
+            }
+            if (changed)
+                SaveConfig();
+        }
+
+        private bool IsProfileEnabled(RaidBaseProfile profile)
+        {
+            return profile != null
+                   && profile.Enabled
+                   && config.RaidableBasesCompatibility.EnabledDifficulties.Contains(profile.Difficulty, StringComparer.OrdinalIgnoreCase)
+                   && profile.BuildingFiles.Count > 0;
+        }
+
+        private RaidBaseProfile ResolveProfileForLayout(string layoutId)
+        {
+            if (config?.RaidableBasesCompatibility?.Enabled != true || string.IsNullOrWhiteSpace(layoutId))
+                return null;
+            return raidProfiles.Values
+                .Where(IsProfileEnabled)
+                .Where(profile => profile.BuildingFiles.Contains(layoutId, StringComparer.OrdinalIgnoreCase))
+                .OrderBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+        }
+
+        private bool TrySelectProfileLayout(string profileId, out RaidBaseProfile profile, out string layoutId, out string error)
+        {
+            profile = null;
+            layoutId = null;
+            error = null;
+            var normalizedId = CleanStableId(profileId, "profile");
+            if (!raidProfiles.TryGetValue(normalizedId, out profile) || profile == null)
+            {
+                error = $"Raid profile '{profileId}' was not found.";
+                return false;
+            }
+            if (!IsProfileEnabled(profile))
+            {
+                error = $"Raid profile '{profile.Id}' is disabled, has no buildings, or its difficulty is disabled.";
+                return false;
+            }
+            var candidates = profile.BuildingFiles
+                .Where(id => data.Layouts.ContainsKey(id) && data.Layouts[id] != null && data.Layouts[id].Valid && !data.Layouts[id].Ignored)
+                .ToList();
+            if (candidates.Count == 0)
+            {
+                var diagnostics = profile.BuildingFiles.Select(id =>
+                {
+                    LayoutScanEntry entry;
+                    if (!data.Layouts.TryGetValue(id, out entry) || entry == null)
+                        return $"{id}: not scanned";
+                    if (entry.Ignored)
+                        return $"{id}: ignored";
+                    return entry.Valid
+                        ? $"{id}: valid"
+                        : $"{id}: {string.Join(", ", entry.ValidationErrors ?? new List<string>())}";
+                });
+                error = $"Raid profile '{profile.Id}' has no valid scanned CopyPaste building files ({string.Join("; ", diagnostics)}).";
+                return false;
+            }
+            layoutId = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+            return true;
+        }
+
+        private string ValidateRaidableCompatibility(bool includeDependencies)
+        {
+            var errors = new List<string>();
+            if (includeDependencies && (CopyPaste == null || !CopyPaste.IsLoaded))
+                errors.Add("required dependency CopyPaste is not loaded");
+            if (includeDependencies
+                && config?.RaidableBasesCompatibility?.RoamBotGuards?.Enabled == true
+                && (RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded))
+                errors.Add("RaidlandsRoamBots is required while RoamBot Guards are enabled");
+            if (raidProfiles.Count == 0)
+                errors.Add("no profiles found in oxide/data/RaidlandsEvents/Profiles");
+            foreach (var profile in raidProfiles.Values.OrderBy(value => value.Id))
+            {
+                if (NormalizeDifficulty(profile.Difficulty) == null)
+                    errors.Add($"{profile.Id}: invalid difficulty");
+                if (profile.BuildingFiles.Count == 0)
+                    errors.Add($"{profile.Id}: no building files");
+                foreach (var building in profile.BuildingFiles)
+                {
+                    if (!Interface.Oxide.DataFileSystem.ExistsDatafile(CopyPasteDirectory + building))
+                        errors.Add($"{profile.Id}: missing CopyPaste file {building}.json");
+                }
+                if (!string.IsNullOrWhiteSpace(profile.LootFile) && !raidLootTables.ContainsKey(profile.LootFile))
+                    errors.Add($"{profile.Id}: missing or invalid loot file {profile.LootFile}.json");
+                foreach (var lootFile in profile.ContainerLootFiles.Values)
+                    if (!raidLootTables.ContainsKey(lootFile))
+                        errors.Add($"{profile.Id}: missing or invalid container loot file {lootFile}.json");
+            }
+            return errors.Count == 0
+                ? $"valid: profiles={raidProfiles.Count}, lootTables={raidLootTables.Count}, CopyPaste={(CopyPaste != null && CopyPaste.IsLoaded ? "loaded" : "missing")}, RoamBotGuards={(config?.RaidableBasesCompatibility?.RoamBotGuards?.Enabled == true ? (RaidlandsRoamBots != null && RaidlandsRoamBots.IsLoaded ? "loaded" : "missing") : "disabled")}"
+                : $"invalid ({errors.Count}): {string.Join("; ", errors.Take(12))}" + (errors.Count > 12 ? $"; +{errors.Count - 12} more" : string.Empty);
         }
 
         private void EnsureDefaultRewardProfile()
@@ -2965,8 +3641,12 @@ namespace Oxide.Plugins
             var target = args[0];
             if (target.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
-                var count = CleanupAll("admin stop");
-                Reply(arg, $"Stopped and cleaned {count} active raid base event(s).");
+                int count;
+                string cleanupMessage;
+                if (TryBeginCleanup(data.ActiveRaidBases.Keys, "admin stop", false, arg.Player(), out count, out cleanupMessage))
+                    Reply(arg, $"Started batched cleanup of {count} active raid base event(s). Use revents.status to monitor progress.");
+                else
+                    Reply(arg, cleanupMessage);
                 return;
             }
 
@@ -2976,8 +3656,12 @@ namespace Oxide.Plugins
                 return;
             }
 
-            CleanupInstance(target, "admin stop");
-            Reply(arg, $"Stopped and cleaned raid base event {target}.");
+            int queued;
+            string message;
+            if (TryBeginCleanup(new[] { target }, "admin stop", false, arg.Player(), out queued, out message))
+                Reply(arg, $"Started batched cleanup of raid base event {target}. Use revents.status to monitor progress.");
+            else
+                Reply(arg, message);
         }
 
         [ConsoleCommand("revents.cleanup")]
@@ -2986,8 +3670,12 @@ namespace Oxide.Plugins
             if (!HasAccess(arg, StopPermission))
                 return;
 
-            var count = CleanupAll("admin cleanup");
-            Reply(arg, $"Cleanup removed {count} active raid base event(s).");
+            int count;
+            string message;
+            if (TryBeginCleanup(data.ActiveRaidBases.Keys, "admin cleanup", false, arg.Player(), out count, out message))
+                Reply(arg, $"Started batched cleanup of {count} active raid base event(s). Use revents.status to monitor progress.");
+            else
+                Reply(arg, message);
         }
 
         [ConsoleCommand("revents.score")]
@@ -3106,6 +3794,158 @@ namespace Oxide.Plugins
             }
         }
 
+        [ConsoleCommand("rlevent")]
+        private void CommandRaidableCompatibility(ConsoleSystem.Arg arg)
+        {
+            if (!HasAccess(arg, AdminPermission))
+                return;
+            HandleRaidableCompatibilityCommand(arg.Player(), GetArgs(arg), message => Reply(arg, message));
+        }
+
+        [ChatCommand("rlevent")]
+        private void ChatCommandRaidableCompatibility(BasePlayer player, string command, string[] args)
+        {
+            if (player == null || !HasPlayerAccess(player, AdminPermission))
+            {
+                if (player != null) SendReply(player, $"{config.ChatPrefix} You do not have permission to use this command.");
+                return;
+            }
+            HandleRaidableCompatibilityCommand(player, args ?? Array.Empty<string>(), message => SendReply(player, $"{config.ChatPrefix} {message}"));
+        }
+
+        private void HandleRaidableCompatibilityCommand(BasePlayer player, string[] args, Action<string> reply)
+        {
+            var usage = "Usage: rlevent profile list|reload | loot reload | validate | base list|add <profile> <file>|remove <profile> <file>|test <profile>|spawn <profile> [here|random]|despawn <id|all>";
+            if (args.Length == 0)
+            {
+                reply(usage);
+                return;
+            }
+
+            var group = args[0].ToLowerInvariant();
+            var action = args.Length > 1 ? args[1].ToLowerInvariant() : "list";
+            if (group == "validate")
+            {
+                reply(ValidateRaidableCompatibility(true));
+                return;
+            }
+            if (group == "profile")
+            {
+                if (action == "reload")
+                {
+                    LoadRaidableCompatibilityData();
+                    EnsureProfileLayoutsInAutomaticConfig();
+                    reply($"Reloaded {raidProfiles.Count} profiles and {raidLootTables.Count} loot tables. {ValidateRaidableCompatibility(false)}");
+                    return;
+                }
+                if (action == "list")
+                {
+                    reply(raidProfiles.Count == 0
+                        ? "No raid profiles are loaded."
+                        : string.Join("\n", raidProfiles.Values.OrderBy(value => value.Difficulty).ThenBy(value => value.Id)
+                            .Select(value => $"{value.Id}: {value.Difficulty}, enabled={IsProfileEnabled(value)}, buildings={value.BuildingFiles.Count}, loot={value.LootFile ?? value.Difficulty.ToLowerInvariant()}")));
+                    return;
+                }
+            }
+            if (group == "loot" && action == "reload")
+            {
+                LoadRaidableCompatibilityData();
+                reply($"Reloaded {raidLootTables.Count} loot tables. {ValidateRaidableCompatibility(false)}");
+                return;
+            }
+            if (group != "base")
+            {
+                reply(usage);
+                return;
+            }
+            if (action == "list")
+            {
+                reply(raidProfiles.Count == 0
+                    ? "No raid profiles are loaded."
+                    : string.Join("\n", raidProfiles.Values.OrderBy(value => value.Id)
+                        .Select(value => $"{value.Id}: {string.Join(", ", value.BuildingFiles)}")));
+                return;
+            }
+            if ((action == "add" || action == "remove") && args.Length >= 4)
+            {
+                RaidBaseProfile editProfile;
+                var profileId = CleanStableId(args[2], "profile");
+                if (!raidProfiles.TryGetValue(profileId, out editProfile))
+                {
+                    reply($"Raid profile '{args[2]}' was not found.");
+                    return;
+                }
+                var building = Path.GetFileNameWithoutExtension(args[3]);
+                if (action == "add")
+                {
+                    if (!Interface.Oxide.DataFileSystem.ExistsDatafile(CopyPasteDirectory + building))
+                    {
+                        reply($"CopyPaste building file '{building}.json' was not found.");
+                        return;
+                    }
+                    if (!editProfile.BuildingFiles.Contains(building, StringComparer.OrdinalIgnoreCase))
+                        editProfile.BuildingFiles.Add(building);
+                }
+                else
+                    editProfile.BuildingFiles.RemoveAll(value => value.Equals(building, StringComparison.OrdinalIgnoreCase));
+                editProfile.BuildingFiles = NormalizeFileIds(editProfile.BuildingFiles);
+                Interface.Oxide.DataFileSystem.WriteObject(RaidProfileDirectory + editProfile.Id, editProfile, true);
+                ScanLayouts(true);
+                EnsureProfileLayoutsInAutomaticConfig();
+                reply($"{(action == "add" ? "Added" : "Removed")} '{building}' {(action == "add" ? "to" : "from")} profile '{editProfile.Id}'.");
+                return;
+            }
+            if ((action == "test" || action == "spawn") && args.Length >= 3)
+            {
+                RaidBaseProfile spawnProfile;
+                string layoutId;
+                string message;
+                if (!TrySelectProfileLayout(args[2], out spawnProfile, out layoutId, out message))
+                {
+                    reply(message);
+                    return;
+                }
+                if (action == "test")
+                {
+                    reply($"Profile '{spawnProfile.Id}' passed selection: layout={layoutId}, difficulty={spawnProfile.Difficulty}, loot={spawnProfile.LootFile ?? spawnProfile.Difficulty.ToLowerInvariant()}. {ValidateRaidableCompatibility(true)}");
+                    return;
+                }
+                var locationMode = args.Length > 3 ? args[3].ToLowerInvariant() : "random";
+                Vector3 position;
+                if (locationMode == "here")
+                {
+                    if (player == null || !TryGetHerePosition(player, out position, out message))
+                    {
+                        reply(player == null ? "The here mode requires an in-game admin." : message);
+                        return;
+                    }
+                }
+                else if (locationMode == "random")
+                    position = Vector3.zero;
+                else
+                {
+                    reply("Usage: rlevent base spawn <profile> [here|random]");
+                    return;
+                }
+                var started = StartRaidBase(layoutId, locationMode == "random", position, out message, "admin", true, null, null, false, -1, spawnProfile);
+                reply(started ? message : "Spawn failed: " + message);
+                return;
+            }
+            if (action == "despawn" && args.Length >= 3)
+            {
+                var targets = args[2].Equals("all", StringComparison.OrdinalIgnoreCase)
+                    ? data.ActiveRaidBases.Keys.ToList()
+                    : new List<string> { args[2] };
+                int count;
+                string message;
+                reply(TryBeginCleanup(targets, "rlevent despawn", false, player, out count, out message)
+                    ? $"Started cleanup of {count} raid base event(s)."
+                    : message);
+                return;
+            }
+            reply(usage);
+        }
+
         [ChatCommand("revents")]
         private void ChatCommandRaidlandsEvents(BasePlayer player, string command, string[] args)
         {
@@ -3220,7 +4060,11 @@ namespace Oxide.Plugins
                     if (args.Length >= 2)
                     {
                         var requestedPanel = args[1].ToLowerInvariant();
-                        uiManagerPanels[player.userID] = requestedPanel == "load" || requestedPanel == "rewards" ? requestedPanel : "active";
+                        uiManagerPanels[player.userID] = requestedPanel == "load"
+                                                         || requestedPanel == "rewards"
+                                                         || requestedPanel == "automation"
+                            ? requestedPanel
+                            : "active";
                     }
                     break;
 
@@ -3476,29 +4320,47 @@ namespace Oxide.Plugins
                     SendReply(player, $"{config.ChatPrefix} Retried pending rewards: paid={paidRewards}, remaining={CountRewardTransactions("pending")}.");
                     break;
 
+                case "botdebugpanel":
+                    if (RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
+                    {
+                        SendReply(player, $"{config.ChatPrefix} RaidlandsRoamBots is not loaded.");
+                        break;
+                    }
+                    var debugPanelEnabled = IsRoamBotDebugPanelEnabled();
+                    var debugPanelResult = RaidlandsRoamBots.Call("REBOT_SetDebugSidePanelEnabled", !debugPanelEnabled);
+                    SendReply(player, $"{config.ChatPrefix} RoamBot debug side panel is now {(Convert.ToBoolean(debugPanelResult) ? "enabled" : "disabled")}.");
+                    break;
+
                 case "stop":
                     if (args.Length >= 2)
                     {
-                        if (args[1].Equals("all", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var stopped = CleanupAll("admin UI stop");
-                            SendReply(player, $"{config.ChatPrefix} Stopped and cleaned {stopped} active raid base event(s).");
-                        }
-                        else if (data.ActiveRaidBases.ContainsKey(args[1]))
-                        {
-                            CleanupInstance(args[1], "admin UI stop");
-                            SendReply(player, $"{config.ChatPrefix} Stopped and cleaned raid base event {args[1]}.");
-                        }
-                        else
-                        {
-                            SendReply(player, $"{config.ChatPrefix} No active raid base instance '{args[1]}' was found.");
-                        }
+                        uiPendingStopConfirmations[player.userID] = args[1];
                     }
                     break;
 
                 case "cleanup":
-                    var cleaned = CleanupAll("admin UI cleanup");
-                    SendReply(player, $"{config.ChatPrefix} Cleanup removed {cleaned} active raid base event(s).");
+                    uiPendingStopConfirmations[player.userID] = "__cleanup";
+                    break;
+
+                case "cancelstop":
+                    uiPendingStopConfirmations.Remove(player.userID);
+                    break;
+
+                case "confirmstop":
+                    string pendingTarget;
+                    if (!uiPendingStopConfirmations.TryGetValue(player.userID, out pendingTarget))
+                        break;
+                    uiPendingStopConfirmations.Remove(player.userID);
+                    int stopped;
+                    string cleanupMessage;
+                    var targets = pendingTarget == "all" || pendingTarget == "__cleanup"
+                        ? data.ActiveRaidBases.Keys.ToList()
+                        : new List<string> { pendingTarget };
+                    if (TryBeginCleanup(targets, pendingTarget == "__cleanup" ? "admin UI cleanup" : "admin UI stop",
+                            false, player, out stopped, out cleanupMessage))
+                        SendReply(player, $"{config.ChatPrefix} Cleaning {stopped} raid base event(s) in background batches.");
+                    else
+                        SendReply(player, $"{config.ChatPrefix} {cleanupMessage}");
                     break;
 
                 default:
@@ -3886,9 +4748,10 @@ namespace Oxide.Plugins
                 var editorRoot = editorContainer.Add(new CuiPanel
                 {
                     CursorEnabled = true,
-                    Image = { Color = "0.01 0.015 0.02 0.985" },
-                    RectTransform = { AnchorMin = "0.05 0.04", AnchorMax = "0.95 0.96" }
+                    Image = { Color = UiSurface },
+                    RectTransform = { AnchorMin = "0.06 0.045", AnchorMax = "0.94 0.955" }
                 }, "Overlay", EventsManagerUi);
+                AddUiFrame(editorContainer, editorRoot);
                 BuildLootEditorUi(editorContainer, editorRoot, player);
                 CuiHelper.AddUi(player, editorContainer);
                 return;
@@ -3898,32 +4761,116 @@ namespace Oxide.Plugins
             var panel = container.Add(new CuiPanel
             {
                 CursorEnabled = true,
-                Image = { Color = "0.025 0.03 0.035 0.96" },
-                RectTransform = { AnchorMin = "0.12 0.08", AnchorMax = "0.88 0.91" }
+                Image = { Color = UiSurface },
+                RectTransform = { AnchorMin = "0.10 0.065", AnchorMax = "0.90 0.935" }
             }, "Overlay", EventsManagerUi);
 
-            AddUiLabel(container, panel, "<b>Raidlands Events Manager</b>", 0.03f, 0.935f, 0.44f, 0.985f, 18, TextAnchor.MiddleLeft, "0.95 0.98 1 1");
+            AddUiFrame(container, panel);
+            var brand = container.Add(new CuiPanel
+            {
+                Image = { Color = UiAccent },
+                RectTransform = { AnchorMin = "0.024 0.936", AnchorMax = "0.068 0.984" }
+            }, panel);
+            AddUiLabel(container, brand, "RE", 0f, 0f, 1f, 1f, 11, TextAnchor.MiddleCenter, "0.98 1 1 1");
+            AddUiLabel(container, panel, "<b>Raidlands Events</b>", 0.082f, 0.955f, 0.40f, 0.986f, 16, TextAnchor.MiddleLeft, "0.95 0.98 1 1");
+            AddUiLabel(container, panel, "EVENT OPERATIONS CENTER", 0.082f, 0.932f, 0.40f, 0.958f, 7, TextAnchor.MiddleLeft, "0.52 0.64 0.68 1");
             AddUiLabel(container, panel, UiHeaderStatus(), 0.45f, 0.935f, 0.90f, 0.985f, 11, TextAnchor.MiddleRight, "0.68 0.75 0.82 1");
-            AddUiButton(container, panel, "X", "revents.ui close", 0.925f, 0.94f, 0.975f, 0.985f, "0.45 0.12 0.12 0.95", 13);
+            AddUiButton(container, panel, "X", "revents.ui close", 0.935f, 0.942f, 0.975f, 0.982f, UiDanger, 12);
 
-            AddUiSection(container, panel, "Controls", 0.03f, 0.865f, 0.97f, 0.91f);
-            AddUiButton(container, panel, "Scan", "revents.ui scan", 0.045f, 0.802f, 0.145f, 0.85f, "0.16 0.24 0.32 0.96", 11);
-            AddUiButton(container, panel, "Refresh", "revents.ui refresh", 0.155f, 0.802f, 0.255f, 0.85f, "0.16 0.24 0.32 0.96", 11);
-            AddUiButton(container, panel, config.EventTypes.AutomaticBases.Enabled ? "Disable Automatic Bases" : "Enable Automatic Bases", config.EventTypes.AutomaticBases.Enabled ? "revents.ui auto off" : "revents.ui auto on", 0.265f, 0.802f, 0.445f, 0.85f, config.EventTypes.AutomaticBases.Enabled ? "0.36 0.20 0.12 0.96" : "0.14 0.30 0.22 0.96", 9);
-            AddUiButton(container, panel, "Stop All Events", "revents.ui stop all", 0.455f, 0.802f, 0.575f, 0.85f, "0.36 0.18 0.16 0.96", 9);
-            AddUiButton(container, panel, "Cleanup", "revents.ui cleanup", 0.585f, 0.802f, 0.695f, 0.85f, "0.36 0.18 0.16 0.96", 10);
-            AddUiButton(container, panel, "Retry Pending", "revents.ui retryrewards", 0.705f, 0.802f, 0.795f, 0.85f, "0.16 0.30 0.42 0.96", 8);
-            AddUiLabel(container, panel, ShortUiText(BuildStatusMessage(false), 96), 0.875f, 0.802f, 0.955f, 0.85f, 8, TextAnchor.MiddleRight, "0.66 0.72 0.78 1");
+            string workspace;
+            if (!uiManagerPanels.TryGetValue(player.userID, out workspace))
+                workspace = "active";
+            var nav = container.Add(new CuiPanel
+            {
+                Image = { Color = "0.04 0.045 0.052 0.98" },
+                RectTransform = { AnchorMin = "0.008 0.015", AnchorMax = "0.19 0.915" }
+            }, panel);
+            BuildManagerNavigation(container, nav, workspace);
+            var body = container.Add(new CuiPanel
+            {
+                Image = { Color = "0.04 0.045 0.052 0.72" },
+                RectTransform = { AnchorMin = "0.198 0.015", AnchorMax = "0.992 0.915" }
+            }, panel);
 
-            var automaticPanel = AddUiRefreshPanel(container, panel, EventsManagerAutomaticUi);
-            BuildAutomaticBasesUi(container, automaticPanel);
-            var workspacePanel = AddUiRefreshPanel(container, panel, EventsManagerWorkspaceUi);
-            BuildManagerWorkspaceUi(container, workspacePanel, player);
+            AddUiSection(container, body, workspace == "automation" ? "Automation Controls" : "Event Operations", 0.03f, 0.865f, 0.97f, 0.91f);
+            AddUiButton(container, body, "Scan Layouts", "revents.ui scan", 0.045f, 0.802f, 0.17f, 0.85f, UiAccentAlt, 10);
+            AddUiButton(container, body, config.EventTypes.AutomaticBases.Enabled ? "Automatic: Enabled" : "Automatic: Disabled", config.EventTypes.AutomaticBases.Enabled ? "revents.ui auto off" : "revents.ui auto on", 0.18f, 0.802f, 0.36f, 0.85f, config.EventTypes.AutomaticBases.Enabled ? UiSuccess : UiMuted, 9);
+            var cleanupRunning = cleanupJob != null;
+            var hasActiveEvents = ActiveEventCount() > 0;
+            AddUiButton(container, body, cleanupRunning ? "Cleanup Running" : hasActiveEvents ? "Stop All Events" : "No Events To Stop",
+                cleanupRunning || !hasActiveEvents ? string.Empty : "revents.ui stop all", 0.37f, 0.802f, 0.52f, 0.85f,
+                cleanupRunning || !hasActiveEvents ? UiMuted : UiDanger, 9);
+            AddUiButton(container, body, cleanupRunning ? CleanupPercentText() : hasActiveEvents ? "Clean Finished" : "Nothing To Clean",
+                cleanupRunning || !hasActiveEvents ? string.Empty : "revents.ui cleanup", 0.53f, 0.802f, 0.67f, 0.85f,
+                cleanupRunning || !hasActiveEvents ? UiMuted : UiDanger, 9);
+            AddUiButton(container, body, "Retry Rewards", "revents.ui retryrewards", 0.68f, 0.802f, 0.80f, 0.85f, UiAccentAlt, 8);
+            AddUiLabel(container, body,
+                ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase)
+                    ? "Configuration valid"
+                    : "Configuration needs attention",
+                0.81f, 0.802f, 0.955f, 0.85f, 8, TextAnchor.MiddleRight,
+                ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase)
+                    ? "0.48 0.88 0.58 1"
+                    : "0.96 0.62 0.30 1");
+            AddUiLabel(container, body, CleanupProgressMessage(), 0.045f, 0.762f, 0.77f, 0.795f, 8, TextAnchor.MiddleLeft, cleanupRunning ? "0.68 0.86 0.96 1" : "0.52 0.60 0.68 1");
+            var roamBotDebugAvailable = RaidlandsRoamBots != null && RaidlandsRoamBots.IsLoaded;
+            var roamBotDebugEnabled = roamBotDebugAvailable && IsRoamBotDebugPanelEnabled();
+            AddUiButton(container, body,
+                roamBotDebugAvailable
+                    ? $"Bot Debug Panel: {(roamBotDebugEnabled ? "ON" : "OFF")}"
+                    : "Bot Debug Panel: Unavailable",
+                roamBotDebugAvailable ? "revents.ui botdebugpanel" : string.Empty,
+                0.785f, 0.758f, 0.955f, 0.797f,
+                !roamBotDebugAvailable ? UiMuted : roamBotDebugEnabled ? UiWarning : UiAccentAlt, 8);
+
+            if (workspace == "automation")
+            {
+                var automaticPanel = AddUiRefreshPanel(container, body, EventsManagerAutomaticUi);
+                BuildAutomaticBasesUi(container, automaticPanel);
+            }
+            else
+            {
+                var workspacePanel = AddUiRefreshPanel(container, body, EventsManagerWorkspaceUi);
+                BuildManagerWorkspaceUi(container, workspacePanel, player);
+            }
 
             if (!string.IsNullOrWhiteSpace(scoreModalInstanceId))
                 BuildScoreModalUi(container, panel, scoreModalInstanceId);
+            string pendingStopTarget;
+            if (uiPendingStopConfirmations.TryGetValue(player.userID, out pendingStopTarget))
+                BuildStopConfirmationUi(container, panel, pendingStopTarget);
 
             CuiHelper.AddUi(player, container);
+        }
+
+        private void BuildStopConfirmationUi(CuiElementContainer container, string panel, string target)
+        {
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.01 0.012 0.015 0.86" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" }
+            }, panel);
+            var modal = container.Add(new CuiPanel
+            {
+                Image = { Color = UiSurfaceRaised },
+                RectTransform = { AnchorMin = "0.28 0.35", AnchorMax = "0.72 0.65" }
+            }, panel);
+            container.Add(new CuiPanel
+            {
+                Image = { Color = UiDanger },
+                RectTransform = { AnchorMin = "0 0.985", AnchorMax = "1 1" }
+            }, modal);
+            var all = target == "all" || target == "__cleanup";
+            AddUiLabel(container, modal, all ? "Confirm cleanup" : "Confirm event stop",
+                0.06f, 0.70f, 0.94f, 0.90f, 15, TextAnchor.MiddleLeft, "0.96 0.98 1 1");
+            AddUiLabel(container, modal,
+                all
+                    ? $"This will end and remove all {ActiveEventCount()} active raid-base events. This cannot be undone."
+                    : $"This will end raid-base event {ShortUiText(target, 42)} and remove its spawned entities.",
+                0.06f, 0.39f, 0.94f, 0.68f, 10, TextAnchor.UpperLeft, "0.72 0.79 0.84 1");
+            AddUiButton(container, modal, "Cancel", "revents.ui cancelstop", 0.39f, 0.12f, 0.61f, 0.28f, UiMuted, 10);
+            AddUiButton(container, modal, all ? "Confirm Cleanup" : "Confirm Stop",
+                "revents.ui confirmstop", 0.64f, 0.12f, 0.94f, 0.28f, UiDanger, 10);
         }
 
         private string AddUiRefreshPanel(CuiElementContainer container, string parent, string name)
@@ -3945,31 +4892,116 @@ namespace Oxide.Plugins
             return name;
         }
 
+        private void BuildManagerNavigation(CuiElementContainer container, string panel, string workspace)
+        {
+            AddUiLabel(container, panel, "MANAGE", 0.08f, 0.91f, 0.92f, 0.96f, 8, TextAnchor.MiddleLeft, "0.48 0.57 0.62 1");
+            AddManagerNavItem(container, panel, workspace, "active", $"Overview  ({ActiveEventCount()})", 0.83f);
+            AddManagerNavItem(container, panel, workspace, "automation", "Automation", 0.75f);
+            AddManagerNavItem(container, panel, workspace, "load", "Bases & Loot", 0.67f);
+            AddManagerNavItem(container, panel, workspace, "rewards", $"Rewards  ({rewardProfiles.Count})", 0.59f);
+
+            AddUiLabel(container, panel, "STATUS", 0.08f, 0.48f, 0.92f, 0.53f, 8, TextAnchor.MiddleLeft, "0.48 0.57 0.62 1");
+            AddUiStatusCard(container, panel, "Automatic", config.EventTypes.AutomaticBases.Enabled ? "ENABLED" : "DISABLED",
+                config.EventTypes.AutomaticBases.Enabled, 0.39f);
+            AddUiStatusCard(container, panel, "Spawn Grid", spawnGridReady ? "READY" : spawnGridBuilding ? "BUILDING" : "OFFLINE",
+                spawnGridReady, 0.30f);
+            AddUiStatusCard(container, panel, "Configuration", ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase) ? "VALID" : "CHECK",
+                ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase), 0.21f);
+            AddUiLabel(container, panel, "Changes are applied immediately and saved by the existing event systems.", 0.08f, 0.045f, 0.92f, 0.15f, 7, TextAnchor.UpperLeft, "0.45 0.53 0.58 1");
+        }
+
+        private void AddManagerNavItem(CuiElementContainer container, string parent, string workspace,
+            string id, string label, float y)
+        {
+            var active = string.Equals(workspace, id, StringComparison.OrdinalIgnoreCase);
+            if (active)
+            {
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = UiAccent },
+                    RectTransform = { AnchorMin = UiAnchor(0.035f, y), AnchorMax = UiAnchor(0.055f, y + 0.058f) }
+                }, parent);
+            }
+            AddUiButton(container, parent, label, $"revents.ui panel {id}", 0.065f, y, 0.94f, y + 0.058f,
+                active ? UiAccent : UiMuted, 9);
+        }
+
+        private void AddUiStatusCard(CuiElementContainer container, string parent, string label, string state,
+            bool healthy, float y)
+        {
+            AddUiRowBackground(container, parent, 0.065f, y, 0.94f, y + 0.065f);
+            AddUiLabel(container, parent, label, 0.09f, y, 0.58f, y + 0.065f, 8, TextAnchor.MiddleLeft, "0.78 0.84 0.88 1");
+            AddUiLabel(container, parent, state, 0.60f, y, 0.90f, y + 0.065f, 7, TextAnchor.MiddleRight,
+                healthy ? "0.48 0.88 0.58 1" : "0.96 0.62 0.30 1");
+        }
+
         private void BuildAutomaticBasesUi(CuiElementContainer container, string panel)
         {
             var automaticBases = config.EventTypes.AutomaticBases;
             AddUiSection(container, panel, "Event Type: Automatic Bases", 0.03f, 0.715f, 0.97f, 0.76f);
-            AddUiLabel(container, panel, automaticBases.Enabled ? "RUNNING" : "DISABLED", 0.045f, 0.665f, 0.125f, 0.70f, 9, TextAnchor.MiddleLeft, automaticBases.Enabled ? "0.60 0.86 0.65 1" : "0.92 0.48 0.42 1");
-            AddUiLabel(container, panel, $"Population {AutomaticBaseActiveCount()} / {automaticBases.MinimumActiveBases}-{automaticBases.MaximumActiveBases}", 0.13f, 0.665f, 0.29f, 0.70f, 9, TextAnchor.MiddleLeft, "0.82 0.88 0.94 1");
-            AddUiStepper(container, panel, "Minimum bases", automaticBases.MinimumActiveBases.ToString(CultureInfo.InvariantCulture), "min", 1f, 0.30f, 0.42f, 0.665f);
-            AddUiStepper(container, panel, "Maximum bases", automaticBases.MaximumActiveBases.ToString(CultureInfo.InvariantCulture), "max", 1f, 0.43f, 0.55f, 0.665f);
-            AddUiStepper(container, panel, "Starts per check", automaticBases.MaximumSpawnsPerCheck.ToString(CultureInfo.InvariantCulture), "batch", 1f, 0.56f, 0.70f, 0.665f);
-            AddUiStepper(container, panel, "Check interval", $"{automaticBases.CheckFrequencyMinutes:0.#}m", "frequency", 5f, 0.71f, 0.86f, 0.665f);
-            AddUiButton(container, panel, "Fill Now", "revents.ui autonow", 0.87f, 0.663f, 0.955f, 0.703f, "0.16 0.32 0.24 0.96", 9);
+            AddUiRowBackground(container, panel, 0.045f, 0.635f, 0.955f, 0.695f);
+            AddUiLabel(container, panel, automaticBases.Enabled ? "RUNNING" : "DISABLED", 0.065f, 0.645f, 0.15f, 0.685f, 9,
+                TextAnchor.MiddleLeft, automaticBases.Enabled ? "0.48 0.88 0.58 1" : "0.96 0.42 0.38 1");
+            AddUiLabel(container, panel,
+                $"Active population  {AutomaticBaseActiveCount()}  /  target {automaticBases.MinimumActiveBases}-{automaticBases.MaximumActiveBases}",
+                0.16f, 0.645f, 0.47f, 0.685f, 9, TextAnchor.MiddleLeft, "0.82 0.88 0.94 1");
+            AddUiLabel(container, panel, ShortUiText(AutomaticSearchStatusShort(), 72), 0.48f, 0.645f, 0.79f, 0.685f, 8,
+                TextAnchor.MiddleLeft, "0.62 0.68 0.74 1");
+            AddUiLabel(container, panel, $"Next check  {FormatDuration(Math.Max(0, data.NextAutoAttemptUnix - NowUnix()))}",
+                0.80f, 0.645f, 0.935f, 0.685f, 8, TextAnchor.MiddleRight, "0.62 0.68 0.74 1");
 
-            AddUiLabel(container, panel, ShortUiText(AutomaticSearchStatusShort(), 72), 0.045f, 0.615f, 0.30f, 0.65f, 8, TextAnchor.MiddleLeft, "0.62 0.68 0.74 1");
-            AddUiStepper(container, panel, "Public percent", $"{automaticBases.PercentageToAnnounce:0.#}%", "announce", 5f, 0.30f, 0.46f, 0.615f);
-            AddUiStepper(container, panel, "Minimum players", automaticBases.MinimumOnlinePlayers.ToString(CultureInfo.InvariantCulture), "players", 1f, 0.47f, 0.61f, 0.615f);
-            AddUiStepper(container, panel, "Cleanup age", $"{automaticBases.HardLifetimeHours:0.#}h", "lifetime", 1f, 0.62f, 0.78f, 0.615f);
-            AddUiLabel(container, panel, $"Next {FormatDuration(Math.Max(0, data.NextAutoAttemptUnix - NowUnix()))}", 0.80f, 0.615f, 0.955f, 0.65f, 8, TextAnchor.MiddleRight, "0.62 0.68 0.74 1");
+            AddAutomationSettingCard(container, panel, "Minimum Bases",
+                automaticBases.MinimumActiveBases.ToString(CultureInfo.InvariantCulture),
+                "Lowest number kept active.", "min", 1f, 0.045f, 0.48f, 0.265f, 0.61f);
+            AddAutomationSettingCard(container, panel, "Maximum Bases",
+                automaticBases.MaximumActiveBases.ToString(CultureInfo.InvariantCulture),
+                "Hard active population cap.", "max", 1f, 0.275f, 0.48f, 0.495f, 0.61f);
+            AddAutomationSettingCard(container, panel, "Starts Per Check",
+                automaticBases.MaximumSpawnsPerCheck.ToString(CultureInfo.InvariantCulture),
+                "Maximum spawned each cycle.", "batch", 1f, 0.505f, 0.48f, 0.725f, 0.61f);
+            AddAutomationSettingCard(container, panel, "Check Interval",
+                $"{automaticBases.CheckFrequencyMinutes:0.#} min",
+                "Time between population checks.", "frequency", 5f, 0.735f, 0.48f, 0.955f, 0.61f);
+
+            AddAutomationSettingCard(container, panel, "Public Events",
+                $"{automaticBases.PercentageToAnnounce:0.#}%",
+                "Percent announced on the map.", "announce", 5f, 0.045f, 0.30f, 0.265f, 0.43f);
+            AddAutomationSettingCard(container, panel, "Minimum Players",
+                automaticBases.MinimumOnlinePlayers.ToString(CultureInfo.InvariantCulture),
+                "Online players required.", "players", 1f, 0.275f, 0.30f, 0.495f, 0.43f);
+            AddAutomationSettingCard(container, panel, "Cleanup Age",
+                $"{automaticBases.HardLifetimeHours:0.#} hours",
+                "Maximum base lifetime.", "lifetime", 1f, 0.505f, 0.30f, 0.725f, 0.43f);
+
+            var actionCard = container.Add(new CuiPanel
+            {
+                Image = { Color = UiRow },
+                RectTransform = { AnchorMin = UiAnchor(0.735f, 0.30f), AnchorMax = UiAnchor(0.955f, 0.43f) }
+            }, panel);
+            AddUiLabel(container, actionCard, "Population Action", 0.06f, 0.68f, 0.94f, 0.92f, 9,
+                TextAnchor.MiddleLeft, "0.88 0.92 0.95 1");
+            AddUiLabel(container, actionCard, "Spawn toward the configured minimum now.", 0.06f, 0.40f, 0.94f, 0.66f, 7,
+                TextAnchor.MiddleLeft, "0.50 0.60 0.65 1");
+            AddUiButton(container, actionCard, "Fill Now", "revents.ui autonow", 0.58f, 0.12f, 0.94f, 0.38f, UiSuccess, 9);
         }
 
-        private void AddUiStepper(CuiElementContainer container, string parent, string label, string value, string setting, float step, float xMin, float xMax, float y)
+        private void AddAutomationSettingCard(CuiElementContainer container, string parent, string label, string value,
+            string help, string setting, float step, float xMin, float yMin, float xMax, float yMax)
         {
-            var width = xMax - xMin;
-            AddUiLabel(container, parent, $"{label}\n<b>{value}</b>", xMin, y, xMin + width * 0.58f, y + 0.038f, 7, TextAnchor.MiddleLeft, "0.78 0.84 0.90 1");
-            AddUiButton(container, parent, $"- {label}", $"revents.ui setting {setting} {(-step).ToString(CultureInfo.InvariantCulture)}", xMin + width * 0.60f, y, xMin + width * 0.79f, y + 0.038f, "0.24 0.18 0.16 0.96", 6);
-            AddUiButton(container, parent, $"+ {label}", $"revents.ui setting {setting} {step.ToString(CultureInfo.InvariantCulture)}", xMin + width * 0.81f, y, xMax, y + 0.038f, "0.14 0.30 0.22 0.96", 6);
+            var card = container.Add(new CuiPanel
+            {
+                Image = { Color = UiRow },
+                RectTransform = { AnchorMin = UiAnchor(xMin, yMin), AnchorMax = UiAnchor(xMax, yMax) }
+            }, parent);
+            AddUiLabel(container, card, label, 0.06f, 0.68f, 0.94f, 0.92f, 9, TextAnchor.MiddleLeft, "0.88 0.92 0.95 1");
+            AddUiLabel(container, card, help, 0.06f, 0.42f, 0.94f, 0.66f, 7, TextAnchor.MiddleLeft, "0.50 0.60 0.65 1");
+            AddUiLabel(container, card, $"<b>{value}</b>", 0.06f, 0.08f, 0.55f, 0.40f, 13, TextAnchor.MiddleLeft, "0.96 0.98 1 1");
+            AddUiButton(container, card, "−",
+                $"revents.ui setting {setting} {(-step).ToString(CultureInfo.InvariantCulture)}",
+                0.62f, 0.10f, 0.77f, 0.38f, UiWarning, 12);
+            AddUiButton(container, card, "+",
+                $"revents.ui setting {setting} {step.ToString(CultureInfo.InvariantCulture)}",
+                0.80f, 0.10f, 0.95f, 0.38f, UiSuccess, 12);
         }
 
         private void BuildManagerWorkspaceUi(CuiElementContainer container, string panel, BasePlayer player)
@@ -3977,11 +5009,6 @@ namespace Oxide.Plugins
             string workspace;
             if (!uiManagerPanels.TryGetValue(player.userID, out workspace))
                 workspace = "active";
-
-            AddUiButton(container, panel, $"Active Events ({ActiveEventCount()})", "revents.ui panel active", 0.03f, 0.525f, 0.205f, 0.57f, workspace == "active" ? "0.16 0.38 0.54 0.98" : "0.10 0.13 0.16 0.96", 10);
-            AddUiButton(container, panel, "Load Event", "revents.ui panel load", 0.21f, 0.525f, 0.355f, 0.57f, workspace == "load" ? "0.16 0.38 0.54 0.98" : "0.10 0.13 0.16 0.96", 10);
-            AddUiButton(container, panel, $"Rewards ({rewardProfiles.Count})", "revents.ui panel rewards", 0.36f, 0.525f, 0.505f, 0.57f, workspace == "rewards" ? "0.16 0.38 0.54 0.98" : "0.10 0.13 0.16 0.96", 10);
-            AddUiLabel(container, panel, workspace == "active" ? "Inspect and manage running instances." : workspace == "load" ? "Choose content and load it into an event." : "Profiles, assignments, validation, dry runs, and transaction status.", 0.52f, 0.525f, 0.97f, 0.57f, 8, TextAnchor.MiddleRight, "0.62 0.70 0.78 1");
 
             if (workspace == "load")
                 BuildLayoutsUi(container, panel, player);
@@ -4647,10 +5674,10 @@ namespace Oxide.Plugins
             if (!lootEditors.TryGetValue(player.userID, out editor))
                 return;
 
-            container.Add(new CuiPanel { Image = { Color = "0 0 0 0.72" }, RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" } }, panel);
+            container.Add(new CuiPanel { Image = { Color = "0.015 0.018 0.022 0.78" }, RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" } }, panel);
             var modal = container.Add(new CuiPanel
             {
-                Image = { Color = "0.025 0.032 0.04 0.995" },
+                Image = { Color = UiSurfaceRaised },
                 RectTransform = { AnchorMin = "0.015 0.025", AnchorMax = "0.985 0.975" }
             }, panel);
 
@@ -4662,9 +5689,22 @@ namespace Oxide.Plugins
                 current = descriptors[0];
             }
 
-            AddUiLabel(container, modal, $"<b>Raid Base Loot Editor</b>  |  {ShortUiText(editor.LayoutId, 32)}", 0.025f, 0.925f, 0.68f, 0.982f, 17, TextAnchor.MiddleLeft, "0.95 0.98 1 1");
-            AddUiLabel(container, modal, "Overrides affect RaidlandsEvents only. Copied layouts are never rewritten.", 0.40f, 0.93f, 0.82f, 0.975f, 8, TextAnchor.MiddleRight, "0.58 0.68 0.76 1");
-            AddUiButton(container, modal, "Discard / Close", "revents.ui lootdiscard", 0.835f, 0.932f, 0.975f, 0.975f, "0.38 0.14 0.14 0.96", 9);
+            var editorBrand = container.Add(new CuiPanel
+            {
+                Image = { Color = UiAccent },
+                RectTransform = { AnchorMin = "0.025 0.928", AnchorMax = "0.063 0.978" }
+            }, modal);
+            AddUiLabel(container, editorBrand, "LT", 0f, 0f, 1f, 1f, 10, TextAnchor.MiddleCenter, "0.98 1 1 1");
+            AddUiLabel(container, modal, "<b>Raid Base Loot</b>", 0.075f, 0.95f, 0.38f, 0.982f, 15, TextAnchor.MiddleLeft, "0.95 0.98 1 1");
+            AddUiLabel(container, modal, ShortUiText(editor.LayoutId, 42), 0.075f, 0.925f, 0.38f, 0.952f, 8, TextAnchor.MiddleLeft, "0.52 0.64 0.68 1");
+            AddUiLabel(container, modal, "Overrides apply to RaidlandsEvents only; source CopyPaste files stay untouched.", 0.39f, 0.93f, 0.82f, 0.975f, 8, TextAnchor.MiddleRight, "0.58 0.68 0.76 1");
+            AddUiButton(container, modal, "Close", "revents.ui lootdiscard", 0.85f, 0.935f, 0.975f, 0.975f, UiDanger, 9);
+            string feedback;
+            if (uiFeedbackMessages.TryGetValue(player.userID, out feedback))
+                AddUiLabel(container, modal, ShortUiText(feedback, 110), 0.27f, 0.025f, 0.965f, 0.06f, 8,
+                    TextAnchor.MiddleRight, feedback.StartsWith("Saved", StringComparison.OrdinalIgnoreCase)
+                        ? "0.48 0.88 0.58 1"
+                        : "0.96 0.62 0.30 1");
 
             AddUiSection(container, modal, "Containers", 0.025f, 0.855f, 0.245f, 0.91f);
             const int containersPerPage = 10;
@@ -4708,7 +5748,7 @@ namespace Oxide.Plugins
                 var y2 = 0.825f - row * 0.09f;
                 var y1 = y2 - slotHeight;
                 var draftItem = editor.DraftItems.FirstOrDefault(item => item != null && item.Position == slot);
-                container.Add(new CuiPanel { Image = { Color = slot == editor.SelectedSlot ? "0.18 0.42 0.60 0.98" : "0.10 0.13 0.16 0.98" }, RectTransform = { AnchorMin = UiAnchor(x1, y1), AnchorMax = UiAnchor(x1 + slotWidth, y2) } }, modal);
+                container.Add(new CuiPanel { Image = { Color = slot == editor.SelectedSlot ? UiAccent : "0.02 0.025 0.03 0.98" }, RectTransform = { AnchorMin = UiAnchor(x1, y1), AnchorMax = UiAnchor(x1 + slotWidth, y2) } }, modal);
                 if (draftItem != null)
                 {
                     var definition = ItemManager.FindItemDefinition(draftItem.ShortName);
@@ -4794,8 +5834,7 @@ namespace Oxide.Plugins
             var leaderboard = BuildLeaderboard(active, false);
             AddUiLabel(container, modal, $"<b>{ShortUiText(active.PublicName, 28)} Scoreboard</b>", 0.035f, 0.895f, 0.48f, 0.965f, 17, TextAnchor.MiddleLeft, "0.95 0.98 1 1");
             AddUiLabel(container, modal, $"{ShortUiText(active.InstanceId, 18)} | {active.Status} | radius {active.ScoreRadiusMeters:0}m | entries {leaderboard.Count}", 0.49f, 0.905f, 0.80f, 0.955f, 9, TextAnchor.MiddleRight, "0.62 0.70 0.78 1");
-            AddUiButton(container, modal, "Refresh", $"revents.ui score {active.InstanceId}", 0.815f, 0.90f, 0.89f, 0.958f, "0.16 0.30 0.42 0.96", 9);
-            AddUiButton(container, modal, "Close", "revents.ui refresh", 0.898f, 0.90f, 0.965f, 0.958f, "0.34 0.16 0.15 0.96", 9);
+            AddUiButton(container, modal, "Close", "revents.ui refresh", 0.85f, 0.90f, 0.965f, 0.958f, UiDanger, 9);
 
             AddUiSection(container, modal, "Leaderboard", 0.035f, 0.795f, 0.965f, 0.85f);
             AddUiScoreHeader(container, modal, 0.742f);
@@ -4866,6 +5905,7 @@ namespace Oxide.Plugins
 
             uiOpenPlayers.Remove(player.userID);
             uiScoreModalInstances.Remove(player.userID);
+            uiPendingStopConfirmations.Remove(player.userID);
             uiRenderGenerations.Remove(player.userID);
             DestroyEventsManagerUi(player);
         }
@@ -4879,6 +5919,7 @@ namespace Oxide.Plugins
                 {
                     uiOpenPlayers.Remove(userId);
                     uiScoreModalInstances.Remove(userId);
+                    uiPendingStopConfirmations.Remove(userId);
                     continue;
                 }
 
@@ -4910,18 +5951,23 @@ namespace Oxide.Plugins
         {
             var section = container.Add(new CuiPanel
             {
-                Image = { Color = "0.07 0.09 0.11 0.96" },
+                Image = { Color = UiSurfaceRaised },
                 RectTransform = { AnchorMin = UiAnchor(x1, y1), AnchorMax = UiAnchor(x2, y2) }
             }, parent);
 
-            AddUiLabel(container, section, text, 0.012f, 0f, 0.98f, 1f, 11, TextAnchor.MiddleLeft, "0.86 0.90 0.94 1");
+            container.Add(new CuiPanel
+            {
+                Image = { Color = UiAccent },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.004 1" }
+            }, section);
+            AddUiLabel(container, section, text, 0.018f, 0f, 0.98f, 1f, 10, TextAnchor.MiddleLeft, "0.86 0.90 0.94 1");
         }
 
         private void AddUiRowBackground(CuiElementContainer container, string parent, float y1, float y2)
         {
             container.Add(new CuiPanel
             {
-                Image = { Color = "0.045 0.055 0.065 0.72" },
+                Image = { Color = UiRow },
                 RectTransform = { AnchorMin = UiAnchor(0.04f, y1), AnchorMax = UiAnchor(0.96f, y2) }
             }, parent);
         }
@@ -4930,7 +5976,7 @@ namespace Oxide.Plugins
         {
             container.Add(new CuiPanel
             {
-                Image = { Color = "0.045 0.055 0.065 0.72" },
+                Image = { Color = UiRow },
                 RectTransform = { AnchorMin = UiAnchor(x1, y1), AnchorMax = UiAnchor(x2, y2) }
             }, parent);
         }
@@ -4939,7 +5985,7 @@ namespace Oxide.Plugins
         {
             container.Add(new CuiButton
             {
-                Button = { Command = command, Color = color },
+                Button = { Command = command, Color = ThemeUiColor(color, command) },
                 RectTransform = { AnchorMin = UiAnchor(x1, y1), AnchorMax = UiAnchor(x2, y2) },
                 Text =
                 {
@@ -4984,7 +6030,7 @@ namespace Oxide.Plugins
         {
             var inputPanel = container.Add(new CuiPanel
             {
-                Image = { Color = "0.07 0.09 0.11 0.98" },
+                Image = { Color = "0.02 0.025 0.03 0.98" },
                 RectTransform = { AnchorMin = UiAnchor(x1, y1), AnchorMax = UiAnchor(x2, y2) }
             }, parent);
 
@@ -5019,9 +6065,79 @@ namespace Oxide.Plugins
             return string.Format(CultureInfo.InvariantCulture, "{0:0.###} {1:0.###}", Mathf.Clamp01(x), Mathf.Clamp01(y));
         }
 
+        private void AddUiFrame(CuiElementContainer container, string parent)
+        {
+            container.Add(new CuiPanel
+            {
+                Image = { Color = UiAccent },
+                RectTransform = { AnchorMin = "0 0.996", AnchorMax = "0.72 1" }
+            }, parent);
+            container.Add(new CuiPanel
+            {
+                Image = { Color = UiAccentAlt },
+                RectTransform = { AnchorMin = "0.72 0.996", AnchorMax = "1 1" }
+            }, parent);
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.12 0.13 0.14 0.85" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "0.002 1" }
+            }, parent);
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.12 0.13 0.14 0.85" },
+                RectTransform = { AnchorMin = "0.998 0", AnchorMax = "1 1" }
+            }, parent);
+        }
+
+        private string ThemeUiColor(string color, string command)
+        {
+            if (string.IsNullOrWhiteSpace(command))
+                return UiMuted;
+
+            var value = (color ?? string.Empty).Trim();
+            if (value.StartsWith("0.40 0.16", StringComparison.Ordinal)
+                || value.StartsWith("0.45 0.12", StringComparison.Ordinal)
+                || value.StartsWith("0.38 0.14", StringComparison.Ordinal)
+                || value.StartsWith("0.36 0.18", StringComparison.Ordinal)
+                || value.StartsWith("0.34 0.16", StringComparison.Ordinal))
+                return UiDanger;
+            if (value.StartsWith("0.30 0.23", StringComparison.Ordinal)
+                || value.StartsWith("0.24 0.18", StringComparison.Ordinal)
+                || value.StartsWith("0.34 0.20", StringComparison.Ordinal)
+                || value.StartsWith("0.36 0.20", StringComparison.Ordinal)
+                || value.StartsWith("0.28 0.16", StringComparison.Ordinal))
+                return UiWarning;
+            if (value.StartsWith("0.14 0.30", StringComparison.Ordinal)
+                || value.StartsWith("0.12 0.36", StringComparison.Ordinal)
+                || value.StartsWith("0.18 0.34", StringComparison.Ordinal))
+                return UiSuccess;
+            if (value.StartsWith("0.16 0.38", StringComparison.Ordinal)
+                || value.StartsWith("0.08 0.42", StringComparison.Ordinal))
+                return UiAccent;
+            if (value.StartsWith("0.16 0.24", StringComparison.Ordinal)
+                || value.StartsWith("0.16 0.25", StringComparison.Ordinal)
+                || value.StartsWith("0.16 0.30", StringComparison.Ordinal))
+                return UiAccentAlt;
+            if (value.StartsWith("0.10 0.13", StringComparison.Ordinal)
+                || value.StartsWith("0.11 0.13", StringComparison.Ordinal)
+                || value.StartsWith("0.11 0.14", StringComparison.Ordinal)
+                || value.StartsWith("0.12 0.13", StringComparison.Ordinal))
+                return UiMuted;
+            return value.Length == 0 ? UiMuted : value;
+        }
+
         private string UiHeaderStatus()
         {
-            return $"autoBases={(config.EventTypes.AutomaticBases.Enabled ? "on" : "off")} {AutomaticBaseActiveCount()}+{data.PendingAutomaticSpawnRequests}/{config.EventTypes.AutomaticBases.MaximumActiveBases} | scoring={(config.Scoring.Enabled ? "on" : "off")} | rewards={(config.Rewards.Enabled ? "on" : "off")} | total={ActiveEventCount()}";
+            var cleanup = cleanupJob == null ? string.Empty : $" | {CleanupPercentText()}";
+            return $"AUTO {(config.EventTypes.AutomaticBases.Enabled ? "ON" : "OFF")}  |  ACTIVE {ActiveEventCount()}  |  REWARDS {(config.Rewards.Enabled ? "ON" : "OFF")}{cleanup}";
+        }
+
+        private bool IsRoamBotDebugPanelEnabled()
+        {
+            if (RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
+                return false;
+            var result = RaidlandsRoamBots.Call("REBOT_GetDebugSidePanelEnabled");
+            return result is bool && (bool)result;
         }
 
         private string LayoutUiState(LayoutScanEntry layout)
@@ -5170,8 +6286,8 @@ namespace Oxide.Plugins
 
                 if (fileData["default"] == null)
                     entry.ValidationErrors.Add("Missing default section");
-                if (fileData["protocol"] == null)
-                    entry.ValidationErrors.Add("Missing protocol section");
+                // CopyPaste treats the protocol section as optional and falls back to an
+                // empty protocol dictionary. Fortify exports legitimately omit it.
 
                 var entities = fileData["entities"] as IEnumerable;
                 if (entities == null)
@@ -5541,6 +6657,7 @@ namespace Oxide.Plugins
             string error;
             if (!ValidateLootEntries(editor.DraftItems, descriptor.Capacity, out error))
             {
+                uiFeedbackMessages[player.userID] = $"Not saved: {error}";
                 SendReply(player, $"{config.ChatPrefix} Loot override was not saved: {error}");
                 return;
             }
@@ -5556,6 +6673,7 @@ namespace Oxide.Plugins
                 UpdatedUnix = NowUnix()
             };
             SaveData();
+            uiFeedbackMessages[player.userID] = $"Saved {editor.DraftItems.Count} slots for {descriptor.Label}.";
             SendReply(player, $"{config.ChatPrefix} Saved {editor.DraftItems.Count} item slot(s) for {descriptor.Label} in {editor.LayoutId}.");
         }
 
@@ -5631,9 +6749,15 @@ namespace Oxide.Plugins
             };
         }
 
-        private bool StartRaidBase(string requestedLayoutId, bool randomLocation, Vector3 requestedPosition, out string message, string triggerType = null, bool? announced = null, LayoutScanEntry preparedLayout = null, float? preparedRotationDegrees = null, bool locationPrevalidated = false, int preparedGridCandidateIndex = -1)
+        private bool StartRaidBase(string requestedLayoutId, bool randomLocation, Vector3 requestedPosition, out string message, string triggerType = null, bool? announced = null, LayoutScanEntry preparedLayout = null, float? preparedRotationDegrees = null, bool locationPrevalidated = false, int preparedGridCandidateIndex = -1, RaidBaseProfile requestedProfile = null)
         {
             message = null;
+
+            if (cleanupJob != null)
+            {
+                message = "Raid-base cleanup is in progress; wait for it to finish before starting another event.";
+                return false;
+            }
 
             if (CopyPaste == null || !CopyPaste.IsLoaded)
             {
@@ -5693,9 +6817,17 @@ namespace Oxide.Plugins
             var now = NowUnix();
             var isAutomatic = string.Equals(resolvedTriggerType, "automatic", StringComparison.OrdinalIgnoreCase);
             var isAnnounced = announced ?? (isAutomatic ? ShouldAnnounceNewAutomaticBase() : true);
+            var raidProfile = requestedProfile ?? ResolveProfileForLayout(layout.LayoutId);
             var hardLifetimeSeconds = isAutomatic
                 ? config.EventTypes.AutomaticBases.HardLifetimeHours * 3600f
                 : config.Cleanup.ForcedCleanupTimeoutSeconds;
+            if (raidProfile != null)
+            {
+                var profileMinutes = raidProfile.EventDurationMinutes > 0f
+                    ? raidProfile.EventDurationMinutes
+                    : config.RaidableBasesCompatibility.DefaultEventDurationMinutes;
+                hardLifetimeSeconds = profileMinutes * 60f;
+            }
             string rewardProfileId;
             RewardProfile rewardProfileSnapshot;
             string rewardProfileHash;
@@ -5714,10 +6846,14 @@ namespace Oxide.Plugins
                 ExpiresUnix = now + hardLifetimeSeconds,
                 EventTypeId = isAutomatic ? "automatic-bases" : "raid-base",
                 ProviderType = "CopyPaste",
+                ProfileId = raidProfile?.Id,
+                Difficulty = raidProfile?.Difficulty,
+                LootFile = raidProfile?.LootFile,
+                AllowPvp = raidProfile == null || raidProfile.AllowPvp,
                 IsAnnounced = isAnnounced,
                 Status = "pasting",
                 HadToolCupboardInLayout = layout.HasToolCupboard,
-                ScoreRadiusMeters = config.Scoring.ScoreRadiusMeters,
+                ScoreRadiusMeters = raidProfile != null ? raidProfile.EventRadiusMeters : config.Scoring.ScoreRadiusMeters,
                 TriggerType = resolvedTriggerType,
                 RewardProfileId = rewardProfileId,
                 RewardProfileSnapshot = rewardProfileSnapshot,
@@ -5777,13 +6913,17 @@ namespace Oxide.Plugins
             spawnGridLastSuccessPosition = startPos;
             RebuildEntityIndex();
             var sanitized = SanitizeEventEntities(active.EntityIds);
+            var profileLootSummary = ApplyProfileLoot(active);
             var overrideSummary = ApplyLayoutLootOverrides(active);
+            var kastroDefenses = ConfigureKastroDefenses(active.LayoutId, active.EntityIds);
             var normalizedTurrets = NormalizePastedTurretsAttackAll(active.EntityIds);
             var managedSentries = ManageEventSentries(active.EntityIds);
+            ScheduleEventGuards(active);
             LayoutScanEntry scannedLayout;
             var expectedAutoTurrets = data.Layouts.TryGetValue(active.LayoutId, out scannedLayout) && scannedLayout != null ? scannedLayout.AutoTurretCount : 0;
             var survivingAutoTurrets = CountLivePastedAutoTurrets(active.EntityIds);
             ScheduleEventSanitizationReapply(active.EntityIds);
+            ScheduleKastroDefenseReapply(active.LayoutId, active.EntityIds);
             SchedulePastedTurretAttackAllReapply(active.EntityIds);
             SchedulePastedTurretSurvivalAudit(active.InstanceId, active.EntityIds, expectedAutoTurrets);
             if (active.IsAnnounced)
@@ -5796,7 +6936,7 @@ namespace Oxide.Plugins
                 var startMessage = $"{config.ChatPrefix} {active.PublicName} has appeared on the map. Bring boom and fight for it.";
                 Server.Broadcast(startMessage);
             }
-            Puts($"Raid base event {active.InstanceId} active: type={active.EventTypeId}, layout={active.LayoutId}, announced={active.IsAnnounced}, entities={active.EntityIds.Count}, tc={active.ToolCupboardId}, adaptiveFoundations={adaptiveSummary}, sanitized={sanitized.Entities}, cupboards={sanitized.Cupboards}, locks={sanitized.Locks}, sams={sanitized.Sams}, traps={sanitized.Traps}, removedSteamIds={sanitized.RemovedSteamIds}, lootOverrides={overrideSummary}, turretsAttackAll={normalizedTurrets}, managedSentries={managedSentries}, autoTurrets={survivingAutoTurrets}/{expectedAutoTurrets}.");
+            Puts($"Raid base event {active.InstanceId} active: type={active.EventTypeId}, layout={active.LayoutId}, profile={active.ProfileId ?? "none"}, difficulty={active.Difficulty ?? "none"}, announced={active.IsAnnounced}, entities={active.EntityIds.Count}, tc={active.ToolCupboardId}, adaptiveFoundations={adaptiveSummary}, sanitized={sanitized.Entities}, cupboards={sanitized.Cupboards}, locks={sanitized.Locks}, sams={sanitized.Sams}, traps={sanitized.Traps}, removedSteamIds={sanitized.RemovedSteamIds}, kastroDefenses={kastroDefenses}, profileLoot={profileLootSummary}, lootOverrides={overrideSummary}, turretsAttackAll={normalizedTurrets}, managedSentries={managedSentries}, autoTurrets={survivingAutoTurrets}/{expectedAutoTurrets}.");
         }
 
         private int ManageActiveEventSentries()
@@ -5825,6 +6965,226 @@ namespace Oxide.Plugins
                 return count;
 
             return 0;
+        }
+
+        private void ScheduleEventGuards(ActiveRaidBase active)
+        {
+            var guards = config?.RaidableBasesCompatibility?.RoamBotGuards;
+            if (active == null || guards?.Enabled != true)
+                return;
+            var instanceId = active.InstanceId;
+            timer.Once(guards.SpawnDelaySeconds, () =>
+            {
+                ActiveRaidBase current;
+                if (data.ActiveRaidBases.TryGetValue(instanceId, out current)
+                    && current != null
+                    && string.Equals(current.Status, "active", StringComparison.OrdinalIgnoreCase))
+                    SpawnEventGuards(current, false);
+            });
+        }
+
+        private void ReconcileActiveEventGuards()
+        {
+            if (config?.RaidableBasesCompatibility?.RoamBotGuards?.Enabled != true
+                || RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded
+                || data?.ActiveRaidBases == null)
+                return;
+
+            foreach (var active in data.ActiveRaidBases.Values
+                         .Where(value => value != null && string.Equals(value.Status, "active", StringComparison.OrdinalIgnoreCase))
+                         .ToList())
+            {
+                var hasLiveGuard = (active.RoamBotGuardEntityIds ?? new List<ulong>())
+                    .Any(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) != null);
+                if (!hasLiveGuard)
+                    SpawnEventGuards(active, true);
+                else
+                    AuthorizeEventGuards(active);
+            }
+        }
+
+        private bool SpawnEventGuards(ActiveRaidBase active, bool reconciliation)
+        {
+            var guards = config?.RaidableBasesCompatibility?.RoamBotGuards;
+            if (active == null || guards?.Enabled != true)
+                return false;
+            if (RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
+            {
+                if (!reconciliation)
+                    PrintWarning($"Raid base {active.InstanceId} guards were not spawned because RaidlandsRoamBots is not loaded.");
+                return false;
+            }
+
+            var difficulty = NormalizeDifficulty(active.Difficulty) ?? "Easy";
+            int count;
+            float healthMultiplier;
+            float leashRadius;
+            guards.CountByDifficulty.TryGetValue(difficulty, out count);
+            guards.HealthMultiplierByDifficulty.TryGetValue(difficulty, out healthMultiplier);
+            guards.LeashRadiusByDifficulty.TryGetValue(difficulty, out leashRadius);
+            if (count <= 0)
+                return true;
+
+            RaidlandsRoamBots.Call("REBOT_DespawnForEvent", active.InstanceId, "RaidlandsEvents guard reconciliation");
+            var spawnPoints = BuildEventGuardSpawnPoints(active, count);
+            var request = new Dictionary<string, object>
+            {
+                ["OwnerPlugin"] = Name,
+                ["EventInstanceId"] = active.InstanceId,
+                ["GroupKey"] = "raid_guards",
+                ["Count"] = count,
+                ["Profile"] = guards.Profile,
+                ["Difficulty"] = difficulty,
+                ["HealthMultiplier"] = healthMultiplier,
+                ["AllowAmbientKitSelection"] = guards.AllowAmbientKitSelection,
+                ["SpawnMode"] = "spawnpoints",
+                ["SpawnPoints"] = spawnPoints,
+                ["LeashCenter"] = EventCenter(active),
+                ["LeashRadius"] = leashRadius,
+                ["TeamKey"] = active.InstanceId + "_guards"
+            };
+
+            var response = RaidlandsRoamBots.Call("REBOT_SpawnGroup", request);
+            bool success;
+            string groupId;
+            List<ulong> entityIds;
+            string detail;
+            if (!TryReadRoamBotResponse(response, out success, out groupId, out entityIds, out detail) || !success)
+            {
+                PrintWarning($"Raid base {active.InstanceId} guard spawn failed: {detail}");
+                return false;
+            }
+
+            active.RoamBotGuardGroupId = groupId;
+            active.RoamBotGuardEntityIds = entityIds;
+            var authorized = AuthorizeEventGuards(active);
+            timer.Once(1f, () =>
+            {
+                ActiveRaidBase current;
+                if (data.ActiveRaidBases.TryGetValue(active.InstanceId, out current) && current != null)
+                    AuthorizeEventGuards(current);
+            });
+            timer.Once(5f, () =>
+            {
+                ActiveRaidBase current;
+                if (data.ActiveRaidBases.TryGetValue(active.InstanceId, out current) && current != null)
+                    AuthorizeEventGuards(current);
+            });
+            SaveData();
+            Puts($"Raid base {active.InstanceId} spawned {entityIds.Count}/{count} {difficulty} RoamBot guards; group={groupId}, tc={active.ToolCupboardId}, authChanges={authorized}, api={detail}.");
+            return entityIds.Count > 0;
+        }
+
+        private List<Vector3> BuildEventGuardSpawnPoints(ActiveRaidBase active, int count)
+        {
+            var result = new List<Vector3>();
+            var center = EventCenter(active);
+            LayoutScanEntry layout;
+            var footprintRadius = data.Layouts.TryGetValue(active.LayoutId, out layout) && layout != null
+                ? Mathf.Max(4f, layout.GroundFootprintRadius)
+                : 12f;
+            var ringRadius = Mathf.Clamp(footprintRadius + 4f, 8f, 32f);
+            for (var index = 0; index < count; index++)
+            {
+                var ring = index % 2 == 0 ? ringRadius : Mathf.Max(5f, ringRadius * 0.65f);
+                var angle = active.RotationDegrees + index * (360f / Math.Max(1, count));
+                var offset = Quaternion.Euler(0f, angle, 0f) * Vector3.forward * ring;
+                var position = center + offset;
+                position.y = TerrainMeta.HeightMap.GetHeight(position) + 0.35f;
+                result.Add(position);
+            }
+            return result;
+        }
+
+        private bool TryReadRoamBotResponse(object response, out bool success, out string groupId,
+            out List<ulong> entityIds, out string detail)
+        {
+            success = false;
+            groupId = string.Empty;
+            entityIds = new List<ulong>();
+            detail = "RaidlandsRoamBots returned no response.";
+            var dictionary = response as IDictionary<string, object>;
+            if (dictionary == null)
+                return false;
+
+            object value;
+            if (dictionary.TryGetValue("Success", out value))
+                bool.TryParse(value?.ToString(), out success);
+            if (dictionary.TryGetValue("GroupId", out value) && value != null)
+                groupId = value.ToString();
+            if (dictionary.TryGetValue("EntityIds", out value) && value is IEnumerable enumerable)
+            {
+                foreach (var raw in enumerable)
+                {
+                    ulong id;
+                    if (raw != null && ulong.TryParse(raw.ToString(), out id) && id != 0)
+                        entityIds.Add(id);
+                }
+            }
+            var messages = new List<string>();
+            foreach (var key in new[] { "Warnings", "Errors" })
+            {
+                if (!dictionary.TryGetValue(key, out value) || !(value is IEnumerable values))
+                    continue;
+                foreach (var raw in values)
+                    if (raw != null && !string.IsNullOrWhiteSpace(raw.ToString()))
+                        messages.Add(raw.ToString());
+            }
+            detail = messages.Count == 0 ? "ok" : string.Join("; ", messages);
+            return true;
+        }
+
+        private int AuthorizeEventGuards(ActiveRaidBase active)
+        {
+            var guards = config?.RaidableBasesCompatibility?.RoamBotGuards;
+            if (active == null || guards == null)
+                return 0;
+            var players = (active.RoamBotGuardEntityIds ?? new List<ulong>())
+                .Select(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BasePlayer)
+                .Where(player => player != null && !player.IsDestroyed && player.userID != 0)
+                .ToList();
+            if (players.Count == 0)
+                return 0;
+
+            var changed = 0;
+            var cupboard = BaseNetworkable.serverEntities.Find(new NetworkableId(active.ToolCupboardId)) as BuildingPrivlidge;
+            if (guards.AuthorizeOnToolCupboard && cupboard != null)
+            {
+                foreach (var player in players)
+                    if (!cupboard.authorizedPlayers.Contains(player.userID))
+                    {
+                        cupboard.authorizedPlayers.Add(player.userID);
+                        changed++;
+                    }
+                cupboard.SendNetworkUpdate();
+            }
+
+            if (guards.AuthorizeOnAutoTurrets)
+            {
+                foreach (var entityId in active.EntityIds ?? new List<ulong>())
+                {
+                    var turret = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as AutoTurret;
+                    if (turret == null || turret.IsDestroyed)
+                        continue;
+                    foreach (var player in players)
+                        if (!turret.authorizedPlayers.Contains(player.userID))
+                        {
+                            turret.authorizedPlayers.Add(player.userID);
+                            changed++;
+                        }
+                    turret.SendNetworkUpdate();
+                }
+                ManageEventSentries(active.EntityIds);
+            }
+            return changed;
+        }
+
+        private void DespawnEventGuards(ActiveRaidBase active, string reason)
+        {
+            if (active == null)
+                return;
+            if (RaidlandsRoamBots != null && RaidlandsRoamBots.IsLoaded)
+                RaidlandsRoamBots.Call("REBOT_DespawnForEvent", active.InstanceId, reason ?? "RaidlandsEvents cleanup");
         }
 
         private void OnRaidlandsTrackedPasteFailed(string trackingId, string filename, object result, Vector3 startPos,
@@ -6021,6 +7381,9 @@ namespace Oxide.Plugins
                     result.Cupboards++;
                     result.RemovedSteamIds += cupboard.authorizedPlayers.Count;
                     cupboard.authorizedPlayers.Clear();
+                    foreach (var guardId in GuardIdsForEventEntity(entity))
+                        if (!cupboard.authorizedPlayers.Contains(guardId))
+                            cupboard.authorizedPlayers.Add(guardId);
                     cupboard.SendNetworkUpdate();
                 }
 
@@ -6030,6 +7393,9 @@ namespace Oxide.Plugins
                     result.Turrets++;
                     result.RemovedSteamIds += turret.authorizedPlayers.Count;
                     turret.authorizedPlayers.Clear();
+                    foreach (var guardId in GuardIdsForEventEntity(entity))
+                        if (!turret.authorizedPlayers.Contains(guardId))
+                            turret.authorizedPlayers.Add(guardId);
                     turret.target = null;
                     turret.SendNetworkUpdate();
                 }
@@ -6056,6 +7422,19 @@ namespace Oxide.Plugins
             return result;
         }
 
+        private IEnumerable<ulong> GuardIdsForEventEntity(BaseEntity entity)
+        {
+            if (entity?.net == null)
+                return Enumerable.Empty<ulong>();
+            string instanceId;
+            ActiveRaidBase active;
+            if (!entityToInstance.TryGetValue(entity.net.ID.Value, out instanceId)
+                || !data.ActiveRaidBases.TryGetValue(instanceId, out active)
+                || active?.RoamBotGuardEntityIds == null)
+                return Enumerable.Empty<ulong>();
+            return active.RoamBotGuardEntityIds.Where(id => id != 0).Distinct().ToList();
+        }
+
         private void ScheduleEventSanitizationReapply(List<ulong> entityIds)
         {
             if (entityIds == null)
@@ -6067,6 +7446,298 @@ namespace Oxide.Plugins
                 if (delay >= 0f)
                     timer.Once(delay, () => SanitizeEventEntities(ids));
             }
+        }
+
+        private string ConfigureKastroDefenses(string layoutId, List<ulong> entityIds)
+        {
+            if (entityIds == null || !IsKastroLayout(layoutId))
+                return "not-applicable";
+
+            var turrets = 0;
+            var sams = 0;
+            var doors = 0;
+            var locks = 0;
+            var hqmBlocks = 0;
+            var upgradedBlocks = 0;
+            foreach (var entityId in entityIds.Where(id => id != 0).Distinct())
+            {
+                var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as BaseEntity;
+                if (entity == null || entity.IsDestroyed)
+                    continue;
+
+                var buildingBlock = entity as BuildingBlock;
+                if (buildingBlock != null)
+                {
+                    if (buildingBlock.grade != BuildingGrade.Enum.TopTier)
+                    {
+                        buildingBlock.skinID = 0;
+                        buildingBlock.SetGrade(BuildingGrade.Enum.TopTier);
+                        buildingBlock.SetHealthToMax();
+                        buildingBlock.UpdateSkin();
+                        buildingBlock.ResetUpkeepTime();
+                        buildingBlock.SendNetworkUpdate();
+                        upgradedBlocks++;
+                    }
+                    hqmBlocks++;
+                }
+
+                var turret = entity as AutoTurret;
+                if (turret != null)
+                {
+                    ProvisionKastroTurret(turret);
+                    turrets++;
+                }
+
+                var sam = entity as SamSite;
+                if (sam != null)
+                {
+                    sam.UpdateHasPower(25, 0);
+                    sam.SetFlag(IOEntity.Flag_HasPower, true);
+                    sam.SetFlag(BaseEntity.Flags.Reserved8, true);
+                    sam.SendNetworkUpdate();
+                    sams++;
+                }
+
+                var door = entity as Door;
+                if (door != null)
+                {
+                    door.SetOpen(false, true);
+                    door.SetFlag(BaseEntity.Flags.Locked, true);
+                    var entityLock = door.GetSlot(BaseEntity.Slot.Lock) as BaseLock;
+                    if (entityLock != null && !entityLock.IsDestroyed)
+                    {
+                        entityLock.SetFlag(BaseEntity.Flags.Locked, true);
+                        entityLock.SendNetworkUpdate();
+                        locks++;
+                    }
+                    door.SendNetworkUpdate();
+                    doors++;
+                }
+            }
+
+            return $"hqm={hqmBlocks}, upgraded={upgradedBlocks}, turrets={turrets}, sams={sams}, doors={doors}, locks={locks}";
+        }
+
+        private void ProvisionKastroTurret(AutoTurret turret)
+        {
+            if (turret == null || turret.IsDestroyed || turret.inventory == null)
+                return;
+
+            foreach (var existing in turret.inventory.itemList.ToList())
+                existing.Remove();
+
+            var weapon = ItemManager.CreateByName("lmg.m249", 1);
+            if (weapon != null && !weapon.MoveToContainer(turret.inventory, 0, false))
+                weapon.Remove();
+
+            var ammoDefinition = ItemManager.FindItemDefinition("ammo.rifle.incendiary");
+            if (ammoDefinition != null)
+            {
+                for (var slot = 1; slot < turret.inventory.capacity; slot++)
+                {
+                    var ammo = ItemManager.Create(ammoDefinition, ammoDefinition.stackable);
+                    if (ammo != null && !ammo.MoveToContainer(turret.inventory, slot, false))
+                        ammo.Remove();
+                }
+            }
+
+            turret.inventory.MarkDirty();
+            turret.UpdateAttachedWeapon();
+            turret.UpdateHasPower(100, 0);
+            turret.SetFlag(IOEntity.Flag_HasPower, true);
+            turret.InitiateStartup();
+            turret.SetIsOnline(true);
+            DisableTurretPeacekeeperMode(turret);
+            turret.SendNetworkUpdate();
+        }
+
+        private void ScheduleKastroDefenseReapply(string layoutId, List<ulong> entityIds)
+        {
+            if (!IsKastroLayout(layoutId) || entityIds == null)
+                return;
+
+            var ids = entityIds.Where(id => id != 0).Distinct().ToList();
+            foreach (var delay in config.Paste.PastedTurretAttackAllReapplyDelaysSeconds ?? Array.Empty<float>())
+                if (delay >= 0f)
+                    timer.Once(delay, () => ConfigureKastroDefenses(layoutId, ids));
+        }
+
+        private bool IsKastroLayout(string layoutId)
+        {
+            return string.Equals(layoutId, "raidlands_kastro_mini_hard", StringComparison.OrdinalIgnoreCase)
+                   || string.Equals(layoutId, "raidlands_kastro_nightmare", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string ApplyProfileLoot(ActiveRaidBase active)
+        {
+            if (active == null || string.IsNullOrWhiteSpace(active.ProfileId))
+                return "not-configured";
+
+            RaidBaseProfile profile;
+            if (!raidProfiles.TryGetValue(active.ProfileId, out profile) || profile == null)
+                return "profile-missing";
+
+            var applied = 0;
+            var skipped = 0;
+            var failed = 0;
+            foreach (var entityId in active.EntityIds ?? new List<ulong>())
+            {
+                var container = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as StorageContainer;
+                if (container == null || container.IsDestroyed || container.inventory == null)
+                    continue;
+
+                RaidLootTable table;
+                List<RaidLootEntry> entries;
+                if (!TryResolveContainerLoot(profile, container, out table, out entries))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                string error;
+                if (TryPopulateProfileContainer(container, profile, entries, out error))
+                    applied++;
+                else
+                {
+                    failed++;
+                    PrintWarning($"Profile loot left copied contents intact: profile={profile.Id}, table={table.Id}, container={container.ShortPrefabName}, error={error}");
+                }
+            }
+
+            return $"{applied} applied, {skipped} unchanged" + (failed > 0 ? $", {failed} failed" : string.Empty);
+        }
+
+        private bool TryResolveContainerLoot(RaidBaseProfile profile, StorageContainer container, out RaidLootTable table, out List<RaidLootEntry> entries)
+        {
+            table = null;
+            entries = null;
+            var key = GetLootContainerKey(container);
+            string tableId;
+            if (profile.ContainerLootFiles.TryGetValue(key, out tableId)
+                || profile.ContainerLootFiles.TryGetValue(container.ShortPrefabName ?? string.Empty, out tableId)
+                || profile.ContainerLootFiles.TryGetValue("default", out tableId))
+            {
+                if (!raidLootTables.TryGetValue(tableId, out table))
+                    return false;
+            }
+            else
+            {
+                tableId = !string.IsNullOrWhiteSpace(profile.LootFile)
+                    ? profile.LootFile
+                    : profile.Difficulty.ToLowerInvariant();
+                if (!raidLootTables.TryGetValue(tableId, out table))
+                    return false;
+            }
+
+            if (!table.Containers.TryGetValue(key, out entries)
+                && !table.Containers.TryGetValue(container.ShortPrefabName ?? string.Empty, out entries)
+                && !table.Containers.TryGetValue("default", out entries))
+                entries = table.Items;
+            return entries != null && entries.Count > 0;
+        }
+
+        private static string GetLootContainerKey(StorageContainer container)
+        {
+            var prefab = ((container?.PrefabName ?? string.Empty) + " " + (container?.ShortPrefabName ?? string.Empty)).ToLowerInvariant();
+            if (prefab.Contains("lockedcrate")) return "lockedcrate";
+            if (prefab.Contains("military")) return "military";
+            if (prefab.Contains("elite")) return "elite";
+            if (prefab.Contains("crate")) return "crate";
+            if (prefab.Contains("box")) return "box";
+            return (container?.ShortPrefabName ?? "default").ToLowerInvariant();
+        }
+
+        private bool TryPopulateProfileContainer(StorageContainer container, RaidBaseProfile profile, List<RaidLootEntry> entries, out string error)
+        {
+            error = null;
+            var capacity = Math.Max(0, container.inventory.capacity);
+            var maximum = Math.Min(capacity, Math.Max(profile.MinimumItemsPerContainer, profile.MaximumItemsPerContainer));
+            var minimum = Math.Min(maximum, profile.MinimumItemsPerContainer);
+            if (maximum == 0)
+                return true;
+
+            var target = UnityEngine.Random.Range(minimum, maximum + 1);
+            var candidates = entries.OrderBy(_ => UnityEngine.Random.value).ToList();
+            var selected = new List<RaidLootEntry>();
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in candidates)
+            {
+                if (selected.Count >= target)
+                    break;
+                if (UnityEngine.Random.value > entry.Chance)
+                    continue;
+                var duplicateKey = entry.ShortName + (entry.Blueprint ? ":bp" : string.Empty);
+                if (profile.PreventDuplicateItems && !used.Add(duplicateKey))
+                    continue;
+                selected.Add(entry);
+            }
+            foreach (var entry in candidates)
+            {
+                if (selected.Count >= minimum)
+                    break;
+                var duplicateKey = entry.ShortName + (entry.Blueprint ? ":bp" : string.Empty);
+                if (profile.PreventDuplicateItems && !used.Add(duplicateKey))
+                    continue;
+                if (!selected.Contains(entry))
+                    selected.Add(entry);
+            }
+
+            var created = new List<Item>();
+            foreach (var entry in selected.Take(capacity))
+            {
+                var targetDefinition = ItemManager.FindItemDefinition(entry.ShortName);
+                var createDefinition = entry.Blueprint ? ItemManager.FindItemDefinition("blueprintbase") : targetDefinition;
+                if (targetDefinition == null || createDefinition == null)
+                {
+                    error = $"item definition '{entry.ShortName}' is unavailable";
+                    break;
+                }
+
+                var amount = UnityEngine.Random.Range(entry.MinimumAmount, entry.MaximumAmount + 1);
+                var naturalStack = Math.Max(1, createDefinition.stackable);
+                amount = Math.Min(amount, naturalStack);
+                if (profile.StackSizeLimit > 0)
+                    amount = Math.Min(amount, profile.StackSizeLimit);
+                if (entry.Blueprint)
+                    amount = 1;
+                var item = ItemManager.Create(createDefinition, Math.Max(1, amount), entry.SkinId);
+                if (item == null)
+                {
+                    error = $"could not create '{entry.ShortName}'";
+                    break;
+                }
+                if (entry.Blueprint)
+                    item.blueprintTarget = targetDefinition.itemid;
+                created.Add(item);
+            }
+
+            if (error != null)
+            {
+                foreach (var item in created) item.Remove();
+                return false;
+            }
+
+            var originalItems = container.inventory.itemList.ToList();
+            foreach (var original in originalItems)
+                original.RemoveFromContainer();
+            foreach (var item in created)
+            {
+                if (!item.MoveToContainer(container.inventory, -1, true))
+                {
+                    error = $"could not place '{item.info.shortname}'";
+                    break;
+                }
+            }
+            if (error != null)
+            {
+                foreach (var item in created) item.Remove();
+                foreach (var original in originalItems) original.MoveToContainer(container.inventory, -1, true);
+                return false;
+            }
+            foreach (var original in originalItems) original.Remove();
+            container.inventory.MarkDirty();
+            container.SendNetworkUpdate();
+            return true;
         }
 
         private string ApplyLayoutLootOverrides(ActiveRaidBase active)
@@ -7221,7 +8892,7 @@ namespace Oxide.Plugins
             return standings;
         }
 
-        private RaidBaseEventResult CommitTerminalResult(ActiveRaidBase active, string state, string reason, bool qualifiesForResults)
+        private RaidBaseEventResult CommitTerminalResult(ActiveRaidBase active, string state, string reason, bool qualifiesForResults, bool persist = true)
         {
             if (active == null)
                 return null;
@@ -7265,7 +8936,8 @@ namespace Oxide.Plugins
                 PlanRewardTransactions(active, result);
             }
             TrimCurrentWipeHistory();
-            SaveAllEventData();
+            if (persist)
+                SaveAllEventData();
 
             if (string.Equals(state, "Completed", StringComparison.OrdinalIgnoreCase))
                 Interface.CallHook("OnRaidlandsRaidBaseCompleted", EventResultToDictionary(result, true));
@@ -8379,6 +10051,12 @@ namespace Oxide.Plugins
         {
             reason = null;
 
+            if (cleanupJob != null)
+            {
+                reason = "raid-base cleanup is in progress";
+                return false;
+            }
+
             var automaticBases = config.EventTypes.AutomaticBases;
             if (!automaticBases.Enabled)
             {
@@ -9357,59 +11035,251 @@ namespace Oxide.Plugins
             return $"Search queued {data.PendingAutomaticSpawnRequests} | {grid} | {automaticLocationSearch?.Layout?.LayoutId ?? "selecting"} | rejected {automaticSearchRejectedCandidates} | {FormatDuration(elapsed)} | {automaticSearchLastRejection ?? "scanning"}";
         }
 
-        private int CleanupAll(string reason)
-        {
-            var count = 0;
-            foreach (var instanceId in data.ActiveRaidBases.Keys.ToList())
-            {
-                CleanupInstance(instanceId, reason);
-                count++;
-            }
-
-            return count;
-        }
-
         private void CleanupInstance(string instanceId, string reason, bool preserveRaidCompletionLoot = false)
         {
-            ActiveRaidBase active;
-            if (!data.ActiveRaidBases.TryGetValue(instanceId, out active))
+            if (string.IsNullOrWhiteSpace(instanceId) || !data.ActiveRaidBases.ContainsKey(instanceId))
                 return;
 
-            var wasAutomatic = IsActiveAutomaticBase(active);
+            if (cleanupJob != null)
+            {
+                if (cleanupJob.InstanceIds.Contains(instanceId))
+                    return;
+
+                timer.Once(1f, () => CleanupInstance(instanceId, reason, preserveRaidCompletionLoot));
+                return;
+            }
+
+            int queued;
+            string message;
+            TryBeginCleanup(new[] { instanceId }, reason, preserveRaidCompletionLoot, null, out queued, out message);
+        }
+
+        private bool TryBeginCleanup(IEnumerable<string> requestedInstanceIds, string reason, bool preserveRaidCompletionLoot,
+            BasePlayer requester, out int queuedCount, out string message)
+        {
+            queuedCount = 0;
+            message = null;
+
+            if (cleanupJob != null)
+            {
+                if (requester != null)
+                    cleanupJob.RequesterUserIds.Add(requester.userID);
+                message = $"Cleanup is already in progress: {CleanupProgressMessage()}";
+                return false;
+            }
+
+            var requested = new HashSet<string>(requestedInstanceIds ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var job = new CleanupJob
+            {
+                Generation = ++cleanupJobGeneration,
+                Reason = reason ?? "cleanup",
+                StartedUnix = NowUnix(),
+                LastUiRefreshUnix = NowUnix()
+            };
+
+            if (requester != null)
+                job.RequesterUserIds.Add(requester.userID);
+
+            foreach (var instanceId in requested)
+            {
+                ActiveRaidBase active;
+                if (string.IsNullOrWhiteSpace(instanceId) || !data.ActiveRaidBases.TryGetValue(instanceId, out active) || active == null)
+                    continue;
+
+                var wasAutomatic = string.Equals(active.EventTypeId, "automatic-bases", StringComparison.OrdinalIgnoreCase)
+                                   || string.Equals(active.TriggerType, "automatic", StringComparison.OrdinalIgnoreCase);
+                DespawnEventGuards(active, job.Reason);
+                var entityIds = (active.EntityIds ?? new List<ulong>())
+                    .Concat(active.RoamBotGuardEntityIds ?? new List<ulong>())
+                    .Where(id => id != 0).Distinct().ToList();
+                job.Items.Add(new CleanupWorkItem
+                {
+                    InstanceId = instanceId,
+                    Reason = job.Reason,
+                    PreserveRaidCompletionLoot = preserveRaidCompletionLoot,
+                    EntityIds = entityIds
+                });
+                job.InstanceIds.Add(instanceId);
+                job.TotalEntities += entityIds.Count;
+                job.HadAutomaticEvent |= wasAutomatic;
+                active.Status = "cleaning";
+                if (config.Cleanup.RemoveMarkers)
+                    DestroyMarker(instanceId);
+            }
+
+            queuedCount = job.Items.Count;
+            if (queuedCount == 0)
+            {
+                message = "There are no active raid base events to clean.";
+                return false;
+            }
+
+            cleanupJob = job;
+            autoSpawnTimer?.Destroy();
+            autoSpawnTimer = null;
+            CancelAutomaticLocationSearch(false);
+            SaveData();
+            RefreshOpenEventsManagerUis();
+            Puts($"Started batched raid-base cleanup: reason={job.Reason}, instances={job.Items.Count}, entities={job.TotalEntities}, entitiesPerTick={config.Cleanup.EntitiesPerTick}.");
+            NextTick(() => ProcessCleanupJob(job.Generation));
+            return true;
+        }
+
+        private void ProcessCleanupJob(int generation)
+        {
+            var job = cleanupJob;
+            if (job == null || job.Generation != generation)
+                return;
+
+            var budget = Mathf.Clamp(config.Cleanup.EntitiesPerTick, 1, 250);
+            while (budget > 0 && job.CurrentItemIndex < job.Items.Count)
+            {
+                var item = job.Items[job.CurrentItemIndex];
+                ActiveRaidBase active;
+                data.ActiveRaidBases.TryGetValue(item.InstanceId, out active);
+
+                if (!item.Prepared)
+                {
+                    if (active != null)
+                    {
+                        if (!active.ResultCommitted)
+                            CommitTerminalResult(active, TerminalStateFromReason(item.Reason), item.Reason, false, false);
+                        if (config.Cleanup.DespawnPastedEntities && item.PreserveRaidCompletionLoot)
+                            item.ReleasedLoot = ReleaseRaidCompletionLoot(item.EntityIds);
+                    }
+                    item.Prepared = true;
+                }
+
+                while (budget > 0 && item.NextEntityIndex < item.EntityIds.Count)
+                {
+                    var entityId = item.EntityIds[item.NextEntityIndex++];
+                    if (config.Cleanup.DespawnPastedEntities && DespawnEntity(entityId))
+                        job.DespawnedEntities++;
+                    entityToInstance.Remove(entityId);
+                    job.ProcessedEntities++;
+                    budget--;
+                }
+
+                if (item.NextEntityIndex < item.EntityIds.Count)
+                    break;
+
+                pendingPasteInstances.Remove(item.InstanceId);
+                if (active != null)
+                    spawnGridReserved.Remove(active.SpawnGridCandidateIndex);
+                data.ActiveRaidBases.Remove(item.InstanceId);
+                job.CompletedInstances++;
+                job.CurrentItemIndex++;
+                Puts($"Cleaned raid base event {item.InstanceId}: {item.Reason}; nativeLootStacksReleased={item.ReleasedLoot}; progress={job.CompletedInstances}/{job.Items.Count}.");
+            }
+
+            if (job.CurrentItemIndex >= job.Items.Count)
+            {
+                FinishCleanupJob(job);
+                return;
+            }
+
+            var now = NowUnix();
+            if (now - job.LastUiRefreshUnix >= 0.75d)
+            {
+                job.LastUiRefreshUnix = now;
+                RefreshOpenEventsManagerUis();
+            }
+            NextTick(() => ProcessCleanupJob(generation));
+        }
+
+        private void FinishCleanupJob(CleanupJob job)
+        {
+            if (job == null || cleanupJob != job)
+                return;
+
+            cleanupJob = null;
+            var elapsed = Math.Max(0d, NowUnix() - job.StartedUnix);
+            if (job.HadAutomaticEvent && config.EventTypes.AutomaticBases.Enabled &&
+                AutomaticBaseActiveCount() < config.EventTypes.AutomaticBases.MinimumActiveBases)
+            {
+                data.NextAutoAttemptUnix = Math.Min(data.NextAutoAttemptUnix, NowUnix() + 5f);
+            }
+
+            SaveAllEventData();
+            RefreshOpenEventsManagerUis();
+            ScheduleAutoSpawn();
+            ScheduleAutomaticLocationSearch();
+
+            var completion = $"Cleanup finished: instances={job.CompletedInstances}, processedEntities={job.ProcessedEntities}, despawnedEntities={job.DespawnedEntities}, elapsed={FormatDuration(elapsed)}.";
+            Puts(completion);
+            foreach (var userId in job.RequesterUserIds)
+            {
+                var player = BasePlayer.FindByID(userId);
+                if (player != null && player.IsConnected)
+                    SendReply(player, $"{config.ChatPrefix} {completion}");
+            }
+        }
+
+        private void ResumeInterruptedCleanup()
+        {
+            var interrupted = data.ActiveRaidBases.Values
+                .Where(active => active != null && string.Equals(active.Status, "cleaning", StringComparison.OrdinalIgnoreCase))
+                .Select(active => active.InstanceId)
+                .ToList();
+            if (interrupted.Count == 0)
+                return;
+
+            int queued;
+            string message;
+            TryBeginCleanup(interrupted, "resumed interrupted cleanup", false, null, out queued, out message);
+        }
+
+        private int CleanupAllImmediate(string reason)
+        {
+            cleanupJobGeneration++;
+            cleanupJob = null;
+            var instanceIds = data.ActiveRaidBases.Keys.ToList();
+            foreach (var instanceId in instanceIds)
+                CleanupInstanceImmediate(instanceId, reason);
+            SaveAllEventData();
+            return instanceIds.Count;
+        }
+
+        private void CleanupInstanceImmediate(string instanceId, string reason)
+        {
+            ActiveRaidBase active;
+            if (!data.ActiveRaidBases.TryGetValue(instanceId, out active) || active == null)
+                return;
 
             if (!active.ResultCommitted)
-                CommitTerminalResult(active, TerminalStateFromReason(reason), reason, false);
-
+                CommitTerminalResult(active, TerminalStateFromReason(reason), reason, false, false);
             active.Status = "cleaning";
-
             if (config.Cleanup.RemoveMarkers)
                 DestroyMarker(instanceId);
-
-            var releasedLoot = 0;
-            if (config.Cleanup.DespawnPastedEntities && preserveRaidCompletionLoot)
-                releasedLoot = ReleaseRaidCompletionLoot(active.EntityIds);
-
+            DespawnEventGuards(active, reason);
             if (config.Cleanup.DespawnPastedEntities)
-                DespawnEntities(active.EntityIds);
-
+                DespawnEntities((active.EntityIds ?? new List<ulong>())
+                    .Concat(active.RoamBotGuardEntityIds ?? new List<ulong>()).Distinct().ToList());
             foreach (var entityId in active.EntityIds ?? new List<ulong>())
                 entityToInstance.Remove(entityId);
-
             pendingPasteInstances.Remove(instanceId);
             spawnGridReserved.Remove(active.SpawnGridCandidateIndex);
             data.ActiveRaidBases.Remove(instanceId);
-            SaveData();
-            RefreshOpenEventsManagerUis();
-            Puts($"Cleaned raid base event {instanceId}: {reason}; nativeLootStacksReleased={releasedLoot}.");
+            Puts($"Cleaned raid base event {instanceId}: {reason}; mode=immediate.");
+        }
 
-            if (wasAutomatic && !string.Equals(reason, "plugin unload", StringComparison.OrdinalIgnoreCase) &&
-                config.EventTypes.AutomaticBases.Enabled && AutomaticBaseActiveCount() < config.EventTypes.AutomaticBases.MinimumActiveBases)
-            {
-                data.NextAutoAttemptUnix = Math.Min(data.NextAutoAttemptUnix, NowUnix() + 5f);
-                SaveData();
-                ScheduleAutoSpawn();
-                Puts($"Automatic Bases dropped below its minimum ({AutomaticBaseActiveCount()}/{config.EventTypes.AutomaticBases.MinimumActiveBases}); queued an urgent population check.");
-            }
+        private string CleanupPercentText()
+        {
+            var job = cleanupJob;
+            if (job == null)
+                return "Cleanup Idle";
+            var percent = job.TotalEntities <= 0
+                ? job.CompletedInstances * 100f / Math.Max(1, job.Items.Count)
+                : job.ProcessedEntities * 100f / job.TotalEntities;
+            return $"Cleanup {Mathf.Clamp(percent, 0f, 100f):0}%";
+        }
+
+        private string CleanupProgressMessage()
+        {
+            var job = cleanupJob;
+            if (job == null)
+                return $"Cleanup idle | entity removals run in batches of {config.Cleanup.EntitiesPerTick} per tick.";
+            return $"CLEANUP IN PROGRESS | bases {job.CompletedInstances}/{job.Items.Count} | entities {job.ProcessedEntities}/{job.TotalEntities} | {FormatDuration(Math.Max(0d, NowUnix() - job.StartedUnix))}";
         }
 
         private int ReleaseRaidCompletionLoot(List<ulong> entityIds)
@@ -9479,19 +11349,24 @@ namespace Oxide.Plugins
                 return;
 
             foreach (var entityId in entityIds.ToList())
-            {
-                var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as BaseEntity;
-                if (entity == null || entity.IsDestroyed)
-                    continue;
+                DespawnEntity(entityId);
+        }
 
-                try
-                {
-                    entity.Kill(BaseNetworkable.DestroyMode.None);
-                }
-                catch (Exception exception)
-                {
-                    PrintWarning($"Could not despawn event entity {entityId}: {exception.GetType().Name}: {exception.Message}");
-                }
+        private bool DespawnEntity(ulong entityId)
+        {
+            var entity = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as BaseEntity;
+            if (entity == null || entity.IsDestroyed)
+                return false;
+
+            try
+            {
+                entity.Kill(BaseNetworkable.DestroyMode.None);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                PrintWarning($"Could not despawn event entity {entityId}: {exception.GetType().Name}: {exception.Message}");
+                return false;
             }
         }
 
@@ -9725,7 +11600,9 @@ namespace Oxide.Plugins
                     return false;
                 }
 
-                var maximumChecks = Math.Min(spawnGridCache.Candidates.Count, 50);
+                var maximumChecks = Math.Min(
+                    spawnGridCache.Candidates.Count,
+                    config.SpawnGrid.RuntimeCandidateChecksPerSpawn);
                 for (var check = 0; check < maximumChecks; check++)
                 {
                     Vector3 ground;
@@ -10267,7 +12144,7 @@ namespace Oxide.Plugins
             var activeCount = ActiveEventCount();
             var automaticBases = config.EventTypes.AutomaticBases;
             var searchElapsed = Math.Max(0d, NowUnix() - (automaticLocationSearch?.StartedUnix ?? NowUnix()));
-            var message = $"RaidlandsEvents: automaticBases={(automaticBases.Enabled ? "on" : "off")} population={AutomaticBaseActiveCount()}/{automaticBases.MinimumActiveBases}-{automaticBases.MaximumActiveBases}, queuedSearches={data.PendingAutomaticSpawnRequests}, searchLayout={automaticLocationSearch?.Layout?.LayoutId ?? "none"}, searchRejected={automaticSearchRejectedCandidates}, searchElapsed={FormatDuration(searchElapsed)}, searchLast={automaticSearchLastRejection ?? "none"}, frequency={automaticBases.CheckFrequencyMinutes:0.#}m, announce={automaticBases.PercentageToAnnounce:0.#}%, scoring={(config.Scoring.Enabled ? "on" : "off")}, rewards={(config.Rewards.Enabled ? "on" : "off")}, rewardProfiles={rewardProfiles.Count}, enabledLayouts={enabledLayouts.Count}, discovered={data.Layouts.Count}, totalActive={activeCount}, pendingPastes={pendingPasteInstances.Count}, pendingRewards={PendingRewardTransactionCount()}, rewardReview={CountRewardTransactions("review-required")}, legacyPendingPurchaseRefunds={data.PendingPurchaseRefunds.Count}.";
+            var message = $"RaidlandsEvents: automaticBases={(automaticBases.Enabled ? "on" : "off")} population={AutomaticBaseActiveCount()}/{automaticBases.MinimumActiveBases}-{automaticBases.MaximumActiveBases}, queuedSearches={data.PendingAutomaticSpawnRequests}, searchLayout={automaticLocationSearch?.Layout?.LayoutId ?? "none"}, searchRejected={automaticSearchRejectedCandidates}, searchElapsed={FormatDuration(searchElapsed)}, searchLast={automaticSearchLastRejection ?? "none"}, frequency={automaticBases.CheckFrequencyMinutes:0.#}m, announce={automaticBases.PercentageToAnnounce:0.#}%, scoring={(config.Scoring.Enabled ? "on" : "off")}, rewards={(config.Rewards.Enabled ? "on" : "off")}, rewardProfiles={rewardProfiles.Count}, enabledLayouts={enabledLayouts.Count}, discovered={data.Layouts.Count}, totalActive={activeCount}, pendingPastes={pendingPasteInstances.Count}, cleanup={CleanupProgressMessage()}, pendingRewards={PendingRewardTransactionCount()}, rewardReview={CountRewardTransactions("review-required")}, legacyPendingPurchaseRefunds={data.PendingPurchaseRefunds.Count}.";
 
             message += "\n" + BuildSpawnGridStatus(includeDetails);
             if (!includeDetails || data.ActiveRaidBases.Count == 0)

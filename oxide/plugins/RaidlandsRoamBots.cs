@@ -17,17 +17,23 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.4.4")]
-    [Description("Spawns player-like roaming NPCs with Raidlands kits, separate NPC stats, and admin controls.")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.7.0")]
+    [Description("Spawns player-like roaming NPCs with a local, goal-driven utility brain, Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
         private const string AdminPermission = "raidlandsroambots.admin";
         private const string IgnorePermission = "raidlandsroambots.ignore";
         private const string SpawnModeNearPlayers = "near_players";
         private const string SpawnModeRandom = "random";
-        private const string TacticalBrainName = "playerlike_tactical_brain";
+        private const string TacticalBrainName = "local_goal_utility_brain_v2";
         private const string LandNavigationScientistPrefab = "assets/rust.ai/agents/npcplayer/humannpc/scientist/scientistnpc_junkpile_pistol.prefab";
         private const string DecisionTraceDataFile = "RaidlandsRoamBots/decision_traces.jsonl";
+        private const string BrainV2TraceDataFile = "RaidlandsRoamBots/brain_v2_traces.jsonl";
+        private const string BrainV2ModeOff = "off";
+        private const string BrainV2ModeShadow = "shadow";
+        private const string BrainV2ModeCanary = "canary";
+        private const string BrainV2ModeActive = "active";
+        private const bool ExternalAiCallsAllowed = false;
         private const string ObservationTraceDataFile = "RaidlandsRoamBots/player_observation_traces.jsonl";
         private const string BehaviorModelDataFile = "RaidlandsRoamBots/behavior_models";
         private const string TrainingRunDataFile = "RaidlandsRoamBots/training_runs.jsonl";
@@ -43,6 +49,16 @@ namespace Oxide.Plugins
         private const string WoodenBarricadeCoverPrefab = "assets/prefabs/deployable/barricades/barricade.cover.wood_double.prefab";
         private const string F1GrenadePrefab = "assets/prefabs/weapons/f1 grenade/grenade.f1.deployed.prefab";
         private const string SmokeGrenadePrefab = "assets/prefabs/tools/smoke grenade/grenade.smoke.deployed.prefab";
+        private const string RaidHvRocketPrefab = "assets/prefabs/ammo/rocket/rocket_hv.prefab";
+        private const string RaidC4Prefab = "assets/prefabs/tools/c4/explosive.timed.deployed.prefab";
+        private const string RaidSleepingBagPrefab = "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab";
+        private const string RaidRocketLauncherShortname = "rocket.launcher";
+        private const string RaidHvRocketShortname = "ammo.rocket.hv";
+        private const string RaidC4Shortname = "explosive.timed";
+        private const string RaidDataFile = "RaidlandsRoamBots/active_raids";
+        private const int RaidDataSchemaVersion = 1;
+        private const string RaidDiscoveryNearby = "nearby_scan";
+        private const string RaidDiscoveryEncounter = "defender_encounter";
         private const string GenericRadiusMapMarkerPrefab = "assets/prefabs/tools/map/genericradiusmarker.prefab";
         private const int MaxTrackedSmokeOccluders = 64;
         private const float NativeBotMapMarkerBaseRadius = 0.015f;
@@ -60,7 +76,9 @@ namespace Oxide.Plugins
         private const string LearningApplyGlobal = "global";
         private const string LearningApplyProfiles = "profiles";
         private const string LearningSourceAdminTesters = "admin_testers";
-        private const int CurrentConfigSchemaVersion = 2;
+        private const int CurrentConfigSchemaVersion = 9;
+        private const int SafeTravelGridSchemaVersion = 1;
+        private const string SafeTravelGridDataFile = "RaidlandsRoamBots/safe_travel_grid";
         private const string ControllerModeLegacy = "legacy";
         private const string ControllerModeV2Shadow = "v2_shadow";
         private const string ControllerModeV2Canary = "v2_canary";
@@ -69,7 +87,18 @@ namespace Oxide.Plugins
         private const string TrainingV2OutcomeDataFile = "RaidlandsRoamBots/training_v2_outcomes.jsonl";
         private const string TrainingV2ConsentDataFile = "RaidlandsRoamBots/training_v2/consent";
         private const string V2EvaluationDataFile = "RaidlandsRoamBots/v2_evaluation.jsonl";
+        private const string TrainingV2PolicyConfigFile = "RaidlandsRoamBots.TrainingV2Policy.json";
+        private const int TrainingV2PolicySchemaVersion = 1;
         private const float V2FireAuthorizationLifetimeSeconds = 4f;
+        private const float V2MaximumVisibleAimErrorDegrees = 3f;
+        private const float V2VisibleAimSettleSeconds = 0.08f;
+        private const float V2FiringLaneBlockedSeconds = 0.65f;
+        private const float V2FiringLaneRetrySeconds = 0.9f;
+        private const int V2UrgentFireUpdatesPastBudgetPerTick = 4;
+        private const int V2AuthorityPrepareMaximumAttempts = 12;
+        private const float V2AuthorityPrepareRetrySeconds = 0.35f;
+        private const int V2StanceConformanceMaximumAttempts = 4;
+        private const float V2StanceConformanceRetrySeconds = 0.5f;
         private const string ObservationContextNone = "none";
         private const string ObservationContextNearestBotSample = "nearest_bot_sample";
         private const string ObservationContextCombatTarget = "combat_target";
@@ -193,6 +222,9 @@ namespace Oxide.Plugins
         private StoredData data;
         private readonly System.Random random = new System.Random();
         private readonly Dictionary<BaseCombatEntity, BotRuntime> activeBots = new Dictionary<BaseCombatEntity, BotRuntime>();
+        private readonly Dictionary<ulong, BotRuntime> botRecordsByInstanceId = new Dictionary<ulong, BotRuntime>();
+        private readonly Dictionary<ulong, AmbientRespawnRequest> pendingAmbientRespawns = new Dictionary<ulong, AmbientRespawnRequest>();
+        private readonly HashSet<ulong> pendingSpawnReservations = new HashSet<ulong>();
         private readonly HashSet<BaseCombatEntity> despawningBots = new HashSet<BaseCombatEntity>();
         private readonly HashSet<ulong> debugBotPanelViewers = new HashSet<ulong>();
         private readonly HashSet<ulong> adminPanelViewers = new HashSet<ulong>();
@@ -215,6 +247,7 @@ namespace Oxide.Plugins
         private readonly Dictionary<string, ManagedBotGroup> managedBotGroups = new Dictionary<string, ManagedBotGroup>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, HashSet<string>> managedGroupsByEvent = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         private readonly List<DecisionTrace> pendingDecisionTraces = new List<DecisionTrace>();
+        private readonly List<BrainTraceV2> pendingBrainV2Traces = new List<BrainTraceV2>();
         private readonly List<PlayerObservationTrace> pendingObservationTraces = new List<PlayerObservationTrace>();
         private readonly List<TrainingSequenceV2> pendingTrainingV2Frames = new List<TrainingSequenceV2>();
         private readonly List<DecisionOutcomeV2> pendingDecisionOutcomesV2 = new List<DecisionOutcomeV2>();
@@ -233,12 +266,19 @@ namespace Oxide.Plugins
         private readonly Dictionary<string, float> recentBotChatInputs = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<BaseCombatEntity, MapMarkerGenericRadius> botMapMarkers = new Dictionary<BaseCombatEntity, MapMarkerGenericRadius>();
         private readonly Dictionary<Vector3Int, BaseRestrictionCacheEntry> baseRestrictionCache = new Dictionary<Vector3Int, BaseRestrictionCacheEntry>();
+        private readonly Dictionary<long, List<int>> safeTravelSpatialIndex = new Dictionary<long, List<int>>();
+        private readonly Dictionary<string, Timer> raidRespawnTimers = new Dictionary<string, Timer>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<ulong, RaidOrdnanceRuntime> raidOrdnanceByEntityId = new Dictionary<ulong, RaidOrdnanceRuntime>();
+        private readonly Dictionary<string, RecentRaidOrdnanceRuntime> recentRaidOrdnanceByMemberId = new Dictionary<string, RecentRaidOrdnanceRuntime>(StringComparer.OrdinalIgnoreCase);
         private readonly Collider[] baseRestrictionColliderBuffer = new Collider[128];
         private readonly HashSet<string> missingSecretWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private AdvisorStats advisorStats = new AdvisorStats();
         private BotChatStats botChatStats = new BotChatStats();
         private BotChatQuotaData botChatQuota = new BotChatQuotaData();
         private BehaviorModelData behaviorModels = new BehaviorModelData();
+        private TrainingV2Policy trainingV2Policy;
+        private string trainingV2PolicyLoadState = "not_loaded";
+        private readonly Dictionary<string, WeaponMotorProfile> trainingV2WeaponProfileCache = new Dictionary<string, WeaponMotorProfile>(StringComparer.OrdinalIgnoreCase);
         private readonly V2Metrics v2Metrics = new V2Metrics();
         private IBotBodyAdapter legacyScientistBodyAdapter;
         private Dictionary<string, string> secrets;
@@ -253,6 +293,7 @@ namespace Oxide.Plugins
         private Timer mapMarkerTimer;
         private Timer scoreboardTimer;
         private Timer decisionTraceSaveTimer;
+        private Timer brainV2TraceSaveTimer;
         private Timer observationTraceSaveTimer;
         private Timer learningTimer;
         private Timer combatMotorTimer;
@@ -261,11 +302,47 @@ namespace Oxide.Plugins
         private Timer saveTimer;
         private Timer initializationTimer;
         private Timer populationRampTimer;
+        private Timer safeTravelGridBuildTimer;
+        private Timer raidTimer;
+        private Timer raidSaveTimer;
+        private RaidPersistenceData raidData = new RaidPersistenceData();
+        private double nextRaidDiscoveryUnix;
+        private bool raidRestoreQueued;
+        private bool raidAdministrativeTeardown;
+        private SafeTravelGridCache safeTravelGridCache = new SafeTravelGridCache();
+        private bool safeTravelGridBuilding;
+        private bool safeTravelGridReady;
+        private float safeTravelGridMin;
+        private float safeTravelGridMax;
+        private float safeTravelGridNextX;
+        private float safeTravelGridNextZ;
+        private int safeTravelGridProcessed;
+        private int safeTravelGridTotal;
+        private double safeTravelGridBuildStartedUnix;
+        private double safeTravelGridMaximumSliceMilliseconds;
+        private long safeTravelPathChecks;
+        private long safeTravelCompletePaths;
+        private long safeTravelRejectedPaths;
+        private long safeTravelWaypointRoutes;
+        private long safeTravelRoamSnaps;
         private int initializationGeneration;
+        private int botGenerationSequence;
+        private ulong botInstanceSequence;
+        private ulong spawnReservationSequence;
+        private bool runtimeRunning;
+        private bool lifecycleStopping;
+        private int lastCleanupCount;
+        private double lastReconciliationMilliseconds;
+        private long lifecycleCombatDeaths;
+        private long lifecycleEntitiesDestroyed;
+        private long lifecycleReplacementsSpawned;
+        private long lifecycleNativeBrainPoolingBypasses;
+        private long lifecycleCorpseBagDropsSuppressed;
         private int teamSequence;
         private float spawnRetryBlockedUntil;
         private float nextPluginLogPruneAt;
         private float lastDecisionTracePruneCheckAt;
+        private float lastBrainV2TracePruneCheckAt;
         private float lastTrainingV2PruneCheckAt;
         private float lastBotChatSentAt;
         private float nextBotChatCleanupAt;
@@ -332,8 +409,14 @@ namespace Oxide.Plugins
             [JsonProperty("Spawn Settings")]
             public SpawnConfig Spawn = new SpawnConfig();
 
+            [JsonProperty("Safe Travel Grid")]
+            public SafeTravelGridConfig SafeTravelGrid = new SafeTravelGridConfig();
+
             [JsonProperty("Ambient Squad Respawn Rejoin")]
             public AmbientSquadRespawnRejoinConfig AmbientSquadRespawnRejoin = new AmbientSquadRespawnRejoinConfig();
+
+            [JsonProperty("Base Raiding")]
+            public BaseRaidingConfig BaseRaiding = new BaseRaidingConfig();
 
             [JsonProperty("Prefab Candidates In Order")]
             public List<string> PrefabCandidates = new List<string>
@@ -342,6 +425,9 @@ namespace Oxide.Plugins
             };
 
             public AIConfig AI = new AIConfig();
+
+            [JsonProperty("Brain V2")]
+            public BrainV2Config BrainV2 = new BrainV2Config();
 
             [JsonProperty("Decision Advisor")]
             public DecisionAdvisorConfig DecisionAdvisor = new DecisionAdvisorConfig();
@@ -417,6 +503,59 @@ namespace Oxide.Plugins
 
             [JsonProperty("Respawn Delay Seconds")]
             public float RespawnDelaySeconds = 20f;
+        }
+
+        private class BaseRaidingConfig
+        {
+            public bool Enabled = true;
+
+            [JsonProperty("Discovery Mode")]
+            public string DiscoveryMode = RaidDiscoveryNearby;
+
+            [JsonProperty("Nearby Scan Radius")]
+            public float NearbyScanRadius = 250f;
+
+            [JsonProperty("Scan Interval Seconds")]
+            public float ScanIntervalSeconds = 15f;
+
+            [JsonProperty("Bags Per Member Minimum")]
+            public int BagsPerMemberMinimum = 1;
+
+            [JsonProperty("Bags Per Member Maximum")]
+            public int BagsPerMemberMaximum = 3;
+
+            [JsonProperty("Bag Placement Minimum Distance From Building")]
+            public float BagPlacementMinimumDistance = 12f;
+
+            [JsonProperty("Bag Placement Maximum Distance From Building")]
+            public float BagPlacementMaximumDistance = 35f;
+
+            [JsonProperty("Minimum Bag Spacing")]
+            public float MinimumBagSpacing = 8f;
+
+            [JsonProperty("Bag Staging Timeout Seconds")]
+            public float BagStagingTimeoutSeconds = 180f;
+
+            [JsonProperty("Raid Respawn Delay Seconds")]
+            public float RaidRespawnDelaySeconds = 20f;
+
+            [JsonProperty("Shared HV Rocket Budget")]
+            public int SharedHvRocketBudget = 48;
+
+            [JsonProperty("Shared C4 Budget")]
+            public int SharedC4Budget = 96;
+
+            [JsonProperty("K/D Evaluation Starts After Deaths")]
+            public int MinimumDeathsBeforeKdCheck = 5;
+
+            [JsonProperty("Give Up Below K/D")]
+            public float GiveUpBelowKd = 0.1f;
+
+            [JsonProperty("Squad Raid Cooldown Minutes")]
+            public float SquadRaidCooldownMinutes = 15f;
+
+            [JsonProperty("Failed Target Cooldown Minutes")]
+            public float FailedTargetCooldownMinutes = 60f;
         }
 
         private class AmbientSquadRespawnRejoinConfig
@@ -581,6 +720,54 @@ namespace Oxide.Plugins
             public float SafeZoneSpawnBufferDistance = 75f;
         }
 
+        private class SafeTravelGridConfig
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Cell Size")]
+            public float CellSize = 25f;
+
+            [JsonProperty("Map Edge Margin")]
+            public float MapEdgeMargin = 20f;
+
+            [JsonProperty("Build Budget Milliseconds")]
+            public float BuildBudgetMilliseconds = 1f;
+
+            [JsonProperty("Candidate Checks Per Slice")]
+            public int CandidateChecksPerSlice = 40;
+
+            [JsonProperty("Navmesh Sample Radius")]
+            public float NavmeshSampleRadius = 12f;
+
+            [JsonProperty("Maximum Vertical Snap")]
+            public float MaximumVerticalSnap = 10f;
+
+            [JsonProperty("Persist Cache")]
+            public bool PersistCache = true;
+
+            [JsonProperty("Route Validation Minimum Distance")]
+            public float RouteValidationMinimumDistance = 24f;
+
+            [JsonProperty("Waypoint Search Radius")]
+            public float WaypointSearchRadius = 95f;
+
+            [JsonProperty("Waypoint Minimum Progress")]
+            public float WaypointMinimumProgress = 8f;
+
+            [JsonProperty("Maximum Path Checks Per Route")]
+            public int MaximumPathChecksPerRoute = 12;
+
+            [JsonProperty("Maximum Waypoint Hops Per Destination")]
+            public int MaximumWaypointHopsPerDestination = 32;
+
+            [JsonProperty("Roam Point Search Radius")]
+            public float RoamPointSearchRadius = 28f;
+
+            [JsonProperty("Path Validation Cache Seconds")]
+            public float PathValidationCacheSeconds = 1f;
+        }
+
         private class SkillDefinition
         {
             public float Health = BotDefaultAverageHealth;
@@ -658,6 +845,15 @@ namespace Oxide.Plugins
 
             [JsonProperty("Search Last Seen Seconds")]
             public float SearchLastSeenSeconds = 38f;
+
+            [JsonProperty("Direct Sight Cone Degrees")]
+            public float DirectSightConeDegrees = 35f;
+
+            [JsonProperty("Direct Sight Reaction Multiplier")]
+            public float DirectSightReactionMultiplier = 0.4f;
+
+            [JsonProperty("Peripheral Sight Reaction Multiplier")]
+            public float PeripheralSightReactionMultiplier = 1.15f;
 
             [JsonProperty("Unsuppressed Gunshot Hearing Range")]
             public float UnsuppressedGunshotHearingRange = 240f;
@@ -1016,6 +1212,9 @@ namespace Oxide.Plugins
             [JsonProperty("Non Syringe Heal Amount")]
             public float NonSyringeHealAmount = 8f;
 
+            [JsonProperty("Berry Spam Interval Seconds")]
+            public float BerrySpamIntervalSeconds = 0.65f;
+
             [JsonProperty("Allow Shooting While Non Syringe Healing")]
             public bool AllowShootingWhileNonSyringeHealing = true;
 
@@ -1087,14 +1286,121 @@ namespace Oxide.Plugins
             [JsonProperty("Auto Reload Bot Weapons")]
             public bool AutoReloadBotWeapons = true;
 
+            [JsonProperty("Prefer Monument Roaming")]
+            public bool PreferMonumentRoaming = true;
+
+            [JsonProperty("Monument Roam Leg Chance")]
+            public float MonumentRoamLegChance = 0.55f;
+
+            [JsonProperty("Minimum Monument Roam Leg Distance")]
+            public float MinimumMonumentRoamLegDistance = 120f;
+
+            [JsonProperty("Maximum Monument Roam Leg Distance")]
+            public float MaximumMonumentRoamLegDistance = 2200f;
+
+            [JsonProperty("Monument Roam Arrival Distance")]
+            public float MonumentRoamArrivalDistance = 16f;
+
+            [JsonProperty("Minimum Open Terrain Roam Leg Distance")]
+            public float MinimumOpenTerrainRoamLegDistance = 140f;
+
+            [JsonProperty("Maximum Open Terrain Roam Leg Distance")]
+            public float MaximumOpenTerrainRoamLegDistance = 420f;
+
             [JsonProperty("Do Not Enter Bases")]
-            public bool DoNotEnterBases = true;
+            public bool DoNotEnterBases = false;
 
             [JsonProperty("Base Avoidance Radius")]
             public float BaseAvoidanceRadius = 8f;
 
             [JsonProperty("Base Hold Seconds")]
             public float BaseHoldSeconds = 12f;
+        }
+
+        private class BrainV2Config
+        {
+            public bool Enabled = true;
+
+            [JsonProperty("Mode")]
+            public string Mode = BrainV2ModeShadow;
+
+            [JsonProperty("Canary Bot Count")]
+            public int CanaryBotCount = 5;
+
+            [JsonProperty("Canary Percent")]
+            public int CanaryPercent = 10;
+
+            [JsonProperty("Goal Tick Seconds")]
+            public float GoalTickSeconds = 0.75f;
+
+            [JsonProperty("Action Tick Seconds")]
+            public float ActionTickSeconds = 0.25f;
+
+            [JsonProperty("Goal Minimum Commitment Seconds")]
+            public float GoalMinimumCommitmentSeconds = 3f;
+
+            [JsonProperty("Goal No Progress Timeout Seconds")]
+            public float GoalNoProgressTimeoutSeconds = 8f;
+
+            [JsonProperty("Goal Switch Margin")]
+            public float GoalSwitchMargin = 0.12f;
+
+            [JsonProperty("Goal Continuity Bonus")]
+            public float GoalContinuityBonus = 0.05f;
+
+            [JsonProperty("Action Minimum Commitment Seconds")]
+            public float ActionMinimumCommitmentSeconds = 0.6f;
+
+            [JsonProperty("Default Action Timeout Seconds")]
+            public float DefaultActionTimeoutSeconds = 6f;
+
+            [JsonProperty("No Progress Timeout Seconds")]
+            public float NoProgressTimeoutSeconds = 4f;
+
+            [JsonProperty("Fallback To Legacy On Failure")]
+            public bool FallbackToLegacyOnFailure = true;
+
+            [JsonProperty("Use Near Tie Randomness")]
+            public bool UseNearTieRandomness = true;
+
+            [JsonProperty("Near Tie Score Ratio")]
+            public float NearTieScoreRatio = 0.92f;
+
+            [JsonProperty("Spatial Materialization Limit")]
+            public int SpatialMaterializationLimit = 3;
+
+            [JsonProperty("Contact Memory Capacity")]
+            public int ContactMemoryCapacity = 8;
+
+            [JsonProperty("Recent Event Capacity")]
+            public int RecentEventCapacity = 32;
+
+            [JsonProperty("Visual Evidence Half Life Seconds")]
+            public float VisualEvidenceHalfLifeSeconds = 8f;
+
+            [JsonProperty("Audio Evidence Half Life Seconds")]
+            public float AudioEvidenceHalfLifeSeconds = 5f;
+
+            [JsonProperty("Damage Evidence Half Life Seconds")]
+            public float DamageEvidenceHalfLifeSeconds = 12f;
+
+            [JsonProperty("Squad Evidence Half Life Seconds")]
+            public float SquadEvidenceHalfLifeSeconds = 10f;
+
+            [JsonProperty("Patrol Utility")]
+            public float PatrolUtility = 0.10f;
+
+            [JsonProperty("Trace Enabled")]
+            public bool TraceEnabled = true;
+
+            [JsonProperty("Trace Heartbeat Seconds")]
+            public float TraceHeartbeatSeconds = 5f;
+
+            [JsonProperty("Maximum Trace File Megabytes")]
+            public int MaximumTraceFileMegabytes = 128;
+
+            [JsonProperty("Maximum Trace Lines After Prune")]
+            public int MaximumTraceLinesAfterPrune = 50000;
         }
 
         private class DecisionAdvisorConfig
@@ -1189,7 +1495,7 @@ namespace Oxide.Plugins
             public bool Enabled = true;
 
             [JsonProperty("AI Replies Enabled")]
-            public bool AiRepliesEnabled = true;
+            public bool AiRepliesEnabled = false;
 
             [JsonProperty("Deterministic Kill Banter Enabled")]
             public bool DeterministicKillBanterEnabled = true;
@@ -1201,10 +1507,10 @@ namespace Oxide.Plugins
             public string MessageFormat = "<color=#C4FF00>{bot}</color>: {message}";
 
             [JsonProperty("OpenAI Calls Per Hour")]
-            public int OpenAiCallsPerHour = 30;
+            public int OpenAiCallsPerHour = 0;
 
             [JsonProperty("Max Concurrent AI Requests")]
-            public int MaxConcurrentAiRequests = 1;
+            public int MaxConcurrentAiRequests = 0;
 
             [JsonProperty("Conversation Idle Seconds")]
             public float ConversationIdleSeconds = 180f;
@@ -1494,7 +1800,7 @@ namespace Oxide.Plugins
             public int MaximumWaterSegmentSamples = 96;
 
             [JsonProperty("Strict Decorative Foliage At All Ranges")]
-            public bool StrictDecorativeFoliageAtAllRanges = true;
+            public bool StrictDecorativeFoliageAtAllRanges = false;
 
             [JsonProperty("Damage Authorization Veto")]
             public bool DamageAuthorizationVeto = true;
@@ -1559,6 +1865,21 @@ namespace Oxide.Plugins
             [JsonProperty("Maximum Burst Shots")]
             public int MaximumBurstShots = 5;
 
+            [JsonProperty("Sustained Burst Chance")]
+            public float SustainedBurstChance = 0.2f;
+
+            [JsonProperty("Minimum Sustained Burst Shots")]
+            public int MinimumSustainedBurstShots = 7;
+
+            [JsonProperty("Maximum Sustained Burst Shots")]
+            public int MaximumSustainedBurstShots = 14;
+
+            [JsonProperty("Accuracy Degradation Degrees Per Shot")]
+            public float AccuracyDegradationDegreesPerShot = 0.1f;
+
+            [JsonProperty("Maximum Accuracy Degradation Degrees")]
+            public float MaximumAccuracyDegradationDegrees = 2.5f;
+
             [JsonProperty("Minimum Shot Gap Seconds")]
             public float MinimumShotGapSeconds = 0.1f;
 
@@ -1583,13 +1904,13 @@ namespace Oxide.Plugins
             return new Dictionary<string, WeaponMotorProfile>(StringComparer.OrdinalIgnoreCase)
             {
                 ["default"] = new WeaponMotorProfile(),
-                ["rifle"] = new WeaponMotorProfile { MinimumBurstShots = 2, MaximumBurstShots = 6, MinimumShotGapSeconds = 0.095f, MaximumShotGapSeconds = 0.145f, MinimumBurstPauseSeconds = 0.2f, MaximumBurstPauseSeconds = 0.62f, MoveWhileFiringChance = 0.76f, TorsoAimWeight = 0.75f },
-                ["smg"] = new WeaponMotorProfile { MinimumBurstShots = 3, MaximumBurstShots = 9, MinimumShotGapSeconds = 0.07f, MaximumShotGapSeconds = 0.115f, MinimumBurstPauseSeconds = 0.16f, MaximumBurstPauseSeconds = 0.48f, MoveWhileFiringChance = 0.84f, TorsoAimWeight = 0.78f },
-                ["lmg"] = new WeaponMotorProfile { MinimumBurstShots = 4, MaximumBurstShots = 12, MinimumShotGapSeconds = 0.075f, MaximumShotGapSeconds = 0.115f, MinimumBurstPauseSeconds = 0.25f, MaximumBurstPauseSeconds = 0.72f, MoveWhileFiringChance = 0.58f, TorsoAimWeight = 0.8f },
-                ["pistol"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 4, MinimumShotGapSeconds = 0.16f, MaximumShotGapSeconds = 0.31f, MinimumBurstPauseSeconds = 0.22f, MaximumBurstPauseSeconds = 0.72f, MoveWhileFiringChance = 0.82f, TorsoAimWeight = 0.68f },
-                ["marksman"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 3, MinimumShotGapSeconds = 0.25f, MaximumShotGapSeconds = 0.46f, MinimumBurstPauseSeconds = 0.35f, MaximumBurstPauseSeconds = 0.9f, MoveWhileFiringChance = 0.5f, TorsoAimWeight = 0.65f },
-                ["sniper"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 1, MinimumShotGapSeconds = 0.8f, MaximumShotGapSeconds = 1.35f, MinimumBurstPauseSeconds = 0.35f, MaximumBurstPauseSeconds = 0.85f, MoveWhileFiringChance = 0.12f, TorsoAimWeight = 0.56f },
-                ["shotgun"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 2, MinimumShotGapSeconds = 0.7f, MaximumShotGapSeconds = 1.15f, MinimumBurstPauseSeconds = 0.25f, MaximumBurstPauseSeconds = 0.7f, MoveWhileFiringChance = 0.7f, TorsoAimWeight = 0.88f }
+                ["rifle"] = new WeaponMotorProfile { MinimumBurstShots = 2, MaximumBurstShots = 6, SustainedBurstChance = 0.42f, MinimumSustainedBurstShots = 8, MaximumSustainedBurstShots = 18, AccuracyDegradationDegreesPerShot = 0.12f, MaximumAccuracyDegradationDegrees = 2.8f, MinimumShotGapSeconds = 0.095f, MaximumShotGapSeconds = 0.145f, MinimumBurstPauseSeconds = 0.2f, MaximumBurstPauseSeconds = 0.62f, MoveWhileFiringChance = 0.76f, TorsoAimWeight = 0.75f },
+                ["smg"] = new WeaponMotorProfile { MinimumBurstShots = 3, MaximumBurstShots = 9, SustainedBurstChance = 0.58f, MinimumSustainedBurstShots = 10, MaximumSustainedBurstShots = 24, AccuracyDegradationDegreesPerShot = 0.15f, MaximumAccuracyDegradationDegrees = 3.4f, MinimumShotGapSeconds = 0.07f, MaximumShotGapSeconds = 0.115f, MinimumBurstPauseSeconds = 0.16f, MaximumBurstPauseSeconds = 0.48f, MoveWhileFiringChance = 0.84f, TorsoAimWeight = 0.78f },
+                ["lmg"] = new WeaponMotorProfile { MinimumBurstShots = 4, MaximumBurstShots = 12, SustainedBurstChance = 0.7f, MinimumSustainedBurstShots = 14, MaximumSustainedBurstShots = 32, AccuracyDegradationDegreesPerShot = 0.14f, MaximumAccuracyDegradationDegrees = 3.8f, MinimumShotGapSeconds = 0.075f, MaximumShotGapSeconds = 0.115f, MinimumBurstPauseSeconds = 0.25f, MaximumBurstPauseSeconds = 0.72f, MoveWhileFiringChance = 0.58f, TorsoAimWeight = 0.8f },
+                ["pistol"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 4, SustainedBurstChance = 0f, MinimumSustainedBurstShots = 1, MaximumSustainedBurstShots = 4, AccuracyDegradationDegreesPerShot = 0.08f, MaximumAccuracyDegradationDegrees = 1.2f, MinimumShotGapSeconds = 0.16f, MaximumShotGapSeconds = 0.31f, MinimumBurstPauseSeconds = 0.22f, MaximumBurstPauseSeconds = 0.72f, MoveWhileFiringChance = 0.82f, TorsoAimWeight = 0.68f },
+                ["marksman"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 3, SustainedBurstChance = 0f, MinimumSustainedBurstShots = 1, MaximumSustainedBurstShots = 3, AccuracyDegradationDegreesPerShot = 0.05f, MaximumAccuracyDegradationDegrees = 0.75f, MinimumShotGapSeconds = 0.25f, MaximumShotGapSeconds = 0.46f, MinimumBurstPauseSeconds = 0.35f, MaximumBurstPauseSeconds = 0.9f, MoveWhileFiringChance = 0.5f, TorsoAimWeight = 0.65f },
+                ["sniper"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 1, SustainedBurstChance = 0f, MinimumSustainedBurstShots = 1, MaximumSustainedBurstShots = 1, AccuracyDegradationDegreesPerShot = 0f, MaximumAccuracyDegradationDegrees = 0f, MinimumShotGapSeconds = 0.8f, MaximumShotGapSeconds = 1.35f, MinimumBurstPauseSeconds = 0.35f, MaximumBurstPauseSeconds = 0.85f, MoveWhileFiringChance = 0.12f, TorsoAimWeight = 0.56f },
+                ["shotgun"] = new WeaponMotorProfile { MinimumBurstShots = 1, MaximumBurstShots = 2, SustainedBurstChance = 0f, MinimumSustainedBurstShots = 1, MaximumSustainedBurstShots = 2, AccuracyDegradationDegreesPerShot = 0.04f, MaximumAccuracyDegradationDegrees = 0.4f, MinimumShotGapSeconds = 0.7f, MaximumShotGapSeconds = 1.15f, MinimumBurstPauseSeconds = 0.25f, MaximumBurstPauseSeconds = 0.7f, MoveWhileFiringChance = 0.7f, TorsoAimWeight = 0.88f }
             };
         }
 
@@ -1638,12 +1959,131 @@ namespace Oxide.Plugins
 
             [JsonProperty("Allow Automatic Live Training")]
             public bool AllowAutomaticLiveTraining = false;
+
+            [JsonProperty("Record Bot Decision Evaluation JSONL")]
+            public bool RecordBotDecisionEvaluationJsonl = false;
+        }
+
+        private class TrainingV2Policy
+        {
+            public int schema_version = TrainingV2PolicySchemaVersion;
+            public string policy_id = "";
+            public string generated_at_utc = "";
+            public string mode = "off";
+            public bool transfer_to_all_weapon_classes;
+            public float transfer_strength;
+            public TrainingV2PolicySource source = new TrainingV2PolicySource();
+            public TrainingV2LearnedSignals learned = new TrainingV2LearnedSignals();
+            public TrainingV2RuntimeApplication runtime_application = new TrainingV2RuntimeApplication();
+            public Dictionary<string, float> action_score_deltas = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            public List<string> notes = new List<string>();
+        }
+
+        private class TrainingV2PolicySource
+        {
+            public string file_name = "";
+            public string sha256 = "";
+            public int players;
+            public int sessions;
+            public int maps;
+            public int records;
+            public int frames;
+            public int sequences;
+            public int outcomes;
+            public int bad_json_rows;
+            public int visible_frames;
+            public int target_frames;
+            public int fire_frames;
+            public int shot_event_frames;
+            public Dictionary<string, int> weapon_frame_counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, int> sequence_counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class TrainingV2LearnedSignals
+        {
+            public float move_while_firing_probability;
+            public float crouch_while_firing_probability;
+            public float sprint_while_firing_probability;
+            public float visible_fire_duty;
+            public Dictionary<string, float> visible_fire_duty_by_distance = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, float> visible_fire_duty_by_exposure = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            public TrainingV2ReactionSignal visible_reaction = new TrainingV2ReactionSignal();
+            public TrainingV2BurstSignal burst_shape = new TrainingV2BurstSignal();
+        }
+
+        private class TrainingV2ReactionSignal
+        {
+            public int episodes_with_fire;
+            public int episodes_without_fire;
+            public float p25_seconds;
+            public float median_seconds;
+            public float p75_seconds;
+            public float p90_seconds;
+        }
+
+        private class TrainingV2BurstSignal
+        {
+            public int samples;
+            public float p25_shots;
+            public float median_shots;
+            public float p75_shots;
+            public float p90_shots;
+            public int maximum_shots;
+            public float sustained_probability_8_plus;
+            public float median_duration_seconds;
+            public float p90_duration_seconds;
+        }
+
+        private class TrainingV2RuntimeApplication
+        {
+            public List<string> weapon_classes = new List<string>();
+            public bool firing_posture;
+            public bool move_while_firing;
+            public bool automatic_weapon_burst_shape;
+            public bool reaction_delay;
+            public bool tactical_action_ranking;
+            public bool weapon_mechanical_cadence_is_always_preserved = true;
         }
 
         private class AdminLearningDraft
         {
             public string PlayerQuery = "";
             public string ProfileKey = "";
+        }
+
+        private class SafeTravelGridCache
+        {
+            public int SchemaVersion = SafeTravelGridSchemaVersion;
+            public int ProtocolSave;
+            public uint WorldSize;
+            public uint WorldSeed;
+            public string LevelUrl = "";
+            public string RulesFingerprint = "";
+            public double GeneratedUnix;
+            public int ScannedPointCount;
+            public List<SafeTravelPoint> Points = new List<SafeTravelPoint>();
+            public Dictionary<string, long> Rejections = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class SafeTravelPoint
+        {
+            public float X;
+            public float Y;
+            public float Z;
+
+            [JsonIgnore]
+            public Vector3 Position => new Vector3(X, Y, Z);
+
+            public SafeTravelPoint()
+            {
+            }
+
+            public SafeTravelPoint(Vector3 position)
+            {
+                X = position.x;
+                Y = position.y;
+                Z = position.z;
+            }
         }
 
         private class PersistenceConfig
@@ -1791,6 +2231,115 @@ namespace Oxide.Plugins
             public Dictionary<string, PlayerNpcStats> players = new Dictionary<string, PlayerNpcStats>(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, BotStats> bots = new Dictionary<string, BotStats>(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, BotClanStats> bot_clans = new Dictionary<string, BotClanStats>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class RaidPersistenceData
+        {
+            public int schema_version = RaidDataSchemaVersion;
+            public string map_fingerprint = "";
+            public Dictionary<string, RaidSessionState> sessions = new Dictionary<string, RaidSessionState>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, double> squad_cooldowns_utc = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, double> failed_target_cooldowns_utc = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class RaidSessionState
+        {
+            public string session_id = "";
+            public string squad_key = "";
+            public int team_id;
+            public string stage = "placing_bags";
+            public double started_utc;
+            public double staging_deadline_utc;
+            public ulong target_tc_net_id;
+            public uint target_building_id;
+            public ulong target_owner_id;
+            public Vector3 target_position;
+            public string target_signature = "";
+            public Vector3 approach_position;
+            public Vector3 breach_seed;
+            public bool breach_seed_set;
+            public int hv_remaining;
+            public int c4_remaining;
+            public int kills;
+            public int deaths;
+            public bool first_bag_placed;
+            public ulong current_defense_net_id;
+            public ulong current_foundation_net_id;
+            public ulong active_ordnance_net_id;
+            public string active_ordnance_kind = "";
+            public string breacher_member_id = "";
+            public double next_action_utc;
+            public string last_reason = "created";
+            [JsonIgnore]
+            public bool dev_smoke_protected;
+            public List<RaidMemberState> members = new List<RaidMemberState>();
+            public List<RaidOrdnanceState> ordnance = new List<RaidOrdnanceState>();
+        }
+
+        private class RaidMemberState
+        {
+            public string member_id = "";
+            public string bot_key = "";
+            public string display_name = "";
+            public string kit_name = "";
+            public string skill_tier = "average";
+            public SkillDefinition skill = new SkillDefinition();
+            public SkillDefinition base_skill = new SkillDefinition();
+            public string behavior_model_key = "";
+            public string player_profile_key = "";
+            public string profile_source_name = "";
+            public string profile_source_steam_id = "";
+            public string avatar_key = "";
+            public string avatar_display_name = "";
+            public string avatar_image_name = "";
+            public string avatar_chat_user_id = "";
+            public string squad_role = "solo";
+            public string clan_key = "";
+            public string clan_tag = "";
+            public string clan_name = "";
+            public string prefab = "";
+            public ulong active_instance_id;
+            public ulong active_net_id;
+            public bool alive = true;
+            public bool separated;
+            public bool restore_spawn;
+            public double respawn_due_utc;
+            public Vector3 last_position;
+            public int desired_bag_count;
+            public List<RaidBagState> bags = new List<RaidBagState>();
+        }
+
+        private class RaidBagState
+        {
+            public int slot;
+            public ulong entity_net_id;
+            public Vector3 position;
+            public bool placed;
+            public bool destroyed;
+            public double last_used_utc;
+        }
+
+        private class RaidOrdnanceState
+        {
+            public ulong entity_net_id;
+            public string kind = "";
+            public string member_id = "";
+            public ulong target_net_id;
+            public double launched_utc;
+        }
+
+        private class RaidOrdnanceRuntime
+        {
+            public string SessionId = "";
+            public string MemberId = "";
+            public string Kind = "";
+            public ulong TargetNetId;
+        }
+
+        private class RecentRaidOrdnanceRuntime
+        {
+            public RaidOrdnanceRuntime Ordnance;
+            public double ExpiresUtc;
         }
 
         private class BotChatQuotaData
@@ -2038,6 +2587,44 @@ namespace Oxide.Plugins
             V2Active
         }
 
+        private enum BotLifecycleState
+        {
+            SpawnReserved,
+            Spawning,
+            Alive,
+            DeathObserved,
+            CleanupStarted,
+            EntityDestroyed,
+            RespawnPending,
+            ReplacementSpawned
+        }
+
+        private sealed class RaidlandsRoamBotMarker : FacepunchBehaviour
+        {
+            public ulong InstanceId;
+            public ulong NetworkId;
+            public string ProfileName = "";
+            public string BrainVersion = TacticalBrainName;
+            public int Generation;
+            public double SpawnedAt;
+            public string LifecycleState = BotLifecycleState.SpawnReserved.ToString();
+        }
+
+        private sealed class RaidlandsRaidBagMarker : FacepunchBehaviour
+        {
+            public string SessionId = "";
+            public string MemberId = "";
+            public int Slot;
+        }
+
+        private sealed class RaidlandsRaidOrdnanceMarker : FacepunchBehaviour
+        {
+            public string SessionId = "";
+            public string MemberId = "";
+            public string Kind = "";
+            public ulong TargetNetId;
+        }
+
         private enum MotorSkill
         {
             None,
@@ -2057,6 +2644,20 @@ namespace Oxide.Plugins
 
         private class BotRuntime
         {
+            public ulong InstanceId;
+            public ulong NetworkId;
+            public int Generation;
+            public double SpawnedAt;
+            public BotLifecycleState LifecycleState = BotLifecycleState.SpawnReserved;
+            public string TerminationReason = "none";
+            public bool CleanupStarted;
+            public bool EntityDestroyed;
+            public bool DeathHandled;
+            public bool ReplacementRequested;
+            public bool RespawnScheduled;
+            public bool SuppressDeathStats;
+            public Timer CleanupTimer;
+            public readonly List<Timer> OwnedTimers = new List<Timer>();
             public string BotKey;
             public string DisplayName;
             public string KitName;
@@ -2086,6 +2687,12 @@ namespace Oxide.Plugins
             public string RequestedProfile = "";
             public string RequestedDifficulty = "";
             public string TeamKey = "";
+            public string RaidSessionId = "";
+            public string RaidMemberId = "";
+            public bool RaidSeparated;
+            public Item RaidTransientItem;
+            public Item RaidTransientAmmoItem;
+            public Item RaidPreviousActiveItem;
             public BotCorpseLootPlan CorpseLootPlan = new BotCorpseLootPlan();
             public bool CorpseLootSnapshotCaptured;
             public Vector3 LeashCenter;
@@ -2109,11 +2716,22 @@ namespace Oxide.Plugins
             public float NextOwnershipVerifyAt;
             public int NativeOwnershipConflicts;
             public int ConsecutiveOwnershipConflicts;
+            public string LastOwnershipConflict = "none";
+            public float LastOwnershipConflictAt;
             public int ConsecutiveFireFailures;
             public string LastControllerInvariant = "none";
             public string RollbackReason = "none";
+            public bool V2BodyReadyForAuthority;
+            public bool V2AuthoritativePrepared;
+            public bool V2AuthorityPreparationPending;
+            public int V2AuthorityPrepareAttempts;
+            public float V2AuthorityPrepareStartedAt;
+            public float NextNavigationRepairAt;
+            public int NavigationRepairAttempts;
+            public string LastNavigationRepairReason = "none";
             public bool V2StanceTestPending;
             public bool V2StanceTestComplete;
+            public int V2StanceTestAttempts;
             public float V2StandingEyeHeight;
             public float V2StandingColliderHeight;
             public float V2CrouchedEyeHeight;
@@ -2121,9 +2739,16 @@ namespace Oxide.Plugins
             public float NextTriggerAt;
             public int BurstShotsRemaining;
             public int CurrentBurstSize;
+            public int CurrentBurstShotsFired;
+            public bool CurrentBurstIsSustained;
             public bool BurstMoveWhileFiring = true;
+            public Vector2 BurstAccuracyBias;
             public float CurrentShotGap;
             public Vector3 CurrentAimPoint;
+            public ulong VisibleAimTargetUserId;
+            public float VisibleAimAlignedSince;
+            public float LastVisibleAimErrorDegrees = 180f;
+            public float LastShotVisibleAimErrorDegrees = 180f;
             public Vector2 CorrelatedAimError;
             public Vector2 CorrelatedAimVelocity;
             public Vector2 RecoilAimError;
@@ -2139,6 +2764,7 @@ namespace Oxide.Plugins
             public int AuthorizedShots;
             public int RejectedShots;
             public int UnauthorizedHitsBlocked;
+            public bool ApplyingBotVsBotResolvedDamage;
             public Vector3 CurrentPeekLeftPoint;
             public Vector3 CurrentPeekRightPoint;
             public int PeekSide = 1;
@@ -2157,7 +2783,9 @@ namespace Oxide.Plugins
             public bool V2Healing;
             public bool V2MedicalUsed;
             public float V2HealEquipReadyAt;
+            public float V2HealUseDeadlineAt;
             public float V2HealLockedUntil;
+            public float V2LastMedicalUseAt;
             public Item V2PreviousActiveItem;
             public Item V2MedicalItem;
             public int V2MedicalAmountBefore;
@@ -2177,8 +2805,17 @@ namespace Oxide.Plugins
             public CombatProfile Combat = new CombatProfile();
             public MovementPlan Movement = new MovementPlan();
             public DecisionContext Decisions = new DecisionContext();
+            public BrainRuntimeV2 BrainV2 = new BrainRuntimeV2();
 
             public Vector3 CurrentDestination;
+            public string RoamMonumentKey = "";
+            public string PreviousRoamMonumentKey = "";
+            public string RoamMonumentName = "none";
+            public int RoamLegsCompleted;
+            public float FireObstructionStartedAt;
+            public float NextFiringLaneSearchAt;
+            public int FiringLaneAttempts;
+            public Vector3 CurrentFiringLaneDestination;
             public Vector3 CurrentCover;
             public Vector3 CurrentTuckPoint;
             public Vector3 CurrentPeekPoint;
@@ -2208,6 +2845,7 @@ namespace Oxide.Plugins
             public float LastPassiveHealAt;
             public float NextNonSyringeHealAt;
             public float PendingNonSyringeHealRemaining;
+            public float NonSyringeHealingUntil;
             public float MedicalFireLockedUntil;
             public float NextSyringeHealAt;
             public float PendingMedicalHealRemaining;
@@ -2340,10 +2978,16 @@ namespace Oxide.Plugins
             public float projectile_velocity;
             public int pellet_count = 1;
             public int observed_hit_callbacks;
+            public bool native_bot_hit_observed;
+            public bool resolver_completed;
+            public float fallback_hit_chance;
+            public float fallback_damage;
             public bool provisional;
             public bool committed;
             [JsonIgnore]
             public BaseProjectile weapon;
+            [JsonIgnore]
+            public BasePlayer target;
             public string eligibility_reason = "ready";
             public string controller_mode = "legacy";
             public bool consumed;
@@ -2558,8 +3202,15 @@ namespace Oxide.Plugins
         {
             public long motor_ticks;
             public long authorized_shots;
+            public long controlled_bursts;
+            public long sustained_bursts;
+            public long sustained_shots;
             public long rejected_shots;
             public long unauthorized_hits_blocked;
+            public long native_bot_hits;
+            public long resolved_bot_hits;
+            public long resolved_bot_misses;
+            public long firing_lane_repositions;
             public long water_target_rejections;
             public long water_crossing_rejections;
             public long foliage_rejections;
@@ -2571,6 +3222,19 @@ namespace Oxide.Plugins
             public long training_flush_failures;
             public long real_medical_uses;
             public long motor_budget_breaches;
+            public long motor_urgent_overflow_updates;
+            public long brain_v2_ticks;
+            public long brain_v2_goal_switches;
+            public long brain_v2_action_switches;
+            public long brain_v2_action_failures;
+            public long brain_v2_reflex_interrupts;
+            public long brain_v2_visible_reacquisitions;
+            public long brain_v2_trace_rows;
+            public long brain_v2_errors;
+            public long brain_v2_legacy_fallbacks;
+            public long training_policy_action_evaluations;
+            public long training_policy_motor_profiles;
+            public long training_policy_crouch_decisions;
         }
 
         private class BaseRestrictionCacheEntry
@@ -2616,10 +3280,14 @@ namespace Oxide.Plugins
 
         private class AmbientRespawnRequest
         {
+            public ulong InstanceId;
+            public int Generation;
+            public string BotKey = "";
             public int TeamId;
             public string PreferredPrefab = "";
             public float QueuedAt;
             public string Reason = "";
+            public Timer Timer;
         }
 
         private class WorldPopulationCensus
@@ -2673,7 +3341,237 @@ namespace Oxide.Plugins
             ThrowSmoke,
             PlaceBarricade,
             HoldOutsideBase,
+            Heal,
+            Reload,
             AbandonTarget
+        }
+
+        private enum BrainV2RuntimeMode
+        {
+            Off,
+            Shadow,
+            Canary,
+            Active
+        }
+
+        private enum BrainGoalIdV2
+        {
+            None,
+            Recover,
+            EngageThreat,
+            SearchThreat,
+            RegroupOrAssist,
+            HoldObjective,
+            Patrol
+        }
+
+        private enum BrainActionStatusV2
+        {
+            None,
+            Running,
+            Succeeded,
+            Failed,
+            Interrupted
+        }
+
+        private class BrainEventV2
+        {
+            public float time;
+            public string type = "";
+            public string detail = "";
+            public Vector3 position;
+            public ulong entity_id;
+        }
+
+        private class BrainContactV2
+        {
+            public ulong entity_id;
+            public string relationship = "enemy";
+            public Vector3 last_seen_position;
+            public Vector3 last_seen_velocity;
+            public float last_seen_at;
+            public Vector3 last_heard_position;
+            public float last_heard_at;
+            public Vector3 last_damage_position;
+            public float last_damage_at;
+            public Vector3 last_squad_position;
+            public float last_squad_at;
+            public float visual_confidence;
+            public float audio_confidence;
+            public float damage_confidence;
+            public float squad_confidence;
+            public Vector3 estimated_position;
+            public float uncertainty_radius;
+            public float confidence;
+            public float threat;
+            public float threat_updated_at;
+            public bool currently_visible;
+            [JsonIgnore]
+            public BasePlayer entity;
+        }
+
+        private class BrainWorldSnapshotV2
+        {
+            public int schema_version = 3;
+            public float captured_at;
+            public Vector3 position;
+            public float health_fraction;
+            public float health_need;
+            public float recent_damage_pressure;
+            public float own_exposure_fraction;
+            public float target_exposure_fraction;
+            public float exposure_risk;
+            public float contact_confidence;
+            public float evidence_freshness;
+            public float target_opportunity;
+            public float target_distance;
+            public float weapon_range_fit;
+            public float ammo_fraction;
+            public float ammo_pressure;
+            public float cover_quality;
+            public float cover_reachability;
+            public float local_force_balance;
+            public float squad_separation;
+            public float teammate_contact_urgency;
+            public float path_risk;
+            public float objective_urgency;
+            public float combat_readiness;
+            public int nearby_allies;
+            public int nearby_enemies;
+            public ulong primary_contact_id;
+            public Vector3 primary_contact_position;
+            public bool has_primary_contact;
+            public bool has_line_of_sight;
+            public bool has_loaded_weapon;
+            public bool has_medical_item;
+            public bool at_cover;
+            public bool effective_cover;
+            public bool inside_base_restriction;
+            public bool grenade_danger;
+            public bool movement_stuck;
+            public bool managed_objective;
+        }
+
+        private class BrainGoalScoreV2
+        {
+            public string goal = "none";
+            [JsonIgnore]
+            public BrainGoalIdV2 GoalId = BrainGoalIdV2.None;
+            public float score;
+            public bool valid;
+            public string reason = "";
+            public Dictionary<string, float> considerations = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class BrainActionScoreV2
+        {
+            public string action = "none";
+            [JsonIgnore]
+            public TacticalActionId ActionId = TacticalActionId.None;
+            public float score;
+            public bool legal;
+            public string reason = "";
+            public string failure = "";
+            public Vector3 destination;
+            public ulong target_id;
+            public Dictionary<string, float> considerations = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private class BrainGoalInstanceV2
+        {
+            public BrainGoalIdV2 GoalId = BrainGoalIdV2.None;
+            public ulong TargetId;
+            public Vector3 TargetPosition;
+            public float StartedAt;
+            public float MinimumCommitUntil;
+            public float Deadline;
+            public float LastProgressAt;
+            public float LastProgressValue;
+            public int FailureCount;
+            public string ReasonSelected = "none";
+        }
+
+        private class BrainActionInstanceV2
+        {
+            public TacticalActionId ActionId = TacticalActionId.None;
+            public BrainActionStatusV2 Status = BrainActionStatusV2.None;
+            public float StartedAt;
+            public float MinimumCommitUntil;
+            public float TimeoutAt;
+            public float LastProgressAt;
+            public float LastProgressValue;
+            public Vector3 Destination;
+            public ulong TargetId;
+            public int StartingPathFailures;
+            public string Reason = "none";
+            public string ResultReason = "none";
+        }
+
+        private class BrainActionProposalV2
+        {
+            public TacticalActionId ActionId = TacticalActionId.None;
+            public float Score;
+            public string Reason = "";
+            public Vector3 Destination;
+            public ulong TargetId;
+            public bool RequiresSpatialPlan;
+            public string SpatialPlan = "none";
+            public bool Legal = true;
+            public string Failure = "";
+            public Dictionary<string, float> Considerations = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            public List<string> RiskFlags = new List<string>();
+            [JsonIgnore]
+            public float PlannedLeashOutsideUntil;
+            [JsonIgnore]
+            public CoverPlan CoverPlan;
+            [JsonIgnore]
+            public ProtectionPlan ProtectionPlan;
+        }
+
+        private class BrainRuntimeV2
+        {
+            public BrainV2RuntimeMode Mode = BrainV2RuntimeMode.Off;
+            public string ModeReason = "off";
+            public BrainWorldSnapshotV2 Snapshot = new BrainWorldSnapshotV2();
+            public readonly Dictionary<ulong, BrainContactV2> Contacts = new Dictionary<ulong, BrainContactV2>();
+            public readonly List<BrainEventV2> RecentEvents = new List<BrainEventV2>();
+            public BrainGoalInstanceV2 ActiveGoal;
+            public BrainActionInstanceV2 ActiveAction;
+            public float NextGoalEvaluationAt;
+            public float NextActionEvaluationAt;
+            public float LastTraceAt;
+            public string LastTraceGoal = "none";
+            public string LastTraceAction = "none";
+            public string LastDecisionReason = "none";
+            public string LastFailure = "none";
+            public int GoalSwitches;
+            public int ActionSwitches;
+            public int ActionFailures;
+            public List<BrainGoalScoreV2> LastGoalScores = new List<BrainGoalScoreV2>();
+            public List<BrainActionScoreV2> LastActionScores = new List<BrainActionScoreV2>();
+        }
+
+        private class BrainTraceV2
+        {
+            public int schema_version = 3;
+            public string record_type = "brain_decision";
+            public string captured_at_utc = "";
+            public float captured_at;
+            public string bot_key = "";
+            public string bot_name = "";
+            public string mode = "off";
+            public string active_goal = "none";
+            public string selected_action = "none";
+            public string decision_reason = "none";
+            public string action_status = "none";
+            public string action_result = "none";
+            public BrainWorldSnapshotV2 snapshot = new BrainWorldSnapshotV2();
+            public List<BrainGoalScoreV2> goals = new List<BrainGoalScoreV2>();
+            public List<BrainActionScoreV2> actions = new List<BrainActionScoreV2>();
+            public List<BrainEventV2> recent_events = new List<BrainEventV2>();
+            public int goal_switches;
+            public int action_switches;
+            public int action_failures;
         }
 
         private class TacticalMemory
@@ -2728,6 +3626,13 @@ namespace Oxide.Plugins
             public TacticalActionId LastActionId = TacticalActionId.None;
             public int SameActionFailures;
             public List<StuckDestinationMemory> AvoidedDestinations = new List<StuckDestinationMemory>();
+            public Vector3 SafeTravelFinalDestination;
+            public Vector3 SafeTravelWaypoint;
+            public int SafeTravelHops;
+            public Vector3 LastPathValidationDestination;
+            public float LastPathValidationAt;
+            public bool LastPathValidationComplete;
+            public string LastPathValidationReason = "none";
         }
 
         private class StuckDestinationMemory
@@ -2948,6 +3853,11 @@ namespace Oxide.Plugins
 
                 if (brain == null)
                 {
+                    if (runtime != null)
+                    {
+                        runtime.V2AuthoritativePrepared = false;
+                        runtime.LastControllerInvariant = "authoritative_prepare_brain_missing";
+                    }
                     return;
                 }
 
@@ -2963,8 +3873,23 @@ namespace Oxide.Plugins
                         legacyScientist.aimConeScale = runtime.OriginalAimConeScale;
                     }
 
-                    brain.SetEnabled(true);
-                    brain.SetThinkMode(AIThinkMode.FixedUpdate);
+                    // Restore native control with typed calls. The generic reflection
+                    // helper can select the wrong overload when Rust exposes several
+                    // methods with the same name and argument count.
+                    try
+                    {
+                        brain.enabled = true;
+                        brain.SetEnabled(true);
+                        brain.SetThinkMode(AIThinkMode.FixedUpdate);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (runtime != null)
+                        {
+                            runtime.LastControllerInvariant = $"native_restore_exception:{ex.GetType().Name}";
+                        }
+                    }
+
                     var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
                     if (navigator != null)
                     {
@@ -2979,12 +3904,68 @@ namespace Oxide.Plugins
                     {
                         legacyAgent.updateRotation = runtime.OriginalAgentUpdateRotation;
                     }
+                    if (runtime != null)
+                    {
+                        runtime.V2AuthoritativePrepared = false;
+                    }
                     return;
                 }
 
-                brain.SwitchToState(AIState.Idle, 0);
-                brain.SetThinkMode(AIThinkMode.None);
-                brain.SetEnabled(false);
+                // Do not call SwitchToState during takeover. A ScientistNPC can have
+                // a visible BaseAIBrain component while its state containers are not
+                // yet populated, and SwitchToState then throws inside HasState.
+                // Stopping think and disabling the component is the ownership boundary.
+                string prepareFailure = "";
+                try
+                {
+                    brain.SetThinkMode(AIThinkMode.None);
+                }
+                catch (Exception ex)
+                {
+                    prepareFailure = $"think_mode:{ex.GetType().Name}";
+                }
+
+                try
+                {
+                    brain.SetEnabled(false);
+                }
+                catch (Exception ex)
+                {
+                    prepareFailure = string.IsNullOrWhiteSpace(prepareFailure)
+                        ? $"set_enabled:{ex.GetType().Name}"
+                        : $"{prepareFailure},set_enabled:{ex.GetType().Name}";
+                }
+
+                try
+                {
+                    // Explicitly set MonoBehaviour.enabled as a final fail-closed
+                    // step. This does not depend on BaseAIBrain method overloads.
+                    brain.enabled = false;
+                }
+                catch (Exception ex)
+                {
+                    prepareFailure = string.IsNullOrWhiteSpace(prepareFailure)
+                        ? $"component_disable:{ex.GetType().Name}"
+                        : $"{prepareFailure},component_disable:{ex.GetType().Name}";
+                }
+
+                owner.SuppressBrainPlayerTargeting(bot, brain);
+                var attacker = owner.GetAttackInterface(bot);
+                if (attacker != null)
+                {
+                    owner.TryInvoke(attacker, "StopAttacking");
+                }
+                owner.TryInvoke(bot, "StopAttacking");
+
+                if (runtime != null)
+                {
+                    runtime.V2AuthoritativePrepared = !brain.enabled;
+                    runtime.LastControllerInvariant = runtime.V2AuthoritativePrepared
+                        ? "authority_prepared"
+                        : string.IsNullOrWhiteSpace(prepareFailure)
+                            ? "authoritative_prepare_brain_still_enabled"
+                            : $"authoritative_prepare_failed:{prepareFailure}";
+                }
 
                 var v2Navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
                 if (v2Navigator != null)
@@ -3016,8 +3997,13 @@ namespace Oxide.Plugins
                     }
 
                     v2Agent.updateRotation = false;
+                    if (v2Agent.enabled && v2Agent.isOnNavMesh)
+                    {
+                        v2Agent.isStopped = false;
+                    }
                 }
             }
+
 
             public bool Move(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed)
             {
@@ -3066,6 +4052,7 @@ namespace Oxide.Plugins
 
                 try
                 {
+                    owner.PublishV2ShotFacing(bot, runtime, aimPoint);
                     projectile.useOwnerForward = false;
                     projectile.aiming = true;
                     projectile.ServerUse(new HeldEntityServerUseParams(1f, 1f, origin, true, false));
@@ -3134,18 +4121,20 @@ namespace Oxide.Plugins
                     return false;
                 }
 
-                var state = brain.CurrentState?.StateType ?? AIState.None;
                 if (brain.enabled)
                 {
                     conflict = "native_brain_enabled";
                     return false;
                 }
 
-                if (state == AIState.Chase || state == AIState.Attack || state == AIState.Combat || state == AIState.CombatStationary)
-                {
-                    conflict = $"native_state:{state}";
-                    return false;
-                }
+                // CurrentState can remain on the last native state after the
+                // behaviour has been disabled. A stale enum is not an ownership
+                // conflict; an enabled brain is. Other live ownership channels are
+                // checked below (senses, attack target, navigator policy and
+                // rotation). Destination drift is handled by the V2 navigation
+                // recovery path instead: BaseNavigator and NavMeshAgent may project
+                // an authoritative V2 destination onto a different polygon, so a
+                // coordinate mismatch alone does not prove native ownership.
 
                 if ((brain.SenseTypes & EntityType.Player) != 0 || brain.Senses != null && (brain.Senses.senseTypes & EntityType.Player) != 0)
                 {
@@ -3178,28 +4167,10 @@ namespace Oxide.Plugins
                     return false;
                 }
 
-                if (runtime.CurrentDestination != Vector3.zero
-                    && navigator.Destination != Vector3.zero
-                    && Vector3.Distance(runtime.CurrentDestination, navigator.Destination) > 3f)
-                {
-                    conflict = "native_destination_overwrite";
-                    return false;
-                }
-
                 var agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
                 if (agent != null && agent.updateRotation)
                 {
                     conflict = "native_rotation_overwrite";
-                    return false;
-                }
-                if (runtime.CurrentDestination != Vector3.zero
-                    && agent != null
-                    && agent.enabled
-                    && agent.isOnNavMesh
-                    && !float.IsInfinity(agent.destination.x)
-                    && Vector3.Distance(runtime.CurrentDestination, agent.destination) > 3f)
-                {
-                    conflict = "native_agent_destination_overwrite";
                     return false;
                 }
 
@@ -3499,7 +4470,35 @@ namespace Oxide.Plugins
 
         protected override void SaveConfig()
         {
+            EnforceLocalOnlyConfiguration();
             Config.WriteObject(config, true);
+        }
+
+        private void EnforceLocalOnlyConfiguration()
+        {
+            if (config == null)
+            {
+                return;
+            }
+
+            if (config.DecisionAdvisor != null)
+            {
+                config.DecisionAdvisor.Enabled = false;
+                config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                config.DecisionAdvisor.ShadowMode = false;
+                config.DecisionAdvisor.EndpointUrl = "";
+                config.DecisionAdvisor.ApiKey = "";
+                config.DecisionAdvisor.Model = "";
+                config.DecisionAdvisor.MaxConcurrentRequests = 0;
+            }
+
+            if (config.BotChat != null)
+            {
+                config.BotChat.AiRepliesEnabled = false;
+                config.BotChat.OpenAiCallsPerHour = 0;
+                config.BotChat.MaxConcurrentAiRequests = 0;
+            }
         }
 
         private static List<string> DistinctConfigValues(IEnumerable<string> values)
@@ -3524,16 +4523,32 @@ namespace Oxide.Plugins
         {
             permission.RegisterPermission(AdminPermission, this);
             permission.RegisterPermission(IgnorePermission, this);
+            botInstanceSequence = unchecked((ulong)DateTime.UtcNow.Ticks);
             legacyScientistBodyAdapter = new LegacyScientistBodyAdapter(this);
             LoadData();
+            LoadRaidData();
             LoadBotChatQuota();
             LoadBehaviorModels();
+            LoadTrainingV2Policy();
         }
 
         private void OnServerInitialized()
         {
             initializationGeneration++;
             QueueInitializationStage(initializationGeneration, 0.1f, InitializeServicesStage);
+        }
+
+        private void OnServerSave()
+        {
+            CaptureRaidMemberPositions();
+            SaveRaidData();
+        }
+
+        private void OnNewSave(string filename)
+        {
+            AbortAllRaidSessions("new save", false);
+            raidData = NewRaidPersistenceData();
+            SaveRaidData();
         }
 
         private void QueueInitializationStage(int generation, float delaySeconds, Action<int> stage)
@@ -3557,6 +4572,7 @@ namespace Oxide.Plugins
             RefreshDecisionAdvisor();
             RefreshLearningTimer();
             RefreshTrainingV2Timer();
+            InitializeSafeTravelGrid(false);
             QueueInitializationStage(generation, 0.1f, InitializeAssetsStage);
         }
 
@@ -3564,6 +4580,7 @@ namespace Oxide.Plugins
         {
             RegisterBotAvatarImages();
             MaybePruneDecisionTraceFile(DecisionTraceDataPath(), true);
+            MaybePruneBrainV2TraceFile(BrainV2TraceDataPath(), true);
             QueueInitializationStage(generation, 0.1f, InitializeScoreboardsStage);
         }
 
@@ -3587,9 +4604,16 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            raidAdministrativeTeardown = true;
+            CaptureRaidMemberPositions();
+            SaveRaidData();
+            lifecycleStopping = true;
             initializationGeneration++;
             initializationTimer?.Destroy();
             initializationTimer = null;
+            safeTravelGridBuildTimer?.Destroy();
+            safeTravelGridBuildTimer = null;
+            safeTravelGridBuilding = false;
             StopTrainingV2(true);
             StopRuntime();
             DestroyDebugBotPanels();
@@ -3603,15 +4627,13 @@ namespace Oxide.Plugins
             SaveBotChatQuota();
             learningTimer?.Destroy();
             learningTimer = null;
-            if (config?.Persistence?.KillBotsOnPluginUnload == true
-                || config?.ControllerV2?.RespawnTrackedBotsOnPluginReload == true
-                    && ParseControllerMode(config.ControllerV2.Mode) != ControllerMode.Legacy)
-            {
-                KillAllBots(!config.Persistence.LeaveCorpses);
-            }
+            KillAllBots(false);
+            Puts($"Raidlands RoamBots unload cleanup: removed={lastCleanupCount}, live={ActualLiveMarkedBotCount()}, tracked={activeBots.Count}, pendingSpawns={pendingSpawnReservations.Count}, pendingRespawns={pendingAmbientRespawns.Count}.");
             SaveData();
+            SaveRaidData();
             SaveBehaviorModels();
             FlushDecisionTraces();
+            FlushBrainV2Traces();
             FlushObservationTraces();
         }
 
@@ -3641,6 +4663,561 @@ namespace Oxide.Plugins
                 registeredAvatarImages.Clear();
                 timer.Once(2f, RegisterBotAvatarImages);
             }
+        }
+
+        private void InitializeSafeTravelGrid(bool forceRebuild)
+        {
+            safeTravelGridBuildTimer?.Destroy();
+            safeTravelGridBuildTimer = null;
+            safeTravelGridBuilding = false;
+            safeTravelGridReady = false;
+            safeTravelSpatialIndex.Clear();
+
+            if (config?.SafeTravelGrid?.Enabled != true)
+            {
+                safeTravelGridCache = new SafeTravelGridCache();
+                return;
+            }
+
+            if (!forceRebuild && TryLoadSafeTravelGridCache())
+            {
+                safeTravelGridReady = true;
+                safeTravelGridProcessed = Math.Max(safeTravelGridCache.ScannedPointCount, safeTravelGridCache.Points.Count);
+                safeTravelGridTotal = Math.Max(1, safeTravelGridProcessed);
+                BuildSafeTravelSpatialIndex();
+                Puts($"Safe travel grid loaded from cache with {safeTravelGridCache.Points.Count} navmesh point(s) for {World.Size}/{World.Seed}.");
+                return;
+            }
+
+            safeTravelGridCache = CreateEmptySafeTravelGridCache();
+            var halfSize = World.Size * 0.5f;
+            var margin = Mathf.Clamp(config.SafeTravelGrid.MapEdgeMargin, 0f, Math.Max(0f, halfSize - config.SafeTravelGrid.CellSize));
+            safeTravelGridMin = -halfSize + margin;
+            safeTravelGridMax = halfSize - margin;
+            safeTravelGridNextX = safeTravelGridMin;
+            safeTravelGridNextZ = safeTravelGridMin;
+            safeTravelGridProcessed = 0;
+            var axisCount = Math.Max(1, Mathf.CeilToInt((safeTravelGridMax - safeTravelGridMin) / config.SafeTravelGrid.CellSize));
+            safeTravelGridTotal = axisCount * axisCount;
+            safeTravelGridBuildStartedUnix = SafeTravelUnixNow();
+            safeTravelGridMaximumSliceMilliseconds = 0d;
+            safeTravelGridBuilding = true;
+            Puts($"Safe travel grid rebuild started for {World.Size}/{World.Seed}: cell={config.SafeTravelGrid.CellSize:0.##}m, points={safeTravelGridTotal}, budget={config.SafeTravelGrid.BuildBudgetMilliseconds:0.##}ms.");
+            ScheduleSafeTravelGridBuildSlice(0.05f);
+        }
+
+        private SafeTravelGridCache CreateEmptySafeTravelGridCache()
+        {
+            return new SafeTravelGridCache
+            {
+                SchemaVersion = SafeTravelGridSchemaVersion,
+                ProtocolSave = Rust.Protocol.save,
+                WorldSize = World.Size,
+                WorldSeed = World.Seed,
+                LevelUrl = ConVar.Server.levelurl ?? "",
+                RulesFingerprint = SafeTravelGridRulesFingerprint(),
+                GeneratedUnix = 0d,
+                Points = new List<SafeTravelPoint>(),
+                Rejections = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            };
+        }
+
+        private bool TryLoadSafeTravelGridCache()
+        {
+            if (config?.SafeTravelGrid?.PersistCache != true || !Interface.Oxide.DataFileSystem.ExistsDatafile(SafeTravelGridDataFile))
+            {
+                return false;
+            }
+
+            try
+            {
+                var cached = Interface.Oxide.DataFileSystem.ReadObject<SafeTravelGridCache>(SafeTravelGridDataFile);
+                if (cached == null || cached.Points == null || cached.SchemaVersion != SafeTravelGridSchemaVersion)
+                {
+                    return false;
+                }
+
+                if (cached.ProtocolSave != Rust.Protocol.save || cached.WorldSize != World.Size || cached.WorldSeed != World.Seed)
+                {
+                    return false;
+                }
+
+                if (!string.Equals(cached.LevelUrl ?? "", ConVar.Server.levelurl ?? "", StringComparison.Ordinal)
+                    || !string.Equals(cached.RulesFingerprint ?? "", SafeTravelGridRulesFingerprint(), StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                cached.Rejections = cached.Rejections ?? new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                safeTravelGridCache = cached;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Safe travel grid cache could not be loaded and will be rebuilt: {ex.GetType().Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private void ScheduleSafeTravelGridBuildSlice(float delay = 0.01f)
+        {
+            if (!safeTravelGridBuilding || safeTravelGridBuildTimer != null)
+            {
+                return;
+            }
+
+            safeTravelGridBuildTimer = timer.Once(Mathf.Max(0.01f, delay), RunSafeTravelGridBuildSlice);
+        }
+
+        private void RunSafeTravelGridBuildSlice()
+        {
+            safeTravelGridBuildTimer = null;
+            if (!safeTravelGridBuilding || config?.SafeTravelGrid?.Enabled != true)
+            {
+                return;
+            }
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var checks = 0;
+            while (safeTravelGridNextX < safeTravelGridMax
+                && checks < config.SafeTravelGrid.CandidateChecksPerSlice
+                && stopwatch.Elapsed.TotalMilliseconds < config.SafeTravelGrid.BuildBudgetMilliseconds)
+            {
+                var candidate = new Vector3(safeTravelGridNextX, TerrainHeight(new Vector3(safeTravelGridNextX, 0f, safeTravelGridNextZ)), safeTravelGridNextZ);
+                if (TryValidateSafeTravelGridPoint(candidate, out var sampled, out var rejection))
+                {
+                    safeTravelGridCache.Points.Add(new SafeTravelPoint(sampled));
+                }
+                else
+                {
+                    CountSafeTravelGridRejection(rejection);
+                }
+
+                checks++;
+                safeTravelGridProcessed++;
+                safeTravelGridNextZ += config.SafeTravelGrid.CellSize;
+                if (safeTravelGridNextZ >= safeTravelGridMax)
+                {
+                    safeTravelGridNextZ = safeTravelGridMin;
+                    safeTravelGridNextX += config.SafeTravelGrid.CellSize;
+                }
+            }
+
+            stopwatch.Stop();
+            safeTravelGridMaximumSliceMilliseconds = Math.Max(safeTravelGridMaximumSliceMilliseconds, stopwatch.Elapsed.TotalMilliseconds);
+            if (safeTravelGridNextX >= safeTravelGridMax)
+            {
+                CompleteSafeTravelGridBuild();
+                return;
+            }
+
+            ScheduleSafeTravelGridBuildSlice();
+        }
+
+        private bool TryValidateSafeTravelGridPoint(Vector3 candidate, out Vector3 sampled, out string reason)
+        {
+            sampled = Vector3.zero;
+            reason = "navmesh";
+            if (!NavMesh.SamplePosition(candidate, out var hit, config.SafeTravelGrid.NavmeshSampleRadius, NavMesh.AllAreas))
+            {
+                return false;
+            }
+
+            sampled = hit.position;
+            if (Distance2D(candidate, sampled) > config.SafeTravelGrid.NavmeshSampleRadius
+                || Math.Abs(sampled.y - candidate.y) > config.SafeTravelGrid.MaximumVerticalSnap)
+            {
+                reason = "snap";
+                return false;
+            }
+
+            if (IsUnderWater(sampled))
+            {
+                reason = "water";
+                return false;
+            }
+
+            if (IsBelowTerrain(sampled) || IsBlockedSafeZoneSpawn(sampled))
+            {
+                reason = IsBelowTerrain(sampled) ? "below_terrain" : "safe_zone";
+                return false;
+            }
+
+            reason = "ready";
+            return true;
+        }
+
+        private void CountSafeTravelGridRejection(string reason)
+        {
+            reason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+            safeTravelGridCache.Rejections.TryGetValue(reason, out var count);
+            safeTravelGridCache.Rejections[reason] = count + 1;
+        }
+
+        private void CompleteSafeTravelGridBuild()
+        {
+            safeTravelGridBuilding = false;
+            safeTravelGridReady = true;
+            safeTravelGridCache.GeneratedUnix = SafeTravelUnixNow();
+            safeTravelGridCache.ScannedPointCount = safeTravelGridProcessed;
+            BuildSafeTravelSpatialIndex();
+
+            if (config.SafeTravelGrid.PersistCache)
+            {
+                try
+                {
+                    Interface.Oxide.DataFileSystem.WriteObject(SafeTravelGridDataFile, safeTravelGridCache, false);
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning($"Safe travel grid cache could not be saved: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            Puts($"Safe travel grid completed in {Math.Max(0d, SafeTravelUnixNow() - safeTravelGridBuildStartedUnix):0}s: {safeTravelGridCache.Points.Count}/{safeTravelGridProcessed} navmesh point(s), maxSlice={safeTravelGridMaximumSliceMilliseconds:0.###}ms.");
+        }
+
+        private string SafeTravelGridRulesFingerprint()
+        {
+            var grid = config.SafeTravelGrid;
+            return string.Join("|", new[]
+            {
+                grid.CellSize.ToString("0.###", CultureInfo.InvariantCulture),
+                grid.MapEdgeMargin.ToString("0.###", CultureInfo.InvariantCulture),
+                grid.NavmeshSampleRadius.ToString("0.###", CultureInfo.InvariantCulture),
+                grid.MaximumVerticalSnap.ToString("0.###", CultureInfo.InvariantCulture),
+                config.Spawn.AvoidSafeZoneSpawns.ToString(),
+                config.Spawn.SafeZoneSpawnBufferDistance.ToString("0.###", CultureInfo.InvariantCulture)
+            });
+        }
+
+        private double SafeTravelUnixNow()
+        {
+            return (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+        }
+
+        private void BuildSafeTravelSpatialIndex()
+        {
+            safeTravelSpatialIndex.Clear();
+            if (safeTravelGridCache?.Points == null)
+            {
+                return;
+            }
+
+            for (var index = 0; index < safeTravelGridCache.Points.Count; index++)
+            {
+                var point = safeTravelGridCache.Points[index];
+                if (point == null)
+                {
+                    continue;
+                }
+
+                var key = SafeTravelSpatialKey(point.Position);
+                if (!safeTravelSpatialIndex.TryGetValue(key, out var indices))
+                {
+                    indices = new List<int>();
+                    safeTravelSpatialIndex[key] = indices;
+                }
+                indices.Add(index);
+            }
+        }
+
+        private long SafeTravelSpatialKey(Vector3 position)
+        {
+            var cell = Math.Max(1f, config?.SafeTravelGrid?.CellSize ?? 25f);
+            var x = Mathf.FloorToInt(position.x / cell);
+            var z = Mathf.FloorToInt(position.z / cell);
+            return ((long)x << 32) ^ (uint)z;
+        }
+
+        private IEnumerable<Vector3> SafeTravelPointsNear(Vector3 center, float radius)
+        {
+            if (!safeTravelGridReady || safeTravelGridCache?.Points == null || safeTravelGridCache.Points.Count == 0)
+            {
+                yield break;
+            }
+
+            var cell = Math.Max(1f, config.SafeTravelGrid.CellSize);
+            var centerX = Mathf.FloorToInt(center.x / cell);
+            var centerZ = Mathf.FloorToInt(center.z / cell);
+            var range = Math.Max(1, Mathf.CeilToInt(Math.Max(cell, radius) / cell));
+            var radiusSquared = radius * radius;
+
+            for (var x = centerX - range; x <= centerX + range; x++)
+            {
+                for (var z = centerZ - range; z <= centerZ + range; z++)
+                {
+                    var key = ((long)x << 32) ^ (uint)z;
+                    if (!safeTravelSpatialIndex.TryGetValue(key, out var indices))
+                    {
+                        continue;
+                    }
+
+                    foreach (var index in indices)
+                    {
+                        if (index < 0 || index >= safeTravelGridCache.Points.Count)
+                        {
+                            continue;
+                        }
+
+                        var point = safeTravelGridCache.Points[index]?.Position ?? Vector3.zero;
+                        if (point != Vector3.zero && (point - center).sqrMagnitude <= radiusSquared)
+                        {
+                            yield return point;
+                        }
+                    }
+                }
+            }
+        }
+
+        private bool TrySnapRoamPointToSafeTravelGrid(BotRuntime runtime, Vector3 requested, float now, out Vector3 snapped)
+        {
+            snapped = requested;
+            if (!safeTravelGridReady || config?.SafeTravelGrid?.Enabled != true)
+            {
+                return requested != Vector3.zero;
+            }
+
+            var candidate = SafeTravelPointsNear(requested, config.SafeTravelGrid.RoamPointSearchRadius)
+                .Where(point => !ShouldAvoidDestination(runtime, point, now)
+                    && !IsBlockedLandPosition(point)
+                    && !IsSquadDestinationReserved(runtime, point, out _))
+                .OrderBy(point => Distance2D(point, requested))
+                .ThenBy(point => StableBucket($"{runtime?.BotKey}:{point.x:0}:{point.z:0}:travel", 100000))
+                .FirstOrDefault();
+
+            if (candidate == Vector3.zero)
+            {
+                return false;
+            }
+
+            var constrained = ConstrainToManagedLeash(runtime, RuntimeEntityFor(runtime)?.transform.position ?? requested, candidate, now);
+            if (Distance2D(constrained, candidate) > 2f)
+            {
+                return false;
+            }
+
+            snapped = candidate;
+            safeTravelRoamSnaps++;
+            return true;
+        }
+
+        private bool TryCalculateCompleteAgentPath(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, float now, out string reason, bool useCache = true)
+        {
+            reason = "path_unchecked";
+            if (bot == null || runtime == null || destination == Vector3.zero)
+            {
+                reason = "path_invalid_input";
+                return false;
+            }
+
+            if (useCache
+                && config.SafeTravelGrid.PathValidationCacheSeconds > 0f
+                && runtime.Movement.LastPathValidationDestination != Vector3.zero
+                && Distance2D(runtime.Movement.LastPathValidationDestination, destination) <= 1.5f
+                && now - runtime.Movement.LastPathValidationAt <= config.SafeTravelGrid.PathValidationCacheSeconds)
+            {
+                reason = runtime.Movement.LastPathValidationReason;
+                return runtime.Movement.LastPathValidationComplete;
+            }
+
+            safeTravelPathChecks++;
+            var agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+            var complete = false;
+
+            if (agent == null || !agent.enabled || !agent.isOnNavMesh)
+            {
+                reason = "agent_not_ready";
+            }
+            else
+            {
+                try
+                {
+                    var path = new NavMeshPath();
+                    if (!agent.CalculatePath(destination, path))
+                    {
+                        reason = "calculate_failed";
+                    }
+                    else if (path.status != NavMeshPathStatus.PathComplete)
+                    {
+                        reason = path.status == NavMeshPathStatus.PathPartial ? "path_partial" : "path_invalid";
+                    }
+                    else if (path.corners == null || path.corners.Length == 0
+                        || Distance2D(path.corners[path.corners.Length - 1], destination) > 3f)
+                    {
+                        reason = "path_endpoint_mismatch";
+                    }
+                    else if (config.ControllerV2.BlockWaterSurfaceCrossings && SafeTravelPathCrossesWater(path))
+                    {
+                        reason = "path_crosses_water";
+                    }
+                    else
+                    {
+                        complete = true;
+                        reason = "path_complete";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    reason = $"path_exception:{ex.GetType().Name}";
+                }
+            }
+
+            if (complete)
+            {
+                safeTravelCompletePaths++;
+            }
+            else
+            {
+                safeTravelRejectedPaths++;
+            }
+
+            if (useCache)
+            {
+                runtime.Movement.LastPathValidationDestination = destination;
+                runtime.Movement.LastPathValidationAt = now;
+                runtime.Movement.LastPathValidationComplete = complete;
+                runtime.Movement.LastPathValidationReason = reason;
+            }
+
+            return complete;
+        }
+
+        private bool SafeTravelPathCrossesWater(NavMeshPath path)
+        {
+            var corners = path?.corners;
+            if (corners == null || corners.Length < 2)
+            {
+                return false;
+            }
+
+            for (var index = 1; index < corners.Length; index++)
+            {
+                if (SegmentIntersectsWater(corners[index - 1] + Vector3.up * 0.25f, corners[index] + Vector3.up * 0.25f, out _))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private bool TryFindSafeTravelWaypoint(BaseCombatEntity bot, BotRuntime runtime, Vector3 finalDestination, float now, out Vector3 waypoint)
+        {
+            waypoint = Vector3.zero;
+            if (!safeTravelGridReady || bot == null || runtime == null || finalDestination == Vector3.zero)
+            {
+                return false;
+            }
+
+            var origin = bot.transform.position;
+            var targetDistance = Distance2D(origin, finalDestination);
+            var minimumMove = Math.Max(8f, config.SafeTravelGrid.CellSize * 0.45f);
+            var maximumChecks = config.SafeTravelGrid.MaximumPathChecksPerRoute;
+            var candidates = SafeTravelPointsNear(origin, config.SafeTravelGrid.WaypointSearchRadius)
+                .Select(point => new
+                {
+                    Point = point,
+                    MoveDistance = Distance2D(origin, point),
+                    Progress = targetDistance - Distance2D(point, finalDestination)
+                })
+                .Where(row => row.MoveDistance >= minimumMove
+                    && row.Progress >= -config.SafeTravelGrid.CellSize * 0.35f
+                    && !ShouldAvoidDestination(runtime, row.Point, now)
+                    && !IsBlockedLandPosition(row.Point)
+                    && !SegmentCrossesBaseRestrictedArea(origin, row.Point)
+                    && !IsSquadDestinationReserved(runtime, row.Point, out _))
+                .OrderByDescending(row => row.Progress >= config.SafeTravelGrid.WaypointMinimumProgress)
+                .ThenByDescending(row => row.Progress)
+                .ThenBy(row => row.MoveDistance)
+                .Take(maximumChecks * 3)
+                .ToList();
+
+            var checks = 0;
+            foreach (var row in candidates)
+            {
+                if (checks++ >= maximumChecks)
+                {
+                    break;
+                }
+
+                var constrained = ConstrainToManagedLeash(runtime, origin, row.Point, now);
+                if (Distance2D(constrained, row.Point) > 2f
+                    || !TryResolveBotDestinationOnOwnNavmesh(bot, row.Point, out var agentPoint)
+                    || !TryCalculateCompleteAgentPath(bot, runtime, agentPoint, now, out _, false))
+                {
+                    continue;
+                }
+
+                waypoint = agentPoint;
+                return true;
+            }
+
+            return false;
+        }
+
+        private string SafeTravelGridStatus()
+        {
+            var state = config?.SafeTravelGrid?.Enabled != true ? "disabled" : safeTravelGridBuilding ? "building" : safeTravelGridReady ? "ready" : "not_ready";
+            var rejectionText = safeTravelGridCache?.Rejections == null || safeTravelGridCache.Rejections.Count == 0
+                ? "none"
+                : string.Join(",", safeTravelGridCache.Rejections.OrderByDescending(pair => pair.Value).Take(6).Select(pair => $"{pair.Key}={pair.Value}"));
+            return $"Safe travel grid: {state}, map={World.Size}/{World.Seed}/{Rust.Protocol.save}, points={safeTravelGridCache?.Points?.Count ?? 0}, processed={safeTravelGridProcessed}/{safeTravelGridTotal}, maxSlice={safeTravelGridMaximumSliceMilliseconds:0.###}ms, paths={safeTravelCompletePaths}/{safeTravelPathChecks} complete, rejected={safeTravelRejectedPaths}, waypoints={safeTravelWaypointRoutes}, roamSnaps={safeTravelRoamSnaps}, rejections=[{rejectionText}].";
+        }
+
+        [ConsoleCommand("raidbots.travel")]
+        private void CmdSafeTravelGrid(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var action = (ArgString(arg, 0) ?? "status").Trim().ToLowerInvariant();
+            if (action == "status")
+            {
+                Reply(arg, SafeTravelGridStatus());
+                return;
+            }
+
+            if (action == "rebuild")
+            {
+                InitializeSafeTravelGrid(true);
+                Reply(arg, "Raidlands bot safe travel grid rebuild started. Use 'raidbots.travel status' to monitor it.");
+                return;
+            }
+
+            if (action == "inspect" || action == "stuck")
+            {
+                var query = ArgStringFrom(arg, 1);
+                var entries = action == "stuck"
+                    ? ActiveBotEntries().Where(entry => entry.Value?.Movement?.IsStuck == true || (entry.Value?.ConsecutiveFailedPaths ?? 0) > 0).Take(10).ToList()
+                    : FindV2DiagnosticBots(query).Take(10).ToList();
+                if (entries.Count == 0)
+                {
+                    Reply(arg, action == "stuck" ? "No active Raidlands bot is currently stuck or carrying path failures." : "No active Raidlands bot matched the query.");
+                    return;
+                }
+
+                foreach (var entry in entries)
+                {
+                    var bot = entry.Key;
+                    var runtime = entry.Value;
+                    var movement = runtime.Movement;
+                    var agent = bot?.GetComponent<NavMeshAgent>() ?? bot?.GetComponentInChildren<NavMeshAgent>();
+                    var finalDistance = runtime.CurrentDestination == Vector3.zero ? 0f : Distance2D(bot.transform.position, runtime.CurrentDestination);
+                    var commandDistance = movement.LastCommandDestination == Vector3.zero ? 0f : Distance2D(bot.transform.position, movement.LastCommandDestination);
+                    var agentStatus = agent == null
+                        ? "missing"
+                        : !SafeBool(() => agent.enabled && agent.isOnNavMesh)
+                            ? "off_navmesh"
+                            : SafeString(() => $"{agent.pathStatus}/{agent.hasPath}/{agent.pathPending}/{(agent.hasPath ? agent.remainingDistance.ToString("0.0", CultureInfo.InvariantCulture) + "m" : "n/a")}");
+                    Reply(arg, $"{runtime.DisplayName}: state={runtime.State}, roam={runtime.RoamMonumentName}, final={finalDistance:0.0}m, command={commandDistance:0.0}m, path={movement.LastPathValidationReason}/{movement.LastPathValidationComplete}, hop={movement.SafeTravelHops}:{FormatVectorSafe(movement.SafeTravelWaypoint)}, agent={agentStatus}, failures={runtime.ConsecutiveFailedPaths}/{movement.SameActionFailures}, stuck={movement.IsStuck}.");
+                }
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.travel status|rebuild|inspect [bot]|stuck");
         }
 
         private void RegisterBotAvatarImages()
@@ -3726,7 +5303,12 @@ namespace Oxide.Plugins
         private void StartRuntime()
         {
             StopRuntime();
+            lifecycleStopping = false;
+            ReconcileRaidlandsOwnedEntities(true);
+            ForceV2RuntimeConfiguration();
+            ApplyBrainV2ModeToExistingBots(BrainV2RuntimeMode.Active);
             spawnRetryBlockedUntil = 0f;
+            runtimeRunning = true;
             maintainTimer = timer.Every(Math.Max(5f, config.MaintainIntervalSeconds), MaintainPopulation);
             perceptionTimer = timer.Every(Math.Max(0.1f, config.AI.PerceptionTickSeconds), PerceptionTick);
             brainTimer = timer.Every(Math.Max(0.15f, config.AI.DecisionTickSeconds), TacticalBrainTick);
@@ -3735,13 +5317,134 @@ namespace Oxide.Plugins
             StartNameplateTimerIfEnabled();
             StartBotMapMarkerTimerIfEnabled();
             scoreboardTimer = timer.Every(Math.Max(15f, config.ScoreboardIntervalSeconds), UpdateScoreboards);
+            StartRaidRuntime();
             MaintainPopulation();
             UpdateBotMapMarkers();
             BotLog($"Raidlands roam bots enabled. Target population: {TargetPopulation()}.");
         }
 
+        private void ForceV2RuntimeConfiguration()
+        {
+            if (config?.BrainV2 == null || config.ControllerV2 == null)
+            {
+                return;
+            }
+
+            var changed = !config.BrainV2.Enabled
+                || !string.Equals(config.BrainV2.Mode, BrainV2ModeActive, StringComparison.OrdinalIgnoreCase)
+                || config.BrainV2.FallbackToLegacyOnFailure
+                || !string.Equals(config.ControllerV2.Mode, ControllerModeV2Active, StringComparison.OrdinalIgnoreCase);
+            config.BrainV2.Enabled = true;
+            config.BrainV2.Mode = BrainV2ModeActive;
+            config.BrainV2.CanaryBotCount = 0;
+            config.BrainV2.CanaryPercent = 100;
+            config.BrainV2.FallbackToLegacyOnFailure = false;
+            config.ControllerV2.Mode = ControllerModeV2Active;
+            config.ControllerV2.CanaryBotCount = 0;
+            config.ControllerV2.CanaryPercent = 100;
+            if (changed)
+            {
+                SaveConfig();
+                Puts("Raidlands RoamBots retired the v1 decision/controller fallback; Brain V2 and Controller V2 are authoritative for every bot.");
+            }
+        }
+
+        private ulong NextBotInstanceId()
+        {
+            do
+            {
+                botInstanceSequence++;
+            }
+            while (botInstanceSequence == 0UL || botRecordsByInstanceId.ContainsKey(botInstanceSequence));
+            return botInstanceSequence;
+        }
+
+        private void UpdateBotMarker(BaseCombatEntity bot, BotRuntime runtime, BotLifecycleState state)
+        {
+            if (bot == null || bot.IsDestroyed || runtime == null)
+            {
+                return;
+            }
+
+            var marker = bot.GetComponent<RaidlandsRoamBotMarker>() ?? bot.gameObject.AddComponent<RaidlandsRoamBotMarker>();
+            runtime.LifecycleState = state;
+            runtime.NetworkId = NetId(bot);
+            marker.InstanceId = runtime.InstanceId;
+            marker.NetworkId = runtime.NetworkId;
+            marker.ProfileName = string.IsNullOrWhiteSpace(runtime.PlayerProfileKey) ? runtime.SkillTier ?? "" : runtime.PlayerProfileKey;
+            marker.BrainVersion = TacticalBrainName;
+            marker.Generation = runtime.Generation;
+            marker.SpawnedAt = runtime.SpawnedAt;
+            marker.LifecycleState = state.ToString();
+        }
+
+        private List<BaseCombatEntity> MarkedRaidlandsBotEntities()
+        {
+            var result = new List<BaseCombatEntity>();
+            if (BaseNetworkable.serverEntities == null)
+            {
+                return result;
+            }
+
+            foreach (var networkable in BaseNetworkable.serverEntities)
+            {
+                var entity = networkable as BaseCombatEntity;
+                if (entity != null && !entity.IsDestroyed && entity.GetComponent<RaidlandsRoamBotMarker>() != null)
+                {
+                    result.Add(entity);
+                }
+            }
+            return result;
+        }
+
+        private int ActualLiveMarkedBotCount()
+        {
+            return MarkedRaidlandsBotEntities().Count(IsLiveBot);
+        }
+
+        private void ReconcileRaidlandsOwnedEntities(bool removeOrphans)
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var entry in activeBots.ToList())
+            {
+                if (entry.Key == null || entry.Key.IsDestroyed)
+                {
+                    ConfirmBotEntityDestroyed(entry.Key, entry.Value, "reconciliation missing entity");
+                    continue;
+                }
+                UpdateBotMarker(entry.Key, entry.Value, entry.Value.CleanupStarted ? BotLifecycleState.CleanupStarted : BotLifecycleState.Alive);
+            }
+
+            if (removeOrphans)
+            {
+                foreach (var marked in MarkedRaidlandsBotEntities().Where(entity => !activeBots.ContainsKey(entity)).ToList())
+                {
+                    SafeKillSpawnAttempt(marked);
+                }
+            }
+
+            lastReconciliationMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+        }
+
+        private void RemoveManagedEntityReference(BotRuntime runtime)
+        {
+            if (runtime == null || string.IsNullOrWhiteSpace(runtime.GroupId)
+                || !managedBotGroups.TryGetValue(runtime.GroupId, out var group))
+            {
+                return;
+            }
+
+            group.EntityIds.Remove(runtime.NetworkId);
+            if (group.EntityIds.Count == 0)
+            {
+                RemoveManagedGroup(runtime.GroupId);
+            }
+        }
+
         private void StopRuntime()
         {
+            runtimeRunning = false;
+            StopRaidRuntime();
             ClearAllBotCrouches();
             populationRampTimer?.Destroy();
             populationRampTimer = null;
@@ -3765,8 +5468,12 @@ namespace Oxide.Plugins
             scoreboardTimer = null;
             decisionTraceSaveTimer?.Destroy();
             decisionTraceSaveTimer = null;
+            brainV2TraceSaveTimer?.Destroy();
+            brainV2TraceSaveTimer = null;
+            FlushBrainV2Traces();
             observationTraceSaveTimer?.Destroy();
             observationTraceSaveTimer = null;
+            CancelAllPendingRespawns("runtime stopped");
         }
 
         private void NormalizeConfig()
@@ -3781,8 +5488,16 @@ namespace Oxide.Plugins
                 // replace skill tiers or steer live tactical scores after migration.
                 if (config.Learning != null)
                 {
-                    config.Learning.ApplyMode = LearningApplyShadow;
+                    config.Learning.ApplyMode = LearningApplyOff;
                     config.Learning.PlayerProfileSpawnWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                if (loadedSchemaVersion < 6 && config.AI != null)
+                {
+                    // V2.1 deliberately removes the old player-base exclusion. Bots
+                    // may traverse and engage around bases while raid actions remain
+                    // a separate, explicitly implemented behavior.
+                    config.AI.DoNotEnterBases = false;
                 }
 
                 config.SchemaVersion = CurrentConfigSchemaVersion;
@@ -3951,6 +5666,30 @@ namespace Oxide.Plugins
                 config.AmbientSquadRespawnRejoin = defaults.AmbientSquadRespawnRejoin;
             }
 
+            if (config.BaseRaiding == null)
+            {
+                config.BaseRaiding = defaults.BaseRaiding;
+            }
+
+            config.BaseRaiding.DiscoveryMode = string.Equals(config.BaseRaiding.DiscoveryMode, RaidDiscoveryEncounter, StringComparison.OrdinalIgnoreCase)
+                ? RaidDiscoveryEncounter
+                : RaidDiscoveryNearby;
+            config.BaseRaiding.NearbyScanRadius = Mathf.Clamp(config.BaseRaiding.NearbyScanRadius, 25f, 1000f);
+            config.BaseRaiding.ScanIntervalSeconds = Mathf.Clamp(config.BaseRaiding.ScanIntervalSeconds, 2f, 300f);
+            config.BaseRaiding.BagsPerMemberMinimum = Clamp(config.BaseRaiding.BagsPerMemberMinimum, 1, 3);
+            config.BaseRaiding.BagsPerMemberMaximum = Clamp(config.BaseRaiding.BagsPerMemberMaximum, config.BaseRaiding.BagsPerMemberMinimum, 3);
+            config.BaseRaiding.BagPlacementMinimumDistance = Mathf.Clamp(config.BaseRaiding.BagPlacementMinimumDistance, 4f, 100f);
+            config.BaseRaiding.BagPlacementMaximumDistance = Mathf.Clamp(config.BaseRaiding.BagPlacementMaximumDistance, config.BaseRaiding.BagPlacementMinimumDistance, 150f);
+            config.BaseRaiding.MinimumBagSpacing = Mathf.Clamp(config.BaseRaiding.MinimumBagSpacing, 2f, 30f);
+            config.BaseRaiding.BagStagingTimeoutSeconds = Mathf.Clamp(config.BaseRaiding.BagStagingTimeoutSeconds, 30f, 900f);
+            config.BaseRaiding.RaidRespawnDelaySeconds = Mathf.Clamp(config.BaseRaiding.RaidRespawnDelaySeconds, 5f, 300f);
+            config.BaseRaiding.SharedHvRocketBudget = Clamp(config.BaseRaiding.SharedHvRocketBudget, 0, 500);
+            config.BaseRaiding.SharedC4Budget = Clamp(config.BaseRaiding.SharedC4Budget, 0, 500);
+            config.BaseRaiding.MinimumDeathsBeforeKdCheck = Clamp(config.BaseRaiding.MinimumDeathsBeforeKdCheck, 1, 100);
+            config.BaseRaiding.GiveUpBelowKd = Mathf.Clamp(config.BaseRaiding.GiveUpBelowKd, 0f, 10f);
+            config.BaseRaiding.SquadRaidCooldownMinutes = Mathf.Clamp(config.BaseRaiding.SquadRaidCooldownMinutes, 0f, 1440f);
+            config.BaseRaiding.FailedTargetCooldownMinutes = Mathf.Clamp(config.BaseRaiding.FailedTargetCooldownMinutes, 0f, 10080f);
+
             config.Spawn.SpawnMode = NormalizeSpawnMode(config.Spawn.SpawnMode);
             config.Spawn.MaxPositionAttempts = Math.Max(10, config.Spawn.MaxPositionAttempts);
             config.Spawn.NavmeshSampleDistance = Math.Max(2f, config.Spawn.NavmeshSampleDistance);
@@ -3966,6 +5705,25 @@ namespace Oxide.Plugins
             config.Spawn.NearPlayerAttempts = Math.Max(8, config.Spawn.NearPlayerAttempts);
             config.Spawn.NearPlayerAnchorNameOrSteamId = (config.Spawn.NearPlayerAnchorNameOrSteamId ?? "").Trim();
             config.Spawn.SafeZoneSpawnBufferDistance = Math.Max(0f, config.Spawn.SafeZoneSpawnBufferDistance);
+
+            if (config.SafeTravelGrid == null)
+            {
+                config.SafeTravelGrid = defaults.SafeTravelGrid;
+            }
+
+            config.SafeTravelGrid.CellSize = Mathf.Clamp(config.SafeTravelGrid.CellSize <= 0f ? defaults.SafeTravelGrid.CellSize : config.SafeTravelGrid.CellSize, 12f, 80f);
+            config.SafeTravelGrid.MapEdgeMargin = Mathf.Clamp(config.SafeTravelGrid.MapEdgeMargin, 0f, 250f);
+            config.SafeTravelGrid.BuildBudgetMilliseconds = Mathf.Clamp(config.SafeTravelGrid.BuildBudgetMilliseconds <= 0f ? defaults.SafeTravelGrid.BuildBudgetMilliseconds : config.SafeTravelGrid.BuildBudgetMilliseconds, 0.1f, 5f);
+            config.SafeTravelGrid.CandidateChecksPerSlice = Clamp(config.SafeTravelGrid.CandidateChecksPerSlice <= 0 ? defaults.SafeTravelGrid.CandidateChecksPerSlice : config.SafeTravelGrid.CandidateChecksPerSlice, 1, 250);
+            config.SafeTravelGrid.NavmeshSampleRadius = Mathf.Clamp(config.SafeTravelGrid.NavmeshSampleRadius <= 0f ? defaults.SafeTravelGrid.NavmeshSampleRadius : config.SafeTravelGrid.NavmeshSampleRadius, 2f, config.SafeTravelGrid.CellSize);
+            config.SafeTravelGrid.MaximumVerticalSnap = Mathf.Clamp(config.SafeTravelGrid.MaximumVerticalSnap <= 0f ? defaults.SafeTravelGrid.MaximumVerticalSnap : config.SafeTravelGrid.MaximumVerticalSnap, 2f, 40f);
+            config.SafeTravelGrid.RouteValidationMinimumDistance = Mathf.Clamp(config.SafeTravelGrid.RouteValidationMinimumDistance <= 0f ? defaults.SafeTravelGrid.RouteValidationMinimumDistance : config.SafeTravelGrid.RouteValidationMinimumDistance, 8f, 150f);
+            config.SafeTravelGrid.WaypointSearchRadius = Mathf.Clamp(config.SafeTravelGrid.WaypointSearchRadius <= 0f ? defaults.SafeTravelGrid.WaypointSearchRadius : config.SafeTravelGrid.WaypointSearchRadius, config.SafeTravelGrid.CellSize * 1.5f, 250f);
+            config.SafeTravelGrid.WaypointMinimumProgress = Mathf.Clamp(config.SafeTravelGrid.WaypointMinimumProgress, 0f, 50f);
+            config.SafeTravelGrid.MaximumPathChecksPerRoute = Clamp(config.SafeTravelGrid.MaximumPathChecksPerRoute <= 0 ? defaults.SafeTravelGrid.MaximumPathChecksPerRoute : config.SafeTravelGrid.MaximumPathChecksPerRoute, 1, 64);
+            config.SafeTravelGrid.MaximumWaypointHopsPerDestination = Clamp(config.SafeTravelGrid.MaximumWaypointHopsPerDestination <= 0 ? defaults.SafeTravelGrid.MaximumWaypointHopsPerDestination : config.SafeTravelGrid.MaximumWaypointHopsPerDestination, 2, 64);
+            config.SafeTravelGrid.RoamPointSearchRadius = Mathf.Clamp(config.SafeTravelGrid.RoamPointSearchRadius <= 0f ? defaults.SafeTravelGrid.RoamPointSearchRadius : config.SafeTravelGrid.RoamPointSearchRadius, config.SafeTravelGrid.CellSize * 0.5f, 100f);
+            config.SafeTravelGrid.PathValidationCacheSeconds = Mathf.Clamp(config.SafeTravelGrid.PathValidationCacheSeconds, 0f, 5f);
 
             if (config.PrefabCandidates == null || config.PrefabCandidates.Count == 0)
             {
@@ -4052,6 +5810,9 @@ namespace Oxide.Plugins
                 .ToList();
             config.AI.TargetMemorySeconds = Math.Max(1f, config.AI.TargetMemorySeconds);
             config.AI.SearchLastSeenSeconds = Math.Max(config.AI.TargetMemorySeconds, config.AI.SearchLastSeenSeconds);
+            config.AI.DirectSightConeDegrees = Mathf.Clamp(config.AI.DirectSightConeDegrees <= 0f ? defaults.AI.DirectSightConeDegrees : config.AI.DirectSightConeDegrees, 5f, 90f);
+            config.AI.DirectSightReactionMultiplier = Mathf.Clamp(config.AI.DirectSightReactionMultiplier <= 0f ? defaults.AI.DirectSightReactionMultiplier : config.AI.DirectSightReactionMultiplier, 0.1f, 1f);
+            config.AI.PeripheralSightReactionMultiplier = Mathf.Clamp(config.AI.PeripheralSightReactionMultiplier <= 0f ? defaults.AI.PeripheralSightReactionMultiplier : config.AI.PeripheralSightReactionMultiplier, 0.5f, 2f);
             config.AI.UnsuppressedGunshotHearingRange = Mathf.Clamp(config.AI.UnsuppressedGunshotHearingRange, 0f, 500f);
             config.AI.SuppressedGunshotHearingRange = Mathf.Clamp(config.AI.SuppressedGunshotHearingRange, 0f, config.AI.UnsuppressedGunshotHearingRange);
             config.AI.ExplosionHearingRange = Mathf.Clamp(config.AI.ExplosionHearingRange, 0f, 800f);
@@ -4147,6 +5908,7 @@ namespace Oxide.Plugins
             config.AI.PassiveCombatHealTargetFraction = Mathf.Clamp(config.AI.PassiveCombatHealTargetFraction, config.AI.LowHealthCoverThreshold, 1f);
             config.AI.NonSyringeHealCooldownSeconds = Mathf.Clamp(config.AI.NonSyringeHealCooldownSeconds <= 0f ? defaults.AI.NonSyringeHealCooldownSeconds : config.AI.NonSyringeHealCooldownSeconds, 0.5f, 20f);
             config.AI.NonSyringeHealAmount = Mathf.Clamp(config.AI.NonSyringeHealAmount <= 0f ? defaults.AI.NonSyringeHealAmount : config.AI.NonSyringeHealAmount, 1f, 40f);
+            config.AI.BerrySpamIntervalSeconds = Mathf.Clamp(config.AI.BerrySpamIntervalSeconds <= 0f ? defaults.AI.BerrySpamIntervalSeconds : config.AI.BerrySpamIntervalSeconds, 0.1f, 3f);
             config.AI.SyringeFireLockSeconds = Mathf.Clamp(config.AI.SyringeFireLockSeconds, 0.5f, 6f);
             config.AI.SyringeCooldownSeconds = Mathf.Clamp(config.AI.SyringeCooldownSeconds, 1f, 30f);
             config.AI.SyringeHealTargetFraction = Mathf.Clamp(config.AI.SyringeHealTargetFraction <= 0f ? defaults.AI.SyringeHealTargetFraction : config.AI.SyringeHealTargetFraction, config.AI.LowHealthCoverThreshold, 1f);
@@ -4194,8 +5956,47 @@ namespace Oxide.Plugins
             config.AI.StuckMemorySeconds = Mathf.Clamp(config.AI.StuckMemorySeconds <= 0f ? defaults.AI.StuckMemorySeconds : config.AI.StuckMemorySeconds, 5f, 300f);
             config.AI.StuckMemoryRadius = Mathf.Clamp(config.AI.StuckMemoryRadius <= 0f ? defaults.AI.StuckMemoryRadius : config.AI.StuckMemoryRadius, 3f, 30f);
             config.AI.MaxStuckMemoryPoints = Clamp(config.AI.MaxStuckMemoryPoints <= 0 ? defaults.AI.MaxStuckMemoryPoints : config.AI.MaxStuckMemoryPoints, 1, 50);
+            config.AI.MonumentRoamLegChance = Mathf.Clamp01(config.AI.MonumentRoamLegChance);
+            config.AI.MinimumMonumentRoamLegDistance = Mathf.Clamp(config.AI.MinimumMonumentRoamLegDistance <= 0f ? defaults.AI.MinimumMonumentRoamLegDistance : config.AI.MinimumMonumentRoamLegDistance, 25f, 1000f);
+            config.AI.MaximumMonumentRoamLegDistance = Mathf.Clamp(config.AI.MaximumMonumentRoamLegDistance <= 0f ? defaults.AI.MaximumMonumentRoamLegDistance : config.AI.MaximumMonumentRoamLegDistance, config.AI.MinimumMonumentRoamLegDistance + 25f, 5000f);
+            config.AI.MonumentRoamArrivalDistance = Mathf.Clamp(config.AI.MonumentRoamArrivalDistance <= 0f ? defaults.AI.MonumentRoamArrivalDistance : config.AI.MonumentRoamArrivalDistance, 4f, 50f);
+            config.AI.MinimumOpenTerrainRoamLegDistance = Mathf.Clamp(config.AI.MinimumOpenTerrainRoamLegDistance <= 0f ? defaults.AI.MinimumOpenTerrainRoamLegDistance : config.AI.MinimumOpenTerrainRoamLegDistance, 40f, 1000f);
+            config.AI.MaximumOpenTerrainRoamLegDistance = Mathf.Clamp(config.AI.MaximumOpenTerrainRoamLegDistance <= 0f ? defaults.AI.MaximumOpenTerrainRoamLegDistance : config.AI.MaximumOpenTerrainRoamLegDistance, config.AI.MinimumOpenTerrainRoamLegDistance + 25f, 2500f);
             config.AI.BaseAvoidanceRadius = Math.Max(1f, config.AI.BaseAvoidanceRadius);
             config.AI.BaseHoldSeconds = Math.Max(2f, config.AI.BaseHoldSeconds);
+
+            if (config.BrainV2 == null)
+            {
+                config.BrainV2 = defaults.BrainV2;
+            }
+
+            config.BrainV2.Mode = NormalizeBrainV2Mode(config.BrainV2.Mode);
+            config.BrainV2.Enabled = true;
+            config.BrainV2.Mode = BrainV2ModeActive;
+            config.BrainV2.FallbackToLegacyOnFailure = false;
+            config.BrainV2.CanaryBotCount = 0;
+            config.BrainV2.CanaryPercent = 100;
+            config.BrainV2.GoalTickSeconds = Mathf.Clamp(config.BrainV2.GoalTickSeconds <= 0f ? defaults.BrainV2.GoalTickSeconds : config.BrainV2.GoalTickSeconds, 0.2f, 5f);
+            config.BrainV2.ActionTickSeconds = Mathf.Clamp(config.BrainV2.ActionTickSeconds <= 0f ? defaults.BrainV2.ActionTickSeconds : config.BrainV2.ActionTickSeconds, 0.1f, 2f);
+            config.BrainV2.GoalMinimumCommitmentSeconds = Mathf.Clamp(config.BrainV2.GoalMinimumCommitmentSeconds < 0f ? defaults.BrainV2.GoalMinimumCommitmentSeconds : config.BrainV2.GoalMinimumCommitmentSeconds, 0f, 30f);
+            config.BrainV2.GoalNoProgressTimeoutSeconds = Mathf.Clamp(config.BrainV2.GoalNoProgressTimeoutSeconds <= 0f ? defaults.BrainV2.GoalNoProgressTimeoutSeconds : config.BrainV2.GoalNoProgressTimeoutSeconds, 2f, 60f);
+            config.BrainV2.GoalSwitchMargin = Mathf.Clamp(config.BrainV2.GoalSwitchMargin, 0f, 0.5f);
+            config.BrainV2.GoalContinuityBonus = Mathf.Clamp(config.BrainV2.GoalContinuityBonus, 0f, 0.35f);
+            config.BrainV2.ActionMinimumCommitmentSeconds = Mathf.Clamp(config.BrainV2.ActionMinimumCommitmentSeconds < 0f ? defaults.BrainV2.ActionMinimumCommitmentSeconds : config.BrainV2.ActionMinimumCommitmentSeconds, 0f, 10f);
+            config.BrainV2.DefaultActionTimeoutSeconds = Mathf.Clamp(config.BrainV2.DefaultActionTimeoutSeconds <= 0f ? defaults.BrainV2.DefaultActionTimeoutSeconds : config.BrainV2.DefaultActionTimeoutSeconds, 1f, 60f);
+            config.BrainV2.NoProgressTimeoutSeconds = Mathf.Clamp(config.BrainV2.NoProgressTimeoutSeconds <= 0f ? defaults.BrainV2.NoProgressTimeoutSeconds : config.BrainV2.NoProgressTimeoutSeconds, 1f, 30f);
+            config.BrainV2.NearTieScoreRatio = Mathf.Clamp(config.BrainV2.NearTieScoreRatio <= 0f ? defaults.BrainV2.NearTieScoreRatio : config.BrainV2.NearTieScoreRatio, 0.5f, 1f);
+            config.BrainV2.SpatialMaterializationLimit = Clamp(config.BrainV2.SpatialMaterializationLimit <= 0 ? defaults.BrainV2.SpatialMaterializationLimit : config.BrainV2.SpatialMaterializationLimit, 1, 8);
+            config.BrainV2.ContactMemoryCapacity = Clamp(config.BrainV2.ContactMemoryCapacity <= 0 ? defaults.BrainV2.ContactMemoryCapacity : config.BrainV2.ContactMemoryCapacity, 1, 32);
+            config.BrainV2.RecentEventCapacity = Clamp(config.BrainV2.RecentEventCapacity <= 0 ? defaults.BrainV2.RecentEventCapacity : config.BrainV2.RecentEventCapacity, 4, 128);
+            config.BrainV2.VisualEvidenceHalfLifeSeconds = Mathf.Clamp(config.BrainV2.VisualEvidenceHalfLifeSeconds <= 0f ? defaults.BrainV2.VisualEvidenceHalfLifeSeconds : config.BrainV2.VisualEvidenceHalfLifeSeconds, 0.5f, 120f);
+            config.BrainV2.AudioEvidenceHalfLifeSeconds = Mathf.Clamp(config.BrainV2.AudioEvidenceHalfLifeSeconds <= 0f ? defaults.BrainV2.AudioEvidenceHalfLifeSeconds : config.BrainV2.AudioEvidenceHalfLifeSeconds, 0.5f, 120f);
+            config.BrainV2.DamageEvidenceHalfLifeSeconds = Mathf.Clamp(config.BrainV2.DamageEvidenceHalfLifeSeconds <= 0f ? defaults.BrainV2.DamageEvidenceHalfLifeSeconds : config.BrainV2.DamageEvidenceHalfLifeSeconds, 0.5f, 180f);
+            config.BrainV2.SquadEvidenceHalfLifeSeconds = Mathf.Clamp(config.BrainV2.SquadEvidenceHalfLifeSeconds <= 0f ? defaults.BrainV2.SquadEvidenceHalfLifeSeconds : config.BrainV2.SquadEvidenceHalfLifeSeconds, 0.5f, 180f);
+            config.BrainV2.PatrolUtility = Mathf.Clamp(config.BrainV2.PatrolUtility <= 0f ? defaults.BrainV2.PatrolUtility : config.BrainV2.PatrolUtility, 0.01f, 0.5f);
+            config.BrainV2.TraceHeartbeatSeconds = Mathf.Clamp(config.BrainV2.TraceHeartbeatSeconds <= 0f ? defaults.BrainV2.TraceHeartbeatSeconds : config.BrainV2.TraceHeartbeatSeconds, 1f, 60f);
+            config.BrainV2.MaximumTraceFileMegabytes = Clamp(config.BrainV2.MaximumTraceFileMegabytes, 0, 4096);
+            config.BrainV2.MaximumTraceLinesAfterPrune = Clamp(config.BrainV2.MaximumTraceLinesAfterPrune, 0, 1000000);
 
             if (config.DecisionAdvisor == null)
             {
@@ -4221,6 +6022,17 @@ namespace Oxide.Plugins
             config.DecisionAdvisor.MaxDecisionTraceLinesAfterPrune = Clamp(config.DecisionAdvisor.MaxDecisionTraceLinesAfterPrune, 0, 1000000);
             config.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds = Mathf.Clamp(config.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds <= 0f ? defaults.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds : config.DecisionAdvisor.DecisionTracePruneCheckIntervalSeconds, 15f, 3600f);
 
+            // V2 is deliberately local-only. Retain the legacy configuration shape
+            // for painless migration, but make remote advisors impossible to enable.
+            config.DecisionAdvisor.Enabled = false;
+            config.DecisionAdvisor.Provider = AdvisorProviderNone;
+            config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+            config.DecisionAdvisor.ShadowMode = false;
+            config.DecisionAdvisor.EndpointUrl = "";
+            config.DecisionAdvisor.ApiKey = "";
+            config.DecisionAdvisor.Model = "";
+            config.DecisionAdvisor.MaxConcurrentRequests = 0;
+
             if (config.Learning == null)
             {
                 config.Learning = defaults.Learning;
@@ -4241,9 +6053,10 @@ namespace Oxide.Plugins
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             config.Learning.PlayerProfileSpawnWeights = NormalizeProfileSpawnPercentages(config.Learning.PlayerProfileSpawnWeights);
-            // Legacy traces/models remain available for audit, but learned profiles
-            // cannot influence live V2 or legacy spawns during the clean baseline.
-            config.Learning.ApplyMode = LearningApplyShadow;
+            // Legacy traces/models remain available for audit and optional offline
+            // analysis, but learned profiles cannot influence live V2 or legacy
+            // tactical scores during the clean baseline.
+            config.Learning.ApplyMode = LearningApplyOff;
             config.Learning.PlayerProfileSpawnWeights = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             if (config.ControllerV2 == null)
@@ -4251,7 +6064,24 @@ namespace Oxide.Plugins
                 config.ControllerV2 = defaults.ControllerV2;
             }
 
+            if (loadedSchemaVersion < 6)
+            {
+                // Existing v5 profiles contain only short-burst fields. Install the
+                // complete weapon-specific V2.1 profiles once during migration so
+                // production receives sustained fire without a separate config upload.
+                config.ControllerV2.WeaponMotorProfiles = defaults.ControllerV2.WeaponMotorProfiles;
+            }
+
+            if (loadedSchemaVersion < 7)
+            {
+                // Forest splat identifies a biome, not a physical object in a bullet
+                // path. Retain collider-based foliage concealment but stop treating an
+                // entire jungle corridor as permanently bulletproof.
+                config.ControllerV2.StrictDecorativeFoliageAtAllRanges = false;
+            }
+
             config.ControllerV2.Mode = NormalizeControllerMode(config.ControllerV2.Mode);
+            config.ControllerV2.Mode = ControllerModeV2Active;
             if (config.ControllerV2.BodyAdapters == null)
             {
                 config.ControllerV2.BodyAdapters = defaults.ControllerV2.BodyAdapters;
@@ -4261,8 +6091,8 @@ namespace Oxide.Plugins
                 .Select(key => key.Trim().ToLowerInvariant())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            config.ControllerV2.CanaryBotCount = Clamp(config.ControllerV2.CanaryBotCount, 0, Math.Max(0, config.MaxAllowedPopulation));
-            config.ControllerV2.CanaryPercent = Clamp(config.ControllerV2.CanaryPercent, 0, 100);
+            config.ControllerV2.CanaryBotCount = 0;
+            config.ControllerV2.CanaryPercent = 100;
             config.ControllerV2.CombatMotorTickSeconds = Mathf.Clamp(config.ControllerV2.CombatMotorTickSeconds <= 0f ? defaults.ControllerV2.CombatMotorTickSeconds : config.ControllerV2.CombatMotorTickSeconds, 0.05f, 0.2f);
             config.ControllerV2.MidDistanceMotorTickSeconds = Mathf.Clamp(config.ControllerV2.MidDistanceMotorTickSeconds <= 0f ? defaults.ControllerV2.MidDistanceMotorTickSeconds : config.ControllerV2.MidDistanceMotorTickSeconds, config.ControllerV2.CombatMotorTickSeconds, 0.5f);
             config.ControllerV2.FarDistanceMotorTickSeconds = Mathf.Clamp(config.ControllerV2.FarDistanceMotorTickSeconds <= 0f ? defaults.ControllerV2.FarDistanceMotorTickSeconds : config.ControllerV2.FarDistanceMotorTickSeconds, config.ControllerV2.MidDistanceMotorTickSeconds, 1f);
@@ -4319,8 +6149,8 @@ namespace Oxide.Plugins
             }
 
             config.BotChat.MessageFormat = string.IsNullOrWhiteSpace(config.BotChat.MessageFormat) ? defaults.BotChat.MessageFormat : config.BotChat.MessageFormat.Trim();
-            config.BotChat.OpenAiCallsPerHour = Clamp(config.BotChat.OpenAiCallsPerHour <= 0 ? defaults.BotChat.OpenAiCallsPerHour : config.BotChat.OpenAiCallsPerHour, 0, 240);
-            config.BotChat.MaxConcurrentAiRequests = Clamp(config.BotChat.MaxConcurrentAiRequests <= 0 ? defaults.BotChat.MaxConcurrentAiRequests : config.BotChat.MaxConcurrentAiRequests, 0, 8);
+            config.BotChat.OpenAiCallsPerHour = Clamp(config.BotChat.OpenAiCallsPerHour, 0, 240);
+            config.BotChat.MaxConcurrentAiRequests = Clamp(config.BotChat.MaxConcurrentAiRequests, 0, 8);
             config.BotChat.ConversationIdleSeconds = Mathf.Clamp(config.BotChat.ConversationIdleSeconds <= 0f ? defaults.BotChat.ConversationIdleSeconds : config.BotChat.ConversationIdleSeconds, 10f, 900f);
             config.BotChat.ConversationMinMessages = Clamp(config.BotChat.ConversationMinMessages <= 0 ? defaults.BotChat.ConversationMinMessages : config.BotChat.ConversationMinMessages, 1, 50);
             config.BotChat.ConversationMaxMessages = Clamp(config.BotChat.ConversationMaxMessages <= 0 ? defaults.BotChat.ConversationMaxMessages : config.BotChat.ConversationMaxMessages, config.BotChat.ConversationMinMessages, 60);
@@ -4343,6 +6173,12 @@ namespace Oxide.Plugins
             config.BotChat.PlayerKilledBotMessages = NormalizeStringList(config.BotChat.PlayerKilledBotMessages, defaults.BotChat.PlayerKilledBotMessages);
             config.BotChat.BotKilledPlayerMessages = NormalizeStringList(config.BotChat.BotKilledPlayerMessages, defaults.BotChat.BotKilledPlayerMessages);
             config.BotChat.BotKilledBotMessages = NormalizeStringList(config.BotChat.BotKilledBotMessages, defaults.BotChat.BotKilledBotMessages);
+
+            // Deterministic banter remains available, but no chat generation may
+            // leave the server or consume paid API quota.
+            config.BotChat.AiRepliesEnabled = false;
+            config.BotChat.OpenAiCallsPerHour = 0;
+            config.BotChat.MaxConcurrentAiRequests = 0;
 
             if (config.BotKillIntegration == null)
             {
@@ -4385,6 +6221,9 @@ namespace Oxide.Plugins
             {
                 config.Persistence = defaults.Persistence;
             }
+            config.Persistence.KillBotsOnPluginUnload = true;
+            config.Persistence.KillBotsOnDisable = true;
+            config.Persistence.LeaveCorpses = false;
 
             if (config.Debug == null)
             {
@@ -4401,6 +6240,11 @@ namespace Oxide.Plugins
             config.Debug.DebugBotMapMarkerUpdateSeconds = Mathf.Clamp(config.Debug.DebugBotMapMarkerUpdateSeconds <= 0f ? defaults.Debug.DebugBotMapMarkerUpdateSeconds : config.Debug.DebugBotMapMarkerUpdateSeconds, 0.25f, 10f);
             config.Debug.DebugConsoleLogCooldownSeconds = Mathf.Clamp(config.Debug.DebugConsoleLogCooldownSeconds, 1f, 60f);
             config.Debug.ConsoleWarningCooldownSeconds = Mathf.Clamp(config.Debug.ConsoleWarningCooldownSeconds, 5f, 300f);
+        }
+
+        private string NormalizeBrainV2Mode(string mode)
+        {
+            return BrainV2ModeActive;
         }
 
         private string NormalizeAdvisorProvider(string provider)
@@ -4549,10 +6393,10 @@ namespace Oxide.Plugins
 
         private void RefreshDecisionAdvisor()
         {
-            var provider = NormalizeAdvisorProvider(config?.DecisionAdvisor?.Provider);
-            decisionAdvisor = provider == AdvisorProviderOpenAiCompatible || provider == AdvisorProviderWebsiteProxy
-                ? (IDecisionAdvisor)new HttpDecisionAdvisor(this, provider)
-                : new NullDecisionAdvisor();
+            // Paid or remote inference is intentionally unsupported by the V2
+            // runtime. The old adapter remains only so existing config/data can be
+            // read without a breaking migration.
+            decisionAdvisor = new NullDecisionAdvisor();
         }
 
         private void ResetSecretsCache()
@@ -5665,6 +7509,68 @@ namespace Oxide.Plugins
             Interface.Oxide.DataFileSystem.WriteObject(StatsDataFile, data);
         }
 
+        private RaidPersistenceData NewRaidPersistenceData()
+        {
+            return new RaidPersistenceData
+            {
+                schema_version = RaidDataSchemaVersion,
+                map_fingerprint = RaidMapFingerprint()
+            };
+        }
+
+        private void LoadRaidData()
+        {
+            try
+            {
+                raidData = Interface.Oxide.DataFileSystem.ReadObject<RaidPersistenceData>(RaidDataFile) ?? NewRaidPersistenceData();
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not read active raid data; starting clean. {ex.GetType().Name}: {ex.Message}");
+                raidData = NewRaidPersistenceData();
+            }
+
+            raidData.sessions = raidData.sessions ?? new Dictionary<string, RaidSessionState>(StringComparer.OrdinalIgnoreCase);
+            raidData.squad_cooldowns_utc = raidData.squad_cooldowns_utc ?? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            raidData.failed_target_cooldowns_utc = raidData.failed_target_cooldowns_utc ?? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void QueueSaveRaidData()
+        {
+            if (raidSaveTimer != null && !raidSaveTimer.Destroyed)
+            {
+                return;
+            }
+
+            raidSaveTimer = timer.Once(2f, SaveRaidData);
+        }
+
+        private void SaveRaidData()
+        {
+            raidSaveTimer?.Destroy();
+            raidSaveTimer = null;
+            if (raidData == null)
+            {
+                raidData = NewRaidPersistenceData();
+            }
+
+            raidData.schema_version = RaidDataSchemaVersion;
+            if (string.IsNullOrWhiteSpace(raidData.map_fingerprint))
+            {
+                raidData.map_fingerprint = RaidMapFingerprint();
+            }
+
+            Interface.Oxide.DataFileSystem.WriteObject(RaidDataFile, raidData);
+        }
+
+        private string RaidMapFingerprint()
+        {
+            var saveCreated = SaveRestore.SaveCreatedTime == default(DateTime)
+                ? "unknown"
+                : SaveRestore.SaveCreatedTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture);
+            return string.Join("|", Rust.Protocol.save, World.Size, World.Seed, ConVar.Server.levelurl ?? "", saveCreated);
+        }
+
         private void LoadBotChatQuota()
         {
             try
@@ -5711,6 +7617,111 @@ namespace Oxide.Plugins
         {
             NormalizeBehaviorModels();
             Interface.Oxide.DataFileSystem.WriteObject(BehaviorModelDataFile, behaviorModels);
+        }
+
+        private string TrainingV2PolicyPath()
+        {
+            return Path.Combine(Interface.Oxide.ConfigDirectory, TrainingV2PolicyConfigFile);
+        }
+
+        private void LoadTrainingV2Policy()
+        {
+            trainingV2Policy = null;
+            trainingV2WeaponProfileCache.Clear();
+            var path = TrainingV2PolicyPath();
+            if (!File.Exists(path))
+            {
+                trainingV2PolicyLoadState = "missing";
+                return;
+            }
+
+            try
+            {
+                var loaded = JsonConvert.DeserializeObject<TrainingV2Policy>(File.ReadAllText(path));
+                if (loaded == null)
+                {
+                    trainingV2PolicyLoadState = "invalid:empty";
+                    return;
+                }
+                if (loaded.schema_version != TrainingV2PolicySchemaVersion)
+                {
+                    trainingV2PolicyLoadState = $"invalid:schema_{loaded.schema_version}";
+                    return;
+                }
+                if (loaded.source == null || loaded.source.frames < 1000 || loaded.source.sessions < 1)
+                {
+                    trainingV2PolicyLoadState = "invalid:insufficient_source";
+                    return;
+                }
+
+                loaded.policy_id = string.IsNullOrWhiteSpace(loaded.policy_id) ? "unnamed" : loaded.policy_id.Trim();
+                loaded.mode = NormalizeTrainingV2PolicyMode(loaded.mode);
+                loaded.transfer_strength = Mathf.Clamp01(loaded.transfer_strength);
+                loaded.learned = loaded.learned ?? new TrainingV2LearnedSignals();
+                loaded.learned.burst_shape = loaded.learned.burst_shape ?? new TrainingV2BurstSignal();
+                loaded.runtime_application = loaded.runtime_application ?? new TrainingV2RuntimeApplication();
+                loaded.runtime_application.weapon_classes = (loaded.runtime_application.weapon_classes ?? new List<string>())
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value.Trim().ToLowerInvariant())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                loaded.action_score_deltas = (loaded.action_score_deltas ?? new Dictionary<string, float>())
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Key))
+                    .GroupBy(entry => entry.Key.Trim().ToLowerInvariant(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => Mathf.Clamp(group.Last().Value, -0.12f, 0.12f), StringComparer.OrdinalIgnoreCase);
+                loaded.learned.move_while_firing_probability = Mathf.Clamp01(loaded.learned.move_while_firing_probability);
+                loaded.learned.crouch_while_firing_probability = Mathf.Clamp01(loaded.learned.crouch_while_firing_probability);
+                loaded.learned.burst_shape.sustained_probability_8_plus = Mathf.Clamp01(loaded.learned.burst_shape.sustained_probability_8_plus);
+                loaded.learned.burst_shape.p25_shots = Mathf.Clamp(loaded.learned.burst_shape.p25_shots, 1f, 40f);
+                loaded.learned.burst_shape.p75_shots = Mathf.Clamp(loaded.learned.burst_shape.p75_shots, loaded.learned.burst_shape.p25_shots, 40f);
+                loaded.learned.burst_shape.p90_shots = Mathf.Clamp(loaded.learned.burst_shape.p90_shots, loaded.learned.burst_shape.p75_shots, 60f);
+
+                trainingV2Policy = loaded;
+                trainingV2PolicyLoadState = loaded.mode;
+                BotLog($"Training V2 policy loaded: id={loaded.policy_id}, mode={loaded.mode}, strength={loaded.transfer_strength:0.00}, source={loaded.source.players} player/{loaded.source.sessions} sessions/{loaded.source.frames} frames, allWeapons={loaded.transfer_to_all_weapon_classes}.");
+            }
+            catch (Exception ex)
+            {
+                trainingV2PolicyLoadState = $"invalid:{ex.GetType().Name}";
+                PrintWarning($"Could not load Training V2 policy '{path}': {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private string NormalizeTrainingV2PolicyMode(string mode)
+        {
+            var normalized = (mode ?? "off").Trim().ToLowerInvariant();
+            return normalized == "active" || normalized == "shadow" ? normalized : "off";
+        }
+
+        private bool TrainingV2PolicyApplies(BotRuntime runtime, Func<TrainingV2RuntimeApplication, bool> applicationSelector)
+        {
+            if (runtime == null
+                || trainingV2Policy == null
+                || !string.Equals(trainingV2Policy.mode, "active", StringComparison.OrdinalIgnoreCase)
+                || trainingV2Policy.transfer_strength <= 0f
+                || !IsV2Actuating(runtime)
+                || applicationSelector == null
+                || !applicationSelector(trainingV2Policy.runtime_application))
+            {
+                return false;
+            }
+
+            var weaponClass = (runtime.Combat?.WeaponClass ?? "default").Trim().ToLowerInvariant();
+            return trainingV2Policy.transfer_to_all_weapon_classes
+                || trainingV2Policy.runtime_application.weapon_classes.Contains(weaponClass, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private string TrainingV2PolicyStatus()
+        {
+            if (trainingV2Policy == null)
+            {
+                return $"state={trainingV2PolicyLoadState}, path={TrainingV2PolicyPath()}";
+            }
+
+            var sourceWeapon = trainingV2Policy.source.weapon_frame_counts == null
+                ? "none"
+                : string.Join(",", trainingV2Policy.source.weapon_frame_counts.OrderByDescending(entry => entry.Value).Take(3).Select(entry => $"{entry.Key}:{entry.Value}"));
+            return $"state={trainingV2PolicyLoadState}, id={trainingV2Policy.policy_id}, strength={trainingV2Policy.transfer_strength:0.00}, source={trainingV2Policy.source.players}p/{trainingV2Policy.source.sessions}s/{trainingV2Policy.source.frames}f, sourceWeapons=[{sourceWeapon}], appliedActions={v2Metrics.training_policy_action_evaluations}, motorProfiles={v2Metrics.training_policy_motor_profiles}, crouchDecisions={v2Metrics.training_policy_crouch_decisions}, path={TrainingV2PolicyPath()}";
         }
 
         private void NormalizeBehaviorModels()
@@ -5807,33 +7818,12 @@ namespace Oxide.Plugins
 
         private string NormalizeControllerMode(string mode)
         {
-            switch (NormalizeAdminKey(mode))
-            {
-                case ControllerModeLegacy:
-                    return ControllerModeLegacy;
-                case ControllerModeV2Canary:
-                    return ControllerModeV2Canary;
-                case ControllerModeV2Active:
-                    return ControllerModeV2Active;
-                case ControllerModeV2Shadow:
-                default:
-                    return ControllerModeV2Shadow;
-            }
+            return ControllerModeV2Active;
         }
 
         private ControllerMode ParseControllerMode(string mode)
         {
-            switch (NormalizeControllerMode(mode))
-            {
-                case ControllerModeLegacy:
-                    return ControllerMode.Legacy;
-                case ControllerModeV2Canary:
-                    return ControllerMode.V2Canary;
-                case ControllerModeV2Active:
-                    return ControllerMode.V2Active;
-                default:
-                    return ControllerMode.V2Shadow;
-            }
+            return ControllerMode.V2Active;
         }
 
         private string ControllerModeKey(ControllerMode mode)
@@ -5848,6 +7838,159 @@ namespace Oxide.Plugins
                     return ControllerModeV2Shadow;
                 default:
                     return ControllerModeLegacy;
+            }
+        }
+
+        private BrainV2RuntimeMode ParseBrainV2Mode(string mode)
+        {
+            return BrainV2RuntimeMode.Active;
+        }
+
+        private string BrainV2ModeKey(BrainV2RuntimeMode mode)
+        {
+            switch (mode)
+            {
+                case BrainV2RuntimeMode.Canary:
+                    return BrainV2ModeCanary;
+                case BrainV2RuntimeMode.Active:
+                    return BrainV2ModeActive;
+                case BrainV2RuntimeMode.Shadow:
+                    return BrainV2ModeShadow;
+                default:
+                    return BrainV2ModeOff;
+            }
+        }
+
+        private void InitializeBrainRuntimeV2(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            if (runtime.BrainV2 == null)
+            {
+                runtime.BrainV2 = new BrainRuntimeV2();
+            }
+
+            var configured = config?.BrainV2?.Enabled == true
+                ? ParseBrainV2Mode(config.BrainV2.Mode)
+                : BrainV2RuntimeMode.Off;
+            runtime.BrainV2.Mode = ResolveSpawnBrainV2Mode(configured, runtime);
+            runtime.BrainV2.ModeReason = configured == BrainV2RuntimeMode.Canary
+                ? runtime.BrainV2.Mode == BrainV2RuntimeMode.Canary ? "selected_canary" : "canary_shadow_control"
+                : BrainV2ModeKey(runtime.BrainV2.Mode);
+            runtime.BrainV2.NextGoalEvaluationAt = Time.realtimeSinceStartup + UnityEngine.Random.Range(0f, Math.Max(0.1f, config.BrainV2.GoalTickSeconds));
+            runtime.BrainV2.NextActionEvaluationAt = Time.realtimeSinceStartup + UnityEngine.Random.Range(0f, Math.Max(0.1f, config.BrainV2.ActionTickSeconds));
+        }
+
+        private BrainV2RuntimeMode ResolveSpawnBrainV2Mode(BrainV2RuntimeMode configuredMode, BotRuntime runtime)
+        {
+            if (configuredMode != BrainV2RuntimeMode.Canary)
+            {
+                return configuredMode;
+            }
+
+            var activeCanaries = activeBots.Values.Count(candidate => candidate?.BrainV2?.Mode == BrainV2RuntimeMode.Canary);
+            var requestedCount = Math.Max(0, config?.BrainV2?.CanaryBotCount ?? 0);
+
+            if (requestedCount > 0)
+            {
+                return activeCanaries < requestedCount ? BrainV2RuntimeMode.Canary : BrainV2RuntimeMode.Shadow;
+            }
+
+            var bucket = StableBucket(runtime?.BotKey ?? "", 100);
+            return bucket < (config?.BrainV2?.CanaryPercent ?? 0) ? BrainV2RuntimeMode.Canary : BrainV2RuntimeMode.Shadow;
+        }
+
+        private bool IsBrainV2Actuating(BotRuntime runtime)
+        {
+            return config?.BrainV2?.Enabled == true
+                && runtime?.BrainV2 != null
+                && (runtime.BrainV2.Mode == BrainV2RuntimeMode.Canary || runtime.BrainV2.Mode == BrainV2RuntimeMode.Active);
+        }
+
+        private bool IsBrainV2ExecutionReady(BotRuntime runtime)
+        {
+            return IsBrainV2Actuating(runtime)
+                && IsV2Actuating(runtime)
+                && runtime.V2BodyReadyForAuthority
+                && runtime.V2AuthoritativePrepared;
+        }
+
+        private string BrainV2ExecutionStatus(BotRuntime runtime)
+        {
+            if (runtime?.BrainV2 == null || runtime.BrainV2.Mode == BrainV2RuntimeMode.Off)
+            {
+                return "off";
+            }
+
+            if (runtime.BrainV2.Mode == BrainV2RuntimeMode.Shadow)
+            {
+                return "observing";
+            }
+
+            if (!IsV2Actuating(runtime))
+            {
+                return "waiting_controller";
+            }
+
+            if (!runtime.V2BodyReadyForAuthority)
+            {
+                return "waiting_body";
+            }
+
+            return runtime.V2AuthoritativePrepared ? "executing" : "preparing_authority";
+        }
+
+        private bool IsBrainV2Shadowing(BotRuntime runtime)
+        {
+            return config?.BrainV2?.Enabled == true
+                && runtime?.BrainV2?.Mode == BrainV2RuntimeMode.Shadow;
+        }
+
+        private void ApplyBrainV2ModeToExistingBots(BrainV2RuntimeMode configuredMode)
+        {
+            configuredMode = BrainV2RuntimeMode.Active;
+            var assignedCanaries = 0;
+            var requestedCount = Math.Max(0, config?.BrainV2?.CanaryBotCount ?? 0);
+
+            foreach (var entry in activeBots
+                .Where(candidate => candidate.Value != null)
+                .OrderBy(candidate => candidate.Value.BotKey, StringComparer.OrdinalIgnoreCase))
+            {
+                var runtime = entry.Value;
+                var previous = runtime.BrainV2?.Mode ?? BrainV2RuntimeMode.Off;
+                var next = configuredMode;
+
+                if (configuredMode == BrainV2RuntimeMode.Canary)
+                {
+                    if (requestedCount > 0)
+                    {
+                        next = assignedCanaries++ < requestedCount ? BrainV2RuntimeMode.Canary : BrainV2RuntimeMode.Shadow;
+                    }
+                    else
+                    {
+                        next = StableBucket(runtime.BotKey ?? "", 100) < config.BrainV2.CanaryPercent
+                            ? BrainV2RuntimeMode.Canary
+                            : BrainV2RuntimeMode.Shadow;
+                    }
+                }
+
+                if (runtime.BrainV2 == null)
+                {
+                    runtime.BrainV2 = new BrainRuntimeV2();
+                }
+
+                if (previous != next && runtime.BrainV2.ActiveAction != null)
+                {
+                    InterruptBrainActionV2(entry.Key, runtime, "brain_mode_changed", Time.realtimeSinceStartup);
+                }
+
+                runtime.BrainV2.Mode = next;
+                runtime.BrainV2.ModeReason = BrainV2ModeKey(next);
+                runtime.BrainV2.NextGoalEvaluationAt = 0f;
+                runtime.BrainV2.NextActionEvaluationAt = 0f;
             }
         }
 
@@ -5889,6 +8032,8 @@ namespace Oxide.Plugins
             fallback = fallback ?? new WeaponMotorProfile();
             var minimumBurst = Clamp(source.MinimumBurstShots <= 0 ? fallback.MinimumBurstShots : source.MinimumBurstShots, 1, 30);
             var maximumBurst = Clamp(source.MaximumBurstShots <= 0 ? fallback.MaximumBurstShots : source.MaximumBurstShots, minimumBurst, 40);
+            var minimumSustainedBurst = Clamp(source.MinimumSustainedBurstShots <= 0 ? fallback.MinimumSustainedBurstShots : source.MinimumSustainedBurstShots, 1, 60);
+            var maximumSustainedBurst = Clamp(source.MaximumSustainedBurstShots <= 0 ? fallback.MaximumSustainedBurstShots : source.MaximumSustainedBurstShots, minimumSustainedBurst, 80);
             var minimumGap = Mathf.Clamp(source.MinimumShotGapSeconds <= 0f ? fallback.MinimumShotGapSeconds : source.MinimumShotGapSeconds, 0.04f, 3f);
             var maximumGap = Mathf.Clamp(source.MaximumShotGapSeconds <= 0f ? fallback.MaximumShotGapSeconds : source.MaximumShotGapSeconds, minimumGap, 4f);
             var minimumPause = Mathf.Clamp(source.MinimumBurstPauseSeconds < 0f ? fallback.MinimumBurstPauseSeconds : source.MinimumBurstPauseSeconds, 0f, 5f);
@@ -5898,6 +8043,11 @@ namespace Oxide.Plugins
             {
                 MinimumBurstShots = minimumBurst,
                 MaximumBurstShots = maximumBurst,
+                SustainedBurstChance = Mathf.Clamp01(source.SustainedBurstChance),
+                MinimumSustainedBurstShots = minimumSustainedBurst,
+                MaximumSustainedBurstShots = maximumSustainedBurst,
+                AccuracyDegradationDegreesPerShot = Mathf.Clamp(source.AccuracyDegradationDegreesPerShot, 0f, 2f),
+                MaximumAccuracyDegradationDegrees = Mathf.Clamp(source.MaximumAccuracyDegradationDegrees, 0f, 12f),
                 MinimumShotGapSeconds = minimumGap,
                 MaximumShotGapSeconds = maximumGap,
                 MinimumBurstPauseSeconds = minimumPause,
@@ -7482,7 +9632,7 @@ namespace Oxide.Plugins
 
         private void QueuePopulationRamp(float delaySeconds)
         {
-            if (config?.Enabled != true || populationRampTimer != null)
+            if (config?.Enabled != true || !runtimeRunning || lifecycleStopping || populationRampTimer != null)
             {
                 return;
             }
@@ -7494,18 +9644,18 @@ namespace Oxide.Plugins
         {
             populationRampTimer = null;
 
-            if (config?.Enabled != true)
+            if (config?.Enabled != true || !runtimeRunning || lifecycleStopping)
             {
                 return;
             }
 
             CleanupInactiveBots();
-            var before = AmbientBotCount();
+            var before = EffectiveAmbientPopulation();
             MaintainPopulationBatch(PopulationRampBatchSize);
             CleanupInactiveBots();
 
             var target = Math.Min(TargetPopulation(), Math.Max(0, config.ManagedApi.MaximumTotalActiveBots - ManagedBotCount()));
-            var after = AmbientBotCount();
+            var after = EffectiveAmbientPopulation();
             if (after >= target)
             {
                 return;
@@ -7525,7 +9675,7 @@ namespace Oxide.Plugins
         {
             CleanupInactiveBots();
 
-            if (!config.Enabled)
+            if (!config.Enabled || !runtimeRunning || lifecycleStopping)
             {
                 return;
             }
@@ -7544,7 +9694,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var missing = target - AmbientBotCount();
+            var missing = target - EffectiveAmbientPopulation();
 
             if (missing <= 0)
             {
@@ -7569,12 +9719,15 @@ namespace Oxide.Plugins
         {
             foreach (var entry in activeBots.ToList())
             {
-                if (!IsLiveBot(entry.Key))
+                if (entry.Key == null || entry.Key.IsDestroyed)
                 {
-                    ClearBotCrouch(entry.Key, entry.Value, "cleanup", Time.realtimeSinceStartup);
-                    DestroyBotMapMarker(entry.Key);
-                    activeBots.Remove(entry.Key);
-                    despawningBots.Remove(entry.Key);
+                    ConfirmBotEntityDestroyed(entry.Key, entry.Value, "inactive scan");
+                    continue;
+                }
+
+                if (entry.Key.IsDead())
+                {
+                    HandleBotTermination(entry.Key, entry.Value, "inactive dead entity", !IsManagedBot(entry.Value), true, false);
                 }
             }
         }
@@ -7590,13 +9743,17 @@ namespace Oxide.Plugins
             }
 
             var bots = activeBots.Keys
-                .Where(bot => IsLiveBot(bot) && !IsManagedBot(RuntimeFor(bot)))
+                .Where(bot =>
+                {
+                    var runtime = RuntimeFor(bot);
+                    return IsLiveBot(bot) && !IsManagedBot(runtime) && string.IsNullOrWhiteSpace(runtime?.RaidSessionId);
+                })
                 .Take(excess)
                 .ToList();
 
             foreach (var bot in bots)
             {
-                DespawnBot(bot, "");
+                DespawnBot(bot, "", false);
             }
 
             if (bots.Count > 0)
@@ -7610,6 +9767,19 @@ namespace Oxide.Plugins
         private int AmbientBotCount()
         {
             return activeBots.Count(entry => IsLiveBot(entry.Key) && !IsManagedBot(entry.Value));
+        }
+
+        private int EffectiveAmbientPopulation()
+        {
+            var pendingCleanup = botRecordsByInstanceId.Values.Count(runtime => runtime != null
+                && !IsManagedBot(runtime)
+                && runtime.ReplacementRequested
+                && !runtime.EntityDestroyed);
+            var pendingRaidMembers = raidData?.sessions?.Values
+                .Where(session => session != null)
+                .SelectMany(session => session.members ?? new List<RaidMemberState>())
+                .Count(member => member != null && FindServerEntity<BaseCombatEntity>(member.active_net_id) == null) ?? 0;
+            return AmbientBotCount() + pendingCleanup + pendingAmbientRespawns.Count + pendingRaidMembers + pendingSpawnReservations.Count;
         }
 
         private int ManagedBotCount()
@@ -7704,10 +9874,14 @@ namespace Oxide.Plugins
             return spawned;
         }
 
-        private BaseCombatEntity TrySpawnBot(Vector3 position, int teamId, string preferredPrefab, ManagedBotSpawnContext managedContext = null, bool holdInitialMovement = false, float actionBlockedUntil = 0f, string actionBlockReason = "")
+        private BaseCombatEntity TrySpawnBot(Vector3 position, int teamId, string preferredPrefab, ManagedBotSpawnContext managedContext = null, bool holdInitialMovement = false, float actionBlockedUntil = 0f, string actionBlockReason = "", RaidMemberState raidMember = null)
         {
-            foreach (var prefab in ActivePrefabCandidates(preferredPrefab))
+            var reservationId = ++spawnReservationSequence;
+            pendingSpawnReservations.Add(reservationId);
+            try
             {
+                foreach (var prefab in ActivePrefabCandidates(preferredPrefab))
+                {
                 if (config.Debug.DebugSpawnDetails)
                 {
                     DebugLog($"spawn-try:{prefab}", $"Trying legacy body prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), brain={TacticalBrainName}.");
@@ -7738,7 +9912,25 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                entity.Spawn();
+                var instanceId = NextBotInstanceId();
+                var generation = ++botGenerationSequence;
+                var marker = entity.gameObject.AddComponent<RaidlandsRoamBotMarker>();
+                marker.InstanceId = instanceId;
+                marker.Generation = generation;
+                marker.SpawnedAt = SafeTravelUnixNow();
+                marker.LifecycleState = BotLifecycleState.Spawning.ToString();
+
+                try
+                {
+                    entity.Spawn();
+                    marker.NetworkId = NetId(entity);
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning($"Could not spawn marked Raidlands roam bot from {prefab}: {ex.GetType().Name}: {ex.Message}");
+                    SafeKillSpawnAttempt(entity);
+                    continue;
+                }
 
                 if (IsBlockedLandPosition(position))
                 {
@@ -7747,7 +9939,8 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                var runtime = ConfigureBot(bot, position, teamId, prefab, managedContext);
+                var runtime = ConfigureBot(bot, position, teamId, prefab, managedContext, instanceId, generation, marker.SpawnedAt, raidMember);
+                UpdateBotMarker(bot, runtime, BotLifecycleState.Alive);
                 PrepareNpcBody(bot);
                 var navigationReadyAt = Time.realtimeSinceStartup + 3f;
                 runtime.NextDecisionAt = Math.Max(runtime.NextDecisionAt, navigationReadyAt);
@@ -7779,18 +9972,23 @@ namespace Oxide.Plugins
                     DebugLog($"spawn-accepted:{prefab}", $"Accepted roam bot {runtime.DisplayName} from prefab {prefab} at {FormatVector(position)} ({PositionDiagnostics(position)}), {BotRuntimeDiagnostics(bot, runtime)}.");
                 }
 
-                return bot;
-            }
+                    return bot;
+                }
 
-            ThrottledWarning("spawn-prefabs-failed", "None of the configured NPC prefabs could be created.");
-            return null;
+                ThrottledWarning("spawn-prefabs-failed", "None of the configured NPC prefabs could be created.");
+                return null;
+            }
+            finally
+            {
+                pendingSpawnReservations.Remove(reservationId);
+            }
         }
 
         private void ScheduleSpawnNavigationInitialization(BaseCombatEntity bot, BotRuntime runtime, bool holdInitialMovement, int attempt)
         {
             var delay = attempt <= 0 ? 0.25f : 0.35f;
 
-            timer.Once(delay, () =>
+            ScheduleBotTimer(runtime, delay, () =>
             {
                 if (!IsLiveBot(bot)
                     || runtime == null
@@ -7822,6 +10020,7 @@ namespace Oxide.Plugins
                 runtime.Movement.IsStuck = false;
                 runtime.Movement.StuckSince = 0f;
                 runtime.ConsecutiveFailedPaths = 0;
+                runtime.V2BodyReadyForAuthority = true;
                 FinalizeV2BodyConformance(bot, runtime);
 
                 if (holdInitialMovement)
@@ -7832,7 +10031,10 @@ namespace Oxide.Plugins
                 else
                 {
                     runtime.CurrentDestination = FindRoamDestination(position, runtime);
-                    MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+                    if (!IsV2Actuating(runtime) || runtime.V2AuthoritativePrepared)
+                    {
+                        MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+                    }
                 }
 
                 runtime.NextDecisionAt = Math.Min(runtime.NextDecisionAt, now + 0.15f);
@@ -7884,6 +10086,7 @@ namespace Oxide.Plugins
 
             try
             {
+                DisablePoolingForNativeBrainTeardown(entity);
                 entity.Kill(BaseNetworkable.DestroyMode.None);
             }
             catch (Exception ex)
@@ -7892,19 +10095,51 @@ namespace Oxide.Plugins
             }
         }
 
-        private BotRuntime ConfigureBot(BaseCombatEntity bot, Vector3 position, int teamId, string prefab, ManagedBotSpawnContext managedContext = null)
+        private bool DisablePoolingForNativeBrainTeardown(BaseNetworkable networkable)
         {
-            var skillTier = string.IsNullOrWhiteSpace(managedContext?.SkillTier)
-                ? WeightedKey(config.SkillWeights, "average")
-                : managedContext.SkillTier;
-            var skill = SkillFor(skillTier);
-            var baseSkill = CloneSkillDefinition(skill);
-            var profileModel = SelectSpawnPlayerProfileModel();
-            var behaviorModel = profileModel ?? ActiveSkillBehaviorModel(skillTier);
-            var behaviorModelKey = behaviorModel?.key ?? "";
-            var playerProfileKey = profileModel?.key ?? "";
+            var entity = networkable as BaseEntity;
+            if (entity == null || entity.IsDestroyed)
+            {
+                return false;
+            }
 
-            if (profileModel != null || ShouldApplyGlobalSkillModelAtSpawn())
+            var nativeBrains = entity.GetComponentsInChildren<BaseAIBrain>(true);
+            if (nativeBrains == null || nativeBrains.Length == 0)
+            {
+                return false;
+            }
+
+            var poolable = entity.GetComponent<Poolable>();
+            if (poolable == null || poolable.prefabID == 0u)
+            {
+                return false;
+            }
+
+            // ScientistBrain.Count and BaseEntity.Query.Server brain registration are
+            // released from BaseAIBrain.OnDestroy. Rust normally retires killed server
+            // entities into its prefab pool, which keeps that component alive. These
+            // NPCs are plugin-owned and continuously replaced, so force this instance
+            // down the real Unity destruction path instead of retaining a native brain.
+            poolable.prefabID = 0u;
+            lifecycleNativeBrainPoolingBypasses++;
+            return true;
+        }
+
+        private BotRuntime ConfigureBot(BaseCombatEntity bot, Vector3 position, int teamId, string prefab, ManagedBotSpawnContext managedContext, ulong instanceId, int generation, double spawnedAt, RaidMemberState raidMember = null)
+        {
+            var skillTier = raidMember != null
+                ? raidMember.skill_tier
+                : string.IsNullOrWhiteSpace(managedContext?.SkillTier)
+                    ? WeightedKey(config.SkillWeights, "average")
+                    : managedContext.SkillTier;
+            var skill = raidMember?.skill == null ? SkillFor(skillTier) : CloneSkillDefinition(raidMember.skill);
+            var baseSkill = raidMember?.base_skill == null ? CloneSkillDefinition(skill) : CloneSkillDefinition(raidMember.base_skill);
+            var profileModel = raidMember == null ? SelectSpawnPlayerProfileModel() : null;
+            var behaviorModel = raidMember == null ? profileModel ?? ActiveSkillBehaviorModel(skillTier) : null;
+            var behaviorModelKey = raidMember?.behavior_model_key ?? behaviorModel?.key ?? "";
+            var playerProfileKey = raidMember?.player_profile_key ?? profileModel?.key ?? "";
+
+            if (raidMember == null && (profileModel != null || ShouldApplyGlobalSkillModelAtSpawn()))
             {
                 skill = SkillFromBehaviorModel(behaviorModel, skillTier, skill);
             }
@@ -7916,13 +10151,15 @@ namespace Oxide.Plugins
                 baseSkill = CloneSkillDefinition(skill);
             }
 
-            var kit = ShouldApplyKit(bot) && (managedContext == null || managedContext.AllowKitSelection) ? ChooseKit() : null;
-            var identity = ChooseBotIdentity();
-            var displayName = identity.DisplayName;
-            var botKey = identity.BotId;
+            var kit = raidMember == null && ShouldApplyKit(bot) && (managedContext == null || managedContext.AllowKitSelection) ? ChooseKit() : null;
+            var identity = raidMember == null ? ChooseBotIdentity() : null;
+            var displayName = raidMember?.display_name ?? identity.DisplayName;
+            var botKey = raidMember?.bot_key ?? identity.BotId;
             var playerBot = bot as BasePlayer;
-            var clan = ClanForTeam(teamId);
-            var avatar = ChooseBotAvatar(displayName, teamId);
+            var clan = raidMember == null
+                ? ClanForTeam(teamId)
+                : new BotClanDefinition { Key = raidMember.clan_key, Tag = raidMember.clan_tag, Name = raidMember.clan_name };
+            var avatar = raidMember == null ? ChooseBotAvatar(displayName, teamId) : null;
 
             if (playerBot != null)
             {
@@ -7934,21 +10171,27 @@ namespace Oxide.Plugins
 
             var runtime = new BotRuntime
             {
+                InstanceId = instanceId,
+                NetworkId = NetId(bot),
+                Generation = generation,
+                SpawnedAt = spawnedAt,
+                LifecycleState = BotLifecycleState.Alive,
                 BotKey = botKey,
                 DisplayName = displayName,
-                KitName = kit?.Name ?? "legacy_scientist",
+                KitName = raidMember?.kit_name ?? kit?.Name ?? "legacy_scientist",
                 SkillTier = skillTier,
                 Skill = skill,
                 BaseSkill = baseSkill,
                 BehaviorModelKey = behaviorModelKey,
                 PlayerProfileKey = playerProfileKey,
-                ProfileSourceName = profileModel?.display_name ?? "",
-                ProfileSourceSteamId = profileModel?.source_steam_id64 ?? "",
-                AvatarKey = avatar?.Key ?? "",
-                AvatarDisplayName = avatar?.DisplayName ?? "",
-                AvatarImageName = avatar == null ? "" : BotAvatarImageName(avatar.Key),
-                AvatarChatUserId = avatar?.ChatUserId ?? "",
+                ProfileSourceName = raidMember?.profile_source_name ?? profileModel?.display_name ?? "",
+                ProfileSourceSteamId = raidMember?.profile_source_steam_id ?? profileModel?.source_steam_id64 ?? "",
+                AvatarKey = raidMember?.avatar_key ?? avatar?.Key ?? "",
+                AvatarDisplayName = raidMember?.avatar_display_name ?? avatar?.DisplayName ?? "",
+                AvatarImageName = raidMember?.avatar_image_name ?? (avatar == null ? "" : BotAvatarImageName(avatar.Key)),
+                AvatarChatUserId = raidMember?.avatar_chat_user_id ?? avatar?.ChatUserId ?? "",
                 TeamId = teamId,
+                SquadRole = raidMember?.squad_role ?? "solo",
                 ClanKey = clan.Key,
                 ClanTag = clan.Tag,
                 ClanName = clan.Name,
@@ -7960,6 +10203,9 @@ namespace Oxide.Plugins
                 RequestedProfile = managedContext?.RequestedProfile ?? "",
                 RequestedDifficulty = managedContext?.RequestedDifficulty ?? "",
                 TeamKey = managedContext?.TeamKey ?? "",
+                RaidSessionId = raidMember == null ? "" : RaidSessionIdForMember(raidMember.member_id),
+                RaidMemberId = raidMember?.member_id ?? "",
+                RaidSeparated = raidMember?.separated == true,
                 LeashCenter = managedContext?.LeashCenter ?? Vector3.zero,
                 LeashRadius = managedContext?.LeashRadius ?? 0f,
                 LeashChaseGraceSeconds = managedContext?.LeashChaseGraceSeconds ?? 0f,
@@ -7975,14 +10221,27 @@ namespace Oxide.Plugins
                 NextPerceptionAt = Time.realtimeSinceStartup + UnityEngine.Random.Range(0f, Math.Max(0.1f, config.AI.PerceptionTickSeconds))
             };
 
-            runtime.CorpseLootPlan = BuildBotCorpseLootPlan(runtime, kit?.Name);
+            runtime.CorpseLootPlan = BuildBotCorpseLootPlan(runtime, runtime.KitName);
             activeBots[bot] = runtime;
+            botRecordsByInstanceId[runtime.InstanceId] = runtime;
+            if (raidMember != null)
+            {
+                raidMember.active_instance_id = runtime.InstanceId;
+                raidMember.active_net_id = runtime.NetworkId;
+                raidMember.alive = true;
+                raidMember.respawn_due_utc = 0d;
+                raidMember.last_position = position;
+            }
             var botStats = EnsureBotStats(runtime);
             botStats.spawns++;
             EnsureClanStats(runtime).bots_spawned++;
             QueueSaveData();
 
-            if (kit != null && playerBot != null)
+            if (playerBot != null && raidMember != null && !string.IsNullOrWhiteSpace(raidMember.kit_name) && !string.Equals(raidMember.kit_name, "legacy_scientist", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyKit(playerBot, raidMember.kit_name);
+            }
+            else if (kit != null && playerBot != null)
             {
                 ApplyKit(playerBot, kit.Name);
             }
@@ -8013,6 +10272,7 @@ namespace Oxide.Plugins
                 return;
             }
 
+            InitializeBrainRuntimeV2(runtime);
             var configuredMode = ParseControllerMode(config?.ControllerV2?.Mode);
             runtime.ControllerMode = ResolveSpawnControllerMode(configuredMode, runtime);
             runtime.ControllerModeReason = configuredMode == ControllerMode.V2Canary
@@ -8042,16 +10302,13 @@ namespace Oxide.Plugins
                 return;
             }
 
-            legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
-
-            if (!runtime.BodyCapabilities.has_brain
-                || !runtime.BodyCapabilities.has_navigator
-                || !runtime.BodyCapabilities.has_navmesh_agent
-                || !runtime.BodyCapabilities.supports_authoritative_fire)
-            {
-                RollbackV2Bot(bot, runtime, runtime.BodyCapabilities.failure_reason);
-                return;
-            }
+            // Do not seize the body synchronously from ConfigureBot. Rust can expose
+            // the components before BaseAIBrain has finished building its state
+            // containers. ScheduleSpawnNavigationInitialization marks the body ready
+            // and FinalizeV2BodyConformance performs the authoritative handoff.
+            runtime.V2BodyReadyForAuthority = false;
+            runtime.V2AuthoritativePrepared = false;
+            runtime.ControllerModeReason = $"{runtime.ControllerModeReason}:awaiting_body_ready";
         }
 
         private void FinalizeV2BodyConformance(BaseCombatEntity bot, BotRuntime runtime)
@@ -8061,24 +10318,172 @@ namespace Oxide.Plugins
                 return;
             }
 
-            runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime) ?? new BodyCapabilities { failure_reason = "adapter_missing" };
-            RecordPrefabConformance(bot, runtime, "delayed_initialization",
-                runtime.BodyCapabilities.supports_authoritative_movement && runtime.BodyCapabilities.supports_authoritative_fire,
-                runtime.BodyCapabilities.failure_reason);
-
-            if (!runtime.BodyCapabilities.supports_authoritative_movement || !runtime.BodyCapabilities.supports_authoritative_fire)
+            runtime.V2AuthorityPreparationPending = false;
+            if (runtime.V2AuthorityPrepareStartedAt <= 0f)
             {
-                RollbackV2Bot(bot, runtime, runtime.BodyCapabilities.failure_reason);
+                runtime.V2AuthorityPrepareStartedAt = Time.realtimeSinceStartup;
+            }
+            runtime.V2AuthorityPrepareAttempts++;
+
+            if (!runtime.V2BodyReadyForAuthority)
+            {
+                var repairedPosition = bot.transform.position;
+                if (TryValidateSpawnedBotOnOwnNavmesh(bot, ref repairedPosition))
+                {
+                    runtime.V2BodyReadyForAuthority = true;
+                    runtime.Movement.LastPosition = repairedPosition;
+                    runtime.Movement.LastProgressAt = Time.realtimeSinceStartup;
+                    runtime.Movement.IsStuck = false;
+                    runtime.Movement.StuckSince = 0f;
+                    runtime.ConsecutiveFailedPaths = 0;
+                }
+                else
+                {
+                    runtime.LastControllerInvariant = "awaiting_body_ready";
+                    ScheduleV2AuthorityPreparationRetry(bot, runtime, "awaiting_body_ready");
+                    return;
+                }
+            }
+
+            var readinessReason = "ready";
+            var bodyReady = TryEnsureV2BodyReadyForAuthority(bot, runtime, out readinessReason);
+            RecordPrefabConformance(bot, runtime, "delayed_initialization", bodyReady, readinessReason);
+
+            if (!bodyReady)
+            {
+                ScheduleV2AuthorityPreparationRetry(bot, runtime, readinessReason);
                 return;
             }
 
             legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+            if (!runtime.V2AuthoritativePrepared)
+            {
+                ScheduleV2AuthorityPreparationRetry(bot, runtime, "authoritative_prepare_failed");
+                return;
+            }
+
+            runtime.V2AuthorityPrepareAttempts = 0;
+            runtime.V2AuthorityPrepareStartedAt = 0f;
+            runtime.V2AuthorityPreparationPending = false;
+            runtime.RollbackReason = "none";
+            runtime.ControllerModeReason = $"{ControllerModeKey(runtime.ControllerMode)}:ready";
+            runtime.LastControllerInvariant = "authority_ready";
+            if (runtime.CurrentDestination != Vector3.zero)
+            {
+                MoveBotToRaw(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
+            }
 
             if (!runtime.V2StanceTestComplete && !runtime.V2StanceTestPending)
             {
                 runtime.V2StanceTestPending = true;
-                timer.Once(0.25f, () => BeginV2StanceConformance(bot, runtime));
+                ScheduleBotTimer(runtime, 0.25f, () => BeginV2StanceConformance(bot, runtime));
             }
+        }
+
+        private bool TryEnsureV2BodyReadyForAuthority(BaseCombatEntity bot, BotRuntime runtime, out string reason)
+        {
+            reason = "ready";
+            if (!IsLiveBot(bot) || runtime == null)
+            {
+                reason = "body_not_live";
+                return false;
+            }
+
+            runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime)
+                ?? new BodyCapabilities { failure_reason = "adapter_missing" };
+
+            if (!runtime.BodyCapabilities.supports_authoritative_movement)
+            {
+                var repairedPosition = bot.transform.position;
+                if (TryValidateSpawnedBotOnOwnNavmesh(bot, ref repairedPosition))
+                {
+                    runtime.SpawnPosition = runtime.SpawnPosition == Vector3.zero ? repairedPosition : runtime.SpawnPosition;
+                    runtime.Movement.LastPosition = repairedPosition;
+                    runtime.Movement.LastProgressAt = Time.realtimeSinceStartup;
+                    runtime.Movement.IsStuck = false;
+                    runtime.Movement.StuckSince = 0f;
+                    runtime.ConsecutiveFailedPaths = 0;
+                    runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime)
+                        ?? new BodyCapabilities { failure_reason = "adapter_missing" };
+                }
+            }
+
+            if (!runtime.BodyCapabilities.supports_authoritative_fire)
+            {
+                RefreshCombatProfile(bot, runtime);
+                EnsureBotWeaponLoaded(bot);
+                runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime)
+                    ?? new BodyCapabilities { failure_reason = "adapter_missing" };
+            }
+
+            var ready = runtime.BodyCapabilities.supports_authoritative_movement
+                && runtime.BodyCapabilities.supports_authoritative_fire;
+            reason = ready ? "ready" : runtime.BodyCapabilities.failure_reason;
+            return ready;
+        }
+
+        private void ScheduleV2AuthorityPreparationRetry(BaseCombatEntity bot, BotRuntime runtime, string reason)
+        {
+            if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            reason = string.IsNullOrWhiteSpace(reason) ? "authority_not_ready" : reason;
+            runtime.LastControllerInvariant = reason;
+            runtime.ControllerModeReason = $"{ControllerModeKey(runtime.ControllerMode)}:preparing:{runtime.V2AuthorityPrepareAttempts}/{V2AuthorityPrepareMaximumAttempts}:{reason}";
+
+            if (runtime.V2AuthorityPrepareAttempts >= V2AuthorityPrepareMaximumAttempts)
+            {
+                HandleV2AuthorityPreparationExhausted(bot, runtime, reason);
+                return;
+            }
+
+            if (runtime.V2AuthorityPreparationPending)
+            {
+                return;
+            }
+
+            runtime.V2AuthorityPreparationPending = true;
+            ScheduleBotTimer(runtime, V2AuthorityPrepareRetrySeconds, () =>
+            {
+                if (!IsLiveBot(bot) || runtime == null || !activeBots.TryGetValue(bot, out var activeRuntime) || !ReferenceEquals(activeRuntime, runtime))
+                {
+                    return;
+                }
+
+                runtime.V2AuthorityPreparationPending = false;
+                FinalizeV2BodyConformance(bot, runtime);
+            });
+        }
+
+        private void HandleV2AuthorityPreparationExhausted(BaseCombatEntity bot, BotRuntime runtime, string reason)
+        {
+            if (!IsLiveBot(bot) || runtime == null)
+            {
+                return;
+            }
+
+            runtime.V2AuthorityPreparationPending = false;
+            var failure = string.IsNullOrWhiteSpace(reason) ? "authority_prepare_exhausted" : reason;
+
+            // An ambient bot that cannot attach to its own navmesh will never become
+            // a valid V2 body. Replace it instead of leaving a permanently stuck
+            // native scientist in the population. Population upkeep supplies a new
+            // bot at a different validated location.
+            if (!IsManagedBot(runtime)
+                && (failure.IndexOf("navigator", StringComparison.OrdinalIgnoreCase) >= 0
+                    || failure.IndexOf("navigation", StringComparison.OrdinalIgnoreCase) >= 0
+                    || failure.IndexOf("navmesh", StringComparison.OrdinalIgnoreCase) >= 0
+                    || failure.IndexOf("awaiting_body_ready", StringComparison.OrdinalIgnoreCase) >= 0))
+            {
+                DespawnBot(bot, $"V2 controller body readiness failed after {runtime.V2AuthorityPrepareAttempts} attempts: {failure}");
+                return;
+            }
+
+            RollbackV2Bot(bot, runtime, failure == "authoritative_prepare_failed"
+                ? "authoritative_prepare_failed"
+                : $"authority_prepare_exhausted:{failure}");
         }
 
         private ControllerMode ResolveSpawnControllerMode(ControllerMode configuredMode, BotRuntime runtime)
@@ -8152,10 +10557,11 @@ namespace Oxide.Plugins
             }
 
             var player = bot as BasePlayer;
+            runtime.V2StanceTestAttempts++;
 
             if (player == null)
             {
-                RollbackV2Bot(bot, runtime, "stance_player_missing");
+                RetryOrRejectV2StanceConformance(bot, runtime, "stance_player_missing");
                 return;
             }
 
@@ -8163,14 +10569,11 @@ namespace Oxide.Plugins
             runtime.V2StandingColliderHeight = SafeColliderHeight(player);
             if (!SetBotCrouchedMechanical(bot, runtime, true, Time.realtimeSinceStartup))
             {
-                runtime.V2StanceTestPending = false;
-                runtime.V2StanceTestComplete = true;
-                RecordPrefabConformance(bot, runtime, "stance_mechanical", false, "crouch_transition_failed");
-                RollbackV2Bot(bot, runtime, "mechanical_crouch_transition_failed");
+                RetryOrRejectV2StanceConformance(bot, runtime, "mechanical_crouch_transition_failed");
                 return;
             }
 
-            timer.Once(0.2f, () =>
+            ScheduleBotTimer(runtime, 0.2f, () =>
             {
                 if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime))
                 {
@@ -8184,13 +10587,28 @@ namespace Oxide.Plugins
                 var mechanicallyDucked = IsPlayerCrouched(player);
                 var stoodSuccessfully = SetBotCrouchedMechanical(bot, runtime, false, Time.realtimeSinceStartup)
                     && !IsPlayerCrouched(player);
+                var crouchMechanicallyVerified = eyeLowered && colliderLowered && mechanicallyDucked;
+
+                if (!crouchMechanicallyVerified)
+                {
+                    RetryOrRejectV2StanceConformance(bot, runtime, "mechanical_crouch_unverified");
+                    return;
+                }
+
                 runtime.V2StanceTestPending = false;
                 runtime.V2StanceTestComplete = true;
-                runtime.BodyCapabilities.supports_mechanical_crouch = eyeLowered && colliderLowered && mechanicallyDucked && stoodSuccessfully;
+                // A low ceiling can legitimately prevent the bot from standing at
+                // the sampled location. The crouch transition is still mechanically
+                // verified when both eye and collider geometry lowered and the
+                // ducked state engaged; keep the bot crouched until movement gives
+                // it room to stand instead of falling back to native control.
+                runtime.BodyCapabilities.supports_mechanical_crouch = crouchMechanicallyVerified;
                 runtime.BodyCapabilities.stance_test_complete = true;
                 runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime) ?? runtime.BodyCapabilities;
                 RecordPrefabConformance(bot, runtime, "stance_mechanical", runtime.BodyCapabilities.supports_mechanical_crouch,
-                    runtime.BodyCapabilities.supports_mechanical_crouch ? "ready" : "stance_geometry_unverified");
+                    runtime.BodyCapabilities.supports_mechanical_crouch
+                        ? stoodSuccessfully ? "ready" : "ready_stand_blocked"
+                        : "stance_geometry_unverified");
 
                 if (config.ControllerV2.RequireMechanicalCrouch && !runtime.BodyCapabilities.supports_mechanical_crouch)
                 {
@@ -8201,6 +10619,43 @@ namespace Oxide.Plugins
                 runtime.LastControllerInvariant = "conformance_ready";
                 legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
             });
+        }
+
+        private void RetryOrRejectV2StanceConformance(BaseCombatEntity bot, BotRuntime runtime, string reason)
+        {
+            if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            reason = string.IsNullOrWhiteSpace(reason) ? "stance_conformance_failed" : reason;
+            runtime.V2StanceTestComplete = false;
+            runtime.BodyCapabilities.stance_test_complete = false;
+            runtime.BodyCapabilities.supports_mechanical_crouch = false;
+            RecordPrefabConformance(bot, runtime, "stance_mechanical", false, reason);
+
+            if (runtime.V2StanceTestAttempts < V2StanceConformanceMaximumAttempts)
+            {
+                runtime.V2StanceTestPending = true;
+                runtime.LastControllerInvariant = $"stance_retry:{runtime.V2StanceTestAttempts}/{V2StanceConformanceMaximumAttempts}:{reason}";
+                ScheduleBotTimer(runtime, V2StanceConformanceRetrySeconds, () => BeginV2StanceConformance(bot, runtime));
+                return;
+            }
+
+            runtime.V2StanceTestPending = false;
+            runtime.V2StanceTestComplete = true;
+            runtime.LastControllerInvariant = $"stance_rejected:{reason}";
+
+            // Ambient population maintenance can replace a body that never proves
+            // the configured crouch contract. Keeping it as a native-controller bot
+            // would silently erode an active V2 rollout.
+            if (!IsManagedBot(runtime))
+            {
+                DespawnBot(bot, $"V2 stance conformance failed after {runtime.V2StanceTestAttempts} attempts: {reason}");
+                return;
+            }
+
+            RollbackV2Bot(bot, runtime, reason);
         }
 
         private void RecordPrefabConformance(BaseCombatEntity bot, BotRuntime runtime, string stage, bool passed, string reason)
@@ -8265,27 +10720,15 @@ namespace Oxide.Plugins
 
         private void RollbackV2Bot(BaseCombatEntity bot, BotRuntime runtime, string reason)
         {
-            if (runtime == null || !IsV2Actuating(runtime))
+            if (runtime == null || runtime.CleanupStarted)
             {
                 return;
             }
 
             runtime.RollbackReason = string.IsNullOrWhiteSpace(reason) ? "invariant_failure" : reason;
-            runtime.V2DamageVetoUntil = Math.Max(runtime.V2DamageVetoUntil,
-                runtime.PendingFireAuthorizations.Count == 0 ? Time.realtimeSinceStartup : runtime.PendingFireAuthorizations.Max(authorization => authorization?.expires_at ?? 0f));
-            runtime.ActionBlockedUntil = Math.Max(runtime.ActionBlockedUntil, runtime.V2DamageVetoUntil);
-            runtime.ActionBlockReason = "v2_damage_drain";
-            runtime.ControllerModeReason = $"rollback:{runtime.RollbackReason}";
-            runtime.LastControllerInvariant = runtime.ControllerModeReason;
-            runtime.ControllerMode = ControllerMode.Legacy;
-            runtime.BurstShotsRemaining = 0;
-            runtime.Intent = new BotIntent { reason = runtime.ControllerModeReason };
             v2Metrics.controller_rollbacks++;
-            legacyScientistBodyAdapter?.StopFire(bot, runtime);
-            AbortV2Healing(bot, runtime, "controller_rollback", Time.realtimeSinceStartup, true);
-            SetBotCrouchedMechanical(bot, runtime, false, Time.realtimeSinceStartup);
-            legacyScientistBodyAdapter?.Prepare(bot, runtime, false);
-            DebugWarning($"v2-rollback:{runtime.BotKey}", $"Rolled {runtime.DisplayName} back to legacy control: {runtime.RollbackReason}", 5f);
+            DebugWarning($"v2-replace:{runtime.BotKey}", $"Replacing {runtime.DisplayName} after V2 invariant failure; v1 fallback is retired: {runtime.RollbackReason}", 5f);
+            DespawnBot(bot, $"V2 invariant failure: {runtime.RollbackReason}", !IsManagedBot(runtime));
         }
 
         private bool ShouldApplyKit(BaseCombatEntity bot)
@@ -8553,6 +10996,11 @@ namespace Oxide.Plugins
         {
             var plan = CorpseLootPlanForCorpse(npcPlayer, corpse);
 
+            if (corpse != null && (BotRuntimeForApi(npcPlayer as BaseCombatEntity) != null || HasCorpseLoot(plan)))
+            {
+                SuppressExpiredBotCorpseBag(corpse);
+            }
+
             if (corpse == null || !HasCorpseLoot(plan))
             {
                 return null;
@@ -8571,8 +11019,27 @@ namespace Oxide.Plugins
                 return null;
             }
 
+            SuppressExpiredBotCorpseBag(corpse);
             PopulateCorpseLootOnce(corpse, plan);
             return null;
+        }
+
+        private void SuppressExpiredBotCorpseBag(LootableCorpse corpse)
+        {
+            if (corpse == null || corpse.blockBagDrop)
+            {
+                return;
+            }
+
+            // LootableCorpse.DoServerDestroy normally converts every unlooted corpse
+            // into an item_drop_backpack. Sustained bot combat therefore leaves a
+            // second ten-to-sixteen minute entity backlog after the normal NPC corpse
+            // lifetime. Rust 2631 also throws from BuriedItem.Create when those bags
+            // expire with common kit items whose ownershipShares list is null. Keep
+            // the normal bot corpse and its loot window, but let unlooted contents
+            // expire with that corpse instead of creating the redundant bag.
+            corpse.blockBagDrop = true;
+            lifecycleCorpseBagDropsSuppressed++;
         }
 
         private object ShouldBLPopulate_NPC(ulong playerSteamId)
@@ -9205,9 +11672,41 @@ namespace Oxide.Plugins
                 }
 
                 Vector3 nearest;
+                var foundPlacement = navigator.GetNearestNavmeshPosition(
+                        position,
+                        out nearest,
+                        Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f))
+                    && IsAcceptableSpawnNavmeshPlacement(nearest, position);
 
-                if (!navigator.GetNearestNavmeshPosition(position, out nearest, Math.Max(24f, config.Spawn.NavmeshSampleDistance * 3f))
-                    || !IsAcceptableSpawnNavmeshPlacement(nearest, position))
+                // Once an agent has detached, its current transform can be beyond
+                // the narrow placement tolerance even though a known-good travel
+                // node is nearby. Use the persisted terrain grid as a bounded repair
+                // fallback and re-project that node through this NPC's navigator.
+                if (!foundPlacement && safeTravelGridReady && config?.SafeTravelGrid?.Enabled == true)
+                {
+                    var repairOrigin = position;
+                    var repairRadius = Math.Max(50f, config.SafeTravelGrid.WaypointSearchRadius);
+                    var repairChecks = Math.Max(8, config.SafeTravelGrid.MaximumPathChecksPerRoute);
+                    foreach (var safePoint in SafeTravelPointsNear(repairOrigin, repairRadius)
+                        .Where(point => !IsBlockedLandPosition(point))
+                        .OrderBy(point => Distance2D(point, repairOrigin))
+                        .Take(repairChecks))
+                    {
+                        Vector3 safeNearest;
+                        if (navigator.GetNearestNavmeshPosition(
+                                safePoint,
+                                out safeNearest,
+                                Math.Max(6f, config.SafeTravelGrid.NavmeshSampleRadius))
+                            && IsAcceptableSpawnNavmeshPlacement(safeNearest, safePoint))
+                        {
+                            nearest = safeNearest;
+                            foundPlacement = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!foundPlacement)
                 {
                     return false;
                 }
@@ -9282,28 +11781,15 @@ namespace Oxide.Plugins
                 && Distance2D(navPosition, requestedPosition) <= Math.Max(6f, config.Spawn.NavmeshSampleDistance);
         }
 
-        private void DespawnBot(BaseCombatEntity bot, string reason)
+        private void DespawnBot(BaseCombatEntity bot, string reason, bool scheduleReplacement = true)
         {
-            if (bot == null || !activeBots.ContainsKey(bot))
+            if (bot == null || !activeBots.TryGetValue(bot, out var runtime))
             {
                 return;
             }
 
-            var runtime = activeBots[bot];
-            despawningBots.Add(bot);
-            ClearBotCrouch(bot, runtime, "despawn", Time.realtimeSinceStartup);
-            DestroyBotMapMarker(bot);
-            activeBots.Remove(bot);
-
-            if (!bot.IsDestroyed)
-            {
-                bot.Kill(BaseNetworkable.DestroyMode.None);
-            }
-
-            if (config?.Enabled == true && !IsManagedBot(runtime))
-            {
-                timer.Once(config.RespawnDelaySeconds, MaintainPopulation);
-            }
+            HandleBotTermination(bot, runtime, string.IsNullOrWhiteSpace(reason) ? "despawn" : reason,
+                scheduleReplacement && !IsManagedBot(runtime), true, true);
 
             if (!string.IsNullOrWhiteSpace(reason))
             {
@@ -9311,35 +11797,243 @@ namespace Oxide.Plugins
             }
         }
 
+        private void HandleBotTermination(BaseCombatEntity bot, BotRuntime runtime, string reason, bool scheduleReplacement, bool destroyEntity, bool suppressDeathStats)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            if (scheduleReplacement && !IsManagedBot(runtime))
+            {
+                runtime.ReplacementRequested = true;
+            }
+            else if (lifecycleStopping)
+            {
+                runtime.ReplacementRequested = false;
+            }
+            runtime.SuppressDeathStats |= suppressDeathStats;
+            if (runtime.CleanupStarted)
+            {
+                if (destroyEntity && bot != null && !bot.IsDestroyed && lifecycleStopping)
+                {
+                    ScheduleBotEntityDestruction(bot, runtime, 0);
+                }
+                return;
+            }
+
+            runtime.CleanupStarted = true;
+            runtime.TerminationReason = string.IsNullOrWhiteSpace(reason) ? "unknown" : reason;
+            runtime.LifecycleState = runtime.DeathHandled ? BotLifecycleState.DeathObserved : BotLifecycleState.CleanupStarted;
+            if (runtime.SuppressDeathStats && bot != null)
+            {
+                despawningBots.Add(bot);
+            }
+
+            CancelBotTimers(runtime);
+            ClearBotCrouch(bot, runtime, "lifecycle-cleanup", Time.realtimeSinceStartup);
+            DestroyBotMapMarker(bot);
+            StopBotAttack(bot, runtime);
+            ClearBotLifecycleState(runtime);
+            UpdateBotMarker(bot, runtime, BotLifecycleState.CleanupStarted);
+
+            if (bot == null || bot.IsDestroyed)
+            {
+                ConfirmBotEntityDestroyed(bot, runtime, runtime.TerminationReason);
+                return;
+            }
+
+            if (destroyEntity)
+            {
+                ScheduleBotEntityDestruction(bot, runtime, 0);
+            }
+        }
+
+        private void ScheduleBotEntityDestruction(BaseCombatEntity bot, BotRuntime runtime, int attempt)
+        {
+            runtime?.CleanupTimer?.Destroy();
+            if (runtime == null)
+            {
+                return;
+            }
+
+            Action destroy = () =>
+            {
+                runtime.CleanupTimer = null;
+                if (runtime.EntityDestroyed || bot == null || bot.IsDestroyed)
+                {
+                    ConfirmBotEntityDestroyed(bot, runtime, "entity already destroyed");
+                    return;
+                }
+
+                try
+                {
+                    DisablePoolingForNativeBrainTeardown(bot);
+                    bot.Kill(BaseNetworkable.DestroyMode.None);
+                }
+                catch (Exception ex)
+                {
+                    PrintWarning($"Failed to destroy RoamBot instance {runtime.InstanceId} generation {runtime.Generation}: {ex.GetType().Name}: {ex.Message}");
+                }
+
+                if (bot.IsDestroyed)
+                {
+                    ConfirmBotEntityDestroyed(bot, runtime, "kill confirmed");
+                }
+                else if (attempt < 20 && !lifecycleStopping)
+                {
+                    ScheduleBotEntityDestruction(bot, runtime, attempt + 1);
+                }
+                else
+                {
+                    PrintWarning($"RoamBot instance {runtime.InstanceId} generation {runtime.Generation} did not reach a destroyed state after {attempt + 1} cleanup attempts; its replacement remains blocked.");
+                }
+            };
+
+            if (lifecycleStopping)
+            {
+                destroy();
+                return;
+            }
+
+            runtime.CleanupTimer = timer.Once(attempt == 0 ? 0.01f : 0.1f, destroy);
+        }
+
+        private void ConfirmBotEntityDestroyed(BaseCombatEntity bot, BotRuntime runtime, string reason)
+        {
+            if (runtime == null || runtime.EntityDestroyed)
+            {
+                return;
+            }
+
+            runtime.CleanupTimer?.Destroy();
+            runtime.CleanupTimer = null;
+            CancelBotTimers(runtime);
+            runtime.EntityDestroyed = true;
+            lifecycleEntitiesDestroyed++;
+            runtime.LifecycleState = BotLifecycleState.EntityDestroyed;
+            runtime.TerminationReason = string.IsNullOrWhiteSpace(reason) ? runtime.TerminationReason : reason;
+
+            var registeredEntity = !ReferenceEquals(bot, null)
+                ? bot
+                : activeBots.FirstOrDefault(entry => ReferenceEquals(entry.Value, runtime)).Key;
+            if (!ReferenceEquals(registeredEntity, null))
+            {
+                if (activeBots.TryGetValue(registeredEntity, out var activeRuntime) && ReferenceEquals(activeRuntime, runtime))
+                {
+                    activeBots.Remove(registeredEntity);
+                }
+                despawningBots.Remove(registeredEntity);
+                DestroyBotMapMarker(registeredEntity);
+            }
+
+            RemoveManagedEntityReference(runtime);
+
+            if (runtime.ReplacementRequested && runtimeRunning && !lifecycleStopping && config?.Enabled == true && !IsManagedBot(runtime))
+            {
+                QueueAmbientRespawn(runtime, runtime.TerminationReason);
+            }
+            else
+            {
+                botRecordsByInstanceId.Remove(runtime.InstanceId);
+            }
+        }
+
         private void KillAllBots(bool dropBodies)
         {
-            foreach (var bot in activeBots.Keys.ToList())
+            var wasStopping = lifecycleStopping;
+            lifecycleStopping = true;
+            CancelAllPendingRespawns("kill all");
+            var tracked = activeBots.ToList();
+            var marked = MarkedRaidlandsBotEntities();
+            var removed = 0;
+
+            foreach (var entry in tracked)
             {
-                if (bot == null)
+                if (entry.Value == null)
                 {
                     continue;
                 }
 
-                activeBots.TryGetValue(bot, out var runtime);
-                ClearBotCrouch(bot, runtime, "killall", Time.realtimeSinceStartup);
-                DestroyBotMapMarker(bot);
+                removed++;
+                HandleBotTermination(entry.Key, entry.Value, "kill all", false, true, true);
+            }
 
-                if (!dropBodies)
+            foreach (var orphan in marked.Where(entity => entity != null && !activeBots.ContainsKey(entity)).ToList())
+            {
+                if (!orphan.IsDestroyed)
                 {
-                    despawningBots.Add(bot);
-                }
-
-                if (!bot.IsDestroyed)
-                {
-                    bot.Kill(BaseNetworkable.DestroyMode.None);
+                    removed++;
+                    SafeKillSpawnAttempt(orphan);
                 }
             }
 
             activeBots.Clear();
+            botRecordsByInstanceId.Clear();
+            pendingSpawnReservations.Clear();
             despawningBots.Clear();
             managedBotGroups.Clear();
             managedGroupsByEvent.Clear();
             DestroyBotMapMarkers();
+            lastCleanupCount = removed;
+            lifecycleStopping = wasStopping;
+        }
+
+        private void ClearBotLifecycleState(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            runtime.PendingFireAuthorizations.Clear();
+            runtime.Intent = new BotIntent();
+            runtime.LastCombatFrame = new CombatFrame();
+            runtime.Memory = new TacticalMemory();
+            runtime.Movement = new MovementPlan();
+            runtime.Decisions = new DecisionContext();
+            runtime.BrainV2 = new BrainRuntimeV2 { Mode = BrainV2RuntimeMode.Off, ModeReason = "destroyed" };
+            runtime.V2Healing = false;
+            runtime.V2MedicalItem = null;
+            runtime.V2PreviousActiveItem = null;
+            runtime.IsShooting = false;
+        }
+
+        private Timer ScheduleBotTimer(BotRuntime runtime, float delay, Action callback)
+        {
+            if (runtime == null || callback == null || runtime.CleanupStarted || runtime.EntityDestroyed)
+            {
+                return null;
+            }
+
+            Timer scheduled = null;
+            scheduled = timer.Once(Math.Max(0.01f, delay), () =>
+            {
+                runtime.OwnedTimers.Remove(scheduled);
+                if (runtime.CleanupStarted || runtime.EntityDestroyed)
+                {
+                    return;
+                }
+                callback();
+            });
+            runtime.OwnedTimers.Add(scheduled);
+            return scheduled;
+        }
+
+        private void CancelBotTimers(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            foreach (var ownedTimer in runtime.OwnedTimers.ToList())
+            {
+                ownedTimer?.Destroy();
+            }
+            runtime.OwnedTimers.Clear();
+            runtime.V2AuthorityPreparationPending = false;
+            runtime.V2StanceTestPending = false;
         }
 
         private object OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
@@ -9365,9 +12059,56 @@ namespace Oxide.Plugins
             var damageTotal = HitDamageTotal(info);
             var v2AuthorizedProjectile = false;
 
+            if (victimRuntime != null
+                && !string.IsNullOrWhiteSpace(victimRuntime.RaidSessionId)
+                && raidData.sessions.TryGetValue(victimRuntime.RaidSessionId, out var protectedSession)
+                && protectedSession?.dev_smoke_protected == true)
+            {
+                info.damageTypes?.ScaleAll(0f);
+                return true;
+            }
+
+            // Raidlands bots may damage structures only through a live raid's
+            // tagged native HV/C4 entity. This keeps ordinary firearms and the
+            // plugin's other transient combat items from becoming raid tools.
+            if (IsRaidDamageProtectedStructure(victim))
+            {
+                var botDamageRuntime = attackerRuntime ?? RuntimeFor(attacker);
+                var taggedRaidOrdnance = RaidOrdnanceForHit(info, botDamageRuntime);
+                if (taggedRaidOrdnance != null)
+                {
+                    var authorizedRaidDamage = IsRaidOrdnanceDamageAuthorized(taggedRaidOrdnance, victim);
+                    if (!authorizedRaidDamage)
+                    {
+                        info.damageTypes?.ScaleAll(0f);
+                        return true;
+                    }
+                }
+                else if (botDamageRuntime != null)
+                {
+                    info.damageTypes?.ScaleAll(0f);
+                    return true;
+                }
+            }
+
+            if (victimRuntime != null && !string.IsNullOrWhiteSpace(victimRuntime.RaidSessionId)
+                && attackerEntity is BaseCombatEntity raidDefense
+                && IsOperationalRaidDefense(raidDefense)
+                && raidData.sessions.TryGetValue(victimRuntime.RaidSessionId, out var damagedSession))
+            {
+                var raidTc = FindRaidTargetTc(damagedSession);
+                if (IsDefenseAssociatedWithRaid(raidDefense, raidTc))
+                {
+                    damagedSession.current_defense_net_id = NetId(raidDefense);
+                    damagedSession.stage = "clear_defenses";
+                    damagedSession.last_reason = $"{raidDefense.ShortPrefabName} attacked raid member";
+                }
+            }
+
             if (attackerRuntime != null
                 && IsProjectileHitInfo(info)
                 && !IsExplosionDamage(info)
+                && !attackerRuntime.ApplyingBotVsBotResolvedDamage
                 && RequiresV2DamageAuthorization(attackerRuntime, now))
             {
                 if (!ValidateV2DamageAuthorization(attackerEntity, attackerRuntime, victimPlayer, info, now, out var authorizationReason))
@@ -9380,14 +12121,28 @@ namespace Oxide.Plugins
                     attackerRuntime.UnauthorizedHitsBlocked++;
                     attackerRuntime.LastFireBlockReason = authorizationReason;
                     v2Metrics.unauthorized_hits_blocked++;
-                    if (IsV2Actuating(attackerRuntime) && config.ControllerV2.AutoRollbackOnInvariantFailure)
+                    if (IsV2Actuating(attackerRuntime) && IsFireAuthorizationInvariantFailure(authorizationReason))
                     {
-                        RollbackV2Bot(attackerEntity, attackerRuntime, $"forbidden_fire:{authorizationReason}");
+                        attackerRuntime.NativeOwnershipConflicts++;
+                        attackerRuntime.ConsecutiveOwnershipConflicts++;
+                        attackerRuntime.LastOwnershipConflict = $"forbidden_fire:{authorizationReason}";
+                        attackerRuntime.LastOwnershipConflictAt = now;
+                        v2Metrics.native_ownership_conflicts++;
+                        if (config.ControllerV2.AutoRollbackOnInvariantFailure
+                            && attackerRuntime.ConsecutiveOwnershipConflicts >= config.ControllerV2.OwnershipConflictsBeforeRollback)
+                        {
+                            RollbackV2Bot(attackerEntity, attackerRuntime, attackerRuntime.LastOwnershipConflict);
+                        }
+                    }
+                    else if (authorizationReason.StartsWith("authorized_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        attackerRuntime.ConsecutiveOwnershipConflicts = 0;
                     }
                     return true;
                 }
 
                 v2AuthorizedProjectile = true;
+                attackerRuntime.ConsecutiveOwnershipConflicts = 0;
             }
 
             if (victimRuntime != null && IsProjectileHitInfo(info))
@@ -9489,6 +12244,174 @@ namespace Oxide.Plugins
             return null;
         }
 
+        private bool IsRaidDamageProtectedStructure(BaseCombatEntity entity)
+        {
+            return entity is BuildingBlock
+                || entity is BuildingPrivlidge
+                || entity is AutoTurret
+                || entity is FlameTurret
+                || entity is GunTrap
+                || entity is DecayEntity decay && decay.buildingID != 0;
+        }
+
+        private RaidOrdnanceRuntime RaidOrdnanceForHit(HitInfo info, BotRuntime botDamageRuntime)
+        {
+            if (info == null)
+            {
+                return null;
+            }
+
+            var candidates = new[]
+            {
+                info.Initiator as BaseEntity,
+                info.WeaponPrefab,
+                info.Weapon as BaseEntity
+            };
+            foreach (var candidate in candidates.Where(candidate => candidate != null).Distinct())
+            {
+                for (var entity = candidate; entity != null; entity = entity.GetParentEntity())
+                {
+                    var marker = entity.GetComponent<RaidlandsRaidOrdnanceMarker>();
+                    if (marker != null)
+                    {
+                        return new RaidOrdnanceRuntime
+                        {
+                            SessionId = marker.SessionId,
+                            MemberId = marker.MemberId,
+                            Kind = marker.Kind,
+                            TargetNetId = marker.TargetNetId
+                        };
+                    }
+                    if (raidOrdnanceByEntityId.TryGetValue(NetId(entity), out var tracked))
+                    {
+                        return tracked;
+                    }
+                }
+            }
+
+            // Native explosion HitInfo may retain the rocket/C4 prefab and its
+            // creator while the spawned projectile component has already been
+            // destroyed. Accept that representation only when it matches the
+            // firing bot and a still-live ordnance record in its raid session.
+            var nativeKind = NativeRaidOrdnanceKindForHit(info);
+            if (!string.IsNullOrWhiteSpace(nativeKind)
+                && botDamageRuntime != null
+                && !string.IsNullOrWhiteSpace(botDamageRuntime.RaidSessionId)
+                && raidData.sessions.TryGetValue(botDamageRuntime.RaidSessionId, out var session)
+                && session != null)
+            {
+                if (recentRaidOrdnanceByMemberId.TryGetValue(botDamageRuntime.RaidMemberId ?? "", out var recent)
+                    && recent?.Ordnance != null
+                    && recent.ExpiresUtc >= SafeTravelUnixNow()
+                    && string.Equals(recent.Ordnance.SessionId, session.session_id, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(recent.Ordnance.Kind, nativeKind, StringComparison.OrdinalIgnoreCase))
+                {
+                    return recent.Ordnance;
+                }
+                var state = session.ordnance
+                    .Where(entry => entry != null
+                        && string.Equals(entry.kind, nativeKind, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(entry.member_id, botDamageRuntime.RaidMemberId, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(entry => entry.launched_utc)
+                    .FirstOrDefault();
+                if (state != null)
+                {
+                    return new RaidOrdnanceRuntime
+                    {
+                        SessionId = session.session_id,
+                        MemberId = state.member_id,
+                        Kind = state.kind,
+                        TargetNetId = state.target_net_id
+                    };
+                }
+            }
+
+            if (botDamageRuntime != null
+                && IsExplosionDamage(info)
+                && !string.IsNullOrWhiteSpace(botDamageRuntime.RaidSessionId)
+                && raidData.sessions.TryGetValue(botDamageRuntime.RaidSessionId, out var fallbackSession)
+                && fallbackSession != null)
+            {
+                var now = SafeTravelUnixNow();
+                var state = fallbackSession.ordnance
+                    .Where(entry => entry != null
+                        && string.Equals(entry.member_id, botDamageRuntime.RaidMemberId, StringComparison.OrdinalIgnoreCase)
+                        && now - entry.launched_utc >= -0.25d
+                        && now - entry.launched_utc <= 15d)
+                    .OrderByDescending(entry => entry.launched_utc)
+                    .FirstOrDefault();
+                if (state != null)
+                {
+                    return new RaidOrdnanceRuntime
+                    {
+                        SessionId = fallbackSession.session_id,
+                        MemberId = state.member_id,
+                        Kind = state.kind,
+                        TargetNetId = state.target_net_id
+                    };
+                }
+            }
+            return null;
+        }
+
+        private string NativeRaidOrdnanceKindForHit(HitInfo info)
+        {
+            if (info == null)
+            {
+                return "";
+            }
+            var candidates = new[]
+            {
+                info.WeaponPrefab,
+                info.Weapon as BaseEntity,
+                info.Initiator as BaseEntity
+            };
+            foreach (var candidate in candidates.Where(candidate => candidate != null))
+            {
+                var prefab = $"{candidate.PrefabName} {candidate.ShortPrefabName}".ToLowerInvariant();
+                if (prefab.Contains("rocket_hv"))
+                {
+                    return "hv";
+                }
+                if (prefab.Contains("explosive.timed"))
+                {
+                    return "c4";
+                }
+            }
+            return "";
+        }
+
+        private bool IsRaidOrdnanceDamageAuthorized(RaidOrdnanceRuntime ordnance, BaseCombatEntity victim)
+        {
+            if (ordnance == null || victim == null
+                || !string.Equals(ordnance.Kind, "hv", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(ordnance.Kind, "c4", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(ordnance.SessionId)
+                || !raidData.sessions.TryGetValue(ordnance.SessionId, out var session)
+                || session == null)
+            {
+                return false;
+            }
+
+            if (victim is BuildingPrivlidge privilege)
+            {
+                return NetId(privilege) == session.target_tc_net_id
+                    || privilege.buildingID != 0 && privilege.buildingID == session.target_building_id;
+            }
+            if (victim is BuildingBlock block)
+            {
+                return block.buildingID != 0 && block.buildingID == session.target_building_id;
+            }
+
+            var tc = FindRaidTargetTc(session);
+            if (IsOperationalRaidDefense(victim) || victim is AutoTurret || victim is FlameTurret || victim is GunTrap)
+            {
+                return IsDefenseAssociatedWithRaid(victim, tc);
+            }
+            var decay = victim as DecayEntity;
+            return decay != null && decay.buildingID != 0 && decay.buildingID == session.target_building_id;
+        }
+
         private bool RequiresV2DamageAuthorization(BotRuntime runtime, float now)
         {
             return runtime != null
@@ -9496,6 +12419,13 @@ namespace Oxide.Plugins
                 && (IsV2Actuating(runtime)
                     || runtime.V2DamageVetoUntil >= now
                     || runtime.PendingFireAuthorizations.Any(authorization => authorization != null && authorization.expires_at >= now));
+        }
+
+        private bool IsFireAuthorizationInvariantFailure(string reason)
+        {
+            return !string.IsNullOrWhiteSpace(reason)
+                && (reason.StartsWith("native_control_conflict:", StringComparison.OrdinalIgnoreCase)
+                    || reason.StartsWith("unauthorized_shot:no_motor_token", StringComparison.OrdinalIgnoreCase));
         }
 
         private bool ValidateV2DamageAuthorization(
@@ -9508,7 +12438,7 @@ namespace Oxide.Plugins
         {
             reason = "unauthorized_shot";
 
-            if (attackerEntity == null || attackerRuntime == null || victim == null || info == null)
+            if (attackerEntity == null || attackerRuntime == null || info == null)
             {
                 return false;
             }
@@ -9526,7 +12456,7 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            var eligibility = victimRuntime == null ? TargetIneligibilityReason(victim) : "";
+            var eligibility = victim == null || victimRuntime != null ? "" : TargetIneligibilityReason(victim);
             if (!string.IsNullOrEmpty(eligibility))
             {
                 reason = eligibility;
@@ -9550,18 +12480,42 @@ namespace Oxide.Plugins
                     && candidate.observed_hit_callbacks < Math.Max(1, candidate.pellet_count)
                     && candidate.issued_at <= now + 0.05f
                     && candidate.expires_at >= now
-                    && candidate.target_id == targetId
                     && (candidate.weapon == null || weapon == null || candidate.weapon == weapon)
                     && Vector3.Distance(candidate.origin, actualOrigin) <= 1.5f
                     && actualDirection.sqrMagnitude > 0.0001f
                     && Vector3.Angle(candidate.direction, actualDirection.normalized) <= candidate.maximum_direction_error_degrees)
-                .OrderByDescending(candidate => candidate.issued_at)
+                .OrderByDescending(candidate => candidate.target_id == targetId)
+                .ThenByDescending(candidate => candidate.issued_at)
                 .FirstOrDefault();
 
             if (authorization == null)
             {
                 reason = "unauthorized_shot:no_motor_token";
                 return false;
+            }
+
+            if (victim == null)
+            {
+                authorization.observed_hit_callbacks++;
+                authorization.consumed = authorization.observed_hit_callbacks >= Math.Max(1, authorization.pellet_count);
+                authorization.eligibility_reason = "authorized_non_player_impact";
+                attackerRuntime.LastFireAuthorization = authorization;
+                reason = "authorized_non_player_impact";
+                return false;
+            }
+
+            if (authorization.resolver_completed && !authorization.native_bot_hit_observed)
+            {
+                authorization.observed_hit_callbacks++;
+                authorization.consumed = authorization.observed_hit_callbacks >= Math.Max(1, authorization.pellet_count);
+                authorization.eligibility_reason = "authorized_resolved_late_hit";
+                if (info.damageTypes != null)
+                {
+                    info.damageTypes.ScaleAll(0f);
+                }
+                attackerRuntime.LastFireAuthorization = authorization;
+                reason = "authorized_resolved_late_hit";
+                return true;
             }
 
             if (!IsTargetSightLineClear(attackerEntity, victim, actualOrigin, actualHit, out var blockReason, out _, true))
@@ -9577,8 +12531,14 @@ namespace Oxide.Plugins
             authorization.observed_hit_callbacks++;
             authorization.consumed = authorization.observed_hit_callbacks >= Math.Max(1, authorization.pellet_count);
             authorization.eligibility_reason = "authorized_hit";
+            if (victimRuntime != null && IsEnemyBot(attackerRuntime, victimRuntime) && !authorization.native_bot_hit_observed)
+            {
+                authorization.native_bot_hit_observed = true;
+                authorization.resolver_completed = true;
+                v2Metrics.native_bot_hits++;
+            }
             attackerRuntime.LastFireAuthorization = authorization;
-            reason = "authorized_hit";
+            reason = authorization.target_id == targetId ? "authorized_hit" : "authorized_collateral_hit";
             return true;
         }
 
@@ -9632,6 +12592,8 @@ namespace Oxide.Plugins
             victimRuntime.Memory.LastDamageSourcePlayer = attacker;
             victimRuntime.Memory.LastDamageSourcePosition = attacker.transform.position;
             victimRuntime.Memory.LastDamagedAt = now;
+            RememberBrainDamageContactV2(victimRuntime, attacker, attacker.transform.position, now);
+            RecordBrainEventV2(victimRuntime, "took_damage", PlayerName(attacker), attacker.transform.position, CombatTargetId(attacker), now);
 
             if (HasLineOfSight(victim, attacker))
             {
@@ -9797,6 +12759,8 @@ namespace Oxide.Plugins
 
             RefreshCombatProfile(attackerEntity, attackerRuntime);
             attackerRuntime.LastDamageDealtAt = now;
+            RememberBrainVisibleContactV2(attackerRuntime, victim, null, now);
+            RecordBrainEventV2(attackerRuntime, "dealt_damage", PlayerName(victim), victim.transform.position, CombatTargetId(victim), now);
             RememberBarricadeAnchorHitmarker(attackerRuntime, CombatTargetId(victim), now);
             attackerRuntime.Memory.Target = victim;
             attackerRuntime.Memory.TargetUserId = CombatTargetId(victim);
@@ -9943,12 +12907,25 @@ namespace Oxide.Plugins
                 && config.ControllerV2.BodyAdapters.RevalidateOnWeaponSwitch
                 && (IsV2Actuating(runtime) || IsV2Shadowing(runtime)))
             {
-                timer.Once(0.15f, () =>
+                // Kit application and medical/weapon swaps can fire before the
+                // delayed NavMesh/body handoff has completed. Treat that window as
+                // preparation, not as a controller invariant failure.
+                ScheduleBotTimer(runtime, 0.35f, () =>
                 {
-                    if (IsLiveBot(player) && ReferenceEquals(RuntimeFor(player), runtime))
+                    if (!IsLiveBot(player) || !ReferenceEquals(RuntimeFor(player), runtime))
                     {
-                        RefreshV2BodyConformance(player, runtime, "weapon_switch", IsV2Actuating(runtime));
+                        return;
                     }
+
+                    if (IsV2Actuating(runtime)
+                        && (!runtime.V2BodyReadyForAuthority || !runtime.V2AuthoritativePrepared))
+                    {
+                        runtime.LastControllerInvariant = "weapon_switch_waiting_authority";
+                        ScheduleV2AuthorityPreparationRetry(player, runtime, "weapon_switch_waiting_authority");
+                        return;
+                    }
+
+                    RefreshV2BodyConformance(player, runtime, "weapon_switch", IsV2Actuating(runtime));
                 });
             }
             else if (player != null && IsRealPlayer(player))
@@ -10005,6 +12982,50 @@ namespace Oxide.Plugins
             }
         }
 
+        private bool IsRecoverableV2BodyConformanceFailure(string reason)
+        {
+            var normalized = NormalizeAdminKey(reason);
+            return normalized == "navigator_not_ready"
+                || normalized == "missing_navigation_contract"
+                || normalized == "missing_server_projectile"
+                || normalized == "weapon_switch_waiting_authority"
+                || normalized == "authoritative_prepare_failed";
+        }
+
+        private void RecoverV2BodyConformance(BaseCombatEntity bot, BotRuntime runtime, string stage, string reason)
+        {
+            if (!IsLiveBot(bot) || runtime == null || !IsV2Actuating(runtime))
+            {
+                return;
+            }
+
+            stage = string.IsNullOrWhiteSpace(stage) ? "conformance" : NormalizeAdminKey(stage);
+            reason = string.IsNullOrWhiteSpace(reason) ? "body_not_ready" : NormalizeAdminKey(reason);
+
+            legacyScientistBodyAdapter?.StopFire(bot, runtime);
+            runtime.V2AuthoritativePrepared = false;
+            runtime.PendingMotorTrigger = false;
+            runtime.PendingMotorTriggerUntil = 0f;
+            runtime.BurstShotsRemaining = 0;
+            runtime.IsShooting = false;
+
+            if (reason.IndexOf("navigator", StringComparison.OrdinalIgnoreCase) >= 0
+                || reason.IndexOf("navigation", StringComparison.OrdinalIgnoreCase) >= 0
+                || reason.IndexOf("navmesh", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                runtime.V2BodyReadyForAuthority = false;
+            }
+
+            if (!runtime.V2AuthorityPreparationPending && runtime.V2AuthorityPrepareStartedAt <= 0f)
+            {
+                runtime.V2AuthorityPrepareAttempts = 0;
+            }
+
+            runtime.LastControllerInvariant = $"{stage}:{reason}:recovering";
+            runtime.ControllerModeReason = $"{ControllerModeKey(runtime.ControllerMode)}:recovering:{stage}:{reason}";
+            ScheduleV2AuthorityPreparationRetry(bot, runtime, $"{stage}:{reason}");
+        }
+
         private void RefreshV2BodyConformance(BaseCombatEntity bot, BotRuntime runtime, string stage, bool authoritative)
         {
             if (bot == null || runtime == null)
@@ -10028,11 +13049,26 @@ namespace Oxide.Plugins
 
             if (!passed)
             {
+                if (IsRecoverableV2BodyConformanceFailure(runtime.BodyCapabilities.failure_reason))
+                {
+                    RecoverV2BodyConformance(bot, runtime, stage, runtime.BodyCapabilities.failure_reason);
+                    return;
+                }
+
                 RollbackV2Bot(bot, runtime, $"{stage}:{runtime.BodyCapabilities.failure_reason}");
                 return;
             }
 
             legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
+            if (!runtime.V2AuthoritativePrepared)
+            {
+                RecoverV2BodyConformance(bot, runtime, stage, "authoritative_prepare_failed");
+                return;
+            }
+
+            runtime.RollbackReason = "none";
+            runtime.LastControllerInvariant = $"{NormalizeAdminKey(stage)}:ready";
+            runtime.ControllerModeReason = $"{ControllerModeKey(runtime.ControllerMode)}:ready";
         }
 
         private void OnEntityBuilt(Planner planner, GameObject gameObject)
@@ -10066,6 +13102,16 @@ namespace Oxide.Plugins
 
                 if (IsV2Actuating(botRuntime))
                 {
+                    if (IsExpectedV2MotorFireCallback(projectile, botRuntime, now))
+                    {
+                        // ServerUse raises OnWeaponFired synchronously. This callback
+                        // is evidence that the authoritative shot pipeline executed,
+                        // not that the native scientist brain stole fire ownership.
+                        botRuntime.ConsecutiveOwnershipConflicts = 0;
+                        botRuntime.LastControllerInvariant = "v2_motor_fire_observed";
+                        return;
+                    }
+
                     botRuntime.LastControllerInvariant = "native_control_conflict:on_weapon_fired";
                     botRuntime.NativeOwnershipConflicts++;
                     botRuntime.ConsecutiveOwnershipConflicts++;
@@ -10113,6 +13159,27 @@ namespace Oxide.Plugins
                     : "gunshot";
 
             BroadcastPlayerSound(player, player.transform.position, range, soundType, quietProjectile ? 0.42f : suppressed ? 0.7f : 1f, 0.08f);
+        }
+
+        private bool IsExpectedV2MotorFireCallback(BaseProjectile projectile, BotRuntime runtime, float now)
+        {
+            if (projectile == null || runtime == null)
+            {
+                return false;
+            }
+
+            if (runtime.PendingMotorTrigger && now <= runtime.PendingMotorTriggerUntil)
+            {
+                return true;
+            }
+
+            var authorization = runtime.LastFireAuthorization;
+            return authorization != null
+                && ReferenceEquals(authorization.weapon, projectile)
+                && authorization.issued_at > 0f
+                && now >= authorization.issued_at - 0.05f
+                && now <= authorization.issued_at + 0.35f
+                && authorization.expires_at >= now;
         }
 
         private object OnPlayerAttack(BasePlayer attacker, HitInfo info)
@@ -10337,10 +13404,24 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null)
             {
+                if (victimRuntime.DeathHandled)
+                {
+                    HandleBotTermination(victim, victimRuntime, "duplicate death hook", !IsManagedBot(victimRuntime), true, victimRuntime.SuppressDeathStats);
+                    return;
+                }
+
+                victimRuntime.DeathHandled = true;
+                if (!victimRuntime.SuppressDeathStats)
+                {
+                    lifecycleCombatDeaths++;
+                }
+                victimRuntime.LifecycleState = BotLifecycleState.DeathObserved;
+                UpdateBotMarker(victim, victimRuntime, BotLifecycleState.DeathObserved);
                 if (IsV2Actuating(victimRuntime) || IsV2Shadowing(victimRuntime))
                 {
                     RecordPrefabConformance(victim, victimRuntime, "death", true, "death_cleanup_observed");
                 }
+                var raidDeathHandled = HandleRaidMemberDeath(victim, victimRuntime);
                 PrepareBotCorpseLoot(victimPlayer, victimRuntime);
                 TrackRecentBotDeath(victim, victimRuntime);
                 ClearBotCrouch(victim, victimRuntime, "death", now);
@@ -10349,10 +13430,9 @@ namespace Oxide.Plugins
                     MarkBarricadeAnchorTargetDeath(CombatTargetId(victimPlayer), now);
                 }
 
-                activeBots.Remove(victim);
                 DestroyBotMapMarker(victim);
 
-                if (!despawningBots.Remove(victim))
+                if (!victimRuntime.SuppressDeathStats && !despawningBots.Remove(victim))
                 {
                     var botStats = EnsureBotStats(victimRuntime);
                     botStats.deaths++;
@@ -10378,9 +13458,14 @@ namespace Oxide.Plugins
                     UpdateScoreboards();
                 }
 
-                QueueAmbientRespawn(victimRuntime, "death");
+                HandleBotTermination(victim, victimRuntime, "death", !IsManagedBot(victimRuntime) && !raidDeathHandled, true, victimRuntime.SuppressDeathStats);
 
                 return;
+            }
+
+            if (IsRealPlayer(victimPlayer) && !ShouldIgnoreRealPlayerTarget(victimPlayer))
+            {
+                RecordRaidPlayerKill(victimPlayer, info, attackerRuntime);
             }
 
             if (attackerRuntime != null && IsRealPlayer(victimPlayer) && !ShouldIgnoreRealPlayerTarget(victimPlayer))
@@ -10405,49 +13490,129 @@ namespace Oxide.Plugins
 
         private void QueueAmbientRespawn(BotRuntime runtime, string reason)
         {
-            if (config?.Enabled != true || runtime == null || IsManagedBot(runtime))
+            if (QueueRaidLifecycleReplacement(runtime, reason))
+            {
+                return;
+            }
+            if (config?.Enabled != true || !runtimeRunning || lifecycleStopping || runtime == null || IsManagedBot(runtime)
+                || runtime.RespawnScheduled || pendingAmbientRespawns.ContainsKey(runtime.InstanceId))
             {
                 return;
             }
 
             var request = new AmbientRespawnRequest
             {
+                InstanceId = runtime.InstanceId,
+                Generation = runtime.Generation,
+                BotKey = runtime.BotKey ?? "",
                 TeamId = runtime.TeamId,
                 PreferredPrefab = runtime.Prefab ?? "",
                 QueuedAt = Time.realtimeSinceStartup,
                 Reason = reason ?? ""
             };
 
-            timer.Once(config.RespawnDelaySeconds, () => HandleAmbientRespawn(request));
+            runtime.RespawnScheduled = true;
+            runtime.LifecycleState = BotLifecycleState.RespawnPending;
+            request.Timer = timer.Once(config.RespawnDelaySeconds, () =>
+            {
+                pendingAmbientRespawns.Remove(request.InstanceId);
+                request.Timer = null;
+                HandleAmbientRespawn(request);
+            });
+            pendingAmbientRespawns[runtime.InstanceId] = request;
+        }
+
+        private bool QueueRaidLifecycleReplacement(BotRuntime runtime, string reason)
+        {
+            if (runtime == null || string.IsNullOrWhiteSpace(runtime.RaidSessionId)
+                || !raidData.sessions.TryGetValue(runtime.RaidSessionId, out var session))
+            {
+                return false;
+            }
+            var member = session.members.FirstOrDefault(candidate => candidate != null
+                && string.Equals(candidate.member_id, runtime.RaidMemberId, StringComparison.OrdinalIgnoreCase));
+            if (member == null)
+            {
+                return false;
+            }
+            member.active_instance_id = 0UL;
+            member.active_net_id = 0UL;
+            member.alive = false;
+            member.restore_spawn = true;
+            member.respawn_due_utc = SafeTravelUnixNow() + 5d;
+            session.last_reason = $"raid lifecycle replacement: {reason}";
+            botRecordsByInstanceId.Remove(runtime.InstanceId);
+            QueueSaveRaidData();
+            return true;
         }
 
         private void HandleAmbientRespawn(AmbientRespawnRequest request)
         {
             CleanupInactiveBots();
 
-            if (config?.Enabled != true)
+            if (request == null
+                || !botRecordsByInstanceId.TryGetValue(request.InstanceId, out var previousRuntime)
+                || previousRuntime.Generation != request.Generation
+                || !previousRuntime.EntityDestroyed)
             {
+                return;
+            }
+
+            previousRuntime.RespawnScheduled = false;
+            if (config?.Enabled != true || !runtimeRunning || lifecycleStopping)
+            {
+                botRecordsByInstanceId.Remove(request.InstanceId);
                 return;
             }
 
             var target = Math.Min(TargetPopulation(), Math.Max(0, config.ManagedApi.MaximumTotalActiveBots - ManagedBotCount()));
 
-            if (AmbientBotCount() >= target)
+            if (AmbientBotCount() + pendingAmbientRespawns.Count + pendingSpawnReservations.Count >= target)
             {
+                botRecordsByInstanceId.Remove(request.InstanceId);
                 return;
             }
 
+            var spawned = false;
             if (request != null
                 && config.AmbientSquadRespawnRejoin?.Enabled == true
                 && TryRespawnAmbientNearHealthyTeammate(request))
             {
-                return;
+                spawned = true;
+            }
+            else if (config.AmbientSquadRespawnRejoin == null || config.AmbientSquadRespawnRejoin.FallbackToNormalSpawn)
+            {
+                spawned = SpawnBots(1, false) == 1;
             }
 
-            if (config.AmbientSquadRespawnRejoin == null || config.AmbientSquadRespawnRejoin.FallbackToNormalSpawn)
+            previousRuntime.LifecycleState = spawned ? BotLifecycleState.ReplacementSpawned : BotLifecycleState.EntityDestroyed;
+            if (spawned)
             {
-                MaintainPopulation();
+                lifecycleReplacementsSpawned++;
             }
+            botRecordsByInstanceId.Remove(request.InstanceId);
+            if (!spawned)
+            {
+                QueuePopulationRamp(Math.Max(0.1f, config.SpawnFailureRetrySeconds));
+            }
+        }
+
+        private void CancelAllPendingRespawns(string reason)
+        {
+            foreach (var request in pendingAmbientRespawns.Values.ToList())
+            {
+                request?.Timer?.Destroy();
+                if (request != null && botRecordsByInstanceId.TryGetValue(request.InstanceId, out var runtime))
+                {
+                    runtime.RespawnScheduled = false;
+                    runtime.ReplacementRequested = false;
+                    if (runtime.EntityDestroyed)
+                    {
+                        botRecordsByInstanceId.Remove(runtime.InstanceId);
+                    }
+                }
+            }
+            pendingAmbientRespawns.Clear();
         }
 
         private bool TryRespawnAmbientNearHealthyTeammate(AmbientRespawnRequest request)
@@ -10625,6 +13790,1790 @@ namespace Oxide.Plugins
             }
         }
 
+        private void StartRaidRuntime()
+        {
+            raidTimer?.Destroy();
+            raidTimer = null;
+            raidAdministrativeTeardown = false;
+            ValidateRaidPersistenceForCurrentMap();
+
+            if (config?.BaseRaiding?.Enabled != true)
+            {
+                if (raidData.sessions.Count > 0)
+                {
+                    AbortAllRaidSessions("base raiding disabled", true);
+                }
+                return;
+            }
+
+            teamSequence = Math.Max(teamSequence, raidData.sessions.Values.Where(session => session != null).Select(session => session.team_id).DefaultIfEmpty(0).Max());
+            nextRaidDiscoveryUnix = SafeTravelUnixNow() + Math.Max(2f, config.BaseRaiding.ScanIntervalSeconds);
+            raidTimer = timer.Every(1f, RaidCoordinatorTick);
+            QueueRestoreRaidSessions();
+        }
+
+        private void StopRaidRuntime()
+        {
+            CaptureRaidMemberPositions();
+            raidTimer?.Destroy();
+            raidTimer = null;
+            raidSaveTimer?.Destroy();
+            raidSaveTimer = null;
+            foreach (var pending in raidRespawnTimers.Values.ToList())
+            {
+                pending?.Destroy();
+            }
+            raidRespawnTimers.Clear();
+            raidRestoreQueued = false;
+            SaveRaidData();
+        }
+
+        private void ValidateRaidPersistenceForCurrentMap()
+        {
+            if (raidData == null)
+            {
+                raidData = NewRaidPersistenceData();
+            }
+
+            var current = RaidMapFingerprint();
+            if (!string.IsNullOrWhiteSpace(raidData.map_fingerprint)
+                && !string.Equals(raidData.map_fingerprint, current, StringComparison.Ordinal))
+            {
+                CleanupRaidAssetsFromData();
+                raidData = NewRaidPersistenceData();
+                SaveRaidData();
+                return;
+            }
+
+            raidData.map_fingerprint = current;
+            PruneRaidCooldowns(SafeTravelUnixNow());
+        }
+
+        private void QueueRestoreRaidSessions()
+        {
+            if (raidRestoreQueued || raidData.sessions.Count == 0)
+            {
+                return;
+            }
+
+            raidRestoreQueued = true;
+            timer.Once(3f, () =>
+            {
+                raidRestoreQueued = false;
+                if (!runtimeRunning || lifecycleStopping || config?.BaseRaiding?.Enabled != true)
+                {
+                    return;
+                }
+                RestoreRaidSessions();
+            });
+        }
+
+        private void RestoreRaidSessions()
+        {
+            var now = SafeTravelUnixNow();
+            var spawnOffset = 0d;
+            foreach (var session in raidData.sessions.Values.ToList())
+            {
+                if (session == null || string.IsNullOrWhiteSpace(session.session_id))
+                {
+                    continue;
+                }
+
+                session.members = session.members ?? new List<RaidMemberState>();
+                session.ordnance = session.ordnance ?? new List<RaidOrdnanceState>();
+                var tc = FindRaidTargetTc(session);
+                if (tc == null)
+                {
+                    EndRaidSession(session, true, "target TC missing during restore");
+                    continue;
+                }
+
+                RebindRaidBags(session);
+                RebindRaidOrdnance(session);
+                foreach (var member in session.members)
+                {
+                    if (member == null)
+                    {
+                        continue;
+                    }
+
+                    member.bags = member.bags ?? new List<RaidBagState>();
+                    var live = ActiveBotEntries().FirstOrDefault(entry => entry.Value != null
+                        && string.Equals(entry.Value.BotKey, member.bot_key, StringComparison.OrdinalIgnoreCase)
+                        && entry.Value.TeamId == session.team_id);
+                    if (live.Key != null && IsLiveBot(live.Key))
+                    {
+                        BindRaidMemberRuntime(session, member, live.Key, live.Value);
+                        continue;
+                    }
+
+                    member.active_instance_id = 0UL;
+                    member.active_net_id = 0UL;
+                    member.alive = false;
+                    member.restore_spawn = true;
+                    member.respawn_due_utc = now + 2d + spawnOffset;
+                    spawnOffset += 0.75d;
+                }
+            }
+            QueueSaveRaidData();
+        }
+
+        private void RebindRaidBags(RaidSessionState session)
+        {
+            foreach (var member in session.members.Where(member => member != null))
+            {
+                member.bags = member.bags ?? new List<RaidBagState>();
+                foreach (var bag in member.bags.Where(bag => bag != null && bag.placed && !bag.destroyed))
+                {
+                    var entity = FindServerEntity<SleepingBag>(bag.entity_net_id);
+                    if (entity == null || entity.IsDestroyed)
+                    {
+                        bag.destroyed = true;
+                        bag.entity_net_id = 0UL;
+                        continue;
+                    }
+
+                    bag.position = entity.transform.position;
+                    var marker = entity.GetComponent<RaidlandsRaidBagMarker>() ?? entity.gameObject.AddComponent<RaidlandsRaidBagMarker>();
+                    marker.SessionId = session.session_id;
+                    marker.MemberId = member.member_id;
+                    marker.Slot = bag.slot;
+                }
+            }
+        }
+
+        private void RebindRaidOrdnance(RaidSessionState session)
+        {
+            foreach (var ordnance in session.ordnance.Where(entry => entry != null).ToList())
+            {
+                var entity = FindServerEntity<BaseEntity>(ordnance.entity_net_id);
+                if (entity == null || entity.IsDestroyed)
+                {
+                    session.ordnance.Remove(ordnance);
+                    if (session.active_ordnance_net_id == ordnance.entity_net_id)
+                    {
+                        session.active_ordnance_net_id = 0UL;
+                        session.active_ordnance_kind = "";
+                    }
+                    continue;
+                }
+
+                RegisterRaidOrdnance(session, ordnance, entity);
+            }
+        }
+
+        private void CaptureRaidMemberPositions()
+        {
+            if (raidData?.sessions == null)
+            {
+                return;
+            }
+
+            foreach (var session in raidData.sessions.Values.Where(session => session != null))
+            {
+                foreach (var member in session.members.Where(member => member != null))
+                {
+                    var runtimeEntry = ActiveBotEntries().FirstOrDefault(entry => entry.Value != null
+                        && string.Equals(entry.Value.RaidMemberId, member.member_id, StringComparison.OrdinalIgnoreCase));
+                    if (runtimeEntry.Key == null || !IsLiveBot(runtimeEntry.Key))
+                    {
+                        continue;
+                    }
+                    member.last_position = runtimeEntry.Key.transform.position;
+                    member.active_instance_id = runtimeEntry.Value.InstanceId;
+                    member.active_net_id = NetId(runtimeEntry.Key);
+                    member.alive = true;
+                    member.separated = runtimeEntry.Value.RaidSeparated;
+                }
+            }
+        }
+
+        private void RaidCoordinatorTick()
+        {
+            if (!runtimeRunning || lifecycleStopping || config?.BaseRaiding?.Enabled != true)
+            {
+                return;
+            }
+
+            var now = SafeTravelUnixNow();
+            PruneRaidCooldowns(now);
+            foreach (var session in raidData.sessions.Values.ToList())
+            {
+                TickRaidSession(session, now);
+            }
+
+            if (now >= nextRaidDiscoveryUnix)
+            {
+                nextRaidDiscoveryUnix = now + Math.Max(2f, config.BaseRaiding.ScanIntervalSeconds);
+                DiscoverRaidTargets(now);
+            }
+
+            CaptureRaidMemberPositions();
+            QueueSaveRaidData();
+        }
+
+        private void TickRaidSession(RaidSessionState session, double now)
+        {
+            if (session == null || !raidData.sessions.ContainsKey(session.session_id))
+            {
+                return;
+            }
+
+            var tc = FindRaidTargetTc(session);
+            if (tc == null)
+            {
+                EndRaidSession(session, true, "target TC destroyed");
+                return;
+            }
+
+            RefreshDestroyedRaidBags(session);
+            RefreshRaidOrdnance(session);
+            if (session.first_bag_placed && RaidSurvivingBagCount(session) == 0)
+            {
+                EndRaidSession(session, false, "all raid bags destroyed");
+                return;
+            }
+
+            if (ShouldRaidGiveUpForKd(session.kills, session.deaths))
+            {
+                EndRaidSession(session, false, $"raid K/D {session.kills}/{session.deaths} below {config.BaseRaiding.GiveUpBelowKd:0.###}");
+                return;
+            }
+
+            if (string.Equals(session.stage, "placing_bags", StringComparison.OrdinalIgnoreCase)
+                && now >= session.staging_deadline_utc)
+            {
+                EndRaidSession(session, false, "bag staging timeout");
+                return;
+            }
+
+            ScheduleDueRaidRespawns(session, now);
+            TryRallySeparatedRaidMembers(session, tc);
+            if (string.Equals(session.stage, "placing_bags", StringComparison.OrdinalIgnoreCase)
+                && session.members.All(member => member != null && member.bags.Count(bag => bag != null && bag.placed && !bag.destroyed) >= member.desired_bag_count))
+            {
+                session.stage = "clear_defenses";
+                session.last_reason = "all member bags placed";
+                session.next_action_utc = now;
+            }
+        }
+
+        private void DiscoverRaidTargets(double now)
+        {
+            var unclaimedTcs = BaseNetworkable.serverEntities
+                .OfType<BuildingPrivlidge>()
+                .Where(tc => tc != null && !tc.IsDestroyed && !IsRaidTargetClaimed(tc))
+                .ToList();
+
+            var squads = ActiveBotEntries()
+                .Where(entry => IsLiveBot(entry.Key) && entry.Value != null && !IsManagedBot(entry.Value) && string.IsNullOrWhiteSpace(entry.Value.RaidSessionId))
+                .GroupBy(entry => entry.Value.TeamId)
+                .OrderBy(group => group.Key)
+                .ToList();
+
+            foreach (var squad in squads)
+            {
+                var members = squad.ToList();
+                if (members.Count == 0)
+                {
+                    continue;
+                }
+
+                var squadKey = RaidSquadKey(members.Select(entry => entry.Value.BotKey));
+                if (RaidCooldownActive(raidData.squad_cooldowns_utc, squadKey, now))
+                {
+                    continue;
+                }
+
+                var center = AveragePosition(members.Select(entry => entry.Key.transform.position));
+                BuildingPrivlidge best = null;
+                var bestDistance = float.MaxValue;
+                foreach (var tc in unclaimedTcs)
+                {
+                    var distance = Distance2D(center, tc.transform.position);
+                    if (distance > config.BaseRaiding.NearbyScanRadius
+                        || !IsEligibleRaidTarget(tc, out var defenders))
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(config.BaseRaiding.DiscoveryMode, RaidDiscoveryEncounter, StringComparison.OrdinalIgnoreCase)
+                        && !SquadEncounteredRaidDefender(members, defenders))
+                    {
+                        continue;
+                    }
+
+                    if (distance < bestDistance - 0.01f || Math.Abs(distance - bestDistance) <= 0.01f && (best == null || NetId(tc) < NetId(best)))
+                    {
+                        best = tc;
+                        bestDistance = distance;
+                    }
+                }
+
+                if (best != null && CommitRaidSession(members, best, squadKey, now))
+                {
+                    unclaimedTcs.Remove(best);
+                }
+            }
+        }
+
+        private bool IsEligibleRaidTarget(BuildingPrivlidge tc, out List<BasePlayer> defenders)
+        {
+            defenders = new List<BasePlayer>();
+            if (tc == null || tc.IsDestroyed || RaidFoundations(tc).Count == 0
+                || RaidCooldownActive(raidData.failed_target_cooldowns_utc, RaidTargetSignature(tc), SafeTravelUnixNow()))
+            {
+                return false;
+            }
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                if (player == null || !player.IsConnected || player.IsDead() || player.IsSleeping()
+                    || !IsRealPlayer(player) || ShouldIgnoreRealPlayerTarget(player) || !tc.IsAuthed(player))
+                {
+                    continue;
+                }
+
+                BuildingPrivlidge presentPrivilege;
+                try
+                {
+                    presentPrivilege = player.GetBuildingPrivilege();
+                }
+                catch
+                {
+                    presentPrivilege = null;
+                }
+
+                if (presentPrivilege == tc)
+                {
+                    defenders.Add(player);
+                }
+            }
+            return defenders.Count > 0;
+        }
+
+        private bool SquadEncounteredRaidDefender(List<KeyValuePair<BaseCombatEntity, BotRuntime>> members, List<BasePlayer> defenders)
+        {
+            var ids = new HashSet<ulong>(defenders.Where(player => player != null).Select(CombatTargetId));
+            var now = Time.realtimeSinceStartup;
+            var memoryWindow = Math.Max(5f, config.AI.SearchLastSeenSeconds);
+            return members.Any(entry => entry.Value?.Memory != null
+                && ids.Contains(entry.Value.Memory.TargetUserId)
+                && Math.Max(entry.Value.Memory.LastSeenAt, Math.Max(entry.Value.Memory.LastHeardAt, entry.Value.Memory.LastDamagedAt)) >= now - memoryWindow);
+        }
+
+        private bool CommitRaidSession(List<KeyValuePair<BaseCombatEntity, BotRuntime>> liveMembers, BuildingPrivlidge tc, string squadKey, double now)
+        {
+            var foundations = RaidFoundations(tc);
+            if (liveMembers.Count == 0 || foundations.Count == 0 || IsRaidTargetClaimed(tc))
+            {
+                return false;
+            }
+
+            var session = new RaidSessionState
+            {
+                session_id = Guid.NewGuid().ToString("N"),
+                squad_key = squadKey,
+                team_id = liveMembers[0].Value.TeamId,
+                stage = "placing_bags",
+                started_utc = now,
+                staging_deadline_utc = now + config.BaseRaiding.BagStagingTimeoutSeconds,
+                target_tc_net_id = NetId(tc),
+                target_building_id = tc.buildingID,
+                target_owner_id = tc.OwnerID,
+                target_position = tc.transform.position,
+                target_signature = RaidTargetSignature(tc),
+                approach_position = AveragePosition(liveMembers.Select(entry => entry.Key.transform.position)),
+                hv_remaining = config.BaseRaiding.SharedHvRocketBudget,
+                c4_remaining = config.BaseRaiding.SharedC4Budget,
+                next_action_utc = now
+            };
+
+            var memberIndex = 0;
+            var totalSlots = 0;
+            foreach (var live in liveMembers.OrderBy(entry => entry.Value.BotKey, StringComparer.OrdinalIgnoreCase))
+            {
+                var desired = UnityEngine.Random.Range(config.BaseRaiding.BagsPerMemberMinimum, config.BaseRaiding.BagsPerMemberMaximum + 1);
+                var member = SnapshotRaidMember(session, live.Key, live.Value, desired);
+                session.members.Add(member);
+                totalSlots += desired;
+                memberIndex++;
+            }
+
+            var slotIndex = 0;
+            foreach (var member in session.members)
+            {
+                for (var slot = 0; slot < member.desired_bag_count; slot++)
+                {
+                    member.bags.Add(new RaidBagState
+                    {
+                        slot = slot,
+                        position = PlannedRaidBagPosition(session, foundations, slotIndex++, Math.Max(1, totalSlots))
+                    });
+                }
+            }
+
+            raidData.sessions[session.session_id] = session;
+            foreach (var live in liveMembers)
+            {
+                var member = session.members.FirstOrDefault(candidate => string.Equals(candidate.bot_key, live.Value.BotKey, StringComparison.OrdinalIgnoreCase));
+                if (member != null)
+                {
+                    BindRaidMemberRuntime(session, member, live.Key, live.Value);
+                }
+            }
+
+            QueueSaveRaidData();
+            BotLog($"Raid {session.session_id.Substring(0, 8)} claimed TC {session.target_tc_net_id} for ambient team {session.team_id} with {session.members.Count} member(s), {totalSlots} planned bag(s), {session.hv_remaining} HV and {session.c4_remaining} C4.");
+            return true;
+        }
+
+        private RaidMemberState SnapshotRaidMember(RaidSessionState session, BaseCombatEntity bot, BotRuntime runtime, int desiredBags)
+        {
+            return new RaidMemberState
+            {
+                member_id = $"{session.session_id}:{runtime.BotKey}",
+                bot_key = runtime.BotKey ?? "",
+                display_name = runtime.DisplayName ?? "",
+                kit_name = runtime.KitName ?? "legacy_scientist",
+                skill_tier = runtime.SkillTier ?? "average",
+                skill = CloneSkillDefinition(runtime.Skill) ?? SkillFor(runtime.SkillTier),
+                base_skill = CloneSkillDefinition(runtime.BaseSkill) ?? CloneSkillDefinition(runtime.Skill),
+                behavior_model_key = runtime.BehaviorModelKey ?? "",
+                player_profile_key = runtime.PlayerProfileKey ?? "",
+                profile_source_name = runtime.ProfileSourceName ?? "",
+                profile_source_steam_id = runtime.ProfileSourceSteamId ?? "",
+                avatar_key = runtime.AvatarKey ?? "",
+                avatar_display_name = runtime.AvatarDisplayName ?? "",
+                avatar_image_name = runtime.AvatarImageName ?? "",
+                avatar_chat_user_id = runtime.AvatarChatUserId ?? "",
+                squad_role = runtime.SquadRole ?? "solo",
+                clan_key = runtime.ClanKey ?? "",
+                clan_tag = runtime.ClanTag ?? "",
+                clan_name = runtime.ClanName ?? "",
+                prefab = runtime.Prefab ?? LandNavigationScientistPrefab,
+                active_instance_id = runtime.InstanceId,
+                active_net_id = NetId(bot),
+                alive = true,
+                last_position = bot.transform.position,
+                desired_bag_count = desiredBags
+            };
+        }
+
+        private void BindRaidMemberRuntime(RaidSessionState session, RaidMemberState member, BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (session == null || member == null || bot == null || runtime == null)
+            {
+                return;
+            }
+
+            runtime.RaidSessionId = session.session_id;
+            runtime.RaidMemberId = member.member_id;
+            runtime.RaidSeparated = member.separated;
+            member.active_instance_id = runtime.InstanceId;
+            member.active_net_id = NetId(bot);
+            member.alive = true;
+            member.last_position = bot.transform.position;
+        }
+
+        private string RaidSessionIdForMember(string memberId)
+        {
+            if (string.IsNullOrWhiteSpace(memberId) || raidData?.sessions == null)
+            {
+                return "";
+            }
+            return raidData.sessions.Values.FirstOrDefault(session => session?.members?.Any(member => member != null && string.Equals(member.member_id, memberId, StringComparison.OrdinalIgnoreCase)) == true)?.session_id ?? "";
+        }
+
+        private List<BuildingBlock> RaidFoundations(BuildingPrivlidge tc)
+        {
+            if (tc == null || BaseNetworkable.serverEntities == null)
+            {
+                return new List<BuildingBlock>();
+            }
+
+            var buildingId = tc.buildingID;
+            return BaseNetworkable.serverEntities
+                .OfType<BuildingBlock>()
+                .Where(block => block != null && !block.IsDestroyed && block.buildingID == buildingId
+                    && (block.ShortPrefabName ?? "").IndexOf("foundation", StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToList();
+        }
+
+        private Vector3 PlannedRaidBagPosition(RaidSessionState session, List<BuildingBlock> foundations, int index, int total)
+        {
+            var center = AveragePosition(foundations.Select(block => block.transform.position));
+            var footprintRadius = foundations.Select(block => Distance2D(center, block.transform.position)).DefaultIfEmpty(5f).Max();
+            var ring = footprintRadius + UnityEngine.Random.Range(config.BaseRaiding.BagPlacementMinimumDistance, config.BaseRaiding.BagPlacementMaximumDistance);
+            var approachAngle = Mathf.Atan2(session.approach_position.z - center.z, session.approach_position.x - center.x);
+            var angle = approachAngle + Mathf.PI * 2f * index / Math.Max(1, total) + UnityEngine.Random.Range(-0.16f, 0.16f);
+            var candidate = center + new Vector3(Mathf.Cos(angle) * ring, 0f, Mathf.Sin(angle) * ring);
+            TryProjectToLandSurface(ref candidate);
+            if (NavMesh.SamplePosition(candidate, out var hit, Math.Max(8f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas))
+            {
+                candidate = hit.position;
+            }
+            return candidate;
+        }
+
+        private Vector3 AveragePosition(IEnumerable<Vector3> positions)
+        {
+            var list = positions?.ToList() ?? new List<Vector3>();
+            if (list.Count == 0)
+            {
+                return Vector3.zero;
+            }
+            var sum = Vector3.zero;
+            foreach (var position in list)
+            {
+                sum += position;
+            }
+            return sum / list.Count;
+        }
+
+        private string RaidTargetSignature(BuildingPrivlidge tc)
+        {
+            if (tc == null)
+            {
+                return "";
+            }
+            var position = tc.transform.position;
+            return string.Join(":", tc.buildingID, tc.OwnerID,
+                Mathf.RoundToInt(position.x / 2f), Mathf.RoundToInt(position.y / 2f), Mathf.RoundToInt(position.z / 2f));
+        }
+
+        private string RaidSquadKey(IEnumerable<string> botKeys)
+        {
+            return string.Join("|", (botKeys ?? Enumerable.Empty<string>())
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
+        }
+
+        private bool IsRaidTargetClaimed(BuildingPrivlidge tc)
+        {
+            var id = NetId(tc);
+            return raidData.sessions.Values.Any(session => session != null
+                && (session.target_tc_net_id == id || string.Equals(session.target_signature, RaidTargetSignature(tc), StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private bool RaidCooldownActive(Dictionary<string, double> cooldowns, string key, double now)
+        {
+            return !string.IsNullOrWhiteSpace(key) && cooldowns != null
+                && cooldowns.TryGetValue(key, out var until) && until > now;
+        }
+
+        private void PruneRaidCooldowns(double now)
+        {
+            if (raidData == null)
+            {
+                return;
+            }
+            foreach (var key in raidData.squad_cooldowns_utc.Where(entry => entry.Value <= now).Select(entry => entry.Key).ToList())
+            {
+                raidData.squad_cooldowns_utc.Remove(key);
+            }
+            foreach (var key in raidData.failed_target_cooldowns_utc.Where(entry => entry.Value <= now).Select(entry => entry.Key).ToList())
+            {
+                raidData.failed_target_cooldowns_utc.Remove(key);
+            }
+        }
+
+        private BuildingPrivlidge FindRaidTargetTc(RaidSessionState session)
+        {
+            if (session == null)
+            {
+                return null;
+            }
+            var byId = FindServerEntity<BuildingPrivlidge>(session.target_tc_net_id);
+            if (byId != null && !byId.IsDestroyed)
+            {
+                return byId;
+            }
+            return BaseNetworkable.serverEntities?.OfType<BuildingPrivlidge>()
+                .Where(tc => tc != null && !tc.IsDestroyed && tc.buildingID == session.target_building_id)
+                .OrderBy(tc => Distance2D(tc.transform.position, session.target_position))
+                .FirstOrDefault(tc => Distance2D(tc.transform.position, session.target_position) <= 8f);
+        }
+
+        private T FindServerEntity<T>(ulong netId) where T : BaseNetworkable
+        {
+            if (netId == 0UL || BaseNetworkable.serverEntities == null)
+            {
+                return null;
+            }
+            foreach (var networkable in BaseNetworkable.serverEntities)
+            {
+                if (networkable != null && !networkable.IsDestroyed && NetId(networkable) == netId)
+                {
+                    return networkable as T;
+                }
+            }
+            return null;
+        }
+
+        private void RefreshDestroyedRaidBags(RaidSessionState session)
+        {
+            foreach (var bag in session.members.Where(member => member != null)
+                .SelectMany(member => member.bags ?? new List<RaidBagState>())
+                .Where(bag => bag != null && bag.placed && !bag.destroyed))
+            {
+                if (FindServerEntity<SleepingBag>(bag.entity_net_id) == null)
+                {
+                    bag.destroyed = true;
+                    bag.entity_net_id = 0UL;
+                }
+            }
+        }
+
+        private int RaidSurvivingBagCount(RaidSessionState session)
+        {
+            return session?.members?.Where(member => member != null)
+                .SelectMany(member => member.bags ?? new List<RaidBagState>())
+                .Count(bag => bag != null && bag.placed && !bag.destroyed && FindServerEntity<SleepingBag>(bag.entity_net_id) != null) ?? 0;
+        }
+
+        private void RefreshRaidOrdnance(RaidSessionState session)
+        {
+            foreach (var ordnance in session.ordnance.Where(entry => entry != null).ToList())
+            {
+                if (FindServerEntity<BaseEntity>(ordnance.entity_net_id) != null)
+                {
+                    continue;
+                }
+                raidOrdnanceByEntityId.Remove(ordnance.entity_net_id);
+                session.ordnance.Remove(ordnance);
+                if (session.active_ordnance_net_id == ordnance.entity_net_id)
+                {
+                    session.active_ordnance_net_id = 0UL;
+                    session.active_ordnance_kind = "";
+                    var cooldown = string.Equals(ordnance.kind, "hv", StringComparison.OrdinalIgnoreCase) ? 2.5d : 0.5d;
+                    session.next_action_utc = Math.Max(session.next_action_utc, SafeTravelUnixNow() + cooldown);
+                }
+            }
+        }
+
+        private void RegisterRaidOrdnance(RaidSessionState session, RaidOrdnanceState state, BaseEntity entity)
+        {
+            if (session == null || state == null || entity == null)
+            {
+                return;
+            }
+            var marker = entity.GetComponent<RaidlandsRaidOrdnanceMarker>() ?? entity.gameObject.AddComponent<RaidlandsRaidOrdnanceMarker>();
+            marker.SessionId = session.session_id;
+            marker.MemberId = state.member_id;
+            marker.Kind = state.kind;
+            marker.TargetNetId = state.target_net_id;
+            raidOrdnanceByEntityId[state.entity_net_id] = new RaidOrdnanceRuntime
+            {
+                SessionId = session.session_id,
+                MemberId = state.member_id,
+                Kind = state.kind,
+                TargetNetId = state.target_net_id
+            };
+            recentRaidOrdnanceByMemberId[state.member_id] = new RecentRaidOrdnanceRuntime
+            {
+                Ordnance = new RaidOrdnanceRuntime
+                {
+                    SessionId = session.session_id,
+                    MemberId = state.member_id,
+                    Kind = state.kind,
+                    TargetNetId = state.target_net_id
+                },
+                ExpiresUtc = SafeTravelUnixNow() + 20d
+            };
+        }
+
+        private void CleanupRaidAssetsFromData()
+        {
+            if (raidData?.sessions == null)
+            {
+                return;
+            }
+            foreach (var session in raidData.sessions.Values.Where(session => session != null))
+            {
+                foreach (var netId in session.members.Where(member => member != null)
+                    .SelectMany(member => member.bags ?? new List<RaidBagState>())
+                    .Select(bag => bag?.entity_net_id ?? 0UL)
+                    .Concat(session.ordnance.Where(entry => entry != null).Select(entry => entry.entity_net_id))
+                    .Where(id => id != 0UL).Distinct())
+                {
+                    var entity = FindServerEntity<BaseEntity>(netId);
+                    if (entity != null && !entity.IsDestroyed)
+                    {
+                        entity.Kill(BaseNetworkable.DestroyMode.None);
+                    }
+                }
+            }
+        }
+
+        private bool TryTickRaidMemberBrainOverride(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, float now)
+        {
+            if (bot == null || runtime == null || string.IsNullOrWhiteSpace(runtime.RaidSessionId)
+                || config?.BaseRaiding?.Enabled != true
+                || !raidData.sessions.TryGetValue(runtime.RaidSessionId, out var session)
+                || session == null)
+            {
+                return false;
+            }
+
+            var member = session.members.FirstOrDefault(candidate => candidate != null
+                && string.Equals(candidate.member_id, runtime.RaidMemberId, StringComparison.OrdinalIgnoreCase));
+            if (member == null)
+            {
+                runtime.RaidSessionId = "";
+                runtime.RaidMemberId = "";
+                runtime.RaidSeparated = false;
+                return false;
+            }
+
+            member.last_position = bot.transform.position;
+            if (runtime.RaidSeparated || member.separated)
+            {
+                return false;
+            }
+
+            if (snapshot != null && (snapshot.health_need >= 0.2f || snapshot.recent_damage_pressure >= 0.2f || snapshot.contact_confidence >= 0.35f))
+            {
+                return false;
+            }
+
+            var tc = FindRaidTargetTc(session);
+            if (tc == null)
+            {
+                EndRaidSession(session, true, "target TC destroyed");
+                return false;
+            }
+
+            if (runtime.BrainV2?.ActiveAction != null)
+            {
+                InterruptBrainActionV2(bot, runtime, "raid_objective", now);
+            }
+            if (runtime.BrainV2 != null)
+            {
+                runtime.BrainV2.LastDecisionReason = $"raid:{session.stage}";
+            }
+
+            if (TryMoveRaidRallyVolunteer(bot, runtime, session, member, tc))
+            {
+                return true;
+            }
+
+            switch ((session.stage ?? "").ToLowerInvariant())
+            {
+                case "placing_bags":
+                    TickRaidBagPlacement(bot, runtime, session, member);
+                    return true;
+                case "clear_defenses":
+                    return TickRaidDefenseObjective(bot, runtime, session, member, tc);
+                case "breach_foundations":
+                    return TickRaidFoundationObjective(bot, runtime, session, member, tc);
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryMoveRaidRallyVolunteer(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session, RaidMemberState member, BuildingPrivlidge tc)
+        {
+            if (!session.members.Any(candidate => candidate != null && candidate.separated && candidate.alive))
+            {
+                return false;
+            }
+
+            var volunteer = session.members
+                .Where(candidate => candidate != null && candidate.alive && !candidate.separated)
+                .OrderBy(candidate => candidate.member_id, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+            if (volunteer == null || !string.Equals(volunteer.member_id, member.member_id, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (RaidMemberOutsideTargetPrivilege(bot, tc))
+            {
+                return true;
+            }
+
+            var away = bot.transform.position - tc.transform.position;
+            away.y = 0f;
+            if (away.sqrMagnitude < 0.01f)
+            {
+                away = session.approach_position - tc.transform.position;
+                away.y = 0f;
+            }
+            if (away.sqrMagnitude < 0.01f)
+            {
+                away = Vector3.forward;
+            }
+            var destination = tc.transform.position + away.normalized * Math.Max(45f, Distance2D(bot.transform.position, tc.transform.position) + 20f);
+            TryProjectRaidDestination(ref destination);
+            MoveRaidBotTo(bot, runtime, destination, BaseNavigator.NavigationSpeed.Fast);
+            return true;
+        }
+
+        private void TickRaidBagPlacement(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session, RaidMemberState member)
+        {
+            var bag = member.bags.FirstOrDefault(candidate => candidate != null && !candidate.placed && !candidate.destroyed);
+            if (bag == null)
+            {
+                HoldRaidSupportPosition(bot, runtime, session);
+                return;
+            }
+
+            if (!IsUsableRaidBagPosition(session, bag.position, bag))
+            {
+                bag.position = ReplanRaidBagPosition(session, bag);
+            }
+
+            if (Distance2D(bot.transform.position, bag.position) > 3f)
+            {
+                MoveRaidBotTo(bot, runtime, bag.position, BaseNavigator.NavigationSpeed.Fast);
+                return;
+            }
+
+            if (TryPlaceRaidBag(bot, runtime, session, member, bag))
+            {
+                session.first_bag_placed = true;
+                session.last_reason = $"{member.bot_key} placed bag {bag.slot + 1}/{member.desired_bag_count}";
+                QueueSaveRaidData();
+            }
+        }
+
+        private bool IsUsableRaidBagPosition(RaidSessionState session, Vector3 position, RaidBagState current)
+        {
+            if (position == Vector3.zero || IsUnderWater(position) || IsBelowTerrain(position) || IsBlockedSafeZoneSpawn(position))
+            {
+                return false;
+            }
+            return !session.members.Where(member => member != null)
+                .SelectMany(member => member.bags ?? new List<RaidBagState>())
+                .Any(bag => bag != null && !ReferenceEquals(bag, current) && bag.placed && !bag.destroyed
+                    && Distance2D(bag.position, position) < config.BaseRaiding.MinimumBagSpacing);
+        }
+
+        private Vector3 ReplanRaidBagPosition(RaidSessionState session, RaidBagState bag)
+        {
+            var tc = FindRaidTargetTc(session);
+            var foundations = RaidFoundations(tc);
+            if (foundations.Count == 0)
+            {
+                return bag.position;
+            }
+            var total = session.members.Sum(member => member?.desired_bag_count ?? 0);
+            var ordinal = session.members.Where(member => member != null)
+                .SelectMany(member => member.bags ?? new List<RaidBagState>()).ToList().IndexOf(bag);
+            return PlannedRaidBagPosition(session, foundations, Math.Max(0, ordinal) + UnityEngine.Random.Range(0, Math.Max(1, total)), Math.Max(1, total));
+        }
+
+        private bool TryPlaceRaidBag(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session, RaidMemberState member, RaidBagState bag)
+        {
+            var entity = GameManager.server.CreateEntity(RaidSleepingBagPrefab, bag.position, Quaternion.Euler(0f, UnityEngine.Random.Range(0f, 360f), 0f), true) as SleepingBag;
+            if (entity == null)
+            {
+                return false;
+            }
+
+            var player = bot as BasePlayer;
+            entity.OwnerID = player?.userID ?? 0UL;
+            entity.deployerUserID = player?.userID ?? 0UL;
+            entity.niceName = $"RB:{session.session_id}:{member.bot_key}:{bag.slot}";
+            var marker = entity.gameObject.AddComponent<RaidlandsRaidBagMarker>();
+            marker.SessionId = session.session_id;
+            marker.MemberId = member.member_id;
+            marker.Slot = bag.slot;
+            try
+            {
+                entity.Spawn();
+            }
+            catch
+            {
+                SafeKillSpawnAttempt(entity);
+                return false;
+            }
+
+            bag.entity_net_id = NetId(entity);
+            bag.position = entity.transform.position;
+            bag.placed = true;
+            bag.destroyed = false;
+            return bag.entity_net_id != 0UL;
+        }
+
+        private void HoldRaidSupportPosition(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session)
+        {
+            var center = session.approach_position == Vector3.zero ? session.target_position : session.approach_position;
+            if (Distance2D(bot.transform.position, center) > 35f)
+            {
+                MoveRaidBotTo(bot, runtime, center, BaseNavigator.NavigationSpeed.Normal);
+            }
+            else
+            {
+                StopBotAttack(bot, runtime);
+            }
+        }
+
+        private bool MoveRaidBotTo(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed)
+        {
+            var avoidBases = config.AI.DoNotEnterBases;
+            try
+            {
+                config.AI.DoNotEnterBases = false;
+                return MoveBotTo(bot, runtime, destination, speed);
+            }
+            finally
+            {
+                config.AI.DoNotEnterBases = avoidBases;
+            }
+        }
+
+        private bool TryProjectRaidDestination(ref Vector3 position)
+        {
+            TryProjectToLandSurface(ref position);
+            if (!NavMesh.SamplePosition(position, out var hit, Math.Max(8f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas))
+            {
+                return false;
+            }
+            position = hit.position;
+            return !IsUnderWater(position) && !IsBlockedSafeZoneSpawn(position);
+        }
+
+        private bool TickRaidDefenseObjective(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session, RaidMemberState member, BuildingPrivlidge tc)
+        {
+            var defense = FindRaidDefense(session, tc);
+            if (defense == null)
+            {
+                session.current_defense_net_id = 0UL;
+                session.stage = "breach_foundations";
+                session.last_reason = "blocking defenses cleared";
+                session.next_action_utc = SafeTravelUnixNow();
+                ClearRaidTransientItem(bot as BasePlayer, runtime);
+                return true;
+            }
+
+            session.current_defense_net_id = NetId(defense);
+            var breacher = SelectRaidBreacher(session);
+            if (breacher == null || !string.Equals(breacher.member_id, member.member_id, StringComparison.OrdinalIgnoreCase))
+            {
+                HoldRaidSupportPosition(bot, runtime, session);
+                return true;
+            }
+
+            if (session.hv_remaining <= 0)
+            {
+                EndRaidSession(session, false, "HV rockets exhausted with blocking defenses remaining");
+                return true;
+            }
+
+            var distance = Distance2D(bot.transform.position, defense.transform.position);
+            var launchDirection = defense.CenterPoint() - EyePosition(bot);
+            var launchStart = launchDirection.sqrMagnitude > 0.01f
+                ? EyePosition(bot) + launchDirection.normalized * 1.5f + Vector3.up * 0.1f
+                : EyePosition(bot);
+            if (distance < 18f || distance > 60f || !IsRaidOrdnanceLineClear(launchStart, defense.CenterPoint(), bot, defense))
+            {
+                if (TryFindRaidDefenseFiringPosition(bot, defense, tc, session, out var firingPosition))
+                {
+                    MoveRaidBotTo(bot, runtime, firingPosition, BaseNavigator.NavigationSpeed.Fast);
+                }
+                return true;
+            }
+
+            var now = SafeTravelUnixNow();
+            if (now < session.next_action_utc || session.active_ordnance_net_id != 0UL)
+            {
+                return true;
+            }
+
+            var player = bot as BasePlayer;
+            if (runtime.RaidTransientItem == null)
+            {
+                if (PrepareRaidTransientItem(player, runtime, RaidRocketLauncherShortname))
+                {
+                    session.next_action_utc = now + 0.75d;
+                }
+                return true;
+            }
+
+            if (TryLaunchRaidOrdnance(bot, runtime, session, member, defense, "hv"))
+            {
+                session.hv_remaining--;
+                session.last_reason = $"HV launched at {defense.ShortPrefabName}";
+                session.next_action_utc = now + 2.5d;
+                QueueSaveRaidData();
+            }
+            ClearRaidTransientItem(player, runtime);
+            return true;
+        }
+
+        private bool TryFindRaidDefenseFiringPosition(BaseCombatEntity bot, BaseCombatEntity defense, BuildingPrivlidge tc, RaidSessionState session, out Vector3 firingPosition)
+        {
+            firingPosition = bot?.transform.position ?? Vector3.zero;
+            if (defense == null)
+            {
+                return false;
+            }
+
+            var outward = defense.transform.position - (tc == null ? session.approach_position : tc.transform.position);
+            outward.y = 0f;
+            if (outward.sqrMagnitude < 0.01f)
+            {
+                outward = session.approach_position - defense.transform.position;
+                outward.y = 0f;
+            }
+            if (outward.sqrMagnitude < 0.01f)
+            {
+                outward = Vector3.forward;
+            }
+            outward.Normalize();
+
+            // Prefer an outward firing lane so the target building is behind the
+            // defense. Circle samples handle enclosed or awkwardly placed traps.
+            var radii = new[] { 28f, 36f, 22f, 46f };
+            foreach (var radius in radii)
+            {
+                for (var sample = 0; sample < 16; sample++)
+                {
+                    var direction = Quaternion.Euler(0f, sample * 22.5f, 0f) * outward;
+                    var candidate = defense.transform.position + direction * radius;
+                    if (!TryProjectRaidDestination(ref candidate))
+                    {
+                        continue;
+                    }
+                    var from = candidate + Vector3.up * 1.55f;
+                    if (!IsRaidOrdnanceLineClear(from, defense.CenterPoint(), null, defense))
+                    {
+                        continue;
+                    }
+                    firingPosition = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private bool IsRaidOrdnanceLineClear(Vector3 from, Vector3 to, BaseEntity shooter, BaseEntity target)
+        {
+            var delta = to - from;
+            var distance = delta.magnitude;
+            if (distance <= 0.01f)
+            {
+                return false;
+            }
+
+            var mask = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed", "Default", "Tree", "Resource");
+            var hits = Physics.RaycastAll(from, delta.normalized, distance + 0.5f, mask, QueryTriggerInteraction.Ignore)
+                .OrderBy(hit => hit.distance);
+            foreach (var hit in hits)
+            {
+                if (IsSightLineEndpointHit(hit, target))
+                {
+                    return true;
+                }
+                if (shooter != null && IsSightLineEndpointHit(hit, shooter))
+                {
+                    continue;
+                }
+                return false;
+            }
+            return true;
+        }
+
+        private BaseCombatEntity FindRaidDefense(RaidSessionState session, BuildingPrivlidge tc)
+        {
+            var current = FindServerEntity<BaseCombatEntity>(session.current_defense_net_id);
+            if (IsOperationalRaidDefense(current) && IsDefenseAssociatedWithRaid(current, tc))
+            {
+                return current;
+            }
+
+            return BaseNetworkable.serverEntities
+                .OfType<BaseCombatEntity>()
+                .Where(entity => IsOperationalRaidDefense(entity) && IsDefenseAssociatedWithRaid(entity, tc))
+                .OrderBy(entity => Distance2D(entity.transform.position, session.approach_position))
+                .ThenBy(entity => NetId(entity))
+                .FirstOrDefault();
+        }
+
+        private bool IsOperationalRaidDefense(BaseCombatEntity entity)
+        {
+            if (entity == null || entity.IsDestroyed || entity.Health() <= 0f)
+            {
+                return false;
+            }
+            var autoTurret = entity as AutoTurret;
+            if (autoTurret != null)
+            {
+                return autoTurret.IsOnline();
+            }
+            return entity is FlameTurret || entity is GunTrap;
+        }
+
+        private bool IsDefenseAssociatedWithRaid(BaseCombatEntity defense, BuildingPrivlidge tc)
+        {
+            if (defense == null || tc == null || Distance2D(defense.transform.position, tc.transform.position) > 85f)
+            {
+                return false;
+            }
+
+            try
+            {
+                var privilege = defense.GetBuildingPrivilege();
+                if (privilege == tc)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            var decay = defense as DecayEntity;
+            return decay != null && decay.buildingID != 0 && decay.buildingID == tc.buildingID;
+        }
+
+        private bool TickRaidFoundationObjective(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session, RaidMemberState member, BuildingPrivlidge tc)
+        {
+            var newDefense = FindRaidDefense(session, tc);
+            if (newDefense != null)
+            {
+                session.stage = "clear_defenses";
+                session.current_defense_net_id = NetId(newDefense);
+                session.last_reason = "new blocking defense discovered";
+                return true;
+            }
+
+            var foundation = SelectRaidFoundation(session, tc);
+            if (foundation == null)
+            {
+                EndRaidSession(session, false, "no target-building foundation remains while TC survives");
+                return true;
+            }
+
+            var breacher = SelectRaidBreacher(session);
+            if (breacher == null || !string.Equals(breacher.member_id, member.member_id, StringComparison.OrdinalIgnoreCase))
+            {
+                HoldRaidSupportPosition(bot, runtime, session);
+                return true;
+            }
+
+            if (session.c4_remaining <= 0)
+            {
+                EndRaidSession(session, false, "C4 exhausted while target TC survives");
+                return true;
+            }
+
+            var distance = Distance2D(bot.transform.position, foundation.transform.position);
+            if (distance > 5f)
+            {
+                var away = bot.transform.position - foundation.transform.position;
+                away.y = 0f;
+                if (away.sqrMagnitude < 0.01f)
+                {
+                    away = session.approach_position - foundation.transform.position;
+                    away.y = 0f;
+                }
+                if (away.sqrMagnitude < 0.01f)
+                {
+                    away = Vector3.forward;
+                }
+                var placementPosition = foundation.transform.position + away.normalized * 3.5f;
+                if (TryProjectRaidDestination(ref placementPosition))
+                {
+                    MoveRaidBotTo(bot, runtime, placementPosition, BaseNavigator.NavigationSpeed.Fast);
+                }
+                return true;
+            }
+
+            var now = SafeTravelUnixNow();
+            if (now < session.next_action_utc || session.active_ordnance_net_id != 0UL)
+            {
+                return true;
+            }
+
+            var player = bot as BasePlayer;
+            if (runtime.RaidTransientItem == null)
+            {
+                if (PrepareRaidTransientItem(player, runtime, RaidC4Shortname))
+                {
+                    session.next_action_utc = now + 0.75d;
+                }
+                return true;
+            }
+
+            if (TryLaunchRaidOrdnance(bot, runtime, session, member, foundation, "c4"))
+            {
+                session.c4_remaining--;
+                session.last_reason = $"C4 placed on foundation {NetId(foundation)}";
+                session.next_action_utc = now + 1d;
+                QueueSaveRaidData();
+            }
+            ClearRaidTransientItem(player, runtime);
+            return true;
+        }
+
+        private RaidMemberState SelectRaidBreacher(RaidSessionState session)
+        {
+            var live = session.members.Where(member => member != null && member.alive && !member.separated
+                && FindServerEntity<BaseCombatEntity>(member.active_net_id) != null)
+                .OrderBy(member => string.Equals(member.squad_role, "leader", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(member => member.member_id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var selected = live.FirstOrDefault(member => string.Equals(member.member_id, session.breacher_member_id, StringComparison.OrdinalIgnoreCase))
+                ?? live.FirstOrDefault();
+            session.breacher_member_id = selected?.member_id ?? "";
+            return selected;
+        }
+
+        private BuildingBlock SelectRaidFoundation(RaidSessionState session, BuildingPrivlidge tc)
+        {
+            var current = FindServerEntity<BuildingBlock>(session.current_foundation_net_id);
+            if (current != null && !current.IsDestroyed && current.buildingID == session.target_building_id)
+            {
+                return current;
+            }
+
+            var foundations = RaidFoundations(tc);
+            if (foundations.Count == 0)
+            {
+                session.current_foundation_net_id = 0UL;
+                return null;
+            }
+
+            if (!session.breach_seed_set)
+            {
+                var seed = foundations.OrderBy(block => Distance2D(block.transform.position, session.approach_position)).ThenBy(block => NetId(block)).First();
+                session.breach_seed = seed.transform.position;
+                session.breach_seed_set = true;
+            }
+
+            var selected = foundations
+                .OrderBy(block => Mathf.RoundToInt(Distance2D(block.transform.position, session.breach_seed) / 3f))
+                .ThenBy(block => RaidClockwiseBearing(session.breach_seed, block.transform.position))
+                .ThenBy(block => NetId(block))
+                .FirstOrDefault();
+            session.current_foundation_net_id = NetId(selected);
+            return selected;
+        }
+
+        private float RaidClockwiseBearing(Vector3 origin, Vector3 point)
+        {
+            var radians = Mathf.Atan2(point.x - origin.x, point.z - origin.z);
+            return radians < 0f ? radians + Mathf.PI * 2f : radians;
+        }
+
+        private bool PrepareRaidTransientItem(BasePlayer player, BotRuntime runtime, string shortname)
+        {
+            if (player == null || runtime == null || player.inventory?.containerBelt == null)
+            {
+                return false;
+            }
+            ClearRaidTransientItem(player, runtime);
+            var item = ItemManager.CreateByName(shortname, 1);
+            if (item == null)
+            {
+                return false;
+            }
+            if (!item.MoveToContainer(player.inventory.containerBelt))
+            {
+                item.Remove();
+                return false;
+            }
+            runtime.RaidPreviousActiveItem = player.GetActiveItem();
+            runtime.RaidTransientItem = item;
+            if (string.Equals(shortname, RaidRocketLauncherShortname, StringComparison.OrdinalIgnoreCase))
+            {
+                var ammo = ItemManager.CreateByName(RaidHvRocketShortname, 1);
+                if (ammo == null || player.inventory.containerMain == null || !ammo.MoveToContainer(player.inventory.containerMain))
+                {
+                    ammo?.Remove();
+                    ClearRaidTransientItem(player, runtime);
+                    return false;
+                }
+                runtime.RaidTransientAmmoItem = ammo;
+                var launcher = item.GetHeldEntity() as BaseProjectile;
+                if (launcher?.primaryMagazine != null)
+                {
+                    launcher.primaryMagazine.ammoType = ammo.info;
+                    launcher.primaryMagazine.contents = 1;
+                }
+            }
+            player.UpdateActiveItem(item.uid);
+            player.SendNetworkUpdateImmediate();
+            return true;
+        }
+
+        private void ClearRaidTransientItem(BasePlayer player, BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+            var item = runtime.RaidTransientItem;
+            runtime.RaidTransientItem = null;
+            var ammo = runtime.RaidTransientAmmoItem;
+            runtime.RaidTransientAmmoItem = null;
+            if (ammo != null)
+            {
+                try
+                {
+                    ammo.Remove();
+                }
+                catch
+                {
+                }
+            }
+            if (item != null)
+            {
+                try
+                {
+                    item.Remove();
+                }
+                catch
+                {
+                }
+            }
+            var previous = runtime.RaidPreviousActiveItem;
+            runtime.RaidPreviousActiveItem = null;
+            if (player != null && previous != null && previous.parent != null)
+            {
+                try
+                {
+                    player.UpdateActiveItem(previous.uid);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private bool TryLaunchRaidOrdnance(BaseCombatEntity bot, BotRuntime runtime, RaidSessionState session, RaidMemberState member, BaseCombatEntity target, string kind)
+        {
+            if (bot == null || runtime == null || session == null || member == null || target == null || target.IsDestroyed)
+            {
+                return false;
+            }
+            var prefab = string.Equals(kind, "hv", StringComparison.OrdinalIgnoreCase) ? RaidHvRocketPrefab : RaidC4Prefab;
+            var eye = EyePosition(bot);
+            var initialDirection = target.CenterPoint() - eye;
+            if (initialDirection.sqrMagnitude < 0.01f)
+            {
+                return false;
+            }
+            var start = eye + initialDirection.normalized * 1.5f + Vector3.up * 0.1f;
+            var targetPoint = target.CenterPoint();
+            var direction = targetPoint - start;
+            if (direction.sqrMagnitude < 0.01f)
+            {
+                return false;
+            }
+            var entity = GameManager.server.CreateEntity(prefab, start, Quaternion.LookRotation(direction.normalized), true) as BaseEntity;
+            if (entity == null)
+            {
+                return false;
+            }
+            var player = bot as BasePlayer;
+            entity.OwnerID = player?.userID ?? 0UL;
+            try
+            {
+                entity.SetCreatorEntity(bot);
+            }
+            catch
+            {
+            }
+
+            // Tag before Spawn so a point-blank native collision cannot race the
+            // damage authorization hook before the runtime index is populated.
+            var preSpawnMarker = entity.GetComponent<RaidlandsRaidOrdnanceMarker>() ?? entity.gameObject.AddComponent<RaidlandsRaidOrdnanceMarker>();
+            preSpawnMarker.SessionId = session.session_id;
+            preSpawnMarker.MemberId = member.member_id;
+            preSpawnMarker.Kind = kind;
+            preSpawnMarker.TargetNetId = NetId(target);
+
+            var speed = string.Equals(kind, "hv", StringComparison.OrdinalIgnoreCase) ? 48f : 12f;
+            var velocity = string.Equals(kind, "hv", StringComparison.OrdinalIgnoreCase)
+                ? direction.normalized * speed
+                : UtilityThrowVelocity(start, targetPoint, speed);
+            var projectile = entity.GetComponent<ServerProjectile>();
+            if (projectile != null)
+            {
+                projectile.speed = Math.Max(projectile.speed, speed);
+                projectile.InitializeVelocity(velocity);
+            }
+            else
+            {
+                TryInvoke(entity, "SetVelocity", velocity);
+                TryInvoke(entity, "ServerThrow", velocity);
+            }
+
+            recentRaidOrdnanceByMemberId[member.member_id] = new RecentRaidOrdnanceRuntime
+            {
+                Ordnance = new RaidOrdnanceRuntime
+                {
+                    SessionId = session.session_id,
+                    MemberId = member.member_id,
+                    Kind = kind,
+                    TargetNetId = NetId(target)
+                },
+                ExpiresUtc = SafeTravelUnixNow() + 20d
+            };
+
+            try
+            {
+                entity.Spawn();
+                projectile?.SetVelocity(velocity);
+            }
+            catch
+            {
+                recentRaidOrdnanceByMemberId.Remove(member.member_id);
+                SafeKillSpawnAttempt(entity);
+                return false;
+            }
+
+            var state = new RaidOrdnanceState
+            {
+                entity_net_id = NetId(entity),
+                kind = kind,
+                member_id = member.member_id,
+                target_net_id = NetId(target),
+                launched_utc = SafeTravelUnixNow()
+            };
+            if (state.entity_net_id == 0UL)
+            {
+                recentRaidOrdnanceByMemberId.Remove(member.member_id);
+                SafeKillSpawnAttempt(entity);
+                return false;
+            }
+            session.ordnance.Add(state);
+            session.active_ordnance_net_id = state.entity_net_id;
+            session.active_ordnance_kind = kind;
+            RegisterRaidOrdnance(session, state, entity);
+            return true;
+        }
+
+        private bool HandleRaidMemberDeath(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            if (runtime == null || string.IsNullOrWhiteSpace(runtime.RaidSessionId)
+                || !raidData.sessions.TryGetValue(runtime.RaidSessionId, out var session) || session == null)
+            {
+                return false;
+            }
+            var member = session.members.FirstOrDefault(candidate => candidate != null
+                && string.Equals(candidate.member_id, runtime.RaidMemberId, StringComparison.OrdinalIgnoreCase));
+            if (member == null)
+            {
+                return false;
+            }
+
+            ClearRaidTransientItem(bot as BasePlayer, runtime);
+            member.last_position = bot == null ? member.last_position : bot.transform.position;
+            member.active_instance_id = 0UL;
+            member.active_net_id = 0UL;
+            member.alive = false;
+            member.restore_spawn = false;
+
+            if (raidAdministrativeTeardown || lifecycleStopping || runtime.SuppressDeathStats)
+            {
+                member.respawn_due_utc = 0d;
+                QueueSaveRaidData();
+                return true;
+            }
+
+            session.deaths++;
+            session.last_reason = $"member death: {member.bot_key} ({session.kills}/{session.deaths})";
+            member.respawn_due_utc = SafeTravelUnixNow() + config.BaseRaiding.RaidRespawnDelaySeconds;
+            if (ShouldRaidGiveUpForKd(session.kills, session.deaths))
+            {
+                EndRaidSession(session, false, $"raid K/D {session.kills}/{session.deaths} below {config.BaseRaiding.GiveUpBelowKd:0.###}");
+            }
+            else
+            {
+                QueueSaveRaidData();
+            }
+            return true;
+        }
+
+        private bool ShouldRaidGiveUpForKd(int kills, int deaths)
+        {
+            var kd = kills / (float)Math.Max(1, deaths);
+            return deaths >= config.BaseRaiding.MinimumDeathsBeforeKdCheck
+                && kd + 0.000001f < config.BaseRaiding.GiveUpBelowKd;
+        }
+
+        private void ScheduleDueRaidRespawns(RaidSessionState session, double now)
+        {
+            foreach (var member in session.members.Where(member => member != null && !member.alive
+                && member.respawn_due_utc > 0d && member.respawn_due_utc <= now).ToList())
+            {
+                if (!raidData.sessions.ContainsKey(session.session_id))
+                {
+                    return;
+                }
+                if (!TryRespawnRaidMember(session, member, now))
+                {
+                    member.respawn_due_utc = now + 5d;
+                }
+            }
+        }
+
+        private bool TryRespawnRaidMember(RaidSessionState session, RaidMemberState member, double now)
+        {
+            if (session == null || member == null || config?.Enabled != true || !runtimeRunning || lifecycleStopping)
+            {
+                return false;
+            }
+            if (session.first_bag_placed && RaidSurvivingBagCount(session) == 0)
+            {
+                EndRaidSession(session, false, "all raid bags destroyed before respawn");
+                return false;
+            }
+
+            var position = Vector3.zero;
+            var separated = false;
+            RaidBagState selectedBag = null;
+            if (member.restore_spawn && TryResolveRaidSpawnPosition(member.last_position, out position))
+            {
+                separated = member.separated;
+            }
+            else
+            {
+                selectedBag = member.bags
+                    .Where(bag => bag != null && bag.placed && !bag.destroyed && FindServerEntity<SleepingBag>(bag.entity_net_id) != null)
+                    .OrderBy(bag => bag.last_used_utc)
+                    .ThenBy(bag => bag.slot)
+                    .FirstOrDefault();
+                if (selectedBag != null)
+                {
+                    if (!TryResolveRaidSpawnPosition(selectedBag.position, out position))
+                    {
+                        selectedBag.destroyed = true;
+                        selectedBag.entity_net_id = 0UL;
+                        return false;
+                    }
+                    selectedBag.last_used_utc = now;
+                }
+                else
+                {
+                    if (session.first_bag_placed && RaidSurvivingBagCount(session) == 0)
+                    {
+                        EndRaidSession(session, false, "all raid bags destroyed before bagless respawn");
+                        return false;
+                    }
+                    if (!TryFindSpawnPosition(out position, out _))
+                    {
+                        return false;
+                    }
+                    separated = session.first_bag_placed;
+                }
+            }
+
+            member.separated = separated;
+            member.restore_spawn = false;
+            var holdUntil = Time.realtimeSinceStartup + Math.Max(0f, config.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds);
+            var bot = TrySpawnBot(position, session.team_id, member.prefab, null, true, holdUntil,
+                selectedBag == null ? "raid_random_respawn" : "raid_bag_respawn", member);
+            if (bot == null)
+            {
+                return false;
+            }
+            var runtime = RuntimeFor(bot);
+            if (runtime != null)
+            {
+                runtime.RaidSeparated = separated;
+                runtime.SquadRole = member.squad_role;
+                BindRaidMemberRuntime(session, member, bot, runtime);
+            }
+            member.respawn_due_utc = 0d;
+            member.alive = true;
+            QueueSaveRaidData();
+            return true;
+        }
+
+        private bool TryResolveRaidSpawnPosition(Vector3 requested, out Vector3 position)
+        {
+            position = requested;
+            if (position == Vector3.zero || !TryProjectToLandSurface(ref position)
+                || IsUnderWater(position) || IsBlockedSafeZoneSpawn(position))
+            {
+                return false;
+            }
+            if (NavMesh.SamplePosition(position, out var hit, Math.Max(8f, config.Spawn.NavmeshSampleDistance), NavMesh.AllAreas))
+            {
+                position = hit.position;
+                return !IsUnderWater(position) && !IsBlockedSafeZoneSpawn(position);
+            }
+            return false;
+        }
+
+        private void TryRallySeparatedRaidMembers(RaidSessionState session, BuildingPrivlidge tc)
+        {
+            var separated = session.members.Where(member => member != null && member.alive && member.separated).ToList();
+            if (separated.Count == 0)
+            {
+                return;
+            }
+            var teammate = session.members.Where(member => member != null && member.alive && !member.separated)
+                .Select(member => new
+                {
+                    Member = member,
+                    Bot = FindServerEntity<BaseCombatEntity>(member.active_net_id),
+                    Runtime = botRecordsByInstanceId.TryGetValue(member.active_instance_id, out var runtime) ? runtime : null
+                })
+                .FirstOrDefault(entry => entry.Bot != null && entry.Runtime != null && RaidMemberOutsideTargetPrivilege(entry.Bot, tc));
+            if (teammate == null)
+            {
+                return;
+            }
+
+            foreach (var member in separated)
+            {
+                var bot = FindServerEntity<BaseCombatEntity>(member.active_net_id);
+                var runtime = botRecordsByInstanceId.TryGetValue(member.active_instance_id, out var foundRuntime) ? foundRuntime : null;
+                if (bot == null || runtime == null || Time.realtimeSinceStartup < runtime.ActionBlockedUntil
+                    || !TryFindDirectTeammateTeleportPosition(teammate.Bot, out var destination))
+                {
+                    continue;
+                }
+                StopBotAttack(bot, runtime);
+                var player = bot as BasePlayer;
+                if (player != null)
+                {
+                    player.Teleport(destination);
+                }
+                else
+                {
+                    bot.transform.position = destination;
+                    bot.SendNetworkUpdateImmediate();
+                }
+                runtime.HomePosition = destination;
+                runtime.SpawnPosition = destination;
+                runtime.CurrentDestination = destination;
+                runtime.RaidSeparated = false;
+                runtime.ActionBlockedUntil = Time.realtimeSinceStartup + Math.Max(0f, config.AmbientSquadRespawnRejoin.WakeupEquipDelaySeconds);
+                runtime.ActionBlockReason = "raid_rally_rejoin";
+                member.last_position = destination;
+                member.separated = false;
+                session.last_reason = $"rallied separated member {member.bot_key}";
+            }
+            QueueSaveRaidData();
+        }
+
+        private bool RaidMemberOutsideTargetPrivilege(BaseCombatEntity bot, BuildingPrivlidge tc)
+        {
+            var player = bot as BasePlayer;
+            if (player == null || tc == null)
+            {
+                return false;
+            }
+            try
+            {
+                return player.GetBuildingPrivilege() != tc;
+            }
+            catch
+            {
+                return Distance2D(player.transform.position, tc.transform.position) > 45f;
+            }
+        }
+
+        private void RecordRaidPlayerKill(BasePlayer victim, HitInfo info, BotRuntime attackerRuntime)
+        {
+            if (victim == null || ShouldIgnoreRealPlayerTarget(victim))
+            {
+                return;
+            }
+            var sessionId = attackerRuntime?.RaidSessionId ?? "";
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                var initiator = info?.Initiator as BaseEntity ?? info?.WeaponPrefab;
+                var marker = initiator?.GetComponent<RaidlandsRaidOrdnanceMarker>();
+                sessionId = marker?.SessionId ?? "";
+                if (string.IsNullOrWhiteSpace(sessionId) && initiator != null
+                    && raidOrdnanceByEntityId.TryGetValue(NetId(initiator), out var ordnance))
+                {
+                    sessionId = ordnance.SessionId;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(sessionId) && raidData.sessions.TryGetValue(sessionId, out var session))
+            {
+                session.kills++;
+                session.last_reason = $"raid kill: {PlayerName(victim)} ({session.kills}/{session.deaths})";
+                QueueSaveRaidData();
+            }
+        }
+
+        private void EndRaidSession(RaidSessionState session, bool victory, string reason)
+        {
+            if (session == null || raidData?.sessions == null || !raidData.sessions.Remove(session.session_id))
+            {
+                return;
+            }
+            session.last_reason = reason ?? (victory ? "victory" : "give_up");
+            var now = SafeTravelUnixNow();
+            if (session.members.Any(member => member != null && member.alive))
+            {
+                raidData.squad_cooldowns_utc[session.squad_key] = now + config.BaseRaiding.SquadRaidCooldownMinutes * 60d;
+            }
+            if (!victory && !string.IsNullOrWhiteSpace(session.target_signature))
+            {
+                raidData.failed_target_cooldowns_utc[session.target_signature] = now + config.BaseRaiding.FailedTargetCooldownMinutes * 60d;
+            }
+
+            foreach (var member in session.members.Where(member => member != null))
+            {
+                recentRaidOrdnanceByMemberId.Remove(member.member_id ?? "");
+                if (raidRespawnTimers.TryGetValue(member.member_id, out var pending))
+                {
+                    pending?.Destroy();
+                    raidRespawnTimers.Remove(member.member_id);
+                }
+                var bot = FindServerEntity<BaseCombatEntity>(member.active_net_id);
+                var runtime = botRecordsByInstanceId.TryGetValue(member.active_instance_id, out var foundRuntime) ? foundRuntime : null;
+                if (runtime != null)
+                {
+                    ClearRaidTransientItem(bot as BasePlayer, runtime);
+                    runtime.RaidSessionId = "";
+                    runtime.RaidMemberId = "";
+                    runtime.RaidSeparated = false;
+                    if (bot != null && IsLiveBot(bot))
+                    {
+                        runtime.CurrentDestination = FindRoamDestination(bot.transform.position, runtime);
+                    }
+                }
+                foreach (var bag in member.bags.Where(bag => bag != null && bag.entity_net_id != 0UL))
+                {
+                    var entity = FindServerEntity<SleepingBag>(bag.entity_net_id);
+                    bag.destroyed = true;
+                    bag.entity_net_id = 0UL;
+                    if (entity != null && !entity.IsDestroyed)
+                    {
+                        entity.Kill(BaseNetworkable.DestroyMode.None);
+                    }
+                }
+            }
+
+            foreach (var ordnance in session.ordnance.Where(entry => entry != null).ToList())
+            {
+                raidOrdnanceByEntityId.Remove(ordnance.entity_net_id);
+                var entity = FindServerEntity<BaseEntity>(ordnance.entity_net_id);
+                if (entity != null && !entity.IsDestroyed)
+                {
+                    entity.Kill(BaseNetworkable.DestroyMode.None);
+                }
+            }
+            session.ordnance.Clear();
+            BotLog($"Raid {session.session_id.Substring(0, Math.Min(8, session.session_id.Length))} ended: {(victory ? "victory" : "give-up")}, reason={session.last_reason}, K/D={session.kills}/{session.deaths}, HV={session.hv_remaining}, C4={session.c4_remaining}.");
+            SaveRaidData();
+        }
+
+        private void AbortAllRaidSessions(string reason, bool failed)
+        {
+            if (raidData?.sessions == null)
+            {
+                return;
+            }
+            foreach (var session in raidData.sessions.Values.ToList())
+            {
+                EndRaidSession(session, !failed, reason);
+            }
+        }
+
         private object OnDeathNotice(Dictionary<string, object> deathData, string message)
         {
             if (config?.BotKillIntegration?.SuppressDeathNotesForRoamBotKills != true)
@@ -10683,12 +15632,15 @@ namespace Oxide.Plugins
         {
             var baseEntity = entity as BaseEntity;
 
-            if (baseEntity == null || config?.AI?.SmokeBlocksVision != true || !IsSmokeOccluderEntity(baseEntity))
+            if (baseEntity == null)
             {
                 return;
             }
 
-            RegisterSmokeOccluder(baseEntity, Time.realtimeSinceStartup, "world");
+            if (config?.AI?.SmokeBlocksVision == true && IsSmokeOccluderEntity(baseEntity))
+            {
+                RegisterSmokeOccluder(baseEntity, Time.realtimeSinceStartup, "world");
+            }
         }
 
         private void OnEntityKill(BaseNetworkable entity)
@@ -10705,6 +15657,7 @@ namespace Oxide.Plugins
             if (baseEntity != null)
             {
                 activeSmokeOccluders.RemoveAll(smoke => smoke == null || smoke.Entity == baseEntity);
+                HandleRaidEntityKilled(baseEntity);
             }
 
             var bot = entity as BaseCombatEntity;
@@ -10714,11 +15667,86 @@ namespace Oxide.Plugins
                 return;
             }
 
+            var marker = bot.GetComponent<RaidlandsRoamBotMarker>();
             activeBots.TryGetValue(bot, out var runtime);
-            ClearBotCrouch(bot, runtime, "entity-kill", Time.realtimeSinceStartup);
-            activeBots.Remove(bot);
-            despawningBots.Remove(bot);
-            DestroyBotMapMarker(bot);
+            if (runtime == null)
+            {
+                if (marker != null)
+                {
+                    botRecordsByInstanceId.TryGetValue(marker.InstanceId, out runtime);
+                }
+            }
+
+            if (runtime != null || marker != null)
+            {
+                DisablePoolingForNativeBrainTeardown(bot);
+            }
+
+            if (runtime != null)
+            {
+                if (!runtime.CleanupStarted)
+                {
+                    runtime.CleanupStarted = true;
+                    runtime.ReplacementRequested = runtimeRunning && !lifecycleStopping && !IsManagedBot(runtime);
+                }
+                ConfirmBotEntityDestroyed(bot, runtime, "OnEntityKill");
+            }
+            else
+            {
+                despawningBots.Remove(bot);
+                DestroyBotMapMarker(bot);
+            }
+        }
+
+        private void HandleRaidEntityKilled(BaseEntity entity)
+        {
+            if (entity == null || raidData?.sessions == null)
+            {
+                return;
+            }
+            var netId = NetId(entity);
+            foreach (var session in raidData.sessions.Values.ToList())
+            {
+                if (session == null)
+                {
+                    continue;
+                }
+                if (session.target_tc_net_id == netId)
+                {
+                    EndRaidSession(session, true, "target TC destroyed");
+                    continue;
+                }
+                foreach (var bag in session.members.Where(member => member != null)
+                    .SelectMany(member => member.bags ?? new List<RaidBagState>())
+                    .Where(bag => bag != null && bag.entity_net_id == netId))
+                {
+                    bag.destroyed = true;
+                    bag.entity_net_id = 0UL;
+                    session.last_reason = "raid bag destroyed";
+                }
+                var ordnance = session.ordnance.FirstOrDefault(entry => entry != null && entry.entity_net_id == netId);
+                if (ordnance != null)
+                {
+                    session.ordnance.Remove(ordnance);
+                    raidOrdnanceByEntityId.Remove(netId);
+                    if (session.active_ordnance_net_id == netId)
+                    {
+                        session.active_ordnance_net_id = 0UL;
+                        session.active_ordnance_kind = "";
+                        var cooldown = string.Equals(ordnance.kind, "hv", StringComparison.OrdinalIgnoreCase) ? 2.5d : 0.5d;
+                        session.next_action_utc = Math.Max(session.next_action_utc, SafeTravelUnixNow() + cooldown);
+                    }
+                }
+                if (session.current_defense_net_id == netId)
+                {
+                    session.current_defense_net_id = 0UL;
+                }
+                if (session.current_foundation_net_id == netId)
+                {
+                    session.current_foundation_net_id = 0UL;
+                }
+            }
+            QueueSaveRaidData();
         }
 
         private object OnServerCommand(ConsoleSystem.Arg arg)
@@ -11241,6 +16269,7 @@ namespace Oxide.Plugins
                 LoadConfig();
                 LoadData();
                 LoadBehaviorModels();
+                LoadTrainingV2Policy();
                 RefreshEligibleKits();
                 RefreshDecisionAdvisor();
                 RefreshLearningTimer();
@@ -11274,16 +16303,8 @@ namespace Oxide.Plugins
                 config.Enabled = false;
                 SaveConfig();
                 StopRuntime();
-
-                if (config.Persistence.KillBotsOnDisable)
-                {
-                    KillAllBots(!config.Persistence.LeaveCorpses);
-                    Reply(arg, "Raidlands roam bots disabled and active bots removed by persistence config.");
-                }
-                else
-                {
-                    Reply(arg, "Raidlands roam bots disabled. Existing bots are left alone by persistence config.");
-                }
+                KillAllBots(false);
+                Reply(arg, "Raidlands roam bots disabled and all owned NPC entities/brains removed.");
 
                 return true;
             }
@@ -11514,16 +16535,8 @@ namespace Oxide.Plugins
                     config.Enabled = false;
                     SaveConfig();
                     StopRuntime();
-
-                    if (config.Persistence.KillBotsOnDisable)
-                    {
-                        KillAllBots(!config.Persistence.LeaveCorpses);
-                        Reply(arg, "Raidlands roam bots disabled and active bots removed by persistence config.");
-                    }
-                    else
-                    {
-                        Reply(arg, "Raidlands roam bots disabled. Existing bots are left alone by persistence config.");
-                    }
+                    KillAllBots(false);
+                    Reply(arg, "Raidlands roam bots disabled and all owned NPC entities/brains removed.");
 
                     return;
 
@@ -11565,6 +16578,7 @@ namespace Oxide.Plugins
                     LoadConfig();
                     LoadData();
                     LoadBehaviorModels();
+                    LoadTrainingV2Policy();
                     RefreshEligibleKits();
                     RefreshDecisionAdvisor();
                     RefreshLearningTimer();
@@ -11623,6 +16637,332 @@ namespace Oxide.Plugins
             }
         }
 
+        [ConsoleCommand("raidbots.raids")]
+        private void CmdRaids(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bot raids.");
+                return;
+            }
+
+            var action = ArgString(arg, 0).Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(action) || action == "status" || action == "list")
+            {
+                var now = SafeTravelUnixNow();
+                Reply(arg, $"Raidlands base raiding: enabled={config.BaseRaiding.Enabled}, discovery={config.BaseRaiding.DiscoveryMode}, active={raidData.sessions.Count}, squadCooldowns={raidData.squad_cooldowns_utc.Count(entry => entry.Value > now)}, targetCooldowns={raidData.failed_target_cooldowns_utc.Count(entry => entry.Value > now)}.");
+                foreach (var session in raidData.sessions.Values.OrderBy(session => session.started_utc))
+                {
+                    Reply(arg, RaidSessionStatus(session));
+                }
+                return;
+            }
+
+            if (action == "enable")
+            {
+                config.BaseRaiding.Enabled = true;
+                SaveConfig();
+                StartRaidRuntime();
+                Reply(arg, "Raidlands base raiding enabled.");
+                return;
+            }
+
+            if (action == "disable")
+            {
+                config.BaseRaiding.Enabled = false;
+                SaveConfig();
+                AbortAllRaidSessions("base raiding disabled by admin", true);
+                StopRaidRuntime();
+                Reply(arg, "Raidlands base raiding disabled; active raids and raid assets were cleaned up.");
+                return;
+            }
+
+            if (action == "mode")
+            {
+                var mode = ArgString(arg, 1).Trim().ToLowerInvariant();
+                if (mode != RaidDiscoveryNearby && mode != RaidDiscoveryEncounter)
+                {
+                    Reply(arg, $"Usage: raidbots.raids mode {RaidDiscoveryNearby}|{RaidDiscoveryEncounter}");
+                    return;
+                }
+                config.BaseRaiding.DiscoveryMode = mode;
+                SaveConfig();
+                Reply(arg, $"Raid discovery mode set to {mode}.");
+                return;
+            }
+
+            if (action == "abort")
+            {
+                var query = ArgString(arg, 1).Trim();
+                var matches = raidData.sessions.Values.Where(session => session.session_id.StartsWith(query, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (string.IsNullOrWhiteSpace(query) || matches.Count != 1)
+                {
+                    Reply(arg, matches.Count > 1 ? "Raid id prefix is ambiguous." : "Raid not found. Run raidbots.raids list.");
+                    return;
+                }
+                EndRaidSession(matches[0], false, "admin abort");
+                Reply(arg, $"Raid {matches[0].session_id} aborted.");
+                return;
+            }
+
+            if (action == "selftest")
+            {
+                if (!string.Equals(ConVar.Server.identity, "raidlands-dev", StringComparison.OrdinalIgnoreCase))
+                {
+                    Reply(arg, "raidbots.raids selftest is available only on the raidlands-dev server identity.");
+                    return;
+                }
+                var defaultsMatch = config.BaseRaiding.BagsPerMemberMinimum == 1
+                    && config.BaseRaiding.BagsPerMemberMaximum == 3
+                    && config.BaseRaiding.SharedHvRocketBudget == 48
+                    && config.BaseRaiding.SharedC4Budget == 96
+                    && config.BaseRaiding.MinimumDeathsBeforeKdCheck == 5
+                    && Math.Abs(config.BaseRaiding.GiveUpBelowKd - 0.1f) < 0.0001f;
+                var kdBoundaries = !ShouldRaidGiveUpForKd(0, 4)
+                    && ShouldRaidGiveUpForKd(0, 5)
+                    && !ShouldRaidGiveUpForKd(1, 10)
+                    && ShouldRaidGiveUpForKd(1, 11);
+                Reply(arg, $"[RLTEST] RESULT {(defaultsMatch && kdBoundaries ? "PASS" : "FAIL")} RoamBotRaids selftest defaults={defaultsMatch} kdBoundaries={kdBoundaries} fingerprint={!string.IsNullOrWhiteSpace(RaidMapFingerprint())}");
+                return;
+            }
+
+            if (action == "teststart")
+            {
+                if (!string.Equals(ConVar.Server.identity, "raidlands-dev", StringComparison.OrdinalIgnoreCase))
+                {
+                    Reply(arg, "raidbots.raids teststart is available only on the raidlands-dev server identity.");
+                    return;
+                }
+                if (!ulong.TryParse(ArgString(arg, 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out var tcId))
+                {
+                    Reply(arg, "Usage: raidbots.raids teststart <tcNetId>");
+                    return;
+                }
+                var tc = FindServerEntity<BuildingPrivlidge>(tcId);
+                Reply(arg, StartAdminRaid(tc));
+                return;
+            }
+
+            if (action == "teststartlooking")
+            {
+                var player = arg?.Player();
+                if (player == null || player.eyes == null)
+                {
+                    Reply(arg, "raidbots.raids teststartlooking must be run by an in-game admin while aiming directly at a TC.");
+                    return;
+                }
+
+                var tc = FindLookedAtRaidTestTc(player);
+                if (tc == null)
+                {
+                    Reply(arg, "No TC found. Stand within 12m and aim directly at the tool cupboard, then try again.");
+                    return;
+                }
+
+                Reply(arg, StartAdminRaid(tc));
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.raids [status|list|enable|disable|mode <nearby_scan|defender_encounter>|abort <raidId>|selftest|teststart <tcNetId>|teststartlooking]");
+        }
+
+        private BuildingPrivlidge FindLookedAtRaidTestTc(BasePlayer player)
+        {
+            if (player == null || player.eyes == null)
+            {
+                return null;
+            }
+
+            var mask = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed", "Default");
+            var hits = Physics.RaycastAll(player.eyes.position, player.eyes.HeadForward(), 12f, mask, QueryTriggerInteraction.Ignore)
+                .OrderBy(hit => hit.distance);
+            foreach (var hit in hits)
+            {
+                if (IsSightLineEndpointHit(hit, player))
+                {
+                    continue;
+                }
+
+                var entity = hit.GetEntity();
+                for (var depth = 0; entity != null && depth < 8; depth++)
+                {
+                    if (entity is BuildingPrivlidge tc)
+                    {
+                        return tc;
+                    }
+                    entity = entity.GetParentEntity();
+                }
+
+                var componentTc = hit.collider?.GetComponentInParent<BuildingPrivlidge>();
+                return componentTc;
+            }
+
+            return null;
+        }
+
+        private string StartAdminRaid(BuildingPrivlidge tc)
+        {
+            var squad = ActiveBotEntries().Where(entry => IsLiveBot(entry.Key) && !IsManagedBot(entry.Value) && string.IsNullOrWhiteSpace(entry.Value.RaidSessionId))
+                .GroupBy(entry => entry.Value.TeamId)
+                .OrderBy(group => tc == null ? float.MaxValue : Distance2D(AveragePosition(group.Select(entry => entry.Key.transform.position)), tc.transform.position))
+                .FirstOrDefault()?.ToList();
+            if (tc == null || squad == null || squad.Count == 0)
+            {
+                return "Test start requires a live TC and an uncommitted ambient squad.";
+            }
+
+            var tcId = NetId(tc);
+            var started = CommitRaidSession(squad, tc, RaidSquadKey(squad.Select(entry => entry.Value.BotKey)), SafeTravelUnixNow());
+            return started ? $"Admin raid started on TC {tcId}." : "Admin raid could not be started.";
+        }
+
+        private string RaidSessionStatus(RaidSessionState session)
+        {
+            if (session == null)
+            {
+                return "Raid: invalid session.";
+            }
+            var bags = RaidSurvivingBagCount(session);
+            var separated = session.members.Count(member => member != null && member.alive && member.separated);
+            var defenseHealth = FindServerEntity<BaseCombatEntity>(session.current_defense_net_id)?.Health() ?? -1f;
+            var foundationHealth = FindServerEntity<BaseCombatEntity>(session.current_foundation_net_id)?.Health() ?? -1f;
+            return $"Raid {session.session_id.Substring(0, Math.Min(8, session.session_id.Length))}: team={session.team_id}, stage={session.stage}, tc={session.target_tc_net_id}, members={session.members.Count}, separated={separated}, bags={bags}, K/D={session.kills}/{session.deaths}, HV={session.hv_remaining}, C4={session.c4_remaining}, defenseHP={defenseHealth:0.#}, foundationHP={foundationHealth:0.#}, reason={session.last_reason}.";
+        }
+
+        [HookMethod("API_RaidlandsDevRaidSnapshot")]
+        private object ApiRaidlandsDevRaidSnapshot()
+        {
+            if (!string.Equals(ConVar.Server.identity, "raidlands-dev", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            return new JObject
+            {
+                ["enabled"] = config?.BaseRaiding?.Enabled == true,
+                ["discovery_mode"] = config?.BaseRaiding?.DiscoveryMode ?? "",
+                ["sessions"] = new JArray(raidData.sessions.Values.Select(session => new JObject
+                {
+                    ["session_id"] = session.session_id,
+                    ["team_id"] = session.team_id,
+                    ["stage"] = session.stage,
+                    ["target_tc"] = session.target_tc_net_id,
+                    ["members"] = session.members.Count,
+                    ["member_net_ids"] = new JArray(session.members.Where(member => member != null).Select(member => member.active_net_id)),
+                    ["member_states"] = new JArray(session.members.Where(member => member != null).Select(member =>
+                    {
+                        var nextBag = member.bags?.FirstOrDefault(bag => bag != null && !bag.placed && !bag.destroyed);
+                        return new JObject
+                        {
+                            ["net_id"] = member.active_net_id,
+                            ["alive"] = member.alive,
+                            ["desired_bags"] = member.desired_bag_count,
+                            ["placed_bags"] = member.bags?.Count(bag => bag != null && bag.placed && !bag.destroyed) ?? 0,
+                            ["next_bag"] = nextBag == null ? null : VectorPayload(nextBag.position)
+                        };
+                    })),
+                    ["separated"] = session.members.Count(member => member != null && member.separated),
+                    ["bags"] = RaidSurvivingBagCount(session),
+                    ["kills"] = session.kills,
+                    ["deaths"] = session.deaths,
+                    ["hv_remaining"] = session.hv_remaining,
+                    ["c4_remaining"] = session.c4_remaining,
+                    ["current_defense_health"] = FindServerEntity<BaseCombatEntity>(session.current_defense_net_id)?.Health() ?? -1f,
+                    ["current_foundation_health"] = FindServerEntity<BaseCombatEntity>(session.current_foundation_net_id)?.Health() ?? -1f,
+                    ["reason"] = session.last_reason
+                }))
+            };
+        }
+
+        [HookMethod("API_RaidlandsDevPrepareRaidSmoke")]
+        private object ApiRaidlandsDevPrepareRaidSmoke(string sessionId)
+        {
+            if (!string.Equals(ConVar.Server.identity, "raidlands-dev", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(sessionId)
+                || !raidData.sessions.TryGetValue(sessionId, out var session)
+                || session == null)
+            {
+                return false;
+            }
+
+            session.dev_smoke_protected = true;
+
+            foreach (var member in session.members.Where(member => member != null && member.alive))
+            {
+                var bot = FindServerEntity<BaseCombatEntity>(member.active_net_id);
+                var runtime = botRecordsByInstanceId.TryGetValue(member.active_instance_id, out var foundRuntime) ? foundRuntime : null;
+                if (bot == null || runtime == null)
+                {
+                    continue;
+                }
+                StopBotAttack(bot, runtime);
+                runtime.Memory = new TacticalMemory();
+                runtime.BrainV2?.Contacts.Clear();
+                runtime.BrainV2?.RecentEvents.Clear();
+                runtime.LastDamageTakenAt = -1000f;
+                runtime.LastDamageDealtAt = -1000f;
+                runtime.LastPlayerAttackAt = -1000f;
+                bot.SetHealth(bot.MaxHealth());
+
+                if (string.Equals(session.stage, "placing_bags", StringComparison.OrdinalIgnoreCase))
+                {
+                    var nextBag = member.bags?.FirstOrDefault(bag => bag != null && !bag.placed && !bag.destroyed);
+                    var player = bot as BasePlayer;
+                    if (nextBag != null && player != null)
+                    {
+                        player.Teleport(nextBag.position);
+                        member.last_position = nextBag.position;
+                        TickRaidBagPlacement(bot, runtime, session, member);
+                    }
+                }
+                else if (string.Equals(session.stage, "clear_defenses", StringComparison.OrdinalIgnoreCase))
+                {
+                    var tc = FindRaidTargetTc(session);
+                    var defense = FindRaidDefense(session, tc);
+                    var breacher = SelectRaidBreacher(session);
+                    var player = bot as BasePlayer;
+                    if (breacher != null && player != null
+                        && string.Equals(breacher.member_id, member.member_id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (defense == null)
+                        {
+                            TickRaidDefenseObjective(bot, runtime, session, member, tc);
+                        }
+                        else if (TryFindRaidDefenseFiringPosition(bot, defense, tc, session, out var firingPosition))
+                        {
+                            player.Teleport(firingPosition);
+                            member.last_position = firingPosition;
+                            TickRaidDefenseObjective(bot, runtime, session, member, tc);
+                        }
+                    }
+                }
+                else if (string.Equals(session.stage, "breach_foundations", StringComparison.OrdinalIgnoreCase))
+                {
+                    var tc = FindRaidTargetTc(session);
+                    var foundation = SelectRaidFoundation(session, tc);
+                    var breacher = SelectRaidBreacher(session);
+                    var player = bot as BasePlayer;
+                    if (foundation != null && breacher != null && player != null
+                        && string.Equals(breacher.member_id, member.member_id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var away = session.approach_position - foundation.transform.position;
+                        away.y = 0f;
+                        if (away.sqrMagnitude < 0.01f)
+                        {
+                            away = Vector3.forward;
+                        }
+                        var placementPosition = foundation.transform.position + away.normalized * 3.5f;
+                        if (TryProjectRaidDestination(ref placementPosition))
+                        {
+                            player.Teleport(placementPosition);
+                            member.last_position = placementPosition;
+                            TickRaidFoundationObjective(bot, runtime, session, member, tc);
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
         [ConsoleCommand("raidbots.status")]
         private void CmdStatus(ConsoleSystem.Arg arg)
         {
@@ -11635,7 +16975,7 @@ namespace Oxide.Plugins
             RefreshEligibleKits();
             var retrySeconds = Math.Max(0f, spawnRetryBlockedUntil - Time.realtimeSinceStartup);
             var retryMessage = retrySeconds > 0f ? $", spawn retry in {retrySeconds:0}s" : "";
-            Reply(arg, $"Raidlands roam bots: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, brain={TacticalBrainName}, anchor={SpawnAnchorLabel()}, target={TargetPopulation()}, ambient={AmbientBotCount()}, managed={ManagedBotCount()}/{config.ManagedApi.MaximumManagedBots}, active={activeBots.Count}{retryMessage}, mapMarkers={BotMapMarkerStatus()}, advisor={config.DecisionAdvisor.Provider}/{config.DecisionAdvisor.Mode}, chat={config.BotChat.Enabled}/{config.BotChat.AiRepliesEnabled}/{BotChatAiCallsInWindow()}/{config.BotChat.OpenAiCallsPerHour}, near-player anchors={SpawnAnchorPlayers().Count}, eligible kits={string.Join(", ", eligibleKits.Keys.OrderBy(name => name))}, tracked players={data.players.Count}, tracked bots={data.bots.Count}, tracked clans={data.bot_clans.Count}.");
+            Reply(arg, $"Raidlands roam bots: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, brain={TacticalBrainName}, anchor={SpawnAnchorLabel()}, target={TargetPopulation()}, ambient={AmbientBotCount()}, managed={ManagedBotCount()}/{config.ManagedApi.MaximumManagedBots}, active={activeBots.Count}{retryMessage}, raids={config.BaseRaiding.Enabled}/{config.BaseRaiding.DiscoveryMode}/{raidData.sessions.Count}, mapMarkers={BotMapMarkerStatus()}, advisor={config.DecisionAdvisor.Provider}/{config.DecisionAdvisor.Mode}, chat={config.BotChat.Enabled}/{config.BotChat.AiRepliesEnabled}/{BotChatAiCallsInWindow()}/{config.BotChat.OpenAiCallsPerHour}, near-player anchors={SpawnAnchorPlayers().Count}, eligible kits={string.Join(", ", eligibleKits.Keys.OrderBy(name => name))}, tracked players={data.players.Count}, tracked bots={data.bots.Count}, tracked clans={data.bot_clans.Count}.");
         }
 
         [ConsoleCommand("raidbots.enable")]
@@ -11669,16 +17009,10 @@ namespace Oxide.Plugins
 
             config.Enabled = false;
             SaveConfig();
+            AbortAllRaidSessions("Raidlands roam bots disabled", true);
             StopRuntime();
-            if (config.Persistence.KillBotsOnDisable)
-            {
-                KillAllBots(!config.Persistence.LeaveCorpses);
-                Reply(arg, "Raidlands roam bots disabled and active bots removed by persistence config.");
-            }
-            else
-            {
-                Reply(arg, "Raidlands roam bots disabled. Existing bots are left alone by persistence config; use raidbots.nuke to remove tracked bots.");
-            }
+            KillAllBots(false);
+            Reply(arg, "Raidlands roam bots disabled and all owned NPC entities/brains removed.");
         }
 
         [ConsoleCommand("raidbots.reload")]
@@ -11693,6 +17027,7 @@ namespace Oxide.Plugins
             LoadConfig();
             LoadData();
             LoadBehaviorModels();
+            LoadTrainingV2Policy();
             RefreshEligibleKits();
             RefreshDecisionAdvisor();
             RefreshLearningTimer();
@@ -11737,7 +17072,7 @@ namespace Oxide.Plugins
 
             CleanupInactiveBots();
 
-            var available = TargetPopulation() - AmbientBotCount();
+            var available = TargetPopulation() - EffectiveAmbientPopulation();
 
             if (available <= 0)
             {
@@ -11764,7 +17099,7 @@ namespace Oxide.Plugins
             CleanupInactiveBots();
 
             var anchors = SpawnAnchorPlayers();
-            Reply(arg, $"Raidlands roam bot diag: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, brain={TacticalBrainName}, anchor={SpawnAnchorLabel()}, anchors={anchors.Count}, debugViewers={DebugUiViewerCount()}, target={TargetPopulation()}, ambient={AmbientBotCount()}, managed={ManagedBotCount()}/{config.ManagedApi.MaximumManagedBots}, active={activeBots.Count}, mapMarkers={BotMapMarkerStatus()}, requireLand={config.Spawn.RequireLandSpawns}, advisor={config.DecisionAdvisor.Provider}/{config.DecisionAdvisor.Mode}, chat={config.BotChat.Enabled}/{config.BotChat.AiRepliesEnabled}/{BotChatAiCallsInWindow()}/{config.BotChat.OpenAiCallsPerHour}.");
+            Reply(arg, $"Raidlands roam bot diag: enabled={config.Enabled}, mode={config.Spawn.SpawnMode}, brain={TacticalBrainName}, anchor={SpawnAnchorLabel()}, anchors={anchors.Count}, debugViewers={DebugUiViewerCount()}, target={TargetPopulation()}, ambient={AmbientBotCount()}, managed={ManagedBotCount()}/{config.ManagedApi.MaximumManagedBots}, active={activeBots.Count}, raids={config.BaseRaiding.Enabled}/{config.BaseRaiding.DiscoveryMode}/{raidData.sessions.Count}, mapMarkers={BotMapMarkerStatus()}, requireLand={config.Spawn.RequireLandSpawns}, advisor={config.DecisionAdvisor.Provider}/{config.DecisionAdvisor.Mode}, chat={config.BotChat.Enabled}/{config.BotChat.AiRepliesEnabled}/{BotChatAiCallsInWindow()}/{config.BotChat.OpenAiCallsPerHour}.");
 
             var liveOwnedBots = activeBots.Count(entry => IsLiveBot(entry.Key));
             var configuredKeys = new HashSet<string>(ConfiguredBotIdentities()
@@ -11800,8 +17135,336 @@ namespace Oxide.Plugins
             }
         }
 
-        [ConsoleCommand("raidbots.v2")]
-        private void CmdV2(ConsoleSystem.Arg arg)
+        [ConsoleCommand("rlbots.stats")]
+        private void CmdLifecycleStats(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to inspect Raidlands roam bot lifecycle state.");
+                return;
+            }
+
+            CleanupInactiveBots();
+            var marked = MarkedRaidlandsBotEntities();
+            var liveMarked = marked.Count(IsLiveBot);
+            var markerGroups = marked.Select(entity => entity.GetComponent<RaidlandsRoamBotMarker>()).Where(marker => marker != null).ToList();
+            var duplicateInstances = markerGroups.GroupBy(marker => marker.InstanceId).Count(group => group.Key == 0UL || group.Count() > 1);
+            var duplicateEntities = activeBots.Keys.Where(entity => entity != null).GroupBy(NetId).Count(group => group.Key == 0UL || group.Count() > 1);
+            var orphans = marked.Count(entity => !activeBots.ContainsKey(entity));
+            var missing = activeBots.Count(entry => entry.Key == null || entry.Key.IsDestroyed);
+            var nativeBrains = marked.Sum(CountNativeBrainComponents);
+            var v2Brains = botRecordsByInstanceId.Values.Count(runtime => runtime?.BrainV2 != null && !runtime.EntityDestroyed);
+            var v2Controllers = botRecordsByInstanceId.Values.Count(runtime => runtime != null && IsV2Actuating(runtime) && !runtime.EntityDestroyed);
+            var legacyControllers = botRecordsByInstanceId.Values.Count(runtime => runtime != null && runtime.ControllerMode == ControllerMode.Legacy && !runtime.EntityDestroyed);
+            var ownedTimers = botRecordsByInstanceId.Values.Sum(runtime => runtime?.OwnedTimers?.Count(timer => timer != null && !timer.Destroyed) ?? 0);
+            var cleanupTimers = botRecordsByInstanceId.Values.Count(runtime => runtime?.CleanupTimer != null && !runtime.CleanupTimer.Destroyed);
+            var cleaning = botRecordsByInstanceId.Values.Count(runtime => runtime?.CleanupStarted == true && !runtime.EntityDestroyed);
+            var desired = Math.Min(TargetPopulation(), Math.Max(0, config.ManagedApi.MaximumTotalActiveBots - ManagedBotCount()));
+            var world = CaptureWorldPopulationCensus();
+
+            Reply(arg, $"Raidlands lifecycle: configuredLimit={TargetPopulation()}, desiredAmbient={desired}, trackedRecords={botRecordsByInstanceId.Count}, registryEntries={activeBots.Count}, liveMarked={liveMarked}, pendingSpawns={pendingSpawnReservations.Count}, pendingRespawns={pendingAmbientRespawns.Count}, cleaning={cleaning}.");
+            Reply(arg, $"Brains/controllers: v1BrainComponents=0 (retired), v2BrainRuntimes={v2Brains}, nativeBrainComponentsOnMarkedEntities={nativeBrains}, nativeScientistEntities={marked.Count(entity => entity is ScientistNPC)}, combatControllerRuntimes={v2Controllers}, movementControllerRuntimes={v2Controllers}, healingControllerRuntimes={v2Controllers}, legacyControllers={legacyControllers}, ownedTimers={ownedTimers}, cleanupTimers={cleanupTimers}, totalBotTimers={ownedTimers + cleanupTimers + pendingAmbientRespawns.Count}.");
+            Reply(arg, $"Integrity: duplicateInstanceIds={duplicateInstances}, duplicateEntityRefs={duplicateEntities}, orphanedMarkedEntities={orphans}, registryMissingEntities={missing}, lastCleanup={lastCleanupCount}, lastReconcile={lastReconciliationMilliseconds:0.###}ms.");
+            Reply(arg, $"Lifecycle totals this load: combatDeaths={lifecycleCombatDeaths}, entitiesDestroyed={lifecycleEntitiesDestroyed}, replacementsSpawned={lifecycleReplacementsSpawned}, nativeBrainPoolingBypasses={lifecycleNativeBrainPoolingBypasses}, corpseBagDropsSuppressed={lifecycleCorpseBagDropsSuppressed}.");
+            var unattributedNativeBrains = Math.Max(0, ScientistBrain.Count - world.LegacyNpcBodies);
+            Reply(arg, $"Rust native scientist brains: staticCount={ScientistBrain.Count}, matchingLegacyBodies={world.LegacyNpcBodies} (scientists={world.Scientists}, tunnel={world.TunnelDwellers}, underwater={world.UnderwaterDwellers}), unattributedDifference={unattributedNativeBrains}, gen2Scientists={world.Gen2Scientists}, Raidlands-owned live NPCs={liveMarked}.");
+        }
+
+        [ConsoleCommand("rlbots.brainaudit")]
+        private void CmdNativeBrainAudit(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to audit native scientist brains.");
+                return;
+            }
+
+            var brains = Resources.FindObjectsOfTypeAll<ScientistBrain>() ?? Array.Empty<ScientistBrain>();
+            var components = 0;
+            var active = 0;
+            var inactive = 0;
+            var enabledBrains = 0;
+            var disabledBrains = 0;
+            var liveEntities = 0;
+            var deadEntities = 0;
+            var destroyedEntities = 0;
+            var missingEntities = 0;
+            var marked = 0;
+            var markedInactive = 0;
+            var markedEnabledBrains = 0;
+            var markedDisabledBrains = 0;
+            var poolingCapable = 0;
+            var fullySpawned = 0;
+            var activeUnspawned = 0;
+            var activeTypes = new Dictionary<string, int>(StringComparer.Ordinal);
+            var activePrefabs = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            foreach (var brain in brains)
+            {
+                if (brain == null)
+                {
+                    continue;
+                }
+
+                components++;
+                var isActive = brain.gameObject != null && brain.gameObject.activeInHierarchy;
+                if (isActive)
+                {
+                    active++;
+                    if (brain.enabled)
+                    {
+                        enabledBrains++;
+                    }
+                    else
+                    {
+                        disabledBrains++;
+                    }
+                }
+                else
+                {
+                    inactive++;
+                }
+
+                var entity = brain.GetBrainBaseEntity();
+                if (entity == null)
+                {
+                    missingEntities++;
+                    continue;
+                }
+
+                var isFullySpawned = entity.IsFullySpawned();
+                if (isFullySpawned)
+                {
+                    fullySpawned++;
+                    if (entity.IsDestroyed)
+                    {
+                        destroyedEntities++;
+                    }
+                    else if (entity is BaseCombatEntity combatEntity && combatEntity.IsAlive())
+                    {
+                        liveEntities++;
+                    }
+                    else
+                    {
+                        deadEntities++;
+                    }
+                }
+                else if (isActive)
+                {
+                    activeUnspawned++;
+                }
+
+                if (isActive)
+                {
+                    IncrementCount(activeTypes, entity.GetType().Name);
+                    IncrementCount(activePrefabs, ShortPrefab(entity.PrefabName));
+                }
+
+                var isMarked = HasRaidlandsMarkerComponent(entity);
+                if (isMarked)
+                {
+                    marked++;
+                    if (!isActive || entity.IsDestroyed)
+                    {
+                        markedInactive++;
+                    }
+                    else if (brain.enabled)
+                    {
+                        markedEnabledBrains++;
+                    }
+                    else
+                    {
+                        markedDisabledBrains++;
+                    }
+                }
+
+                var poolable = entity.GetComponent<Poolable>();
+                if (poolable != null && poolable.prefabID != 0u)
+                {
+                    poolingCapable++;
+                }
+            }
+
+            Reply(arg, $"Native scientist brain audit: staticCount={ScientistBrain.Count}, activeGameObjects={active}, enabledBrains={enabledBrains}, disabledBrains={disabledBrains}, staticActiveDifference={ScientistBrain.Count - active}, fullySpawned={fullySpawned}, spawnedLiveEntities={liveEntities}, spawnedDeadEntities={deadEntities}, destroyedSpawnedEntities={destroyedEntities}, loadedInactiveAssets={inactive}, missingEntities={missingEntities}.");
+            Reply(arg, $"Native entity state: fullySpawned={fullySpawned}, activeUnspawned={activeUnspawned}, activeTypes=[{FormatAuditGroups(activeTypes)}], activePrefabs=[{FormatAuditGroups(activePrefabs)}].");
+            Reply(arg, $"Raidlands attribution: markedComponents={marked}, markedEnabledBrains={markedEnabledBrains}, markedDisabledBrains={markedDisabledBrains}, markedInactiveOrDestroyed={markedInactive}, poolingCapableComponents={poolingCapable}, liveMarkedEntities={ActualLiveMarkedBotCount()}. Only a nonzero staticActiveDifference indicates a counter/component mismatch; that mismatch requires a server restart because no Unity component remains to destroy.");
+        }
+
+        private void IncrementCount(Dictionary<string, int> counts, string key)
+        {
+            key = string.IsNullOrWhiteSpace(key) ? "unknown" : key;
+            counts[key] = counts.TryGetValue(key, out var current) ? current + 1 : 1;
+        }
+
+        private string FormatAuditGroups(Dictionary<string, int> counts)
+        {
+            return string.Join(", ", counts.OrderByDescending(entry => entry.Value)
+                .ThenBy(entry => entry.Key, StringComparer.Ordinal)
+                .Take(12)
+                .Select(entry => $"{entry.Key}:{entry.Value}"));
+        }
+
+        private bool HasRaidlandsMarkerComponent(BaseEntity entity)
+        {
+            if (entity == null)
+            {
+                return false;
+            }
+
+            if (entity.GetComponent<RaidlandsRoamBotMarker>() != null)
+            {
+                return true;
+            }
+
+            var expectedTypeName = typeof(RaidlandsRoamBotMarker).FullName;
+            return entity.GetComponents<Component>().Any(component => component != null
+                && string.Equals(component.GetType().FullName, expectedTypeName, StringComparison.Ordinal));
+        }
+
+        [ConsoleCommand("rlbots.list")]
+        private void CmdLifecycleList(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to inspect Raidlands roam bots.");
+                return;
+            }
+
+            if (botRecordsByInstanceId.Count == 0)
+            {
+                Reply(arg, "No Raidlands RoamBot lifecycle records.");
+                return;
+            }
+
+            foreach (var runtime in botRecordsByInstanceId.Values.OrderBy(value => value.Generation))
+            {
+                var entity = RuntimeEntityFor(runtime);
+                var nativeBrains = CountNativeBrainComponents(entity);
+                var hasV2Runtime = runtime.BrainV2 != null && !runtime.EntityDestroyed;
+                var controllers = runtime.EntityDestroyed ? 0 : IsV2Actuating(runtime) ? 1 : 0;
+                var state = entity == null || entity.IsDestroyed ? "destroyed" : entity.IsDead() ? "dead" : "alive";
+                var position = entity == null || entity.IsDestroyed ? Vector3.zero : entity.transform.position;
+                Reply(arg, $"instance={runtime.InstanceId} gen={runtime.Generation} net={runtime.NetworkId} profile={(string.IsNullOrWhiteSpace(runtime.PlayerProfileKey) ? runtime.SkillTier : runtime.PlayerProfileKey)} pos={FormatVector(position)} entity={state} lifecycle={runtime.LifecycleState} brain={TacticalBrainName} nativeBrainComponents={nativeBrains} v2BrainRuntime={hasV2Runtime} controllers={controllers} timers={runtime.OwnedTimers.Count} respawn={runtime.RespawnScheduled} cleanup={runtime.CleanupStarted} destroyed={runtime.EntityDestroyed}.");
+            }
+        }
+
+        [ConsoleCommand("rlbots.validate")]
+        private void CmdLifecycleValidate(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to validate Raidlands roam bots.");
+                return;
+            }
+
+            var issues = ValidateLifecycleState();
+            Reply(arg, issues.Count == 0
+                ? $"Raidlands lifecycle validation passed: live={ActualLiveMarkedBotCount()}, tracked={botRecordsByInstanceId.Count}, pendingRespawns={pendingAmbientRespawns.Count}."
+                : $"Raidlands lifecycle validation found {issues.Count} issue(s): {string.Join(" | ", issues.Take(30))}");
+        }
+
+        [ConsoleCommand("rlbots.cleanup")]
+        private void CmdLifecycleCleanup(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to clean up Raidlands roam bots.");
+                return;
+            }
+
+            StopRuntime();
+            KillAllBots(false);
+            Reply(arg, $"Raidlands-only cleanup complete: removed={lastCleanupCount}, liveMarked={ActualLiveMarkedBotCount()}, pendingSpawns={pendingSpawnReservations.Count}, pendingRespawns={pendingAmbientRespawns.Count}. Runtime is stopped; use raidbots.enable to repopulate.");
+        }
+
+        [ConsoleCommand("rlbots.reconcile")]
+        private void CmdLifecycleReconcile(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to reconcile Raidlands roam bots.");
+                return;
+            }
+
+            var before = MarkedRaidlandsBotEntities().Count(entity => !activeBots.ContainsKey(entity));
+            ReconcileRaidlandsOwnedEntities(true);
+            CleanupInactiveBots();
+            var after = MarkedRaidlandsBotEntities().Count(entity => !activeBots.ContainsKey(entity));
+            Reply(arg, $"Raidlands reconciliation complete in {lastReconciliationMilliseconds:0.###}ms: orphanedMarked={before}->{after}, tracked={botRecordsByInstanceId.Count}, liveMarked={ActualLiveMarkedBotCount()}. Orphans are destroyed rather than adopted to guarantee a single brain/controller generation.");
+        }
+
+        private int CountNativeBrainComponents(BaseCombatEntity entity)
+        {
+            if (entity == null || entity.IsDestroyed)
+            {
+                return 0;
+            }
+
+            try
+            {
+                return entity.GetComponentsInChildren<BaseAIBrain>().Length;
+            }
+            catch
+            {
+                return entity.GetComponent<BaseAIBrain>() == null ? 0 : 1;
+            }
+        }
+
+        private List<string> ValidateLifecycleState()
+        {
+            var issues = new List<string>();
+            var marked = MarkedRaidlandsBotEntities();
+            foreach (var entity in marked)
+            {
+                var marker = entity.GetComponent<RaidlandsRoamBotMarker>();
+                var brainCount = CountNativeBrainComponents(entity);
+                if (brainCount != 1)
+                {
+                    issues.Add($"entity {NetId(entity)} has {brainCount} native brains");
+                }
+                if (!activeBots.TryGetValue(entity, out var runtime))
+                {
+                    issues.Add($"marked entity {NetId(entity)} missing registry");
+                    continue;
+                }
+                if (entity.IsDead() && !runtime.CleanupStarted)
+                {
+                    issues.Add($"dead entity {NetId(entity)} still has active controller");
+                }
+                if (marker == null || marker.InstanceId != runtime.InstanceId || marker.Generation != runtime.Generation)
+                {
+                    issues.Add($"entity {NetId(entity)} marker/record mismatch");
+                }
+            }
+
+            foreach (var group in marked.Select(entity => entity.GetComponent<RaidlandsRoamBotMarker>()).Where(marker => marker != null).GroupBy(marker => marker.InstanceId))
+            {
+                if (group.Key == 0UL || group.Count() > 1)
+                {
+                    issues.Add($"duplicate instance {group.Key} count={group.Count()}");
+                }
+            }
+            foreach (var entry in activeBots.Where(entry => entry.Key == null || entry.Key.IsDestroyed))
+            {
+                issues.Add($"registry instance {entry.Value?.InstanceId ?? 0UL} has no entity");
+            }
+            foreach (var runtime in botRecordsByInstanceId.Values.Where(runtime => runtime != null && runtime.RespawnScheduled && !pendingAmbientRespawns.ContainsKey(runtime.InstanceId)))
+            {
+                issues.Add($"instance {runtime.InstanceId} respawn flag has no timer");
+            }
+            if (EffectiveAmbientPopulation() > TargetPopulation())
+            {
+                issues.Add($"effective ambient population {EffectiveAmbientPopulation()} exceeds cap {TargetPopulation()}");
+            }
+            if (botRecordsByInstanceId.Values.Any(runtime => runtime != null && runtime.ControllerMode == ControllerMode.Legacy && !runtime.EntityDestroyed))
+            {
+                issues.Add("live v1/legacy controller runtime detected");
+            }
+            return issues;
+        }
+
+        [ConsoleCommand("raidbots.brainv2")]
+        private void CmdBrainV2(ConsoleSystem.Arg arg)
         {
             if (!CanAdmin(arg))
             {
@@ -11812,11 +17475,151 @@ namespace Oxide.Plugins
             var action = (ArgString(arg, 0) ?? "status").Trim().ToLowerInvariant();
             if (action == "status")
             {
+                var modes = activeBots.Values
+                    .Where(runtime => runtime?.BrainV2 != null)
+                    .GroupBy(runtime => BrainV2ModeKey(runtime.BrainV2.Mode))
+                    .OrderBy(group => group.Key)
+                    .Select(group => $"{group.Key}={group.Count()}");
+                var executing = activeBots.Values.Count(IsBrainV2ExecutionReady);
+                var waitingController = activeBots.Values.Count(runtime => IsBrainV2Actuating(runtime) && !IsV2Actuating(runtime));
+                var waitingAuthority = activeBots.Values.Count(runtime => IsBrainV2Actuating(runtime)
+                    && IsV2Actuating(runtime)
+                    && (!runtime.V2BodyReadyForAuthority || !runtime.V2AuthoritativePrepared));
+                var visibleStalls = activeBots.Values.Count(IsVisibleTargetBrainStalledV2);
+                Reply(arg, $"Raidlands Brain V2: enabled={config.BrainV2.Enabled}, configured={config.BrainV2.Mode}, active=[{string.Join(", ", modes)}], executing={executing}, waitingController={waitingController}, waitingAuthority={waitingAuthority}, ticks={v2Metrics.brain_v2_ticks}, goalSwitches={v2Metrics.brain_v2_goal_switches}, actionSwitches={v2Metrics.brain_v2_action_switches}, actionFailures={v2Metrics.brain_v2_action_failures}, brainErrors={v2Metrics.brain_v2_errors}, legacyFallbacks={v2Metrics.brain_v2_legacy_fallbacks}, reflexes={v2Metrics.brain_v2_reflex_interrupts}, visibleReacquires={v2Metrics.brain_v2_visible_reacquisitions}, visibleStalls={visibleStalls}, traces={v2Metrics.brain_v2_trace_rows}, pending={pendingBrainV2Traces.Count}, remoteAI=disabled_by_design.");
+                return;
+            }
+
+            if (action == "mode" || action == "promote")
+            {
+                config.BrainV2.Enabled = true;
+                config.BrainV2.Mode = BrainV2ModeActive;
+                config.BrainV2.FallbackToLegacyOnFailure = false;
+                SaveConfig();
+                ApplyBrainV2ModeToExistingBots(BrainV2RuntimeMode.Active);
+                Reply(arg, "Raidlands Brain V2 remains active for every bot; v1/off/shadow/canary execution modes are retired.");
+                return;
+            }
+
+            if (action == "inspect")
+            {
+                var query = ArgStringFrom(arg, 1);
+                var entries = FindV2DiagnosticBots(query).Take(10).ToList();
+                if (entries.Count == 0)
+                {
+                    Reply(arg, string.IsNullOrWhiteSpace(query) ? "No active Raidlands bots." : $"No active Raidlands bot matched '{query}'.");
+                    return;
+                }
+
+                foreach (var entry in entries)
+                {
+                    var brain = entry.Value.BrainV2;
+                    var snapshot = brain?.Snapshot ?? new BrainWorldSnapshotV2();
+                    var topGoals = string.Join(",", (brain?.LastGoalScores ?? new List<BrainGoalScoreV2>()).Take(3).Select(row => $"{row.goal}:{row.score:0.00}"));
+                    var topActions = string.Join(",", (brain?.LastActionScores ?? new List<BrainActionScoreV2>()).Where(row => row.legal).Take(4).Select(row => $"{row.action}:{row.score:0.00}"));
+                    Reply(arg, $"{entry.Value.DisplayName}: mode={BrainV2ModeKey(brain?.Mode ?? BrainV2RuntimeMode.Off)}/{BrainV2ExecutionStatus(entry.Value)}, goal={BrainGoalIdStringV2(brain?.ActiveGoal?.GoalId ?? BrainGoalIdV2.None)}, action={ActionIdString(brain?.ActiveAction?.ActionId ?? TacticalActionId.None)}/{brain?.ActiveAction?.Status.ToString().ToLowerInvariant() ?? "none"}, hpNeed={snapshot.health_need:0.00}, damage={snapshot.recent_damage_pressure:0.00}, exposure={snapshot.exposure_risk:0.00}(own={snapshot.own_exposure_fraction:0.00}/target={snapshot.target_exposure_fraction:0.00}), contact={snapshot.contact_confidence:0.00}, opportunity={snapshot.target_opportunity:0.00}, cover={snapshot.cover_quality:0.00}, force={snapshot.local_force_balance:0.00}, pathRisk={snapshot.path_risk:0.00}, goals=[{topGoals}], actions=[{topActions}], reason={brain?.LastDecisionReason ?? "none"}, failure={brain?.LastFailure ?? "none"}.");
+                }
+                return;
+            }
+
+            if (action == "flush" || action == "traces" || action == "prune")
+            {
+                FlushBrainV2Traces();
+                var path = BrainV2TraceDataPath();
+                var beforeBytes = File.Exists(path) ? new FileInfo(path).Length : 0L;
+                MaybePruneBrainV2TraceFile(path, true);
+                var afterBytes = File.Exists(path) ? new FileInfo(path).Length : 0L;
+                Reply(arg, $"Brain V2 traces flushed/pruned at {path} ({FormatFileSize(beforeBytes)} -> {FormatFileSize(afterBytes)}).");
+                return;
+            }
+
+            Reply(arg, "Usage: raidbots.brainv2 status | mode active | inspect [bot|visible_stall] | traces|prune");
+        }
+
+        private string NextBrainV2Promotion(string mode)
+        {
+            switch (NormalizeBrainV2Mode(mode))
+            {
+                case BrainV2ModeOff: return BrainV2ModeShadow;
+                case BrainV2ModeShadow: return BrainV2ModeCanary;
+                case BrainV2ModeCanary: return BrainV2ModeActive;
+                default: return BrainV2ModeActive;
+            }
+        }
+
+        [ConsoleCommand("raidbots.v2")]
+        private void CmdV2(ConsoleSystem.Arg arg)
+        {
+            if (!CanAdmin(arg))
+            {
+                Reply(arg, "You do not have permission to manage Raidlands roam bots.");
+                return;
+            }
+
+            var action = (ArgString(arg, 0) ?? "status").Trim().ToLowerInvariant();
+            if (action == "testall")
+            {
+                var requestedState = (ArgString(arg, 1) ?? "on").Trim().ToLowerInvariant();
+                var enableAll = requestedState != "off"
+                    && requestedState != "shadow"
+                    && requestedState != "disable";
+
+                config.BrainV2.Enabled = true;
+                config.BrainV2.CanaryBotCount = 0;
+                config.BrainV2.CanaryPercent = 100;
+                config.ControllerV2.CanaryBotCount = 0;
+                config.ControllerV2.CanaryPercent = 100;
+
+                if (enableAll)
+                {
+                    config.BrainV2.Mode = BrainV2ModeActive;
+                    config.ControllerV2.Mode = ControllerModeV2Active;
+                    SaveConfig();
+
+                    // Controller first, then brain: bots can briefly report
+                    // preparing_authority, but never execute a V2 action through the
+                    // native scientist controller. Reapplying this command also
+                    // clears prior per-bot rollbacks and reacquires every body.
+                    ApplyControllerModeToExistingBots(ControllerMode.V2Active);
+                    ApplyBrainV2ModeToExistingBots(BrainV2RuntimeMode.Active);
+                    Reply(arg, $"Raidlands V2 test-all enabled for {activeBots.Count} tracked bots. Brain=active, controller=v2_active, canary allocation=100%. Use 'raidbots.v2 status' until authorityReady matches the active population.");
+                    return;
+                }
+
+                config.BrainV2.Mode = BrainV2ModeActive;
+                config.ControllerV2.Mode = ControllerModeV2Active;
+                SaveConfig();
+                ApplyControllerModeToExistingBots(ControllerMode.V2Active);
+                ApplyBrainV2ModeToExistingBots(BrainV2RuntimeMode.Active);
+                Reply(arg, "V2 test-all cannot be disabled because the v1/shadow controller path is retired. Brain V2 and Controller V2 remain active.");
+                return;
+            }
+
+            if (action == "status")
+            {
                 var modes = activeBots.Values.Where(runtime => runtime != null)
                     .GroupBy(runtime => ControllerModeKey(runtime.ControllerMode))
                     .OrderBy(group => group.Key)
                     .Select(group => $"{group.Key}={group.Count()}");
-                Reply(arg, $"Raidlands AI V2: configured={config.ControllerV2.Mode}, active=[{string.Join(", ", modes)}], motorTicks={v2Metrics.motor_ticks}, shots={v2Metrics.authorized_shots}, rejected={v2Metrics.rejected_shots}, unauthorizedHitsBlocked={v2Metrics.unauthorized_hits_blocked}, waterTargets={v2Metrics.water_target_rejections}, waterCrossings={v2Metrics.water_crossing_rejections}, foliage={v2Metrics.foliage_rejections}, muzzle={v2Metrics.muzzle_rejections}, ownershipConflicts={v2Metrics.native_ownership_conflicts}, rollbacks={v2Metrics.controller_rollbacks}, budgetBreaches={v2Metrics.motor_budget_breaches}.");
+                var authorityReady = activeBots.Values.Count(runtime => IsV2Actuating(runtime) && runtime.V2AuthoritativePrepared);
+                var authorityPreparing = activeBots.Values.Count(runtime => IsV2Actuating(runtime) && !runtime.V2AuthoritativePrepared);
+                var degraded = activeBots.Values.Count(runtime => runtime != null
+                    && runtime.ControllerMode == ControllerMode.Legacy
+                    && !string.Equals(runtime.RollbackReason, "none", StringComparison.OrdinalIgnoreCase));
+                var rollbackReasons = activeBots.Values
+                    .Where(runtime => runtime != null
+                        && runtime.ControllerMode == ControllerMode.Legacy
+                        && !string.Equals(runtime.RollbackReason, "none", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(runtime => runtime.RollbackReason ?? "unknown", StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(group => group.Key)
+                    .Select(group => $"{group.Key}={group.Count()}")
+                    .ToList();
+                var nativeBrainDisabled = activeBots.Count(entry =>
+                {
+                    var brain = entry.Key?.GetComponent<BaseAIBrain>() ?? entry.Key?.GetComponentInChildren<BaseAIBrain>();
+                    return brain != null && !brain.enabled;
+                });
+                Reply(arg, $"Raidlands AI V2: configured={config.ControllerV2.Mode}, active=[{string.Join(", ", modes)}], authorityReady={authorityReady}, authorityPreparing={authorityPreparing}, degradedLegacy={degraded}, rollbackReasons=[{(rollbackReasons.Count == 0 ? "none" : string.Join(", ", rollbackReasons))}], nativeBrainDisabled={nativeBrainDisabled}, policy={trainingV2PolicyLoadState}/{trainingV2Policy?.policy_id ?? "none"}, motorTicks={v2Metrics.motor_ticks}, shots={v2Metrics.authorized_shots}, bursts={v2Metrics.controlled_bursts}/{v2Metrics.sustained_bursts} controlled/sustained, sustainedShots={v2Metrics.sustained_shots}, rejected={v2Metrics.rejected_shots}, unauthorizedHitsBlocked={v2Metrics.unauthorized_hits_blocked}, botHits={v2Metrics.native_bot_hits}/{v2Metrics.resolved_bot_hits} native/resolved, resolverMisses={v2Metrics.resolved_bot_misses}, laneMoves={v2Metrics.firing_lane_repositions}, waterTargets={v2Metrics.water_target_rejections}, waterCrossings={v2Metrics.water_crossing_rejections}, foliage={v2Metrics.foliage_rejections}, muzzle={v2Metrics.muzzle_rejections}, ownershipConflicts={v2Metrics.native_ownership_conflicts}, rollbacks={v2Metrics.controller_rollbacks}, budgetDeferrals={v2Metrics.motor_budget_breaches}, urgentFireOverflow={v2Metrics.motor_urgent_overflow_updates}, budgetPolicy=fair_defer_plus_bounded_fire.");
                 return;
             }
 
@@ -11841,15 +17644,25 @@ namespace Oxide.Plugins
                     }
                     else if (action == "stance")
                     {
-                        Reply(arg, $"{runtime.DisplayName}: crouched={runtime.IsCrouching}/{IsPlayerCrouched(bot as BasePlayer)}, verified={runtime.BodyCapabilities.stance_test_complete}/{runtime.BodyCapabilities.supports_mechanical_crouch}, eyes={runtime.V2StandingEyeHeight:0.00}->{runtime.V2CrouchedEyeHeight:0.00}, collider={runtime.V2StandingColliderHeight:0.00}->{runtime.V2CrouchedColliderHeight:0.00}, invariant={runtime.LastControllerInvariant}.");
+                        Reply(arg, $"{runtime.DisplayName}: crouched={runtime.IsCrouching}/{IsPlayerCrouched(bot as BasePlayer)}, verified={runtime.BodyCapabilities.stance_test_complete}/{runtime.BodyCapabilities.supports_mechanical_crouch}, attempts={runtime.V2StanceTestAttempts}/{V2StanceConformanceMaximumAttempts}, eyes={runtime.V2StandingEyeHeight:0.00}->{runtime.V2CrouchedEyeHeight:0.00}, collider={runtime.V2StandingColliderHeight:0.00}->{runtime.V2CrouchedColliderHeight:0.00}, invariant={runtime.LastControllerInvariant}.");
                     }
                     else if (action == "cadence")
                     {
-                        Reply(arg, $"{runtime.DisplayName}: weapon={runtime.Combat?.WeaponClass}/{runtime.Combat?.WeaponShortname}, authorized={runtime.AuthorizedShots}, rejected={runtime.RejectedShots}, burst={runtime.BurstShotsRemaining}/{runtime.CurrentBurstSize}, shotGap={runtime.CurrentShotGap:0.000}s, nextTrigger={Math.Max(0f, runtime.NextTriggerAt - Time.realtimeSinceStartup):0.000}s, nativeCallbacks={runtime.WeaponFiredCount}, failures={runtime.ConsecutiveFireFailures}.");
+                        var settleAge = runtime.VisibleAimAlignedSince <= 0f
+                            ? 0f
+                            : Math.Max(0f, Time.realtimeSinceStartup - runtime.VisibleAimAlignedSince);
+                        Reply(arg, $"{runtime.DisplayName}: weapon={runtime.Combat?.WeaponClass}/{runtime.Combat?.WeaponShortname}, authorized={runtime.AuthorizedShots}, rejected={runtime.RejectedShots}, burst={(runtime.CurrentBurstIsSustained ? "sustained" : "controlled")}:{runtime.BurstShotsRemaining}/{runtime.CurrentBurstSize}, fired={runtime.CurrentBurstShotsFired}, spread={runtime.CurrentAimErrorDegrees:0.00}deg, visibleAim={runtime.LastVisibleAimErrorDegrees:0.00}deg/{settleAge:0.000}s, lastShotAim={runtime.LastShotVisibleAimErrorDegrees:0.00}deg, shotGap={runtime.CurrentShotGap:0.000}s, nextTrigger={Math.Max(0f, runtime.NextTriggerAt - Time.realtimeSinceStartup):0.000}s, nativeCallbacks={runtime.WeaponFiredCount}, failures={runtime.ConsecutiveFireFailures}.");
                     }
                     else
                     {
-                        Reply(arg, $"{runtime.DisplayName}: mode={ControllerModeKey(runtime.ControllerMode)} reason={runtime.ControllerModeReason}, adapter={runtime.BodyAdapterKey}, capability={runtime.BodyCapabilities.failure_reason}, intent={JsonConvert.SerializeObject(runtime.Intent)}, ownership={runtime.NativeOwnershipConflicts}/{runtime.ConsecutiveOwnershipConflicts}, rollback={runtime.RollbackReason}.");
+                        var nativeBrain = bot?.GetComponent<BaseAIBrain>() ?? bot?.GetComponentInChildren<BaseAIBrain>();
+                        var nativeBrainState = nativeBrain == null ? "missing" : nativeBrain.enabled ? "enabled" : "disabled";
+                        var lastConflictAge = runtime.LastOwnershipConflictAt <= 0f
+                            ? "never"
+                            : $"{Math.Max(0f, Time.realtimeSinceStartup - runtime.LastOwnershipConflictAt):0.0}s";
+                        var diagnosticNow = Time.realtimeSinceStartup;
+                        var healItem = runtime.V2MedicalItem?.info?.shortname ?? "none";
+                        Reply(arg, $"{runtime.DisplayName}: mode={ControllerModeKey(runtime.ControllerMode)} reason={runtime.ControllerModeReason}, bodyReady={runtime.V2BodyReadyForAuthority}, authorityReady={runtime.V2AuthoritativePrepared}, nativeBrain={nativeBrainState}, prepare={runtime.V2AuthorityPrepareAttempts}/{V2AuthorityPrepareMaximumAttempts}, adapter={runtime.BodyAdapterKey}, capability={runtime.BodyCapabilities.failure_reason}, navRepair={runtime.NavigationRepairAttempts}:{runtime.LastNavigationRepairReason}, heal=active:{runtime.V2Healing}/used:{runtime.V2MedicalUsed}/item:{healItem}/equip:{Math.Max(0f, runtime.V2HealEquipReadyAt - diagnosticNow):0.00}s/deadline:{Math.Max(0f, runtime.V2HealUseDeadlineAt - diagnosticNow):0.00}s/lock:{Math.Max(0f, runtime.V2HealLockedUntil - diagnosticNow):0.00}s/last:{runtime.LastMedicalUseReason}, intent={JsonConvert.SerializeObject(runtime.Intent)}, ownership={runtime.NativeOwnershipConflicts}/{runtime.ConsecutiveOwnershipConflicts}, lastConflict={runtime.LastOwnershipConflict}@{lastConflictAge}, invariant={runtime.LastControllerInvariant}, rollback={runtime.RollbackReason}.");
                     }
                 }
                 return;
@@ -11874,7 +17687,17 @@ namespace Oxide.Plugins
             {
                 var path = Path.Combine(Interface.Oxide.DataFileSystem.Directory, TrainingV2TraceDataFile);
                 var bytes = File.Exists(path) ? new FileInfo(path).Length : 0L;
-                Reply(arg, $"Training V2: enabled={config.TrainingV2.Enabled}, sessions={trainingSessionsV2.Values.Count(session => session.StartedAt > 0f)}, buffered={pendingTrainingV2Frames.Count}, outcomeAnchors={pendingTrainingOutcomeAnchorsV2.Count}, frames={v2Metrics.training_frames}, dropped={v2Metrics.training_frames_dropped}, flushFailures={v2Metrics.training_flush_failures}, trace={path} ({FormatFileSize(bytes)}).");
+                Reply(arg, $"Training V2: enabled={config.TrainingV2.Enabled}, decisionEvaluation={config.TrainingV2.RecordBotDecisionEvaluationJsonl}, sessions={trainingSessionsV2.Values.Count(session => session.StartedAt > 0f)}, buffered={pendingTrainingV2Frames.Count}, outcomeAnchors={pendingTrainingOutcomeAnchorsV2.Count}, frames={v2Metrics.training_frames}, dropped={v2Metrics.training_frames_dropped}, flushFailures={v2Metrics.training_flush_failures}, trace={path} ({FormatFileSize(bytes)}).");
+                return;
+            }
+
+            if (action == "policy")
+            {
+                if (string.Equals(ArgString(arg, 1), "reload", StringComparison.OrdinalIgnoreCase))
+                {
+                    LoadTrainingV2Policy();
+                }
+                Reply(arg, $"Training V2 policy: {TrainingV2PolicyStatus()}.");
                 return;
             }
 
@@ -11886,12 +17709,10 @@ namespace Oxide.Plugins
 
             if (action == "mode" || action == "promote")
             {
-                var requested = action == "promote" ? NextControllerPromotion(config.ControllerV2.Mode) : ArgString(arg, 1);
-                var normalized = NormalizeControllerMode(requested);
-                config.ControllerV2.Mode = normalized;
+                config.ControllerV2.Mode = ControllerModeV2Active;
                 SaveConfig();
-                ApplyControllerModeToExistingBots(ParseControllerMode(normalized));
-                Reply(arg, $"Raidlands AI V2 mode is now {normalized}; existing tracked bots were reconciled to the requested rollout allocation.");
+                ApplyControllerModeToExistingBots(ControllerMode.V2Active);
+                Reply(arg, "Raidlands Controller V2 remains active for every bot; legacy/shadow/canary controller modes are retired.");
                 return;
             }
 
@@ -11908,11 +17729,11 @@ namespace Oxide.Plugins
                         rolledBack++;
                     }
                 }
-                Reply(arg, $"Rolled {rolledBack} actuating V2 bot{(rolledBack == 1 ? "" : "s")} back to the versioned legacy controller.");
+                Reply(arg, $"Replaced {rolledBack} actuating V2 bot{(rolledBack == 1 ? "" : "s")} after the admin rollback request; v1 controller fallback is retired.");
                 return;
             }
 
-            Reply(arg, "Usage: raidbots.v2 status|inspect [bot]|rays [bot]|stance [bot]|cadence [bot]|prefabs|training|replay|mode <legacy|v2_shadow|v2_canary|v2_active>|promote|rollback [bot|all]");
+            Reply(arg, "Usage: raidbots.v2 testall [on|off]|status|inspect [bot]|rays [bot]|stance [bot]|cadence [bot]|prefabs|training|policy [status|reload]|replay|mode <legacy|v2_shadow|v2_canary|v2_active> [force]|promote|rollback [bot|all]");
         }
 
         private void DrawV2PerceptionRays(BasePlayer viewer, BaseCombatEntity bot, BotRuntime runtime)
@@ -11956,12 +17777,49 @@ namespace Oxide.Plugins
         private List<KeyValuePair<BaseCombatEntity, BotRuntime>> FindV2DiagnosticBots(string query)
         {
             query = (query ?? "").Trim();
-            return ActiveBotEntries()
+            var entries = ActiveBotEntries();
+            if (string.Equals(query, "visible_stall", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(query, "staring", StringComparison.OrdinalIgnoreCase))
+            {
+                return entries.Where(entry => IsVisibleTargetBrainStalledV2(entry.Value)).ToList();
+            }
+            if (string.Equals(query, "legacy", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(query, "rollback", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(query, "degraded", StringComparison.OrdinalIgnoreCase))
+            {
+                return entries.Where(entry => entry.Value != null
+                        && entry.Value.ControllerMode == ControllerMode.Legacy
+                        && !string.Equals(entry.Value.RollbackReason, "none", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            return entries
                 .Where(entry => string.IsNullOrWhiteSpace(query)
                     || (entry.Value?.BotKey ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0
                     || (entry.Value?.DisplayName ?? "").IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0
                     || NetId(entry.Key).ToString(CultureInfo.InvariantCulture) == query)
                 .ToList();
+        }
+
+        private bool IsVisibleTargetBrainStalledV2(BotRuntime runtime)
+        {
+            if (runtime?.Memory?.Target == null || !runtime.Memory.HasLineOfSight)
+            {
+                return false;
+            }
+
+            var brain = runtime.BrainV2;
+            if (brain == null || !IsBrainV2Actuating(runtime))
+            {
+                return false;
+            }
+
+            var action = brain.ActiveAction?.ActionId ?? TacticalActionId.None;
+            return brain.Snapshot == null
+                || !brain.Snapshot.has_line_of_sight
+                || brain.ActiveGoal?.GoalId == BrainGoalIdV2.SearchThreat
+                || action == TacticalActionId.SearchLastKnown
+                || action == TacticalActionId.InvestigateSound;
         }
 
         private string NextControllerPromotion(string current)
@@ -11977,6 +17835,7 @@ namespace Oxide.Plugins
 
         private void ApplyControllerModeToExistingBots(ControllerMode requested)
         {
+            requested = ControllerMode.V2Active;
             var entries = ActiveBotEntries().OrderBy(entry => entry.Value?.BotKey ?? "").ToList();
             var canaryCount = config.ControllerV2.CanaryBotCount > 0
                 ? Math.Min(config.ControllerV2.CanaryBotCount, entries.Count)
@@ -11986,34 +17845,88 @@ namespace Oxide.Plugins
             {
                 var bot = entries[index].Key;
                 var runtime = entries[index].Value;
+                if (bot == null || runtime == null)
+                {
+                    continue;
+                }
+
                 var mode = requested == ControllerMode.V2Canary
                     ? index < canaryCount ? ControllerMode.V2Canary : ControllerMode.V2Shadow
                     : requested;
 
-                if (mode == ControllerMode.Legacy)
+                if (mode == ControllerMode.Legacy || mode == ControllerMode.V2Shadow)
                 {
-                    if (IsV2Actuating(runtime))
-                    {
-                        RollbackV2Bot(bot, runtime, "admin_mode_legacy");
-                    }
-                    else
-                    {
-                        runtime.ControllerMode = ControllerMode.Legacy;
-                        runtime.ControllerModeReason = "admin_mode_legacy";
-                        legacyScientistBodyAdapter?.Prepare(bot, runtime, false);
-                    }
+                    ReleaseV2ControllerAuthority(bot, runtime, mode, $"admin_mode:{ControllerModeKey(mode)}");
                     continue;
+                }
+
+                // Actuating modes take ownership only after the delayed body/nav
+                // conformance pass. This is safe for both existing and newly spawned
+                // bots and avoids BaseAIBrain state-container startup races.
+                if (runtime.V2AuthoritativePrepared)
+                {
+                    ReleaseV2ControllerAuthority(bot, runtime, ControllerMode.V2Shadow, "controller_reacquire_reset");
                 }
 
                 runtime.RollbackReason = "none";
                 runtime.ControllerMode = mode;
                 runtime.ControllerModeReason = $"admin_mode:{ControllerModeKey(mode)}";
                 runtime.NextCombatMotorAt = Time.realtimeSinceStartup;
-                if (IsV2Actuating(runtime))
+                runtime.V2AuthoritativePrepared = false;
+                runtime.V2AuthorityPreparationPending = false;
+                runtime.V2AuthorityPrepareAttempts = 0;
+                runtime.V2AuthorityPrepareStartedAt = 0f;
+                if (runtime.V2BodyReadyForAuthority)
                 {
-                    legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
                     FinalizeV2BodyConformance(bot, runtime);
                 }
+                else
+                {
+                    runtime.ControllerModeReason += ":awaiting_body_ready";
+                    ScheduleV2AuthorityPreparationRetry(bot, runtime, "awaiting_body_ready");
+                }
+            }
+        }
+
+        private void ReleaseV2ControllerAuthority(BaseCombatEntity bot, BotRuntime runtime, ControllerMode destinationMode, string reason)
+        {
+            if (bot == null || runtime == null)
+            {
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            runtime.V2DamageVetoUntil = Math.Max(runtime.V2DamageVetoUntil,
+                runtime.PendingFireAuthorizations.Count == 0
+                    ? now
+                    : runtime.PendingFireAuthorizations.Max(authorization => authorization?.expires_at ?? 0f));
+            runtime.ActionBlockedUntil = Math.Max(runtime.ActionBlockedUntil, runtime.V2DamageVetoUntil);
+            runtime.ActionBlockReason = runtime.V2DamageVetoUntil > now ? "v2_damage_drain" : "none";
+            runtime.BurstShotsRemaining = 0;
+            runtime.CurrentBurstSize = 0;
+            runtime.PendingMotorTrigger = false;
+            runtime.PendingMotorTriggerUntil = 0f;
+            runtime.IsShooting = false;
+            runtime.MotorSkill = MotorSkill.None;
+            runtime.MotorSkillUntil = 0f;
+            runtime.Intent = new BotIntent { reason = reason ?? "controller_released" };
+            legacyScientistBodyAdapter?.StopFire(bot, runtime);
+            AbortV2Healing(bot, runtime, "controller_released", now, true);
+            SetBotCrouchedMechanical(bot, runtime, false, now);
+
+            runtime.ControllerMode = destinationMode;
+            runtime.ControllerModeReason = reason ?? $"admin_mode:{ControllerModeKey(destinationMode)}";
+            runtime.RollbackReason = "none";
+            runtime.V2AuthoritativePrepared = false;
+            runtime.V2AuthorityPreparationPending = false;
+            runtime.V2AuthorityPrepareAttempts = 0;
+            runtime.V2AuthorityPrepareStartedAt = 0f;
+            runtime.LastControllerInvariant = "native_authority_restored";
+            legacyScientistBodyAdapter?.Prepare(bot, runtime, false);
+
+            if (runtime.CurrentDestination != Vector3.zero)
+            {
+                MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
             }
         }
 
@@ -12386,7 +18299,23 @@ namespace Oxide.Plugins
             if (string.IsNullOrWhiteSpace(mode) || mode == "status")
             {
                 Reply(arg, AdvisorStatusLine());
-                Reply(arg, "Usage: raidbots.advisor status|off|fallback|shadow|canary|stats|last [bot name/key]");
+                Reply(arg, "Usage: raidbots.advisor status|off|stats|last [bot name/key]");
+                return;
+            }
+
+            if (!ExternalAiCallsAllowed && mode != "stats" && mode != "last")
+            {
+                config.DecisionAdvisor.Enabled = false;
+                config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                config.DecisionAdvisor.ShadowMode = false;
+                config.DecisionAdvisor.EndpointUrl = "";
+                config.DecisionAdvisor.ApiKey = "";
+                config.DecisionAdvisor.Model = "";
+                config.DecisionAdvisor.MaxConcurrentRequests = 0;
+                SaveConfig();
+                RefreshDecisionAdvisor();
+                Reply(arg, "Remote decision advisors are disabled by design. Brain V2 runs entirely on the game server without paid AI calls.");
                 return;
             }
 
@@ -12511,13 +18440,17 @@ namespace Oxide.Plugins
             {
                 if (submode != "on" && submode != "off")
                 {
-                    Reply(arg, "Usage: raidbots.chat ai on|off");
+                    Reply(arg, "Usage: raidbots.chat ai off");
                     return;
                 }
 
-                config.BotChat.AiRepliesEnabled = submode == "on";
+                config.BotChat.AiRepliesEnabled = false;
+                config.BotChat.OpenAiCallsPerHour = 0;
+                config.BotChat.MaxConcurrentAiRequests = 0;
                 SaveConfig();
-                Reply(arg, $"Raidlands roam bot AI chat replies set to {config.BotChat.AiRepliesEnabled}.");
+                Reply(arg, submode == "on"
+                    ? "AI-generated chat is disabled by design. Deterministic local banter remains available."
+                    : "AI-generated chat remains disabled; deterministic local banter is unchanged.");
                 return;
             }
 
@@ -13176,6 +19109,26 @@ namespace Oxide.Plugins
         public object REBOT_IsBot(object entityIdOrEntity)
         {
             return BotRuntimeForApiObject(entityIdOrEntity) != null;
+        }
+
+        [HookMethod("REBOT_GetDebugSidePanelEnabled")]
+        public bool REBOT_GetDebugSidePanelEnabled()
+        {
+            return config?.Debug?.DebugBotSidePanel == true;
+        }
+
+        [HookMethod("REBOT_SetDebugSidePanelEnabled")]
+        public bool REBOT_SetDebugSidePanelEnabled(bool enabled)
+        {
+            if (config?.Debug == null)
+                return false;
+
+            config.Debug.DebugBotSidePanel = enabled;
+            SaveConfig();
+            StartNameplateTimerIfEnabled();
+            if (!enabled)
+                DestroyDebugBotPanels();
+            return config.Debug.DebugBotSidePanel;
         }
 
         [HookMethod("REBOT_GetControllerMode")]
@@ -14341,6 +20294,7 @@ namespace Oxide.Plugins
             runtime.AimWarmupTargetUserId = targetUserId;
             runtime.AimWarmupStartedAt = now;
             runtime.CurrentAimErrorDegrees = AimErrorDegreesAt(runtime, now);
+            ResetV2VisibleAimSettle(runtime);
         }
 
         private float AimWarmupProgress(BotRuntime runtime, float now)
@@ -14386,6 +20340,16 @@ namespace Oxide.Plugins
         private BotIdentityConfig ChooseBotIdentity()
         {
             var activeKeys = new HashSet<string>(activeBots.Values.Select(runtime => runtime.BotKey), StringComparer.OrdinalIgnoreCase);
+            if (raidData?.sessions != null)
+            {
+                foreach (var reserved in raidData.sessions.Values.Where(session => session != null)
+                    .SelectMany(session => session.members ?? new List<RaidMemberState>())
+                    .Where(member => member != null && !string.IsNullOrWhiteSpace(member.bot_key))
+                    .Select(member => member.bot_key))
+                {
+                    activeKeys.Add(reserved);
+                }
+            }
             var candidates = ConfiguredBotIdentities()
                 .Select(identity => new BotIdentityConfig
                 {
@@ -14963,6 +20927,17 @@ namespace Oxide.Plugins
             }
         }
 
+        private bool IsBotNavmeshAgentReady(BaseCombatEntity bot)
+        {
+            if (bot == null || bot.IsDestroyed)
+            {
+                return false;
+            }
+
+            var agent = bot.GetComponent<NavMeshAgent>() ?? bot.GetComponentInChildren<NavMeshAgent>();
+            return agent != null && agent.enabled && agent.isOnNavMesh;
+        }
+
         private bool IsInvalidRuntimePosition(BaseCombatEntity bot)
         {
             if (bot == null)
@@ -15096,6 +21071,11 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                if (HandleNavigationFailurePressure(bot, runtime, now, !IsBotNavmeshAgentReady(bot)))
+                {
+                    continue;
+                }
+
                 if (!EnsureBotPositionUsable(bot, runtime, now))
                 {
                     continue;
@@ -15116,36 +21096,30 @@ namespace Oxide.Plugins
 
                 runtime.NextDecisionAt = now + EffectiveDecisionInterval(bot, runtime, now);
                 UpdateRetreatPosture(bot, runtime, now);
+                var brainV2ExecutionReady = IsBrainV2ExecutionReady(runtime);
                 if (IsV2Actuating(runtime))
                 {
-                    UpdateV2HealingIntent(bot, runtime, now);
+                    if (!brainV2ExecutionReady)
+                    {
+                        UpdateV2HealingIntent(bot, runtime, now);
+                    }
                 }
-                else
+                else if (!brainV2ExecutionReady)
                 {
                     UpdateMedicalHealing(bot, runtime, now);
                 }
                 UpdateBotPosture(bot, runtime, now);
-                var request = BuildDecisionRequest(bot, runtime, now);
-                var candidates = BuildCandidateActions(bot, runtime, now);
 
-                if (candidates.Count == 0)
+                if (TickBrainV2(bot, runtime, now))
                 {
+                    UpdateBotPosture(bot, runtime, now);
                     continue;
                 }
 
-                if (IsV2Actuating(runtime) || IsV2Shadowing(runtime))
-                {
-                    ApplyBoundedStyleRanking(runtime, candidates);
-                }
-                else
-                {
-                    ApplyLearnedBehaviorScoring(bot, runtime, candidates, now);
-                }
-                request.CandidateActions = candidates;
-                var decision = DecideOrFallback(bot, runtime, request, candidates, now);
-                ExecuteDecision(bot, runtime, decision, now);
-                QueueDecisionOutcomesV2(bot, runtime, decision, now);
-                UpdateBotPosture(bot, runtime, now);
+                // V1 decision execution is retired. During V2 body handoff or a
+                // transient V2 failure, hold the bot safely instead of running a
+                // second decision/controller loop against the same scientist body.
+                StopBotAttack(bot, runtime);
             }
         }
 
@@ -15199,20 +21173,13 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var start = Mathf.Abs(v2MotorScanOffset++) % entries.Count;
+            var start = ((v2MotorScanOffset % entries.Count) + entries.Count) % entries.Count;
+            var firstDeferredOffset = -1;
+            var budgetDeferredWork = false;
+            var urgentOverflowUpdates = 0;
 
             for (var offset = 0; offset < entries.Count; offset++)
             {
-                if (stopwatch.Elapsed.TotalMilliseconds >= budgetMilliseconds)
-                {
-                    v2Metrics.motor_budget_breaches++;
-                    if (v2BudgetBreachStartedAt <= 0f)
-                    {
-                        v2BudgetBreachStartedAt = now;
-                    }
-                    break;
-                }
-
                 var entry = entries[(start + offset) % entries.Count];
                 var bot = entry.Key;
                 var runtime = entry.Value;
@@ -15225,12 +21192,49 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                var pastBudget = stopwatch.Elapsed.TotalMilliseconds >= budgetMilliseconds;
+                if (pastBudget
+                    && (!IsUrgentV2FireMotorWork(runtime, now)
+                        || urgentOverflowUpdates >= V2UrgentFireUpdatesPastBudgetPerTick))
+                {
+                    if (firstDeferredOffset < 0)
+                    {
+                        firstDeferredOffset = offset;
+                    }
+                    budgetDeferredWork = true;
+                    continue;
+                }
+
+                if (pastBudget)
+                {
+                    urgentOverflowUpdates++;
+                    v2Metrics.motor_urgent_overflow_updates++;
+                }
+
                 var interval = EffectiveV2MotorInterval(bot, runtime);
                 runtime.NextCombatMotorAt = now + interval;
                 runtime.LastCombatFrame = CaptureV2CombatFrame(bot, runtime, now);
                 v2Metrics.motor_ticks++;
 
                 if (IsV2Shadowing(runtime))
+                {
+                    continue;
+                }
+
+                // Once a syringe is equipped, the current held entity is a
+                // MedicalTool rather than a server projectile. Finish (or abort)
+                // that already-authorized medical action before applying the
+                // firearm capability and navigation gates below.
+                if (runtime.V2Healing)
+                {
+                    UpdateV2HealingMotor(bot, runtime, now);
+                    if (runtime.V2Healing)
+                    {
+                        continue;
+                    }
+                }
+
+                if (!runtime.V2BodyReadyForAuthority || !runtime.V2AuthoritativePrepared)
                 {
                     continue;
                 }
@@ -15253,9 +21257,11 @@ namespace Oxide.Plugins
                     }
                 }
 
-                if (runtime.ConsecutiveFailedPaths >= config.ControllerV2.PathFailuresBeforeRollback)
+                var agentNeedsRepair = !IsBotNavmeshAgentReady(bot);
+                if ((agentNeedsRepair || runtime.ConsecutiveFailedPaths >= config.ControllerV2.PathFailuresBeforeRollback)
+                    && HandleNavigationFailurePressure(bot, runtime, now, agentNeedsRepair))
                 {
-                    RollbackV2Bot(bot, runtime, "excessive_path_failures");
+                    legacyScientistBodyAdapter?.StopFire(bot, runtime);
                     continue;
                 }
 
@@ -15265,6 +21271,7 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                UpdateV2NonSyringeHealing(bot, runtime, now);
                 UpdateV2HealingMotor(bot, runtime, now);
 
                 if (!runtime.V2Healing)
@@ -15279,20 +21286,50 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (stopwatch.Elapsed.TotalMilliseconds < budgetMilliseconds)
-            {
-                v2BudgetBreachStartedAt = 0f;
-            }
-            else if (v2BudgetBreachStartedAt > 0f
-                && now - v2BudgetBreachStartedAt >= config.ControllerV2.SustainedBudgetBreachSeconds)
-            {
-                foreach (var entry in activeBots.Where(candidate => IsV2Actuating(candidate.Value)).ToList())
-                {
-                    RollbackV2Bot(entry.Key, entry.Value, "sustained_motor_budget_breach");
-                }
+            // Resume at the first bot whose due work was actually deferred. The old
+            // cursor advanced by one regardless of how many entries were inspected,
+            // repeatedly revisiting the same prefix and making later bots wait
+            // seconds under load. When the full scan completes, rotate one slot so
+            // equal-due entries do not acquire a permanent ordering advantage.
+            v2MotorScanOffset = firstDeferredOffset >= 0
+                ? (start + firstDeferredOffset) % entries.Count
+                : (start + 1) % entries.Count;
 
+            if (!budgetDeferredWork)
+            {
                 v2BudgetBreachStartedAt = 0f;
             }
+            else
+            {
+                v2Metrics.motor_budget_breaches++;
+                if (v2BudgetBreachStartedAt <= 0f)
+                {
+                    v2BudgetBreachStartedAt = now;
+                }
+                else if (now - v2BudgetBreachStartedAt >= config.ControllerV2.SustainedBudgetBreachSeconds)
+                {
+                    // Reaching the scheduler budget means non-urgent work is
+                    // deferred to a fair resume point. A small bounded number of
+                    // ready trigger pulls may finish so automatic bursts keep their
+                    // configured cadence without turning the budget into an
+                    // unbounded CPU overrun.
+                    DebugWarning(
+                        "v2-motor-budget",
+                        $"V2 motor work has exceeded the {budgetMilliseconds:0.00}ms scheduler budget for {config.ControllerV2.SustainedBudgetBreachSeconds:0.0}s. Non-urgent bot work is being fairly deferred; controller authority is retained.",
+                        30f);
+                    v2BudgetBreachStartedAt = now;
+                }
+            }
+        }
+
+        private bool IsUrgentV2FireMotorWork(BotRuntime runtime, float now)
+        {
+            return runtime?.Intent?.wants_fire == true
+                && runtime.Memory?.Target != null
+                && runtime.Memory.HasLineOfSight
+                && now >= runtime.NextReactionAllowedAt
+                && now >= runtime.NextTriggerAt
+                && !IsMedicalFireLocked(runtime, now);
         }
 
         private float EffectiveV2MotorInterval(BaseCombatEntity bot, BotRuntime runtime)
@@ -15355,11 +21392,14 @@ namespace Oxide.Plugins
                 return;
             }
 
+            var ownershipInvariant = $"native_control_conflict:{(string.IsNullOrWhiteSpace(conflict) ? "unknown" : conflict)}";
             runtime.NativeOwnershipConflicts++;
             runtime.ConsecutiveOwnershipConflicts++;
-            runtime.LastControllerInvariant = $"native_control_conflict:{(string.IsNullOrWhiteSpace(conflict) ? "unknown" : conflict)}";
+            runtime.LastOwnershipConflict = ownershipInvariant;
+            runtime.LastOwnershipConflictAt = now;
+            runtime.LastControllerInvariant = ownershipInvariant;
             v2Metrics.native_ownership_conflicts++;
-            RecordPrefabConformance(bot, runtime, "ownership", false, runtime.LastControllerInvariant);
+            RecordPrefabConformance(bot, runtime, "ownership", false, ownershipInvariant);
             legacyScientistBodyAdapter?.StopFire(bot, runtime);
             legacyScientistBodyAdapter?.Prepare(bot, runtime, true);
 
@@ -15373,7 +21413,7 @@ namespace Oxide.Plugins
             if (config.ControllerV2.AutoRollbackOnInvariantFailure
                 && runtime.ConsecutiveOwnershipConflicts >= config.ControllerV2.OwnershipConflictsBeforeRollback)
             {
-                RollbackV2Bot(bot, runtime, runtime.LastControllerInvariant);
+                RollbackV2Bot(bot, runtime, ownershipInvariant);
             }
         }
 
@@ -15453,6 +21493,31 @@ namespace Oxide.Plugins
                 return;
             }
 
+            if (IsFiringLaneObstruction(runtime.LastFireBlockReason)
+                && runtime.FireObstructionStartedAt > 0f
+                && now - runtime.FireObstructionStartedAt >= V2FiringLaneBlockedSeconds
+                && now >= runtime.NextFiringLaneSearchAt)
+            {
+                runtime.NextFiringLaneSearchAt = now + V2FiringLaneRetrySeconds;
+
+                if (TryFindFiringLaneDestination(bot, runtime, target, now, out var firingLaneDestination))
+                {
+                    runtime.FiringLaneAttempts++;
+                    runtime.CurrentFiringLaneDestination = firingLaneDestination;
+                    runtime.CurrentDestination = firingLaneDestination;
+                    runtime.MotorSkill = MotorSkill.WideSwing;
+                    runtime.MotorSkillUntil = now + V2FiringLaneRetrySeconds;
+                    runtime.NextMotorDirectionChangeAt = runtime.MotorSkillUntil;
+
+                    if (MoveBotTo(bot, runtime, firingLaneDestination, BaseNavigator.NavigationSpeed.Fast))
+                    {
+                        v2Metrics.firing_lane_repositions++;
+                        FaceEntity(bot, target);
+                        return;
+                    }
+                }
+            }
+
             if (runtime.BurstShotsRemaining > 0 && !runtime.BurstMoveWhileFiring)
             {
                 return;
@@ -15483,6 +21548,63 @@ namespace Oxide.Plugins
                 MoveBotTo(bot, runtime, sampled, BaseNavigator.NavigationSpeed.Fast);
                 FaceEntity(bot, target);
             }
+        }
+
+        private bool TryFindFiringLaneDestination(BaseCombatEntity bot, BotRuntime runtime, BasePlayer target, float now, out Vector3 destination)
+        {
+            destination = Vector3.zero;
+            if (bot == null || runtime == null || target == null)
+            {
+                return false;
+            }
+
+            var origin = bot.transform.position;
+            var toTarget = target.transform.position - origin;
+            toTarget.y = 0f;
+            if (toTarget.sqrMagnitude <= 0.01f)
+            {
+                return false;
+            }
+
+            var forward = toTarget.normalized;
+            var preferredSide = StableBucket($"{runtime.BotKey}:{runtime.Memory.TargetUserId}:lane", 2) == 0 ? -1f : 1f;
+            var radii = new[] { 6f, 9f, 13f };
+            var angles = new[] { 90f, 58f, 122f, -90f, -58f, -122f };
+            var fallback = Vector3.zero;
+
+            foreach (var radius in radii)
+            {
+                foreach (var rawAngle in angles)
+                {
+                    var angle = rawAngle * preferredSide;
+                    var direction = Quaternion.Euler(0f, angle, 0f) * forward;
+                    var candidate = origin + direction * radius;
+
+                    if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(4f, config.Spawn.NavmeshSampleDistance), now, out var sampled)
+                        || Distance2D(origin, sampled) < 3.5f
+                        || SegmentCrossesBaseRestrictedArea(origin, sampled)
+                        || IsSquadDestinationReserved(runtime, sampled, out _))
+                    {
+                        continue;
+                    }
+
+                    if (fallback == Vector3.zero)
+                    {
+                        fallback = sampled;
+                    }
+
+                    var hypotheticalMuzzle = sampled + Vector3.up * (runtime.IsCrouching ? 1.05f : 1.55f);
+                    var targetPoint = target.transform.position + Vector3.up * 1.15f;
+                    if (IsTargetSightLineClear(bot, target, hypotheticalMuzzle, targetPoint, out _, out _, true))
+                    {
+                        destination = sampled;
+                        return true;
+                    }
+                }
+            }
+
+            destination = fallback;
+            return destination != Vector3.zero;
         }
 
         private bool IsVerifiedCoverEdge(BaseCombatEntity bot, BotRuntime runtime, BasePlayer target)
@@ -15519,7 +21641,11 @@ namespace Oxide.Plugins
             {
                 if (target == null || !runtime.Memory.HasLineOfSight || !runtime.Intent.wants_fire)
                 {
+                    ResetV2VisibleAimSettle(runtime);
                     runtime.BurstShotsRemaining = 0;
+                    runtime.CurrentBurstShotsFired = 0;
+                    runtime.CurrentBurstIsSustained = false;
+                    runtime.BurstAccuracyBias = Vector2.zero;
                     legacyScientistBodyAdapter?.StopFire(bot, runtime);
                 }
                 return;
@@ -15560,9 +21686,29 @@ namespace Oxide.Plugins
             var profile = WeaponMotorProfileFor(runtime);
             if (runtime.BurstShotsRemaining <= 0)
             {
-                runtime.CurrentBurstSize = UnityEngine.Random.Range(Math.Max(1, profile.MinimumBurstShots), Math.Max(profile.MinimumBurstShots, profile.MaximumBurstShots) + 1);
+                runtime.CurrentBurstIsSustained = ShouldUseSustainedBurst(runtime, profile, target);
+                var minimumBurst = runtime.CurrentBurstIsSustained ? profile.MinimumSustainedBurstShots : profile.MinimumBurstShots;
+                var maximumBurst = runtime.CurrentBurstIsSustained ? profile.MaximumSustainedBurstShots : profile.MaximumBurstShots;
+                maximumBurst = Math.Min(maximumBurst, magazine.contents);
+                minimumBurst = Math.Min(minimumBurst, Math.Max(1, maximumBurst));
+                runtime.CurrentBurstSize = UnityEngine.Random.Range(Math.Max(1, minimumBurst), Math.Max(minimumBurst, maximumBurst) + 1);
                 runtime.BurstShotsRemaining = runtime.CurrentBurstSize;
+                runtime.CurrentBurstShotsFired = 0;
+                if (runtime.CurrentBurstIsSustained)
+                {
+                    v2Metrics.sustained_bursts++;
+                }
+                else
+                {
+                    v2Metrics.controlled_bursts++;
+                }
                 runtime.BurstMoveWhileFiring = UnityEngine.Random.value <= profile.MoveWhileFiringChance;
+                runtime.BurstAccuracyBias = UnityEngine.Random.insideUnitCircle;
+                if (runtime.BurstAccuracyBias.sqrMagnitude <= 0.001f)
+                {
+                    runtime.BurstAccuracyBias = Vector2.up;
+                }
+                runtime.BurstAccuracyBias.Normalize();
                 runtime.CurrentShotGap = UnityEngine.Random.Range(profile.MinimumShotGapSeconds, profile.MaximumShotGapSeconds);
             }
 
@@ -15570,13 +21716,38 @@ namespace Oxide.Plugins
             var aimPoint = ApplyV2CorrelatedAimError(runtime, muzzle, runtime.CurrentAimPoint, now, deltaSeconds);
             SmoothFacePositionV2(bot, runtime, aimPoint, deltaSeconds);
 
-            if (!MotorAimAligned(bot, aimPoint))
+            var targetId = CombatTargetId(target);
+            var visibleAimError = MotorAimErrorDegrees(bot, aimPoint);
+            runtime.LastVisibleAimErrorDegrees = visibleAimError;
+
+            if (visibleAimError > V2MaximumVisibleAimErrorDegrees)
+            {
+                runtime.VisibleAimTargetUserId = targetId;
+                runtime.VisibleAimAlignedSince = 0f;
+                return;
+            }
+
+            if (runtime.VisibleAimTargetUserId != targetId)
+            {
+                runtime.VisibleAimTargetUserId = targetId;
+                runtime.VisibleAimAlignedSince = now;
+                return;
+            }
+
+            if (runtime.VisibleAimAlignedSince <= 0f)
+            {
+                runtime.VisibleAimAlignedSince = now;
+                return;
+            }
+
+            if (now - runtime.VisibleAimAlignedSince < V2VisibleAimSettleSeconds)
             {
                 return;
             }
 
             if (!IsTargetSightLineClear(bot, target, muzzle, aimPoint, out var blockReason, out _, true))
             {
+                ResetV2VisibleAimSettle(runtime);
                 BlockFire(runtime, string.Equals(blockReason, "solid", StringComparison.OrdinalIgnoreCase) ? "muzzle_blocked" : blockReason);
                 runtime.RejectedShots++;
                 v2Metrics.rejected_shots++;
@@ -15586,6 +21757,9 @@ namespace Oxide.Plugins
             var ammoMod = magazine.ammoType?.GetComponent<ItemModProjectile>();
             var projectileVelocity = Math.Max(1f, (ammoMod?.projectileVelocity ?? 300f) * Math.Max(0.01f, projectile.projectileVelocityScale));
             var maximumTravelSeconds = 300f / projectileVelocity;
+            var targetRuntime = RuntimeFor(target);
+            var enemyBotTarget = targetRuntime != null && IsEnemyBot(runtime, targetRuntime);
+            var shotDistance = Vector3.Distance(bot.transform.position, target.transform.position);
             var authorization = new FireAuthorization
             {
                 token_id = ++v2ShotSequence,
@@ -15599,8 +21773,11 @@ namespace Oxide.Plugins
                 maximum_direction_error_degrees = string.Equals(runtime.Combat?.WeaponClass, "shotgun", StringComparison.OrdinalIgnoreCase) ? 14f : 4f,
                 projectile_velocity = projectileVelocity,
                 pellet_count = Math.Max(1, ammoMod?.numProjectiles ?? 1),
+                fallback_hit_chance = enemyBotTarget ? BotVsBotTacticalBulletHitChance(runtime, shotDistance) : 0f,
+                fallback_damage = enemyBotTarget ? BotVsBotTacticalBulletDamage(bot, runtime, targetRuntime, shotDistance) : 0f,
                 provisional = true,
                 weapon = projectile,
+                target = enemyBotTarget ? target : null,
                 eligibility_reason = "ready",
                 controller_mode = ControllerModeKey(runtime.ControllerMode)
             };
@@ -15637,11 +21814,18 @@ namespace Oxide.Plugins
             authorization.committed = true;
             runtime.ConsecutiveFireFailures = 0;
             runtime.AuthorizedShots++;
+            runtime.LastShotVisibleAimErrorDegrees = visibleAimError;
             runtime.IsShooting = true;
             runtime.LastMotorShotAt = now;
             runtime.LastShotAt = now;
             runtime.BurstShotsRemaining--;
+            runtime.CurrentBurstShotsFired++;
+            if (runtime.CurrentBurstIsSustained)
+            {
+                v2Metrics.sustained_shots++;
+            }
             v2Metrics.authorized_shots++;
+            ScheduleV2BotVsBotShotResolution(bot, runtime, authorization, shotDistance);
             RecordPrefabConformance(bot, runtime, "single_shot_pipeline", true, "round_consumed");
             var recoilScale = string.Equals(runtime.Combat?.WeaponClass, "lmg", StringComparison.OrdinalIgnoreCase) ? 1.25f
                 : string.Equals(runtime.Combat?.WeaponClass, "rifle", StringComparison.OrdinalIgnoreCase) ? 1f
@@ -15656,8 +21840,105 @@ namespace Oxide.Plugins
 
             if (runtime.BurstShotsRemaining <= 0)
             {
-                runtime.NextTriggerAt += UnityEngine.Random.Range(profile.MinimumBurstPauseSeconds, profile.MaximumBurstPauseSeconds);
+                var pause = UnityEngine.Random.Range(profile.MinimumBurstPauseSeconds, profile.MaximumBurstPauseSeconds);
+                runtime.NextTriggerAt += runtime.CurrentBurstIsSustained ? pause * 1.2f : pause;
             }
+        }
+
+        private void ScheduleV2BotVsBotShotResolution(BaseCombatEntity bot, BotRuntime runtime, FireAuthorization authorization, float distance)
+        {
+            if (bot == null || runtime == null || authorization?.target == null || authorization.fallback_damage <= 0f)
+            {
+                return;
+            }
+
+            var delay = Mathf.Clamp(distance / Math.Max(1f, authorization.projectile_velocity) + 0.12f, 0.12f, 0.85f);
+            ScheduleBotTimer(runtime, delay, () =>
+            {
+                if (authorization == null || authorization.resolver_completed || authorization.native_bot_hit_observed || !authorization.committed)
+                {
+                    return;
+                }
+
+                authorization.resolver_completed = true;
+
+                var target = authorization.target;
+                var targetEntity = target as BaseCombatEntity;
+                var targetRuntime = RuntimeFor(targetEntity);
+                if (!IsLiveBot(bot)
+                    || RuntimeFor(bot) != runtime
+                    || targetEntity == null
+                    || targetRuntime == null
+                    || !IsLiveBot(targetEntity)
+                    || !IsEnemyBot(runtime, targetRuntime))
+                {
+                    return;
+                }
+
+                if (UnityEngine.Random.value > Mathf.Clamp01(authorization.fallback_hit_chance))
+                {
+                    v2Metrics.resolved_bot_misses++;
+                    RecordBotVsBotBullet(runtime, $"v2_miss {authorization.fallback_hit_chance.ToString("0.00", CultureInfo.InvariantCulture)}", Time.realtimeSinceStartup);
+                    return;
+                }
+
+                var healthBefore = Math.Max(0f, targetEntity.Health());
+                try
+                {
+                    runtime.ApplyingBotVsBotResolvedDamage = true;
+                    targetEntity.Hurt(authorization.fallback_damage, Rust.DamageType.Bullet, bot, false);
+                }
+                catch (Exception ex)
+                {
+                    DebugWarning($"v2-bot-shot-resolver:{runtime.BotKey}:{targetRuntime.BotKey}", $"V2 bot shot resolver failed for {runtime.DisplayName} -> {targetRuntime.DisplayName}: {ex.GetType().Name}: {ex.Message}", 10f);
+                    return;
+                }
+                finally
+                {
+                    runtime.ApplyingBotVsBotResolvedDamage = false;
+                }
+
+                var healthAfter = targetEntity == null || targetEntity.IsDestroyed ? 0f : Math.Max(0f, targetEntity.Health());
+                var observedLoss = Math.Max(0f, healthBefore - healthAfter);
+                if (observedLoss <= 0.01f)
+                {
+                    RecordBotVsBotBullet(runtime, "v2_applied_no_loss", Time.realtimeSinceStartup);
+                    return;
+                }
+
+                v2Metrics.resolved_bot_hits++;
+                RecordBotVsBotBullet(runtime, $"v2_applied {observedLoss.ToString("0.0", CultureInfo.InvariantCulture)}", Time.realtimeSinceStartup);
+                RecordDamageHookDiagnostics(targetRuntime, runtime, observedLoss, "enemy_bot_v2_resolver", Time.realtimeSinceStartup);
+                RememberDamageSource(targetEntity, targetRuntime, bot as BasePlayer, Time.realtimeSinceStartup);
+                RememberDamageDealt(bot, runtime, target, Time.realtimeSinceStartup);
+            });
+        }
+
+        private bool ShouldUseSustainedBurst(BotRuntime runtime, WeaponMotorProfile profile, BasePlayer target)
+        {
+            if (runtime?.Combat == null || profile == null || target == null || profile.SustainedBurstChance <= 0f)
+            {
+                return false;
+            }
+
+            var weaponClass = runtime.Combat.WeaponClass ?? "";
+            var weapon = runtime.Combat.WeaponShortname ?? "";
+            var automatic = string.Equals(weaponClass, "rifle", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(weaponClass, "smg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(weaponClass, "lmg", StringComparison.OrdinalIgnoreCase);
+            if (!automatic || weapon.IndexOf("m16", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+
+            var bot = RuntimeEntityFor(runtime);
+            var distance = bot == null ? runtime.Combat.IdealRange : Vector3.Distance(bot.transform.position, target.transform.position);
+            var distanceMultiplier = distance <= runtime.Combat.PreferredDistance ? 1.18f
+                : distance <= runtime.Combat.IdealRange ? 1f
+                : distance <= runtime.Combat.HarassRange ? 0.72f
+                : 0.42f;
+            var aggressionMultiplier = Mathf.Lerp(0.72f, 1.18f, Mathf.Clamp01(runtime.Skill?.Aggression ?? 0.5f));
+            return UnityEngine.Random.value <= Mathf.Clamp01(profile.SustainedBurstChance * distanceMultiplier * aggressionMultiplier);
         }
 
         private void RegisterV2FireFailure(BaseCombatEntity bot, BotRuntime runtime, string reason)
@@ -15684,6 +21965,9 @@ namespace Oxide.Plugins
             runtime.Intent.wants_fire = false;
             runtime.MotorSkill = MotorSkill.Reload;
             runtime.BurstShotsRemaining = 0;
+            runtime.CurrentBurstShotsFired = 0;
+            runtime.CurrentBurstIsSustained = false;
+            runtime.BurstAccuracyBias = Vector2.zero;
 
             if (projectile.ServerIsReloading())
             {
@@ -15708,18 +21992,73 @@ namespace Oxide.Plugins
         {
             var profiles = config?.ControllerV2?.WeaponMotorProfiles;
             var key = runtime?.Combat?.WeaponClass ?? "default";
+            WeaponMotorProfile profile = null;
+            if (profiles == null
+                || !profiles.TryGetValue(key, out profile)
+                || profile == null)
+            {
+                if (profiles == null
+                    || !profiles.TryGetValue("default", out profile)
+                    || profile == null)
+                {
+                    profile = new WeaponMotorProfile();
+                }
+            }
 
-            if (profiles != null && profiles.TryGetValue(key, out var profile) && profile != null)
+            if (!TrainingV2PolicyApplies(runtime, application => application.move_while_firing || application.automatic_weapon_burst_shape))
             {
                 return profile;
             }
 
-            if (profiles != null && profiles.TryGetValue("default", out profile) && profile != null)
+            if (trainingV2WeaponProfileCache.TryGetValue(key, out var learnedProfile) && learnedProfile != null)
             {
-                return profile;
+                return learnedProfile;
             }
 
-            return new WeaponMotorProfile();
+            learnedProfile = CloneWeaponMotorProfile(profile);
+            var strength = trainingV2Policy.transfer_strength;
+            if (trainingV2Policy.runtime_application.move_while_firing)
+            {
+                learnedProfile.MoveWhileFiringChance = Mathf.Lerp(profile.MoveWhileFiringChance, trainingV2Policy.learned.move_while_firing_probability, strength);
+            }
+
+            var automatic = string.Equals(key, "rifle", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "smg", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(key, "lmg", StringComparison.OrdinalIgnoreCase);
+            var burst = trainingV2Policy.learned.burst_shape;
+            if (automatic && trainingV2Policy.runtime_application.automatic_weapon_burst_shape && burst.samples >= 20)
+            {
+                learnedProfile.MinimumBurstShots = Math.Max(1, Mathf.RoundToInt(Mathf.Lerp(profile.MinimumBurstShots, burst.p25_shots, strength)));
+                learnedProfile.MaximumBurstShots = Math.Max(learnedProfile.MinimumBurstShots, Mathf.RoundToInt(Mathf.Lerp(profile.MaximumBurstShots, burst.p75_shots, strength)));
+                learnedProfile.SustainedBurstChance = Mathf.Lerp(profile.SustainedBurstChance, burst.sustained_probability_8_plus, strength);
+                learnedProfile.MinimumSustainedBurstShots = Math.Max(learnedProfile.MaximumBurstShots + 1, Mathf.RoundToInt(Mathf.Lerp(profile.MinimumSustainedBurstShots, burst.p75_shots, strength)));
+                learnedProfile.MaximumSustainedBurstShots = Math.Max(learnedProfile.MinimumSustainedBurstShots, Mathf.RoundToInt(Mathf.Lerp(profile.MaximumSustainedBurstShots, burst.p90_shots, strength)));
+            }
+
+            trainingV2WeaponProfileCache[key] = learnedProfile;
+            v2Metrics.training_policy_motor_profiles++;
+            return learnedProfile;
+        }
+
+        private WeaponMotorProfile CloneWeaponMotorProfile(WeaponMotorProfile source)
+        {
+            source = source ?? new WeaponMotorProfile();
+            return new WeaponMotorProfile
+            {
+                MinimumBurstShots = source.MinimumBurstShots,
+                MaximumBurstShots = source.MaximumBurstShots,
+                SustainedBurstChance = source.SustainedBurstChance,
+                MinimumSustainedBurstShots = source.MinimumSustainedBurstShots,
+                MaximumSustainedBurstShots = source.MaximumSustainedBurstShots,
+                AccuracyDegradationDegreesPerShot = source.AccuracyDegradationDegreesPerShot,
+                MaximumAccuracyDegradationDegrees = source.MaximumAccuracyDegradationDegrees,
+                MinimumShotGapSeconds = source.MinimumShotGapSeconds,
+                MaximumShotGapSeconds = source.MaximumShotGapSeconds,
+                MinimumBurstPauseSeconds = source.MinimumBurstPauseSeconds,
+                MaximumBurstPauseSeconds = source.MaximumBurstPauseSeconds,
+                MoveWhileFiringChance = source.MoveWhileFiringChance,
+                TorsoAimWeight = source.TorsoAimWeight
+            };
         }
 
         private Vector3 SelectV2TargetPoint(BotRuntime runtime, VisionResult visibility, BasePlayer target)
@@ -15761,6 +22100,11 @@ namespace Oxide.Plugins
             var recoilCorrection = SkillWeightedValue(runtime, 1.8f, 3.8f, 6.5f);
             runtime.RecoilAimError = Vector2.Lerp(runtime.RecoilAimError, Vector2.zero, Mathf.Clamp01(deltaSeconds * recoilCorrection));
             var combinedError = runtime.CorrelatedAimError + runtime.RecoilAimError;
+            var profile = WeaponMotorProfileFor(runtime);
+            var degradationMultiplier = runtime.CurrentBurstIsSustained ? 1.35f : 0.65f;
+            var degradation = Math.Min(profile.MaximumAccuracyDegradationDegrees,
+                runtime.CurrentBurstShotsFired * profile.AccuracyDegradationDegreesPerShot * degradationMultiplier);
+            combinedError += runtime.BurstAccuracyBias * degradation;
             runtime.CurrentAimErrorDegrees = combinedError.magnitude;
 
             var normalized = direction.normalized;
@@ -15776,20 +22120,40 @@ namespace Oxide.Plugins
             return muzzle + adjusted.normalized * direction.magnitude;
         }
 
-        private bool MotorAimAligned(BaseCombatEntity bot, Vector3 aimPoint)
+        private float MotorAimErrorDegrees(BaseCombatEntity bot, Vector3 aimPoint)
         {
             if (bot == null || aimPoint == Vector3.zero)
             {
-                return false;
+                return 180f;
             }
 
-            var desired = aimPoint - bot.transform.position;
-            desired.y = 0f;
-            var forward = bot.transform.forward;
-            forward.y = 0f;
-            return desired.sqrMagnitude > 0.001f
-                && forward.sqrMagnitude > 0.001f
-                && Vector3.Angle(forward, desired) <= 14f;
+            var origin = WeaponMuzzlePosition(bot);
+            if (origin == Vector3.zero)
+            {
+                origin = EyePosition(bot);
+            }
+
+            var desired = aimPoint - origin;
+            var player = bot as BasePlayer;
+            var visibleForward = player?.eyes == null ? bot.transform.forward : player.eyes.BodyForward();
+            if (desired.sqrMagnitude <= 0.001f || visibleForward.sqrMagnitude <= 0.001f)
+            {
+                return 180f;
+            }
+
+            return Vector3.Angle(visibleForward, desired);
+        }
+
+        private void ResetV2VisibleAimSettle(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return;
+            }
+
+            runtime.VisibleAimTargetUserId = 0UL;
+            runtime.VisibleAimAlignedSince = 0f;
+            runtime.LastVisibleAimErrorDegrees = 180f;
         }
 
         private void PruneExpiredFireAuthorizations(float now)
@@ -15807,7 +22171,8 @@ namespace Oxide.Plugins
 
         private void QueueDecisionOutcomesV2(BaseCombatEntity bot, BotRuntime runtime, TacticalDecision decision, float now)
         {
-            if (bot == null
+            if (config?.TrainingV2?.RecordBotDecisionEvaluationJsonl != true
+                || bot == null
                 || runtime == null
                 || decision?.Selected == null
                 || (!IsV2Actuating(runtime) && !IsV2Shadowing(runtime)))
@@ -16012,7 +22377,10 @@ namespace Oxide.Plugins
                     runtime.NextPeekAt = now + UnityEngine.Random.Range(config.AI.TuckMinSeconds, config.AI.TuckMaxSeconds);
                 }
 
-                MaintainFireOrStop(bot, runtime, now);
+                if (!IsBrainV2Actuating(runtime))
+                {
+                    MaintainFireOrStop(bot, runtime, now);
+                }
                 return;
             }
 
@@ -16437,7 +22805,7 @@ namespace Oxide.Plugins
                 Text =
                 {
                     Text = BuildDebugSidePanelText(bot, runtime, distance, now),
-                    FontSize = 12,
+                    FontSize = 11,
                     Align = TextAnchor.UpperLeft,
                     Color = "0.92 0.96 1 1"
                 },
@@ -16546,7 +22914,7 @@ namespace Oxide.Plugins
             {
                 CursorEnabled = false,
                 Image = { Color = "0.03 0.04 0.05 0.76" },
-                RectTransform = { AnchorMin = "0.755 0.52", AnchorMax = "0.995 0.92" }
+                RectTransform = { AnchorMin = "0.755 0.36", AnchorMax = "0.995 0.94" }
             }, "Hud", DebugBotPanelUi);
 
             CuiHelper.AddUi(viewer, container);
@@ -17798,11 +24166,22 @@ namespace Oxide.Plugins
             var aimStatus = AimStatus(runtime, now);
             var damageStatus = DamageHookStatus(runtime, now);
             var skillColor = SkillNameplateColorHex(runtime);
+            var brainMode = BrainV2ModeKey(runtime.BrainV2?.Mode ?? BrainV2RuntimeMode.Off);
+            var brainExecution = BrainV2ExecutionStatus(runtime);
+            var brainGoal = BrainGoalIdStringV2(runtime.BrainV2?.ActiveGoal?.GoalId ?? BrainGoalIdV2.None);
+            var brainAction = ActionIdString(runtime.BrainV2?.ActiveAction?.ActionId ?? TacticalActionId.None);
+            var controllerMode = ControllerModeKey(runtime.ControllerMode);
+            var controllerReason = string.IsNullOrWhiteSpace(runtime.ControllerModeReason) ? "none" : runtime.ControllerModeReason;
+            var rollbackReason = string.IsNullOrWhiteSpace(runtime.RollbackReason) ? "none" : runtime.RollbackReason;
+            var nativeBrain = bot?.GetComponent<BaseAIBrain>() ?? bot?.GetComponentInChildren<BaseAIBrain>();
+            var nativeBrainStatus = nativeBrain == null ? "missing" : nativeBrain.enabled ? "enabled" : "disabled";
             CleanupBotPlacedEntityRefs();
 
             return "<b>Closest Raidlands Bot</b>"
                 + $"\n<color={skillColor}>{runtime.DisplayName}</color>  {distance.ToString("0", CultureInfo.InvariantCulture)}m"
-                + $"\nState: {runtime.State}  Prev: {runtime.PreviousState}"
+                + $"\nBrainV2: {brainMode}/{brainExecution}  Goal: {brainGoal}  Action: {brainAction}"
+                + $"\nController: {controllerMode} ({controllerReason})  Rollback: {rollbackReason}"
+                + $"\nNative scientist brain: {nativeBrainStatus}  Compat state: {runtime.State}/{runtime.PreviousState}"
                 + $"\nSignal: {signal}  Target: {target}"
                 + $"\nAction: {action}"
                 + $"\nLOS: {(runtime.Memory.HasLineOfSight ? "Y" : "N")}  Exposure: {runtime.Memory.TargetExposureFraction:0.00} ({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints})"
@@ -17916,7 +24295,8 @@ namespace Oxide.Plugins
                 : $"cover={Vector3.Distance(bot.transform.position, runtime.CurrentCover).ToString("0", CultureInfo.InvariantCulture)}m";
             var stuck = runtime.Movement.IsStuck ? "stuck=Y" : "stuck=N";
             var badSpots = ActiveStuckMemoryCount(runtime, Time.realtimeSinceStartup);
-            return $"{destination} | {cover} | {stuck} | bad={badSpots}";
+            var roam = string.IsNullOrWhiteSpace(runtime.RoamMonumentKey) ? "roam=open" : $"roam={runtime.RoamMonumentName}#{runtime.RoamLegsCompleted}";
+            return $"{destination} | {roam} | {cover} | {stuck} | bad={badSpots}";
         }
 
         private string SecondsAgo(float timestamp, float now)
@@ -17931,6 +24311,7 @@ namespace Oxide.Plugins
 
         private void UpdatePerception(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
+            var wasVisible = runtime?.Memory?.HasLineOfSight == true;
             var ignoredTarget = IneligibleMemoryPlayer(runtime, out var ignoredReason);
 
             if (ignoredTarget != null)
@@ -17956,12 +24337,14 @@ namespace Oxide.Plugins
                 runtime.Memory.LastSeenAt = now;
                 runtime.Memory.TargetConfidence = Mathf.Clamp(0.55f + visibility.ExposedFraction * 0.45f, 0f, 1f);
                 runtime.Memory.ThreatScore = Mathf.Clamp01((1f - Vector3.Distance(bot.transform.position, visible.transform.position) / Math.Max(1f, config.AI.VisionRange)) * 0.65f + visibility.ExposedFraction * 0.35f);
+                RememberBrainVisibleContactV2(runtime, visible, visibility, now);
 
                 if (switched)
                 {
                     runtime.Memory.LastTargetSwitchAt = now;
+                    RecordBrainEventV2(runtime, "saw_enemy", PlayerName(visible), visible.transform.position, visibleTargetId, now);
                     StartAimWarmup(runtime, visibleTargetId, now);
-                    runtime.NextReactionAllowedAt = now + UnityEngine.Random.Range(runtime.Skill.ReactionMinSeconds, runtime.Skill.ReactionMaxSeconds);
+                    runtime.NextReactionAllowedAt = now + ReactionDelayForVisibleTarget(bot, runtime, visible, visibility);
                 }
                 else if (runtime.AimWarmupTargetUserId == 0UL)
                 {
@@ -17976,23 +24359,31 @@ namespace Oxide.Plugins
                 if (IsV2Actuating(runtime) || IsV2Shadowing(runtime))
                 {
                     runtime.Intent.target_id = visibleTargetId;
-                    runtime.Intent.wants_fire = now >= runtime.NextReactionAllowedAt && ShouldFireAtTarget(bot, runtime, visible, now, true);
                     runtime.Intent.aim_point = runtime.CurrentAimPoint;
-                    runtime.Intent.reason = runtime.Intent.wants_fire ? "visible_target" : runtime.LastFireBlockReason;
                     runtime.Intent.created_at = now;
+
+                    if (!IsBrainV2Actuating(runtime))
+                    {
+                        runtime.Intent.wants_fire = now >= runtime.NextReactionAllowedAt && ShouldFireAtTarget(bot, runtime, visible, now, true);
+                        runtime.Intent.reason = runtime.Intent.wants_fire ? "visible_target" : runtime.LastFireBlockReason;
+                    }
                 }
 
                 if (IsV2Actuating(runtime))
                 {
                     RecordPrefabConformance(bot, runtime, "target_acquisition", true, "plugin_target_only");
                 }
-                else if (runtime.IsShooting && !ShouldFireAtTarget(bot, runtime, visible, now, true))
+
+                if (!IsBrainV2Actuating(runtime) && !IsV2Actuating(runtime))
                 {
-                    StopBotAttack(bot, runtime);
-                }
-                else if (!runtime.IsShooting && now >= runtime.NextReactionAllowedAt && ShouldFireAtTarget(bot, runtime, visible, now, true))
-                {
-                    StartBotAttack(bot, runtime, visible);
+                    if (runtime.IsShooting && !ShouldFireAtTarget(bot, runtime, visible, now, true))
+                    {
+                        StopBotAttack(bot, runtime);
+                    }
+                    else if (!runtime.IsShooting && now >= runtime.NextReactionAllowedAt && ShouldFireAtTarget(bot, runtime, visible, now, true))
+                    {
+                        StartBotAttack(bot, runtime, visible);
+                    }
                 }
 
                 return;
@@ -18000,6 +24391,10 @@ namespace Oxide.Plugins
 
             runtime.Memory.HasLineOfSight = false;
             runtime.Memory.TargetExposureFraction = 0f;
+            if (wasVisible)
+            {
+                RecordBrainEventV2(runtime, "lost_sight", runtime.Memory.TargetUserId.ToString(CultureInfo.InvariantCulture), runtime.Memory.LastSeenPosition, runtime.Memory.TargetUserId, now);
+            }
             runtime.Memory.TargetVisibleProbePoints = visibility?.VisibleProbePoints ?? 0;
             runtime.Memory.TargetTotalProbePoints = visibility?.TotalProbePoints ?? 0;
             runtime.LastSightReason = DescribeVisionResult(visibility);
@@ -18053,6 +24448,54 @@ namespace Oxide.Plugins
             }
         }
 
+        private float ReactionDelayForVisibleTarget(BaseCombatEntity bot, BotRuntime runtime, BasePlayer target, VisionResult visibility)
+        {
+            var skill = runtime?.Skill ?? new SkillDefinition();
+            var baseDelay = UnityEngine.Random.Range(skill.ReactionMinSeconds, skill.ReactionMaxSeconds);
+            if (bot == null || target == null)
+            {
+                return baseDelay;
+            }
+
+            var toTarget = target.transform.position - bot.transform.position;
+            toTarget.y = 0f;
+            var forward = bot.transform.forward;
+            forward.y = 0f;
+            if (toTarget.sqrMagnitude <= 0.01f || forward.sqrMagnitude <= 0.01f)
+            {
+                return baseDelay;
+            }
+
+            var angle = Vector3.Angle(forward, toTarget);
+            var directCone = Math.Max(5f, config.AI.DirectSightConeDegrees);
+            var peripheralAngle = Math.Max(directCone + 1f, config.AI.VisionFovDegrees * 0.5f);
+            var exposed = visibility?.ExposedFraction ?? 0f;
+            var close = Vector3.Distance(bot.transform.position, target.transform.position) <= config.AI.CloseAwarenessRadius;
+            var direct = angle <= directCone && exposed >= config.AI.MinimumExposedTargetFractionToShoot;
+            var multiplier = direct || close
+                ? config.AI.DirectSightReactionMultiplier
+                : Mathf.Lerp(config.AI.DirectSightReactionMultiplier, config.AI.PeripheralSightReactionMultiplier, Mathf.InverseLerp(directCone, peripheralAngle, angle));
+            return Math.Max(0.06f, baseDelay * multiplier);
+        }
+
+        private bool IsDirectVisibleThreat(BaseCombatEntity bot, BotRuntime runtime)
+        {
+            var target = runtime?.Memory?.Target;
+            if (bot == null || target == null || !runtime.Memory.HasLineOfSight
+                || runtime.Memory.TargetExposureFraction < config.AI.MinimumExposedTargetFractionToShoot)
+            {
+                return false;
+            }
+
+            var toTarget = target.transform.position - bot.transform.position;
+            toTarget.y = 0f;
+            var forward = bot.transform.forward;
+            forward.y = 0f;
+            return toTarget.sqrMagnitude > 0.01f
+                && forward.sqrMagnitude > 0.01f
+                && Vector3.Angle(forward, toTarget) <= config.AI.DirectSightConeDegrees;
+        }
+
         private BasePlayer FindBestVisibleTarget(BaseCombatEntity bot, BotRuntime runtime, out VisionResult bestVisibility)
         {
             BasePlayer best = null;
@@ -18094,6 +24537,7 @@ namespace Oxide.Plugins
                     continue;
                 }
 
+                RememberBrainVisibleContactV2(runtime, player, visibility, Time.realtimeSinceStartup);
                 var score = visibility.ExposedFraction * 1000f - distance;
 
                 if (score <= bestScore)
@@ -18322,12 +24766,40 @@ namespace Oxide.Plugins
 
             if (Physics.Linecast(from, to, out var hit, mask, QueryTriggerInteraction.Ignore))
             {
-                var hitEntity = hit.GetEntity();
+                var hitBotAttachment = IsSightLineEndpointHit(hit, bot);
+                var hitTargetAttachment = IsSightLineEndpointHit(hit, player);
 
-                if (hitEntity == null || (hitEntity != player && hitEntity != bot))
+                if (!hitBotAttachment && !hitTargetAttachment)
                 {
                     blockReason = "solid";
+                    blockerHits = 1;
                     directLineClear = false;
+                }
+                else if (hitBotAttachment && !hitTargetAttachment)
+                {
+                    // A held weapon or another collider parented to the shooter can
+                    // be the first Linecast result when the ray begins at the muzzle.
+                    // Ignore only endpoint hierarchies, then keep checking the full
+                    // segment so actual terrain, cover, teammates, and deployables
+                    // still block the shot.
+                    var delta = to - from;
+                    var distance = delta.magnitude;
+                    if (distance > 0.001f)
+                    {
+                        var followUpHits = Physics.RaycastAll(from, delta.normalized, distance, mask, QueryTriggerInteraction.Ignore);
+                        foreach (var followUpHit in followUpHits)
+                        {
+                            if (IsSightLineEndpointHit(followUpHit, bot) || IsSightLineEndpointHit(followUpHit, player))
+                            {
+                                continue;
+                            }
+
+                            blockReason = "solid";
+                            blockerHits = 1;
+                            directLineClear = false;
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -18357,6 +24829,33 @@ namespace Oxide.Plugins
             }
 
             return true;
+        }
+
+        private bool IsSightLineEndpointHit(RaycastHit hit, BaseEntity endpoint)
+        {
+            if (endpoint == null)
+            {
+                return false;
+            }
+
+            var colliderTransform = hit.collider?.transform;
+            if (colliderTransform != null
+                && (colliderTransform == endpoint.transform || colliderTransform.IsChildOf(endpoint.transform)))
+            {
+                return true;
+            }
+
+            var entity = hit.GetEntity();
+            for (var depth = 0; entity != null && depth < 8; depth++)
+            {
+                if (entity == endpoint)
+                {
+                    return true;
+                }
+                entity = entity.GetParentEntity();
+            }
+
+            return false;
         }
 
         private bool IsVisionConcealedByFoliage(BaseCombatEntity bot, BasePlayer player, Vector3 from, Vector3 to)
@@ -18393,11 +24892,14 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            // Strict fire authorization checks physical tree/bush colliders at every distance.
+            // Strict fire authorization checks physical tree/bush colliders at every
+            // distance, but uses a bullet-sized corridor. The former 0.9 m minimum
+            // sphere treated nearby leaves and branches as a solid wall even when the
+            // actual projectile ray was clear.
             var blockers = 0;
             var mask = FoliageVisionMask();
             var checkRadius = strictLineOfFire
-                ? Math.Max(0.9f, config.AI.FoliageVisionCheckRadius)
+                ? Mathf.Clamp(config.AI.FoliageVisionCheckRadius * 0.22f, 0.12f, 0.28f)
                 : config.AI.FoliageVisionCheckRadius;
             var hitsRequired = strictLineOfFire
                 ? 1
@@ -18431,6 +24933,16 @@ namespace Oxide.Plugins
                         return true;
                     }
                 }
+            }
+
+            // Terrain splat says that the line crosses a forest/jungle biome; it does
+            // not prove a bush is actually between muzzle and target. Collider checks
+            // above remain authoritative for gunfire. Servers may opt back into the
+            // conservative legacy behavior with StrictDecorativeFoliageAtAllRanges.
+            if (strictLineOfFire && config?.ControllerV2?.StrictDecorativeFoliageAtAllRanges != true)
+            {
+                blockerHits = blockers;
+                return false;
             }
 
             // Terrain splat sampling is a fallback for decorative bushes/forest detail
@@ -18582,6 +25094,8 @@ namespace Oxide.Plugins
                 runtime.Memory.TargetUserId = source.userID;
                 runtime.Memory.LastHeardPosition = sourcePosition;
                 runtime.Memory.LastHeardAt = now;
+                RememberBrainHeardContactV2(runtime, source, sourcePosition, confidence, now);
+                RecordBrainEventV2(runtime, "heard_contact", soundType, sourcePosition, CombatTargetId(source), now);
                 if (IsBarricadeAnchorActive(runtime, now))
                 {
                     runtime.BarricadeAnchorNoActionPushAt = now + BarricadeAnchorNoActionPushSeconds(runtime);
@@ -18590,7 +25104,7 @@ namespace Oxide.Plugins
                 runtime.Memory.TargetConfidence = Math.Max(runtime.Memory.TargetConfidence, confidence);
                 runtime.NextDecisionAt = Math.Min(runtime.NextDecisionAt, now);
 
-                if (ShouldCommandSoundInvestigation(runtime, source.userID, now))
+                if (!IsBrainV2Actuating(runtime) && ShouldCommandSoundInvestigation(runtime, source.userID, now))
                 {
                     var destination = SoundInvestigationDestination(bot.transform.position, sourcePosition, runtime);
                     var destinationChanged = runtime.CurrentDestination == Vector3.zero
@@ -18788,6 +25302,2436 @@ namespace Oxide.Plugins
             }
 
             return entity == null ? Vector3.zero : entity.transform.position + Vector3.up * 1.6f;
+        }
+
+        private void RecordBrainEventV2(BotRuntime runtime, string type, string detail, Vector3 position, ulong entityId, float now)
+        {
+            var brain = runtime?.BrainV2;
+            if (brain == null || config?.BrainV2 == null)
+            {
+                return;
+            }
+
+            var normalizedType = NormalizeAdminKey(type);
+            var last = brain.RecentEvents.LastOrDefault();
+            if (last != null
+                && string.Equals(last.type, normalizedType, StringComparison.OrdinalIgnoreCase)
+                && last.entity_id == entityId
+                && now - last.time < 0.2f)
+            {
+                last.time = now;
+                last.position = position;
+                last.detail = detail ?? "";
+                return;
+            }
+
+            brain.RecentEvents.Add(new BrainEventV2
+            {
+                time = now,
+                type = string.IsNullOrWhiteSpace(normalizedType) ? "event" : normalizedType,
+                detail = detail ?? "",
+                position = position,
+                entity_id = entityId
+            });
+
+            var capacity = Math.Max(4, config.BrainV2.RecentEventCapacity);
+            while (brain.RecentEvents.Count > capacity)
+            {
+                brain.RecentEvents.RemoveAt(0);
+            }
+        }
+
+        private BrainContactV2 GetOrCreateBrainContactV2(BotRuntime runtime, BasePlayer entity, ulong entityId)
+        {
+            var brain = runtime?.BrainV2;
+            if (brain == null)
+            {
+                return null;
+            }
+
+            if (entityId == 0UL && entity != null)
+            {
+                entityId = CombatTargetId(entity);
+            }
+
+            if (entityId == 0UL)
+            {
+                return null;
+            }
+
+            if (!brain.Contacts.TryGetValue(entityId, out var contact) || contact == null)
+            {
+                contact = new BrainContactV2 { entity_id = entityId };
+                brain.Contacts[entityId] = contact;
+            }
+
+            if (entity != null)
+            {
+                contact.entity = entity;
+            }
+
+            return contact;
+        }
+
+        private void RememberBrainVisibleContactV2(BotRuntime runtime, BasePlayer target, VisionResult visibility, float now)
+        {
+            if (runtime?.BrainV2 == null || target == null)
+            {
+                return;
+            }
+
+            var contact = GetOrCreateBrainContactV2(runtime, target, CombatTargetId(target));
+            if (contact == null)
+            {
+                return;
+            }
+
+            var previousPosition = contact.last_seen_position;
+            var previousAt = contact.last_seen_at;
+            var position = target.transform.position;
+            if (previousAt > 0f && now > previousAt && previousPosition != Vector3.zero)
+            {
+                contact.last_seen_velocity = Vector3.ClampMagnitude((position - previousPosition) / Math.Max(0.05f, now - previousAt), 20f);
+            }
+
+            var exposure = visibility == null ? 0.5f : Mathf.Clamp01(visibility.ExposedFraction);
+            contact.last_seen_position = position;
+            contact.last_seen_at = now;
+            contact.visual_confidence = Mathf.Clamp01(0.62f + exposure * 0.38f);
+            RememberBrainThreatEvidenceV2(contact, 0.35f + exposure * 0.35f + runtime.Memory.ThreatScore * 0.30f, now);
+            contact.currently_visible = visibility == null || visibility.CanSee;
+            contact.entity = target;
+        }
+
+        private void RememberBrainHeardContactV2(BotRuntime runtime, BasePlayer source, Vector3 position, float confidence, float now)
+        {
+            var contact = GetOrCreateBrainContactV2(runtime, source, CombatTargetId(source));
+            if (contact == null)
+            {
+                return;
+            }
+
+            contact.last_heard_position = position;
+            contact.last_heard_at = now;
+            contact.audio_confidence = Mathf.Clamp01(confidence);
+            RememberBrainThreatEvidenceV2(contact, confidence * 0.65f, now);
+        }
+
+        private void RememberBrainDamageContactV2(BotRuntime runtime, BasePlayer attacker, Vector3 position, float now)
+        {
+            var contact = GetOrCreateBrainContactV2(runtime, attacker, CombatTargetId(attacker));
+            if (contact == null)
+            {
+                return;
+            }
+
+            contact.last_damage_position = position;
+            contact.last_damage_at = now;
+            contact.damage_confidence = 1f;
+            RememberBrainThreatEvidenceV2(contact, 1f, now);
+        }
+
+        private void RememberBrainSquadContactV2(BotRuntime runtime, EnemyMemory memory, float now)
+        {
+            if (memory == null || memory.UserId == 0UL || memory.LastKnownPosition == Vector3.zero)
+            {
+                return;
+            }
+
+            var contact = GetOrCreateBrainContactV2(runtime, ResolveBrainContactEntityV2(memory.UserId), memory.UserId);
+            if (contact == null)
+            {
+                return;
+            }
+
+            contact.last_squad_position = memory.LastKnownPosition;
+            contact.last_squad_at = memory.LastKnownAt > 0f ? memory.LastKnownAt : now;
+            contact.squad_confidence = Mathf.Clamp01(memory.Confidence * 0.85f);
+            RememberBrainThreatEvidenceV2(contact, memory.Confidence * 0.6f, now);
+        }
+
+        private BasePlayer ResolveBrainContactEntityV2(ulong entityId)
+        {
+            if (entityId == 0UL)
+            {
+                return null;
+            }
+
+            var player = BasePlayer.FindByID(entityId) ?? BasePlayer.FindSleeping(entityId);
+            if (player != null)
+            {
+                return player;
+            }
+
+            foreach (var bot in activeBots.Keys.OfType<BasePlayer>())
+            {
+                if (CombatTargetId(bot) == entityId)
+                {
+                    return bot;
+                }
+            }
+
+            return null;
+        }
+
+        private float BrainEvidenceDecayV2(float now, float timestamp, float halfLifeSeconds)
+        {
+            if (timestamp <= 0f || halfLifeSeconds <= 0f)
+            {
+                return 0f;
+            }
+
+            var age = Math.Max(0f, now - timestamp);
+            return Mathf.Pow(0.5f, age / Math.Max(0.01f, halfLifeSeconds));
+        }
+
+        private float DecayBrainThreatV2(BrainContactV2 contact, float now)
+        {
+            if (contact == null)
+            {
+                return 0f;
+            }
+
+            if (contact.threat_updated_at <= 0f)
+            {
+                contact.threat_updated_at = now;
+                return contact.threat;
+            }
+
+            var elapsed = Math.Max(0f, now - contact.threat_updated_at);
+            if (elapsed > 0f)
+            {
+                contact.threat = Mathf.Clamp01(contact.threat * Mathf.Pow(0.5f, elapsed / Math.Max(0.01f, config.BrainV2.DamageEvidenceHalfLifeSeconds)));
+                contact.threat_updated_at = now;
+            }
+
+            return contact.threat;
+        }
+
+        private void RememberBrainThreatEvidenceV2(BrainContactV2 contact, float evidence, float now)
+        {
+            if (contact == null)
+            {
+                return;
+            }
+
+            DecayBrainThreatV2(contact, now);
+            contact.threat = Math.Max(contact.threat, Mathf.Clamp01(evidence));
+            contact.threat_updated_at = now;
+        }
+
+        private bool IsBrainContactEligibleV2(BotRuntime observer, BasePlayer entity)
+        {
+            if (observer == null || entity == null || entity.IsDestroyed || entity.IsDead() || entity.IsSleeping())
+            {
+                return false;
+            }
+
+            var otherRuntime = RuntimeFor(entity);
+            if (otherRuntime != null)
+            {
+                return IsEnemyBot(observer, otherRuntime);
+            }
+
+            return IsRealPlayer(entity) && !ShouldIgnoreRealPlayerTarget(entity);
+        }
+
+        private void RefreshBrainContactsV2(BotRuntime runtime, float now)
+        {
+            var brain = runtime?.BrainV2;
+            if (brain == null)
+            {
+                return;
+            }
+
+            if (TryGetSharedEnemyMemory(runtime, now, out var sharedMemory))
+            {
+                RememberBrainSquadContactV2(runtime, sharedMemory, now);
+            }
+
+            foreach (var contact in brain.Contacts.Values.Where(value => value != null).ToList())
+            {
+                if (contact.entity == null || contact.entity.IsDestroyed)
+                {
+                    contact.entity = ResolveBrainContactEntityV2(contact.entity_id);
+                }
+
+                if (contact.entity != null && !IsBrainContactEligibleV2(runtime, contact.entity))
+                {
+                    brain.Contacts.Remove(contact.entity_id);
+                    continue;
+                }
+
+                var visual = Mathf.Clamp01(contact.visual_confidence * BrainEvidenceDecayV2(now, contact.last_seen_at, config.BrainV2.VisualEvidenceHalfLifeSeconds));
+                var audio = Mathf.Clamp01(contact.audio_confidence * BrainEvidenceDecayV2(now, contact.last_heard_at, config.BrainV2.AudioEvidenceHalfLifeSeconds));
+                var damage = Mathf.Clamp01(contact.damage_confidence * BrainEvidenceDecayV2(now, contact.last_damage_at, config.BrainV2.DamageEvidenceHalfLifeSeconds));
+                var squad = Mathf.Clamp01(contact.squad_confidence * BrainEvidenceDecayV2(now, contact.last_squad_at, config.BrainV2.SquadEvidenceHalfLifeSeconds));
+                contact.confidence = Mathf.Clamp01(1f - (1f - visual) * (1f - audio) * (1f - damage) * (1f - squad));
+                contact.currently_visible = visual > 0.35f
+                    && contact.last_seen_at > 0f
+                    && now - contact.last_seen_at <= Math.Max(0.5f, config.AI.PerceptionTickSeconds * 2.5f);
+
+                var weightedPosition = Vector3.zero;
+                var weight = 0f;
+                if (contact.last_seen_position != Vector3.zero && visual > 0f)
+                {
+                    var extrapolationSeconds = Mathf.Clamp(now - contact.last_seen_at, 0f, 2f);
+                    weightedPosition += (contact.last_seen_position + contact.last_seen_velocity * extrapolationSeconds) * visual;
+                    weight += visual;
+                }
+                if (contact.last_damage_position != Vector3.zero && damage > 0f)
+                {
+                    weightedPosition += contact.last_damage_position * damage;
+                    weight += damage;
+                }
+                if (contact.last_heard_position != Vector3.zero && audio > 0f)
+                {
+                    weightedPosition += contact.last_heard_position * audio;
+                    weight += audio;
+                }
+                if (contact.last_squad_position != Vector3.zero && squad > 0f)
+                {
+                    weightedPosition += contact.last_squad_position * squad;
+                    weight += squad;
+                }
+
+                contact.estimated_position = weight <= 0.0001f ? Vector3.zero : weightedPosition / weight;
+                var freshestAt = Math.Max(Math.Max(contact.last_seen_at, contact.last_heard_at), Math.Max(contact.last_damage_at, contact.last_squad_at));
+                var ageSeconds = freshestAt <= 0f ? config.AI.SearchLastSeenSeconds : Math.Max(0f, now - freshestAt);
+                contact.uncertainty_radius = Mathf.Clamp(
+                    (1f - visual) * 2.5f + ageSeconds * Math.Max(0.1f, config.ControllerV2.LastKnownPositionUncertaintyPerSecond),
+                    0f,
+                    Math.Max(2f, config.ControllerV2.MaximumLastKnownPositionUncertainty));
+                DecayBrainThreatV2(contact, now);
+            }
+
+            var staleIds = brain.Contacts
+                .Where(entry => entry.Value == null
+                    || entry.Value.confidence < 0.015f
+                        && Math.Max(Math.Max(entry.Value.last_seen_at, entry.Value.last_heard_at), Math.Max(entry.Value.last_damage_at, entry.Value.last_squad_at)) > 0f
+                        && now - Math.Max(Math.Max(entry.Value.last_seen_at, entry.Value.last_heard_at), Math.Max(entry.Value.last_damage_at, entry.Value.last_squad_at)) > config.AI.SearchLastSeenSeconds)
+                .Select(entry => entry.Key)
+                .ToList();
+            foreach (var id in staleIds)
+            {
+                brain.Contacts.Remove(id);
+            }
+
+            var capacity = Math.Max(1, config.BrainV2.ContactMemoryCapacity);
+            foreach (var excess in brain.Contacts.Values
+                .Where(value => value != null)
+                .OrderByDescending(value => value.confidence * 0.65f + value.threat * 0.35f)
+                .Skip(capacity)
+                .Select(value => value.entity_id)
+                .ToList())
+            {
+                brain.Contacts.Remove(excess);
+            }
+        }
+
+        private BrainContactV2 SelectBrainPrimaryContactV2(BotRuntime runtime)
+        {
+            var currentId = runtime?.Memory?.TargetUserId ?? 0UL;
+            var contacts = runtime?.BrainV2?.Contacts?.Values
+                .Where(contact => contact != null && contact.confidence > 0.01f && contact.estimated_position != Vector3.zero)
+                .ToList();
+
+            if (contacts == null || contacts.Count == 0)
+            {
+                return null;
+            }
+
+            // Perception has already paid the cost of proving this target visible.
+            // Never let a high-confidence stale sound, squad callout, or previous
+            // damage source outrank a legal enemy that is visibly in front of us.
+            // Doing so split runtime.Memory from the brain snapshot: the debug view
+            // showed LOS=Y while SearchThreat kept walking toward another contact,
+            // leaving the fire motor blocked with no_target.
+            var visible = contacts
+                .Where(contact => contact.currently_visible && contact.entity != null)
+                .OrderByDescending(contact => contact.entity_id == currentId)
+                .ThenByDescending(contact => contact.confidence * 0.62f + contact.threat * 0.38f)
+                .FirstOrDefault();
+
+            if (visible != null)
+            {
+                return visible;
+            }
+
+            return contacts
+                .OrderByDescending(contact => contact.confidence * 0.48f
+                    + contact.threat * 0.30f
+                    + (contact.entity_id == currentId ? 0.04f : 0f))
+                .FirstOrDefault();
+        }
+
+        private void PromoteBrainContactV2(BotRuntime runtime, BrainContactV2 contact, float now)
+        {
+            if (runtime == null || contact == null || contact.entity_id == 0UL)
+            {
+                return;
+            }
+
+            runtime.Memory.TargetUserId = contact.entity_id;
+            runtime.Memory.Target = contact.currently_visible ? contact.entity : null;
+            runtime.Memory.HasLineOfSight = contact.currently_visible && contact.entity != null;
+            runtime.Memory.TargetConfidence = contact.confidence;
+            runtime.Memory.ThreatScore = contact.threat;
+
+            if (contact.last_seen_position != Vector3.zero)
+            {
+                runtime.Memory.LastSeenPosition = contact.last_seen_position;
+                runtime.Memory.LastSeenAt = contact.last_seen_at;
+            }
+            if (contact.last_heard_position != Vector3.zero)
+            {
+                runtime.Memory.LastHeardPosition = contact.last_heard_position;
+                runtime.Memory.LastHeardAt = contact.last_heard_at;
+            }
+            if (contact.last_damage_position != Vector3.zero)
+            {
+                runtime.Memory.LastDamageSourcePosition = contact.last_damage_position;
+                runtime.Memory.LastDamagedAt = contact.last_damage_at;
+                runtime.Memory.LastDamageSourcePlayer = contact.entity;
+            }
+
+            if (runtime.Memory.HasLineOfSight && contact.entity != null)
+            {
+                var visibility = TargetVisibility(RuntimeEntityFor(runtime), contact.entity, config.AI.MinimumExposedTargetFraction);
+                runtime.Memory.TargetExposureFraction = visibility.ExposedFraction;
+                runtime.Memory.TargetVisibleProbePoints = visibility.VisibleProbePoints;
+                runtime.Memory.TargetTotalProbePoints = visibility.TotalProbePoints;
+            }
+        }
+
+        private BaseCombatEntity RuntimeEntityFor(BotRuntime runtime)
+        {
+            if (runtime == null)
+            {
+                return null;
+            }
+
+            return activeBots.FirstOrDefault(entry => ReferenceEquals(entry.Value, runtime)).Key;
+        }
+
+        private bool HasBotMedicalItemV2(BaseCombatEntity bot)
+        {
+            var player = bot as BasePlayer;
+            if (player?.inventory == null)
+            {
+                return false;
+            }
+
+            var allowed = new HashSet<string>(config.AI.RealMedicalItemShortnames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in config.AI.BotMedicalLoadout ?? new Dictionary<string, int>())
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    allowed.Add(entry.Key.Trim());
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+            {
+                allowed.Add(config.AI.BotMedicalItemShortname.Trim());
+            }
+
+            return new[] { player.inventory.containerBelt, player.inventory.containerMain }
+                .Where(container => container?.itemList != null)
+                .SelectMany(container => container.itemList)
+                .Any(item => item != null
+                    && item.amount > 0
+                    && (allowed.Count == 0 || allowed.Contains(item.info?.shortname ?? ""))
+                    && item.info?.GetComponent<ItemModConsumable>() != null);
+        }
+
+        private bool HasBotSyringeMedicalItemV2(BaseCombatEntity bot)
+        {
+            var player = bot as BasePlayer;
+            if (player?.inventory == null)
+            {
+                return false;
+            }
+
+            var allowed = AllowedBotMedicalShortnames();
+            return new[] { player.inventory.containerBelt, player.inventory.containerMain }
+                .Where(container => container?.itemList != null)
+                .SelectMany(container => container.itemList)
+                .Any(item => item != null
+                    && item.amount > 0
+                    && (allowed.Count == 0 || allowed.Contains(item.info?.shortname ?? ""))
+                    && IsSyringeMedicalItem(item.info?.shortname)
+                    && item.info?.GetComponent<ItemModConsumable>() != null
+                    && item.GetHeldEntity() is MedicalTool);
+        }
+
+        private bool IsBrainGrenadeDangerV2(Vector3 position, float now)
+        {
+            return utilityDangerZones.Any(zone => zone != null
+                && zone.ExpiresAt > now
+                && string.Equals(zone.UtilityType, "grenade", StringComparison.OrdinalIgnoreCase)
+                && Distance2D(position, zone.Position) <= zone.Radius + 1.5f);
+        }
+
+        private BrainWorldSnapshotV2 CaptureBrainSnapshotV2(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            RefreshBrainContactsV2(runtime, now);
+            var contact = SelectBrainPrimaryContactV2(runtime);
+            if (contact?.currently_visible == true
+                && contact.entity != null
+                && (runtime.Memory.TargetUserId != contact.entity_id
+                    || runtime.Memory.Target != contact.entity
+                    || !runtime.Memory.HasLineOfSight))
+            {
+                PromoteBrainContactV2(runtime, contact, now);
+            }
+            var target = contact?.entity;
+            var maxHealth = Math.Max(1f, BotMaxHealth(bot, runtime));
+            var healthFraction = Mathf.Clamp01(bot.Health() / maxHealth);
+            var healthNeed = Mathf.Clamp01((0.88f - healthFraction) / 0.78f);
+            var damageAge = runtime.LastDamageTakenAt <= 0f ? float.MaxValue : now - runtime.LastDamageTakenAt;
+            var recentDamage = damageAge == float.MaxValue ? 0f : BrainEvidenceDecayV2(now, runtime.LastDamageTakenAt, 6f);
+            var triggerFraction = Math.Max(0.01f, config.AI.ProtectionDamageTriggerPercent / 100f);
+            var accumulatedPressure = Mathf.Clamp01(runtime.ProtectionDamageAccumulatedFraction / triggerFraction);
+            var damagePressure = Mathf.Clamp01(recentDamage * 0.65f + accumulatedPressure * 0.35f);
+            var currentlyVisible = contact?.currently_visible == true && target != null;
+            var targetDistance = contact == null || contact.estimated_position == Vector3.zero
+                ? 0f
+                : Vector3.Distance(bot.transform.position, contact.estimated_position);
+            RefreshCombatProfile(bot, runtime);
+            var rangeFit = targetDistance <= 0f ? 0f : WeaponRangeScore(runtime, targetDistance);
+            var targetExposure = currentlyVisible
+                ? Mathf.Clamp01(Mathf.Max(runtime.Memory.TargetExposureFraction, 0.15f))
+                : 0f;
+            var ownExposure = currentlyVisible && target != null
+                ? Mathf.Clamp01(BotExposureFromThreat(bot, target, runtime.IsCrouching))
+                : 0f;
+            var exposureRisk = Mathf.Clamp01(ownExposure * 0.72f + damagePressure * 0.42f);
+            var ammoFraction = ActiveWeaponMagazineFraction(bot);
+            var atCover = IsAtCover(bot, runtime);
+            var effectiveCover = IsEffectiveCover(bot, runtime, target);
+            var coverQuality = effectiveCover ? 1f : atCover ? 0.58f : 0f;
+            var coverReachability = runtime.CurrentCover != Vector3.zero || runtime.CurrentTuckPoint != Vector3.zero
+                ? Mathf.Clamp01(1f - Vector3.Distance(bot.transform.position, runtime.CurrentTuckPoint != Vector3.zero ? runtime.CurrentTuckPoint : runtime.CurrentCover) / Math.Max(6f, config.AI.CoverSearchRadius))
+                : config.AI.AllowCover ? 0.35f : 0f;
+            var allies = NearbyAllies(bot, runtime);
+            var enemies = Math.Max(NearbyKnownEnemies(runtime, now), contact == null ? 0 : 1);
+            var forceBalance = Mathf.Clamp01((allies + 1f) / (allies + enemies + 2f));
+            var board = SquadBoardFor(runtime);
+            var squadSeparation = board == null || board.TeamSize <= 1
+                ? 0f
+                : Mathf.Clamp01(Vector3.Distance(bot.transform.position, board.TeamCenter) / Math.Max(1f, config.AI.SquadRegroupDistance));
+            var teammateUrgency = board?.AnyMemberHasLineOfSight == true && !currentlyVisible ? 1f : board?.SharedEnemyUserId != 0UL ? 0.55f : 0f;
+            var pathRisk = Mathf.Clamp01((runtime.Movement.IsStuck ? 0.65f : 0f)
+                + Mathf.Clamp01(runtime.ConsecutiveFailedPaths / 10f) * 0.35f);
+            var insideBase = IsBaseRestrictedPosition(bot.transform.position);
+            var objectiveUrgency = insideBase ? 1f : 0f;
+            var managedObjective = IsManagedBot(runtime) && runtime.ManagedObjective != null && runtime.ManagedObjective.HasValues;
+            if (IsManagedBot(runtime) && runtime.LeashCenter != Vector3.zero && runtime.LeashRadius > 0f)
+            {
+                var leashDistance = Vector3.Distance(bot.transform.position, runtime.LeashCenter);
+                objectiveUrgency = Math.Max(objectiveUrgency, Mathf.Clamp01((leashDistance - runtime.LeashRadius * 0.8f) / Math.Max(4f, runtime.LeashRadius * 0.3f)));
+            }
+            if (managedObjective)
+            {
+                objectiveUrgency = Math.Max(objectiveUrgency, 0.22f);
+            }
+
+            var aimReady = Mathf.Clamp01(AimWarmupProgress(runtime, now));
+            var targetOpportunity = currentlyVisible
+                ? Mathf.Clamp01((contact?.confidence ?? 0f) * targetExposure * rangeFit * (0.55f + aimReady * 0.45f))
+                : 0f;
+            var readiness = Mathf.Clamp01(healthFraction * 0.42f
+                + ammoFraction * 0.23f
+                + coverQuality * 0.18f
+                + (1f - pathRisk) * 0.17f);
+
+            return new BrainWorldSnapshotV2
+            {
+                captured_at = now,
+                position = bot.transform.position,
+                health_fraction = healthFraction,
+                health_need = healthNeed,
+                recent_damage_pressure = damagePressure,
+                own_exposure_fraction = ownExposure,
+                target_exposure_fraction = targetExposure,
+                exposure_risk = exposureRisk,
+                contact_confidence = contact?.confidence ?? 0f,
+                evidence_freshness = contact?.confidence ?? 0f,
+                target_opportunity = targetOpportunity,
+                target_distance = targetDistance,
+                weapon_range_fit = rangeFit,
+                ammo_fraction = ammoFraction,
+                ammo_pressure = 1f - ammoFraction,
+                cover_quality = coverQuality,
+                cover_reachability = coverReachability,
+                local_force_balance = forceBalance,
+                squad_separation = squadSeparation,
+                teammate_contact_urgency = teammateUrgency,
+                path_risk = pathRisk,
+                objective_urgency = objectiveUrgency,
+                combat_readiness = readiness,
+                nearby_allies = allies,
+                nearby_enemies = enemies,
+                primary_contact_id = contact?.entity_id ?? 0UL,
+                primary_contact_position = contact?.estimated_position ?? Vector3.zero,
+                has_primary_contact = contact != null,
+                has_line_of_sight = currentlyVisible,
+                has_loaded_weapon = ammoFraction > MinimumAmmoFractionToShoot,
+                has_medical_item = HasBotMedicalItemV2(bot),
+                at_cover = atCover,
+                effective_cover = effectiveCover,
+                inside_base_restriction = insideBase,
+                grenade_danger = IsBrainGrenadeDangerV2(bot.transform.position, now),
+                movement_stuck = runtime.Movement.IsStuck,
+                managed_objective = managedObjective
+            };
+        }
+
+        private string BrainGoalIdStringV2(BrainGoalIdV2 goal)
+        {
+            var text = goal.ToString();
+            var builder = new StringBuilder();
+            for (var index = 0; index < text.Length; index++)
+            {
+                if (char.IsUpper(text[index]) && index > 0)
+                {
+                    builder.Append('_');
+                }
+                builder.Append(char.ToLowerInvariant(text[index]));
+            }
+            return builder.ToString();
+        }
+
+        private BrainGoalScoreV2 CreateBrainGoalScoreV2(BrainGoalIdV2 goal, float score, bool valid, string reason, params KeyValuePair<string, float>[] considerations)
+        {
+            var row = new BrainGoalScoreV2
+            {
+                GoalId = goal,
+                goal = BrainGoalIdStringV2(goal),
+                score = valid ? Mathf.Clamp01(score) : 0f,
+                valid = valid,
+                reason = reason ?? ""
+            };
+            foreach (var consideration in considerations ?? new KeyValuePair<string, float>[0])
+            {
+                row.considerations[consideration.Key] = Mathf.Clamp01(consideration.Value);
+            }
+            return row;
+        }
+
+        private List<BrainGoalScoreV2> ScoreBrainGoalsV2(BotRuntime runtime, BrainWorldSnapshotV2 snapshot)
+        {
+            var scores = new List<BrainGoalScoreV2>();
+            var skill = runtime?.Skill ?? new SkillDefinition();
+            var recoverValid = snapshot.health_need > 0.06f
+                || snapshot.recent_damage_pressure > 0.25f
+                || snapshot.ammo_pressure > 0.92f;
+            var recover = Mathf.Clamp01(
+                Mathf.Pow(snapshot.health_need, 1.3f) * 0.52f
+                + Math.Max(snapshot.recent_damage_pressure, snapshot.exposure_risk) * 0.24f
+                + snapshot.ammo_pressure * 0.16f
+                + (1f - snapshot.combat_readiness) * 0.16f);
+            if (snapshot.health_fraction <= 0.35f)
+            {
+                recover = Mathf.Clamp01(recover + 0.18f);
+            }
+            scores.Add(CreateBrainGoalScoreV2(BrainGoalIdV2.Recover, recover, recoverValid, "survival and readiness",
+                new KeyValuePair<string, float>("health_need", snapshot.health_need),
+                new KeyValuePair<string, float>("damage_pressure", snapshot.recent_damage_pressure),
+                new KeyValuePair<string, float>("exposure_risk", snapshot.exposure_risk),
+                new KeyValuePair<string, float>("ammo_pressure", snapshot.ammo_pressure),
+                new KeyValuePair<string, float>("readiness_loss", 1f - snapshot.combat_readiness)));
+
+            var engageValid = snapshot.has_primary_contact && snapshot.has_line_of_sight && snapshot.contact_confidence > 0.12f;
+            var engage = snapshot.contact_confidence
+                * (0.45f + snapshot.target_opportunity * 0.55f)
+                * (0.62f + snapshot.local_force_balance * 0.38f)
+                * (0.72f + Mathf.Clamp01(skill.Courage) * 0.28f)
+                * (1f - snapshot.health_need * 0.42f);
+            scores.Add(CreateBrainGoalScoreV2(BrainGoalIdV2.EngageThreat, engage, engageValid, "confirmed visible threat",
+                new KeyValuePair<string, float>("contact", snapshot.contact_confidence),
+                new KeyValuePair<string, float>("opportunity", snapshot.target_opportunity),
+                new KeyValuePair<string, float>("force_balance", snapshot.local_force_balance),
+                new KeyValuePair<string, float>("courage", skill.Courage)));
+
+            var searchValid = snapshot.has_primary_contact && !snapshot.has_line_of_sight && snapshot.contact_confidence > 0.035f;
+            var search = snapshot.contact_confidence
+                * (0.70f + (1f - snapshot.path_risk) * 0.30f)
+                * (0.76f + Mathf.Clamp01(skill.Aggression) * 0.24f)
+                + snapshot.teammate_contact_urgency * 0.12f;
+            scores.Add(CreateBrainGoalScoreV2(BrainGoalIdV2.SearchThreat, search, searchValid, "retain and reacquire uncertain contact",
+                new KeyValuePair<string, float>("contact", snapshot.contact_confidence),
+                new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk),
+                new KeyValuePair<string, float>("squad_contact", snapshot.teammate_contact_urgency)));
+
+            var regroupValid = snapshot.squad_separation > 0.18f || snapshot.teammate_contact_urgency > 0.65f && snapshot.local_force_balance < 0.45f;
+            var regroup = snapshot.squad_separation * 0.62f
+                + (1f - snapshot.local_force_balance) * 0.18f
+                + snapshot.teammate_contact_urgency * 0.20f;
+            scores.Add(CreateBrainGoalScoreV2(BrainGoalIdV2.RegroupOrAssist, regroup, regroupValid, "restore squad support",
+                new KeyValuePair<string, float>("separation", snapshot.squad_separation),
+                new KeyValuePair<string, float>("support_need", 1f - snapshot.local_force_balance),
+                new KeyValuePair<string, float>("teammate_contact", snapshot.teammate_contact_urgency)));
+
+            var holdValid = snapshot.objective_urgency > 0.08f;
+            var hold = snapshot.objective_urgency * (0.82f + (1f - snapshot.path_risk) * 0.18f);
+            scores.Add(CreateBrainGoalScoreV2(BrainGoalIdV2.HoldObjective, hold, holdValid, "managed objective, leash, or base boundary",
+                new KeyValuePair<string, float>("objective_urgency", snapshot.objective_urgency),
+                new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+
+            scores.Add(CreateBrainGoalScoreV2(BrainGoalIdV2.Patrol, config.BrainV2.PatrolUtility, true, "default world exploration",
+                new KeyValuePair<string, float>("patrol", config.BrainV2.PatrolUtility)));
+
+            var activeGoal = runtime?.BrainV2?.ActiveGoal?.GoalId ?? BrainGoalIdV2.None;
+            foreach (var score in scores)
+            {
+                if (score.valid && score.GoalId == activeGoal)
+                {
+                    score.score = Mathf.Clamp01(score.score + config.BrainV2.GoalContinuityBonus);
+                    score.considerations["continuity"] = config.BrainV2.GoalContinuityBonus;
+                }
+            }
+
+            return scores.OrderByDescending(row => row.score).ToList();
+        }
+
+        private float BrainGoalProgressV2(BaseCombatEntity bot, BotRuntime runtime, BrainGoalIdV2 goal, BrainWorldSnapshotV2 snapshot)
+        {
+            switch (goal)
+            {
+                case BrainGoalIdV2.Recover:
+                    var coverProgress = Math.Max(snapshot.cover_quality, snapshot.cover_reachability * 0.85f);
+                    return Mathf.Clamp01((1f - snapshot.health_need) * 0.55f + coverProgress * 0.30f + snapshot.ammo_fraction * 0.15f);
+                case BrainGoalIdV2.EngageThreat:
+                    return Mathf.Clamp01(snapshot.target_opportunity * 0.62f
+                        + BrainEvidenceDecayV2(snapshot.captured_at, runtime.LastDamageDealtAt, 4f) * 0.28f
+                        + snapshot.weapon_range_fit * 0.10f);
+                case BrainGoalIdV2.SearchThreat:
+                    if (snapshot.has_line_of_sight)
+                    {
+                        return 1f;
+                    }
+                    if (snapshot.primary_contact_position == Vector3.zero)
+                    {
+                        return 0f;
+                    }
+                    return Mathf.Clamp01(1f - Vector3.Distance(bot.transform.position, snapshot.primary_contact_position) / Math.Max(12f, config.AI.VisionRange));
+                case BrainGoalIdV2.RegroupOrAssist:
+                    return 1f - snapshot.squad_separation;
+                case BrainGoalIdV2.HoldObjective:
+                    return 1f - snapshot.objective_urgency;
+                case BrainGoalIdV2.Patrol:
+                    if (runtime.CurrentDestination == Vector3.zero)
+                    {
+                        return 0f;
+                    }
+                    return -Vector3.Distance(bot.transform.position, runtime.CurrentDestination);
+                default:
+                    return 0f;
+            }
+        }
+
+        private bool IsBrainGoalCompleteV2(BrainGoalInstanceV2 goal, BrainWorldSnapshotV2 snapshot)
+        {
+            if (goal == null)
+            {
+                return false;
+            }
+
+            switch (goal.GoalId)
+            {
+                case BrainGoalIdV2.Recover:
+                    return snapshot.health_need < 0.10f && snapshot.exposure_risk < 0.32f && snapshot.ammo_pressure < 0.82f;
+                case BrainGoalIdV2.EngageThreat:
+                    return !snapshot.has_primary_contact || snapshot.contact_confidence < 0.025f;
+                case BrainGoalIdV2.SearchThreat:
+                    return snapshot.has_line_of_sight || !snapshot.has_primary_contact || snapshot.contact_confidence < 0.025f;
+                case BrainGoalIdV2.RegroupOrAssist:
+                    return snapshot.squad_separation < 0.12f;
+                case BrainGoalIdV2.HoldObjective:
+                    return snapshot.objective_urgency < 0.06f;
+                default:
+                    return false;
+            }
+        }
+
+        private bool IsBrainGoalStillValidV2(BrainGoalInstanceV2 goal, List<BrainGoalScoreV2> scores)
+        {
+            if (goal == null)
+            {
+                return false;
+            }
+
+            var score = scores?.FirstOrDefault(row => row.GoalId == goal.GoalId);
+            return score?.valid == true;
+        }
+
+        private float BrainGoalDeadlineSecondsV2(BrainGoalIdV2 goal)
+        {
+            switch (goal)
+            {
+                case BrainGoalIdV2.Recover: return 18f;
+                case BrainGoalIdV2.EngageThreat: return 24f;
+                case BrainGoalIdV2.SearchThreat: return Math.Max(8f, config.AI.SearchLastSeenSeconds);
+                case BrainGoalIdV2.RegroupOrAssist: return 18f;
+                case BrainGoalIdV2.HoldObjective: return 30f;
+                case BrainGoalIdV2.Patrol: return 300f;
+                default: return 12f;
+            }
+        }
+
+        private void StartBrainGoalV2(BaseCombatEntity bot, BotRuntime runtime, BrainGoalScoreV2 selected, BrainWorldSnapshotV2 snapshot, float now, string reason)
+        {
+            if (runtime?.BrainV2 == null || selected == null)
+            {
+                return;
+            }
+
+            var previous = runtime.BrainV2.ActiveGoal?.GoalId ?? BrainGoalIdV2.None;
+            if (runtime.BrainV2.ActiveAction != null)
+            {
+                InterruptBrainActionV2(bot, runtime, $"goal_switch:{BrainGoalIdStringV2(previous)}->{selected.goal}", now);
+            }
+
+            runtime.BrainV2.ActiveGoal = new BrainGoalInstanceV2
+            {
+                GoalId = selected.GoalId,
+                TargetId = snapshot.primary_contact_id,
+                TargetPosition = snapshot.primary_contact_position,
+                StartedAt = now,
+                MinimumCommitUntil = now + config.BrainV2.GoalMinimumCommitmentSeconds,
+                Deadline = now + BrainGoalDeadlineSecondsV2(selected.GoalId),
+                LastProgressAt = now,
+                LastProgressValue = BrainGoalProgressV2(bot, runtime, selected.GoalId, snapshot),
+                ReasonSelected = reason ?? selected.reason
+            };
+            runtime.BrainV2.GoalSwitches++;
+            runtime.BrainV2.LastDecisionReason = runtime.BrainV2.ActiveGoal.ReasonSelected;
+            v2Metrics.brain_v2_goal_switches++;
+            RecordBrainEventV2(runtime, "goal_switch", $"{BrainGoalIdStringV2(previous)}->{selected.goal}", snapshot.primary_contact_position, snapshot.primary_contact_id, now);
+        }
+
+        private void EvaluateBrainGoalV2(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, float now, bool force)
+        {
+            var brain = runtime?.BrainV2;
+            if (brain == null)
+            {
+                return;
+            }
+
+            // Native syringe use is a short, exclusive action. Re-scoring the
+            // recovery goal during its equip/use window can restart Recover (or
+            // switch to SearchThreat) between UpdateActiveItem and ServerUse,
+            // leaving the bot repeatedly holding a syringe without injecting it.
+            // The motor owns a bounded use deadline, while the active Heal action
+            // still detects lost cover, so defer only goal replacement here.
+            if (runtime.V2Healing)
+            {
+                brain.NextGoalEvaluationAt = Math.Max(brain.NextGoalEvaluationAt, now + 0.1f);
+                return;
+            }
+
+            var visibleSearchReacquisition = brain.ActiveGoal?.GoalId == BrainGoalIdV2.SearchThreat
+                && snapshot.has_primary_contact
+                && snapshot.has_line_of_sight;
+            var due = force || visibleSearchReacquisition || brain.ActiveGoal == null || now >= brain.NextGoalEvaluationAt;
+            if (!due)
+            {
+                var progress = BrainGoalProgressV2(bot, runtime, brain.ActiveGoal.GoalId, snapshot);
+                if (progress > brain.ActiveGoal.LastProgressValue + 0.025f)
+                {
+                    brain.ActiveGoal.LastProgressValue = progress;
+                    brain.ActiveGoal.LastProgressAt = now;
+                }
+                return;
+            }
+
+            brain.NextGoalEvaluationAt = now + config.BrainV2.GoalTickSeconds;
+            var scores = ScoreBrainGoalsV2(runtime, snapshot);
+            brain.LastGoalScores = scores;
+            var best = scores.FirstOrDefault(row => row.valid);
+            if (best == null)
+            {
+                return;
+            }
+
+            var active = brain.ActiveGoal;
+            var completed = IsBrainGoalCompleteV2(active, snapshot);
+            var invalid = active != null && !IsBrainGoalStillValidV2(active, scores);
+            var expired = active != null && active.Deadline > 0f && now >= active.Deadline;
+            var noProgress = false;
+            if (active != null)
+            {
+                var progress = BrainGoalProgressV2(bot, runtime, active.GoalId, snapshot);
+                if (progress > active.LastProgressValue + 0.025f)
+                {
+                    active.LastProgressValue = progress;
+                    active.LastProgressAt = now;
+                }
+                noProgress = now - active.LastProgressAt >= config.BrainV2.GoalNoProgressTimeoutSeconds;
+            }
+
+            if (active == null)
+            {
+                StartBrainGoalV2(bot, runtime, best, snapshot, now, "no_active_goal");
+                return;
+            }
+
+            var activeScore = scores.FirstOrDefault(row => row.GoalId == active.GoalId)?.score ?? 0f;
+            var canSwitch = now >= active.MinimumCommitUntil;
+            var directThreatPreemption = best.GoalId == BrainGoalIdV2.EngageThreat
+                && active.GoalId != BrainGoalIdV2.EngageThreat
+                && active.GoalId != BrainGoalIdV2.Recover
+                && IsDirectVisibleThreat(bot, runtime);
+            var challengerWins = best.GoalId != active.GoalId
+                && (directThreatPreemption
+                    || canSwitch && best.score > activeScore + config.BrainV2.GoalSwitchMargin);
+
+            if (completed || invalid || expired || noProgress || challengerWins)
+            {
+                var reason = visibleSearchReacquisition ? "visible_contact_reacquired"
+                    : completed ? "goal_complete"
+                    : invalid ? "goal_invalid"
+                    : expired ? "goal_deadline"
+                    : noProgress ? "goal_no_progress"
+                    : directThreatPreemption ? "direct_visible_threat"
+                    : $"challenger_margin:{best.score - activeScore:0.00}";
+                if (visibleSearchReacquisition)
+                {
+                    v2Metrics.brain_v2_visible_reacquisitions++;
+                }
+                StartBrainGoalV2(bot, runtime, best, snapshot, now, reason);
+            }
+        }
+
+        private float BrainWeightedGeometricMeanV2(Dictionary<string, float> considerations, params KeyValuePair<string, float>[] weightedValues)
+        {
+            if (considerations == null || weightedValues == null || weightedValues.Length == 0)
+            {
+                return 0f;
+            }
+
+            var weightedLog = 0f;
+            var totalWeight = 0f;
+            foreach (var pair in weightedValues)
+            {
+                var separator = pair.Key.LastIndexOf('|');
+                var key = separator > 0 ? pair.Key.Substring(0, separator) : pair.Key;
+                var weight = 1f;
+                if (separator > 0)
+                {
+                    float.TryParse(pair.Key.Substring(separator + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out weight);
+                    weight = Math.Max(0.01f, weight);
+                }
+                var value = Mathf.Clamp01(pair.Value);
+                considerations[key] = value;
+                weightedLog += Mathf.Log(Math.Max(0.001f, value)) * weight;
+                totalWeight += weight;
+            }
+
+            return totalWeight <= 0f ? 0f : Mathf.Clamp01(Mathf.Exp(weightedLog / totalWeight));
+        }
+
+        private BrainActionProposalV2 CreateBrainActionProposalV2(
+            TacticalActionId actionId,
+            float basePriority,
+            string reason,
+            bool requiresSpatialPlan,
+            string spatialPlan,
+            ulong targetId,
+            params KeyValuePair<string, float>[] considerations)
+        {
+            var proposal = new BrainActionProposalV2
+            {
+                ActionId = actionId,
+                Reason = reason ?? "",
+                RequiresSpatialPlan = requiresSpatialPlan,
+                SpatialPlan = spatialPlan ?? "none",
+                TargetId = targetId
+            };
+            var mean = BrainWeightedGeometricMeanV2(proposal.Considerations, considerations);
+            proposal.Score = Mathf.Clamp01(Mathf.Clamp01(basePriority) * mean);
+            return proposal;
+        }
+
+        private BrainContactV2 BrainPrimaryContactV2(BotRuntime runtime, BrainWorldSnapshotV2 snapshot)
+        {
+            if (runtime?.BrainV2?.Contacts == null || snapshot == null || snapshot.primary_contact_id == 0UL)
+            {
+                return null;
+            }
+
+            runtime.BrainV2.Contacts.TryGetValue(snapshot.primary_contact_id, out var contact);
+            return contact;
+        }
+
+        private List<BrainActionProposalV2> BuildBrainActionSeedsV2(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, BrainGoalIdV2 goal, float now)
+        {
+            var seeds = new List<BrainActionProposalV2>();
+            var contact = BrainPrimaryContactV2(runtime, snapshot);
+            var threatPosition = contact?.estimated_position ?? KnownThreatPosition(runtime);
+            var targetId = contact?.entity_id ?? runtime.Memory.TargetUserId;
+            var skill = runtime.Skill ?? new SkillDefinition();
+
+            switch (goal)
+            {
+                case BrainGoalIdV2.Recover:
+                    if (snapshot.effective_cover && HasBotSyringeMedicalItemV2(bot) && snapshot.health_need > 0.08f && now >= runtime.NextSyringeHealAt)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.Heal, 1f, "heal from verified cover", false, "none", targetId,
+                            new KeyValuePair<string, float>("health_need|2", snapshot.health_need),
+                            new KeyValuePair<string, float>("cover|2", snapshot.cover_quality),
+                            new KeyValuePair<string, float>("not_recently_hit", 1f - snapshot.recent_damage_pressure)));
+                    }
+                    if (snapshot.at_cover)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.Tuck, 0.92f, "reduce exposure while recovering", false, "none", targetId,
+                            new KeyValuePair<string, float>("pressure|2", Math.Max(snapshot.health_need, snapshot.recent_damage_pressure)),
+                            new KeyValuePair<string, float>("cover", Math.Max(0.25f, snapshot.cover_quality))));
+                    }
+                    if (config.AI.AllowCover && threatPosition != Vector3.zero && !snapshot.effective_cover)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.MoveToCover, 1f, "reach verified cover before healing", true, "cover", targetId,
+                            new KeyValuePair<string, float>("health_need|2", Math.Max(0.1f, snapshot.health_need)),
+                            new KeyValuePair<string, float>("exposure|2", Math.Max(0.1f, snapshot.exposure_risk)),
+                            new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.RetreatToCover, 0.88f, "create distance while cover is evaluated", true, "retreat", targetId,
+                            new KeyValuePair<string, float>("pressure|2", Math.Max(snapshot.health_need, snapshot.recent_damage_pressure)),
+                            new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+                    }
+                    if (config.AI.AllowBarricades && threatPosition != Vector3.zero && !snapshot.effective_cover && now >= runtime.NextBarricadeAt)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.PlaceBarricade, 0.86f, "no immediate cover; create local protection", true, "barricade", targetId,
+                            new KeyValuePair<string, float>("pressure|2", Math.Max(snapshot.exposure_risk, snapshot.health_need)),
+                            new KeyValuePair<string, float>("cover_absence", 1f - snapshot.cover_quality)));
+                    }
+                    if (snapshot.ammo_pressure > 0.88f && config.AI.AutoReloadBotWeapons)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.Reload, 0.9f, "restore weapon readiness", false, "none", targetId,
+                            new KeyValuePair<string, float>("ammo_pressure|2", snapshot.ammo_pressure),
+                            new KeyValuePair<string, float>("safety", Math.Max(0.1f, 1f - snapshot.exposure_risk))));
+                    }
+                    if (snapshot.has_line_of_sight && snapshot.has_loaded_weapon)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.AcquireVisibleTarget, 0.62f, "return fire when recovery options are weak", false, "none", targetId,
+                            new KeyValuePair<string, float>("opportunity", Math.Max(0.05f, snapshot.target_opportunity)),
+                            new KeyValuePair<string, float>("no_better_cover", Math.Max(0.08f, 1f - snapshot.cover_reachability)),
+                            new KeyValuePair<string, float>("courage", skill.Courage)));
+                    }
+                    break;
+
+                case BrainGoalIdV2.EngageThreat:
+                    if (snapshot.has_line_of_sight && snapshot.has_loaded_weapon)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.AcquireVisibleTarget, 1f, "fire on confirmed legal target", false, "none", targetId,
+                            new KeyValuePair<string, float>("opportunity|2", Math.Max(0.03f, snapshot.target_opportunity)),
+                            new KeyValuePair<string, float>("contact", snapshot.contact_confidence),
+                            new KeyValuePair<string, float>("range_fit", Math.Max(0.05f, snapshot.weapon_range_fit)),
+                            new KeyValuePair<string, float>("ammo", snapshot.ammo_fraction)));
+                    }
+                    if (config.AI.AllowCover && threatPosition != Vector3.zero && snapshot.exposure_risk > 0.34f && !snapshot.effective_cover)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.MoveToCover, 0.88f, "improve firing position without abandoning fight", true, "cover", targetId,
+                            new KeyValuePair<string, float>("exposure|2", snapshot.exposure_risk),
+                            new KeyValuePair<string, float>("contact", snapshot.contact_confidence),
+                            new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+                    }
+                    if (runtime.IsPeeking
+                        && now >= runtime.CurrentPeekUntil
+                        && (runtime.CurrentTuckPoint != Vector3.zero || runtime.CurrentCover != Vector3.zero))
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.Tuck, 0.97f, "peek window complete; return behind cover", false, "none", targetId,
+                            new KeyValuePair<string, float>("cover", Math.Max(0.25f, snapshot.cover_quality)),
+                            new KeyValuePair<string, float>("exposure", Math.Max(0.15f, snapshot.exposure_risk))));
+                    }
+                    if (snapshot.at_cover && !runtime.IsPeeking && now >= runtime.NextPeekAt)
+                    {
+                        if (runtime.CurrentPeekLeftPoint != Vector3.zero)
+                        {
+                            seeds.Add(CreateBrainActionProposalV2(TacticalActionId.PeekLeft, 0.83f, "short left cover-edge exposure", false, "none", targetId,
+                                new KeyValuePair<string, float>("contact", snapshot.contact_confidence),
+                                new KeyValuePair<string, float>("aggression", skill.Aggression),
+                                new KeyValuePair<string, float>("readiness", snapshot.combat_readiness)));
+                        }
+                        if (runtime.CurrentPeekRightPoint != Vector3.zero)
+                        {
+                            seeds.Add(CreateBrainActionProposalV2(TacticalActionId.PeekRight, 0.83f, "short right cover-edge exposure", false, "none", targetId,
+                                new KeyValuePair<string, float>("contact", snapshot.contact_confidence),
+                                new KeyValuePair<string, float>("aggression", skill.Aggression),
+                                new KeyValuePair<string, float>("readiness", snapshot.combat_readiness)));
+                        }
+                    }
+                    if (threatPosition != Vector3.zero
+                        && snapshot.target_distance > Math.Max(runtime.Combat.PreferredDistance, runtime.Combat.RetreatDistance + 4f)
+                        && snapshot.health_need < 0.58f)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.PushTarget, 0.76f, "close to preferred weapon range", true, "push", targetId,
+                            new KeyValuePair<string, float>("range_need", Mathf.Clamp01((snapshot.target_distance - runtime.Combat.PreferredDistance) / Math.Max(8f, runtime.Combat.IdealRange))),
+                            new KeyValuePair<string, float>("aggression", skill.Aggression),
+                            new KeyValuePair<string, float>("force_balance", snapshot.local_force_balance),
+                            new KeyValuePair<string, float>("health", 1f - snapshot.health_need)));
+                    }
+                    if (config.AI.AllowFlanking
+                        && SquadBoardFor(runtime)?.TeamSize > 1
+                        && now >= runtime.NextFlankAt
+                        && snapshot.health_need < 0.5f
+                        && (runtime.SquadRole == "flanker" || runtime.SquadRole == "pusher"))
+                    {
+                        var left = runtime.SquadRole == "flanker";
+                        seeds.Add(CreateBrainActionProposalV2(left ? TacticalActionId.FlankLeft : TacticalActionId.FlankRight, 0.72f, "take a distinct squad angle", true, left ? "flank_left" : "flank_right", targetId,
+                            new KeyValuePair<string, float>("aggression", skill.Aggression),
+                            new KeyValuePair<string, float>("squad_support", Math.Max(0.1f, snapshot.local_force_balance)),
+                            new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+                    }
+                    if (snapshot.ammo_pressure > 0.88f && config.AI.AutoReloadBotWeapons)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.Reload, 0.78f, "reload between firing opportunities", false, "none", targetId,
+                            new KeyValuePair<string, float>("ammo_pressure|2", snapshot.ammo_pressure),
+                            new KeyValuePair<string, float>("safety", Math.Max(0.08f, 1f - snapshot.exposure_risk))));
+                    }
+                    break;
+
+                case BrainGoalIdV2.SearchThreat:
+                    if (snapshot.has_line_of_sight && snapshot.has_loaded_weapon)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.AcquireVisibleTarget, 1f, "fire immediately after visible reacquisition", false, "none", targetId,
+                            new KeyValuePair<string, float>("opportunity|2", Math.Max(0.05f, snapshot.target_opportunity)),
+                            new KeyValuePair<string, float>("contact", Math.Max(0.1f, snapshot.contact_confidence)),
+                            new KeyValuePair<string, float>("readiness", Math.Max(0.1f, snapshot.combat_readiness))));
+                    }
+                    else if (contact != null)
+                    {
+                        var heardFreshest = contact.last_heard_at > contact.last_seen_at && contact.last_heard_at >= contact.last_damage_at;
+                        seeds.Add(CreateBrainActionProposalV2(heardFreshest ? TacticalActionId.InvestigateSound : TacticalActionId.SearchLastKnown, 0.96f,
+                            heardFreshest ? "investigate freshest audio evidence" : "sweep last credible contact position", true, heardFreshest ? "investigate" : "search", targetId,
+                            new KeyValuePair<string, float>("contact|2", snapshot.contact_confidence),
+                            new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk),
+                            new KeyValuePair<string, float>("aggression", skill.Aggression)));
+                    }
+                    if (snapshot.squad_separation > 0.42f)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.RegroupWithSquad, 0.62f, "avoid isolated search", true, "regroup", targetId,
+                            new KeyValuePair<string, float>("separation|2", snapshot.squad_separation),
+                            new KeyValuePair<string, float>("support_need", 1f - snapshot.local_force_balance)));
+                    }
+                    if (snapshot.contact_confidence < 0.08f)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.AbandonTarget, 0.9f, "evidence decayed below useful threshold", false, "none", targetId,
+                            new KeyValuePair<string, float>("staleness", 1f - snapshot.contact_confidence)));
+                    }
+                    break;
+
+                case BrainGoalIdV2.RegroupOrAssist:
+                    seeds.Add(CreateBrainActionProposalV2(TacticalActionId.RegroupWithSquad, 1f, "return to squad support radius", true, "regroup", targetId,
+                        new KeyValuePair<string, float>("separation|2", Math.Max(0.05f, snapshot.squad_separation)),
+                        new KeyValuePair<string, float>("support_need", 1f - snapshot.local_force_balance),
+                        new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+                    if (snapshot.has_line_of_sight && snapshot.has_loaded_weapon)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.AcquireVisibleTarget, 0.72f, "cover teammate while regrouping", false, "none", targetId,
+                            new KeyValuePair<string, float>("opportunity", Math.Max(0.05f, snapshot.target_opportunity)),
+                            new KeyValuePair<string, float>("teammate_contact", Math.Max(0.1f, snapshot.teammate_contact_urgency))));
+                    }
+                    break;
+
+                case BrainGoalIdV2.HoldObjective:
+                    seeds.Add(CreateBrainActionProposalV2(TacticalActionId.HoldOutsideBase, 1f, "restore objective or legal boundary position", true, "hold", targetId,
+                        new KeyValuePair<string, float>("objective|2", Math.Max(0.05f, snapshot.objective_urgency)),
+                        new KeyValuePair<string, float>("path_safety", 1f - snapshot.path_risk)));
+                    if (snapshot.has_line_of_sight && snapshot.has_loaded_weapon && !snapshot.inside_base_restriction)
+                    {
+                        seeds.Add(CreateBrainActionProposalV2(TacticalActionId.AcquireVisibleTarget, 0.68f, "defend objective without leaving boundary", false, "none", targetId,
+                            new KeyValuePair<string, float>("opportunity", Math.Max(0.05f, snapshot.target_opportunity)),
+                            new KeyValuePair<string, float>("objective", Math.Max(0.1f, snapshot.objective_urgency))));
+                    }
+                    break;
+
+                case BrainGoalIdV2.Patrol:
+                default:
+                    seeds.Add(CreateBrainActionProposalV2(TacticalActionId.RoamToPoint, 1f, "patrol toward a valid land destination", true, "patrol", 0UL,
+                        new KeyValuePair<string, float>("path_safety", Math.Max(0.1f, 1f - snapshot.path_risk)),
+                        new KeyValuePair<string, float>("no_contact", Math.Max(0.1f, 1f - snapshot.contact_confidence))));
+                    break;
+            }
+
+            return seeds;
+        }
+
+        private bool MaterializeBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, BrainActionProposalV2 proposal, float now)
+        {
+            if (proposal == null || bot == null || runtime == null)
+            {
+                return false;
+            }
+
+            var contact = BrainPrimaryContactV2(runtime, snapshot);
+            var target = contact?.entity;
+            var threat = contact?.estimated_position ?? KnownThreatPosition(runtime);
+            var priorCoverSearchAt = runtime.NextCoverSearchAt;
+            var priorBarricadeReason = runtime.LastBarricadeReason;
+            var priorLeashOutsideUntil = runtime.LeashOutsideUntil;
+
+            try
+            {
+                switch (proposal.SpatialPlan)
+                {
+                    case "none":
+                        switch (proposal.ActionId)
+                        {
+                            case TacticalActionId.Tuck:
+                                proposal.Destination = runtime.CurrentTuckPoint != Vector3.zero ? runtime.CurrentTuckPoint : runtime.CurrentCover;
+                                break;
+                            case TacticalActionId.PeekLeft:
+                                proposal.Destination = runtime.CurrentPeekLeftPoint;
+                                break;
+                            case TacticalActionId.PeekRight:
+                                proposal.Destination = runtime.CurrentPeekRightPoint;
+                                break;
+                            case TacticalActionId.WideSwing:
+                                proposal.Destination = runtime.CurrentPeekPoint;
+                                break;
+                        }
+                        break;
+
+                    case "cover":
+                        if (threat == Vector3.zero)
+                        {
+                            proposal.Failure = "missing_threat_position";
+                            return false;
+                        }
+                        if (snapshot.health_need > 0.45f
+                            && TryFindNearbyProtectionPlan(bot, runtime, threat, target, ProtectionDistance(runtime), now, out var protection))
+                        {
+                            proposal.ProtectionPlan = protection;
+                            proposal.Destination = protection.TuckPoint;
+                            proposal.Considerations["cover_quality"] = 1f;
+                            break;
+                        }
+                        if (!TryFindCoverPlan(bot, runtime, threat, target, out var cover))
+                        {
+                            proposal.Failure = "no_verified_cover";
+                            return false;
+                        }
+                        proposal.CoverPlan = cover;
+                        proposal.Destination = cover.CoverPoint;
+                        proposal.Considerations["cover_quality"] = Mathf.Clamp01((cover.Score + 20f) / 120f);
+                        break;
+
+                    case "retreat":
+                        if (threat == Vector3.zero)
+                        {
+                            proposal.Failure = "missing_threat_position";
+                            return false;
+                        }
+                        if (TryFindCoverPlan(bot, runtime, threat, target, out var retreatCover))
+                        {
+                            proposal.CoverPlan = retreatCover;
+                            proposal.Destination = retreatCover.CoverPoint;
+                            proposal.Considerations["cover_quality"] = Mathf.Clamp01((retreatCover.Score + 20f) / 120f);
+                        }
+                        else
+                        {
+                            proposal.Destination = FindRetreatPosition(bot.transform.position, threat, runtime);
+                            proposal.Considerations["cover_quality"] = 0.18f;
+                        }
+                        break;
+
+                    case "push":
+                        if (threat == Vector3.zero)
+                        {
+                            proposal.Failure = "missing_threat_position";
+                            return false;
+                        }
+                        proposal.Destination = MoveTowardPosition(bot.transform.position, threat, runtime.Combat.PushDistance, runtime);
+                        break;
+
+                    case "flank_left":
+                    case "flank_right":
+                        if (threat == Vector3.zero
+                            || !TryFindFlankPosition(bot.transform.position, threat, proposal.SpatialPlan == "flank_left" ? 1f : -1f, runtime, now, out var flank))
+                        {
+                            proposal.Failure = "no_valid_flank";
+                            return false;
+                        }
+                        proposal.Destination = flank;
+                        break;
+
+                    case "regroup":
+                        var board = SquadBoardFor(runtime);
+                        if (board == null || board.TeamSize <= 1)
+                        {
+                            proposal.Failure = "no_squad";
+                            return false;
+                        }
+                        if (!TrySampleTacticalPositionAvoidingStuck(runtime, board.TeamCenter, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var regroup))
+                        {
+                            proposal.Failure = "no_regroup_path";
+                            return false;
+                        }
+                        proposal.Destination = regroup;
+                        break;
+
+                    case "search":
+                        if (threat == Vector3.zero)
+                        {
+                            proposal.Failure = "missing_search_position";
+                            return false;
+                        }
+                        proposal.Destination = TrySampleTacticalPositionAvoidingStuck(runtime, threat, Math.Max(8f, config.Spawn.NavmeshSampleDistance), now, out var search)
+                            ? search
+                            : threat;
+                        break;
+
+                    case "investigate":
+                        if (contact == null || contact.last_heard_position == Vector3.zero)
+                        {
+                            proposal.Failure = "missing_audio_position";
+                            return false;
+                        }
+                        proposal.Destination = SoundInvestigationDestination(bot.transform.position, contact.last_heard_position, runtime);
+                        break;
+
+                    case "patrol":
+                        if (runtime.CurrentDestination == Vector3.zero
+                            || Vector3.Distance(bot.transform.position, runtime.CurrentDestination) <= RoamArrivalDistance(runtime)
+                            || ShouldAvoidDestination(runtime, runtime.CurrentDestination, now))
+                        {
+                            proposal.Destination = FindRoamDestination(runtime.HomePosition, runtime);
+                        }
+                        else
+                        {
+                            proposal.Destination = runtime.CurrentDestination;
+                        }
+                        break;
+
+                    case "hold":
+                        if (snapshot.inside_base_restriction)
+                        {
+                            if (!TryFindOutsideBaseHoldPoint(bot.transform.position, threat, runtime, now, out var outside))
+                            {
+                                proposal.Failure = "no_legal_boundary_point";
+                                return false;
+                            }
+                            proposal.Destination = outside;
+                        }
+                        else if (IsManagedBot(runtime) && runtime.LeashCenter != Vector3.zero && runtime.LeashRadius > 0f)
+                        {
+                            proposal.Destination = ConstrainToManagedLeash(runtime, bot.transform.position, runtime.LeashCenter, now);
+                        }
+                        else
+                        {
+                            proposal.Destination = runtime.HomePosition == Vector3.zero ? bot.transform.position : runtime.HomePosition;
+                        }
+                        break;
+
+                    case "barricade":
+                        if (threat == Vector3.zero
+                            || !ShouldPlaceBarricade(bot, runtime, threat, snapshot.health_fraction, snapshot.exposure_risk, now, out var barricade))
+                        {
+                            proposal.Failure = string.IsNullOrWhiteSpace(runtime.LastBarricadeReason) ? "no_barricade_position" : runtime.LastBarricadeReason;
+                            return false;
+                        }
+                        proposal.Destination = barricade;
+                        proposal.RiskFlags.Add("real_entity");
+                        break;
+
+                    default:
+                        proposal.Failure = "unknown_spatial_plan";
+                        return false;
+                }
+            }
+            finally
+            {
+                // Planning is read-only. Only the winning proposal may alter the
+                // runtime's cover, cooldown, destination, or reason fields.
+                proposal.PlannedLeashOutsideUntil = runtime.LeashOutsideUntil;
+                runtime.NextCoverSearchAt = priorCoverSearchAt;
+                runtime.LastBarricadeReason = priorBarricadeReason;
+                runtime.LeashOutsideUntil = priorLeashOutsideUntil;
+            }
+
+            if (IsMovementDestinationAction(proposal.ActionId))
+            {
+                if (proposal.Destination == Vector3.zero)
+                {
+                    proposal.Failure = "zero_destination";
+                    return false;
+                }
+                if (ShouldAvoidDestination(runtime, proposal.Destination, now))
+                {
+                    proposal.Failure = "stuck_memory_destination";
+                    return false;
+                }
+                if (SegmentCrossesBaseRestrictedArea(bot.transform.position, proposal.Destination)
+                    && proposal.ActionId != TacticalActionId.HoldOutsideBase)
+                {
+                    proposal.Failure = "base_restricted_route";
+                    return false;
+                }
+            }
+
+            proposal.Score = Mathf.Clamp01(proposal.Score * (0.85f + (proposal.Considerations.TryGetValue("cover_quality", out var coverQuality) ? coverQuality * 0.15f : 0.15f)));
+            return true;
+        }
+
+        private void ApplyBrainStyleRankingV2(BotRuntime runtime, IEnumerable<BrainActionProposalV2> proposals)
+        {
+            if (runtime?.Style == null || proposals == null)
+            {
+                return;
+            }
+
+            foreach (var proposal in proposals.Where(value => value != null && value.Legal))
+            {
+                var delta = 0f;
+                switch (proposal.ActionId)
+                {
+                    case TacticalActionId.PushTarget:
+                    case TacticalActionId.SuppressTarget:
+                        delta = (runtime.Style.aggression - 0.5f) * 0.12f;
+                        break;
+                    case TacticalActionId.PeekLeft:
+                    case TacticalActionId.PeekRight:
+                        delta = (runtime.Style.jiggle_preference - 0.5f) * 0.10f;
+                        break;
+                    case TacticalActionId.WideSwing:
+                        delta = (runtime.Style.wide_swing_preference - 0.5f) * 0.12f;
+                        break;
+                    case TacticalActionId.RetreatToCover:
+                    case TacticalActionId.MoveToCover:
+                    case TacticalActionId.Tuck:
+                    case TacticalActionId.Heal:
+                        delta = (0.5f - runtime.Style.aggression) * 0.08f;
+                        break;
+                }
+                proposal.Score = Mathf.Clamp01(proposal.Score + Mathf.Clamp(delta, -0.07f, 0.07f));
+            }
+        }
+
+        private void ApplyTrainingV2PolicyRanking(BotRuntime runtime, IEnumerable<BrainActionProposalV2> proposals)
+        {
+            if (!TrainingV2PolicyApplies(runtime, application => application.tactical_action_ranking)
+                || trainingV2Policy.action_score_deltas == null
+                || proposals == null)
+            {
+                return;
+            }
+
+            foreach (var proposal in proposals.Where(value => value != null && value.Legal))
+            {
+                var action = ActionIdString(proposal.ActionId);
+                if (!trainingV2Policy.action_score_deltas.TryGetValue(action, out var learnedDelta))
+                {
+                    continue;
+                }
+
+                var appliedDelta = Mathf.Clamp(learnedDelta * trainingV2Policy.transfer_strength, -0.06f, 0.06f);
+                proposal.Score = Mathf.Clamp01(proposal.Score + appliedDelta);
+                proposal.Considerations["training_v2_policy"] = appliedDelta;
+                v2Metrics.training_policy_action_evaluations++;
+            }
+        }
+
+        private BrainActionProposalV2 SelectNearTieBrainActionV2(BotRuntime runtime, List<BrainActionProposalV2> legal)
+        {
+            if (legal == null || legal.Count == 0)
+            {
+                return null;
+            }
+
+            var ordered = legal.OrderByDescending(value => value.Score).ToList();
+            var best = ordered[0];
+            if (!config.BrainV2.UseNearTieRandomness || ordered.Count == 1)
+            {
+                return best;
+            }
+
+            var noise = Mathf.Clamp01(runtime?.Skill?.TacticalNoise ?? 0f);
+            if (noise <= 0.01f || UnityEngine.Random.value > Mathf.Clamp01(noise * 2f))
+            {
+                return best;
+            }
+
+            var threshold = best.Score * config.BrainV2.NearTieScoreRatio;
+            var nearTies = ordered.Where(value => value.Score >= threshold).ToList();
+            if (nearTies.Count <= 1)
+            {
+                return best;
+            }
+
+            var total = nearTies.Sum(value => Math.Max(0.001f, value.Score * value.Score));
+            var roll = UnityEngine.Random.value * total;
+            foreach (var proposal in nearTies)
+            {
+                roll -= Math.Max(0.001f, proposal.Score * proposal.Score);
+                if (roll <= 0f)
+                {
+                    return proposal;
+                }
+            }
+
+            return best;
+        }
+
+        private BrainActionProposalV2 SelectBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, float now)
+        {
+            var goal = runtime?.BrainV2?.ActiveGoal?.GoalId ?? BrainGoalIdV2.Patrol;
+            var seeds = BuildBrainActionSeedsV2(bot, runtime, snapshot, goal, now);
+            var spatialBudget = Math.Max(1, config.BrainV2.SpatialMaterializationLimit);
+            var selectedSpatial = new HashSet<BrainActionProposalV2>(seeds
+                .Where(value => value != null && value.RequiresSpatialPlan)
+                .OrderByDescending(value => value.Score)
+                .Take(spatialBudget));
+
+            foreach (var proposal in seeds.Where(value => value != null))
+            {
+                if (proposal.RequiresSpatialPlan && !selectedSpatial.Contains(proposal))
+                {
+                    proposal.Legal = false;
+                    proposal.Failure = "spatial_materialization_budget";
+                    continue;
+                }
+
+                proposal.Legal = MaterializeBrainActionV2(bot, runtime, snapshot, proposal, now);
+                if (!proposal.Legal && string.IsNullOrWhiteSpace(proposal.Failure))
+                {
+                    proposal.Failure = "materialization_failed";
+                }
+            }
+
+            ApplyBrainStyleRankingV2(runtime, seeds);
+            ApplyTrainingV2PolicyRanking(runtime, seeds);
+            runtime.BrainV2.LastActionScores = seeds.Select(proposal => new BrainActionScoreV2
+            {
+                ActionId = proposal.ActionId,
+                action = ActionIdString(proposal.ActionId),
+                score = proposal.Score,
+                legal = proposal.Legal,
+                reason = proposal.Reason,
+                failure = proposal.Failure,
+                destination = proposal.Destination,
+                target_id = proposal.TargetId,
+                considerations = new Dictionary<string, float>(proposal.Considerations, StringComparer.OrdinalIgnoreCase)
+            }).OrderByDescending(row => row.score).ToList();
+
+            var legal = seeds.Where(value => value != null && value.Legal).ToList();
+            if (legal.Count == 0 && goal != BrainGoalIdV2.Patrol)
+            {
+                var fallback = CreateBrainActionProposalV2(TacticalActionId.RoamToPoint, 0.3f, "goal had no legal action; use safe patrol fallback", true, "patrol", 0UL,
+                    new KeyValuePair<string, float>("path_safety", Math.Max(0.1f, 1f - snapshot.path_risk)));
+                fallback.Legal = MaterializeBrainActionV2(bot, runtime, snapshot, fallback, now);
+                if (fallback.Legal)
+                {
+                    legal.Add(fallback);
+                    runtime.BrainV2.LastActionScores.Add(new BrainActionScoreV2
+                    {
+                        ActionId = fallback.ActionId,
+                        action = ActionIdString(fallback.ActionId),
+                        score = fallback.Score,
+                        legal = true,
+                        reason = fallback.Reason,
+                        destination = fallback.Destination,
+                        considerations = new Dictionary<string, float>(fallback.Considerations, StringComparer.OrdinalIgnoreCase)
+                    });
+                }
+            }
+
+            return SelectNearTieBrainActionV2(runtime, legal);
+        }
+
+        private bool TryBuildBrainReflexActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, float now, out BrainActionProposalV2 proposal)
+        {
+            proposal = null;
+            if (snapshot.grenade_danger
+                && TryFindUtilityDangerEscapePosition(bot, runtime, now, out var escape, out var escapeReason))
+            {
+                proposal = CreateBrainActionProposalV2(TacticalActionId.RetreatToCover, 1f, escapeReason, false, "none", snapshot.primary_contact_id,
+                    new KeyValuePair<string, float>("immediate_danger", 1f));
+                proposal.Destination = escape;
+                proposal.RiskFlags.Add("grenade_danger_avoidance");
+                return true;
+            }
+
+            if (snapshot.inside_base_restriction
+                && TryFindOutsideBaseHoldPoint(bot.transform.position, snapshot.primary_contact_position, runtime, now, out var outside))
+            {
+                proposal = CreateBrainActionProposalV2(TacticalActionId.HoldOutsideBase, 1f, "leave base-restricted area immediately", false, "none", snapshot.primary_contact_id,
+                    new KeyValuePair<string, float>("boundary_violation", 1f));
+                proposal.Destination = outside;
+                proposal.RiskFlags.Add("base_avoidance");
+                return true;
+            }
+
+            if (snapshot.movement_stuck && (now >= runtime.NextStuckRecoveryAt || runtime.ConsecutiveFailedPaths >= 6))
+            {
+                proposal = CreateBrainActionProposalV2(TacticalActionId.RoamToPoint, 0.98f, "stuck recovery alternate route", false, "none", snapshot.primary_contact_id,
+                    new KeyValuePair<string, float>("stuck", 1f),
+                    new KeyValuePair<string, float>("path_failures", Mathf.Clamp01(runtime.ConsecutiveFailedPaths / 12f)));
+                proposal.Destination = FindStuckRecoveryDestination(bot, runtime);
+                proposal.RiskFlags.Add("stuck_recovery");
+                return proposal.Destination != Vector3.zero;
+            }
+
+            return false;
+        }
+
+        private float BrainActionTimeoutV2(TacticalActionId actionId, BaseCombatEntity bot = null, Vector3 destination = default(Vector3))
+        {
+            switch (actionId)
+            {
+                case TacticalActionId.AcquireVisibleTarget: return 2.2f;
+                case TacticalActionId.PeekLeft:
+                case TacticalActionId.PeekRight:
+                case TacticalActionId.WideSwing: return Math.Max(2f, config.AI.PeekExposureMaxSeconds + 1f);
+                case TacticalActionId.Tuck: return Math.Max(2f, config.AI.TuckMaxSeconds + 0.75f);
+                case TacticalActionId.Heal: return 10f;
+                case TacticalActionId.Reload: return 5f;
+                case TacticalActionId.ThrowGrenade:
+                case TacticalActionId.ThrowSmoke:
+                case TacticalActionId.PlaceBarricade:
+                case TacticalActionId.AbandonTarget: return 1.5f;
+                case TacticalActionId.RoamToPoint:
+                    var roamDistance = bot == null || destination == Vector3.zero ? 0f : Vector3.Distance(bot.transform.position, destination);
+                    return Mathf.Clamp(20f + roamDistance / 2.5f, 30f, 300f);
+                case TacticalActionId.SearchLastKnown:
+                case TacticalActionId.InvestigateSound:
+                case TacticalActionId.RegroupWithSquad: return 16f;
+                default: return config.BrainV2.DefaultActionTimeoutSeconds;
+            }
+        }
+
+        private float BrainActionProgressV2(BaseCombatEntity bot, BotRuntime runtime, BrainActionInstanceV2 action, BrainWorldSnapshotV2 snapshot, float now)
+        {
+            if (action == null)
+            {
+                return 0f;
+            }
+
+            switch (action.ActionId)
+            {
+                case TacticalActionId.Heal:
+                    return snapshot.health_fraction;
+                case TacticalActionId.Reload:
+                    return snapshot.ammo_fraction;
+                case TacticalActionId.AcquireVisibleTarget:
+                    return snapshot.target_opportunity + BrainEvidenceDecayV2(now, runtime.LastDamageDealtAt, 3f) * 0.35f;
+                case TacticalActionId.Tuck:
+                    return Mathf.Clamp01((now - action.StartedAt) / Math.Max(0.1f, action.MinimumCommitUntil - action.StartedAt));
+                default:
+                    if (action.Destination != Vector3.zero)
+                    {
+                        return -Vector3.Distance(bot.transform.position, action.Destination);
+                    }
+                    return 0f;
+            }
+        }
+
+        private void BeginBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainActionProposalV2 proposal, BrainWorldSnapshotV2 snapshot, float now, string reasonOverride = "")
+        {
+            if (bot == null || runtime?.BrainV2 == null || proposal == null)
+            {
+                return;
+            }
+
+            if (runtime.BrainV2.ActiveAction != null)
+            {
+                InterruptBrainActionV2(bot, runtime, "replaced_by_new_action", now);
+            }
+
+            var contact = BrainPrimaryContactV2(runtime, snapshot);
+            if (contact != null)
+            {
+                PromoteBrainContactV2(runtime, contact, now);
+            }
+            if (proposal.CoverPlan != null)
+            {
+                ApplyCoverPlan(runtime, proposal.CoverPlan);
+            }
+            if (proposal.ProtectionPlan != null)
+            {
+                ApplyProtectionPlan(runtime, proposal.ProtectionPlan, now);
+            }
+            if (proposal.PlannedLeashOutsideUntil > runtime.LeashOutsideUntil)
+            {
+                runtime.LeashOutsideUntil = proposal.PlannedLeashOutsideUntil;
+            }
+
+            var instance = new BrainActionInstanceV2
+            {
+                ActionId = proposal.ActionId,
+                Status = BrainActionStatusV2.Running,
+                StartedAt = now,
+                MinimumCommitUntil = now + config.BrainV2.ActionMinimumCommitmentSeconds,
+                TimeoutAt = now + BrainActionTimeoutV2(proposal.ActionId, bot, proposal.Destination),
+                Destination = proposal.Destination,
+                TargetId = proposal.TargetId,
+                StartingPathFailures = runtime.ConsecutiveFailedPaths,
+                Reason = string.IsNullOrWhiteSpace(reasonOverride) ? proposal.Reason : reasonOverride,
+                LastProgressAt = now
+            };
+            instance.LastProgressValue = BrainActionProgressV2(bot, runtime, instance, snapshot, now);
+            runtime.BrainV2.ActiveAction = instance;
+            runtime.BrainV2.ActionSwitches++;
+            runtime.BrainV2.LastDecisionReason = instance.Reason;
+            runtime.Decisions.LastActionId = proposal.ActionId;
+            runtime.Decisions.LastDecisionAt = now;
+            v2Metrics.brain_v2_action_switches++;
+            RecordBrainEventV2(runtime, "action_start", ActionIdString(proposal.ActionId), proposal.Destination, proposal.TargetId, now);
+
+            if (proposal.ActionId == TacticalActionId.Heal)
+            {
+                runtime.LowHealthCoverAwareUntil = Math.Max(runtime.LowHealthCoverAwareUntil, now + config.AI.LowHealthCoverCommitmentSeconds);
+                StopBotAttack(bot, runtime);
+                RequestCoverHealCrouch(bot, runtime, now);
+                if (IsV2Actuating(runtime))
+                {
+                    runtime.Intent.action = "covered_heal";
+                    runtime.Intent.motor_skill = MotorSkill.Heal;
+                    runtime.Intent.wants_fire = false;
+                    runtime.Intent.wants_reload = false;
+                    runtime.Intent.wants_crouch = true;
+                    runtime.Intent.reason = instance.Reason;
+                    runtime.Intent.created_at = now;
+                }
+                else
+                {
+                    UpdateMedicalHealing(bot, runtime, now);
+                }
+                return;
+            }
+
+            if (proposal.ActionId == TacticalActionId.AbandonTarget && proposal.TargetId != 0UL)
+            {
+                runtime.BrainV2.Contacts.Remove(proposal.TargetId);
+            }
+
+            if (proposal.ActionId == TacticalActionId.Reload)
+            {
+                StopBotAttack(bot, runtime);
+                if (IsV2Actuating(runtime))
+                {
+                    TryStartV2Reload(bot, runtime, ActiveBaseProjectile(bot), now);
+                }
+                else
+                {
+                    EnsureBotWeaponLoaded(bot);
+                }
+                return;
+            }
+
+            var tactical = Candidate(proposal.ActionId, proposal.Score * 100f, "local", instance.Reason, proposal.Destination, proposal.TargetId, now);
+            foreach (var flag in proposal.RiskFlags)
+            {
+                tactical.RiskFlags.Add(flag);
+            }
+            ExecuteTacticalAction(bot, runtime, tactical, now);
+        }
+
+        private void MaintainBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainActionInstanceV2 action, BrainWorldSnapshotV2 snapshot, float now)
+        {
+            if (bot == null || runtime == null || action == null)
+            {
+                return;
+            }
+
+            switch (action.ActionId)
+            {
+                case TacticalActionId.AcquireVisibleTarget:
+                    var contact = BrainPrimaryContactV2(runtime, snapshot);
+                    if (contact != null)
+                    {
+                        PromoteBrainContactV2(runtime, contact, now);
+                    }
+                    if (runtime.Memory.Target != null && runtime.Memory.HasLineOfSight)
+                    {
+                        FaceEntity(bot, runtime.Memory.Target);
+                        if (now >= runtime.NextReactionAllowedAt && ShouldFireAtTarget(bot, runtime, runtime.Memory.Target, now, true))
+                        {
+                            StartBotAttack(bot, runtime, runtime.Memory.Target);
+                        }
+                    }
+                    else
+                    {
+                        StopBotAttack(bot, runtime);
+                    }
+                    break;
+
+                case TacticalActionId.Heal:
+                    runtime.LowHealthCoverAwareUntil = Math.Max(runtime.LowHealthCoverAwareUntil, now + 1f);
+                    StopBotAttack(bot, runtime);
+                    RequestCoverHealCrouch(bot, runtime, now);
+                    if (IsV2Actuating(runtime))
+                    {
+                        runtime.Intent.motor_skill = MotorSkill.Heal;
+                        runtime.Intent.wants_fire = false;
+                        runtime.Intent.wants_crouch = true;
+                        runtime.Intent.reason = action.Reason;
+                    }
+                    else
+                    {
+                        UpdateMedicalHealing(bot, runtime, now);
+                    }
+                    break;
+
+                case TacticalActionId.Reload:
+                    StopBotAttack(bot, runtime);
+                    if (IsV2Actuating(runtime) && !runtime.Intent.wants_reload && snapshot.ammo_fraction <= MinimumAmmoFractionToShoot)
+                    {
+                        TryStartV2Reload(bot, runtime, ActiveBaseProjectile(bot), now);
+                    }
+                    break;
+
+                case TacticalActionId.Tuck:
+                    StopBotAttack(bot, runtime);
+                    RequestBotCrouch(bot, runtime, "tuck", Math.Max(action.MinimumCommitUntil, now + 0.2f), now);
+                    break;
+
+                case TacticalActionId.RetreatToCover:
+                case TacticalActionId.MoveToCover:
+                    if (runtime.Memory.Target != null && snapshot.has_line_of_sight && snapshot.health_need < 0.75f)
+                    {
+                        MaintainFireOrStop(bot, runtime, now);
+                    }
+                    break;
+            }
+
+            if (IsMovementDestinationAction(action.ActionId)
+                && action.Destination != Vector3.zero
+                && now - runtime.Movement.LastCommandAt >= 1.25f
+                && Vector3.Distance(bot.transform.position, action.Destination) > Math.Max(1f, config.AI.CoverArrivalDistance))
+            {
+                MoveBotTo(bot, runtime, action.Destination, BaseNavigator.NavigationSpeed.Fast);
+            }
+        }
+
+        private BrainActionStatusV2 EvaluateBrainActionStatusV2(BaseCombatEntity bot, BotRuntime runtime, BrainActionInstanceV2 action, BrainWorldSnapshotV2 snapshot, float now, out string reason)
+        {
+            reason = "running";
+            if (!IsLiveBot(bot))
+            {
+                reason = "bot_not_live";
+                return BrainActionStatusV2.Failed;
+            }
+
+            if (runtime.ConsecutiveFailedPaths >= action.StartingPathFailures + 3 || runtime.Movement.IsStuck && now >= action.MinimumCommitUntil)
+            {
+                reason = "path_failure";
+                return BrainActionStatusV2.Failed;
+            }
+
+            var progress = BrainActionProgressV2(bot, runtime, action, snapshot, now);
+            var threshold = IsMovementDestinationAction(action.ActionId) ? 0.35f : 0.025f;
+            if (progress > action.LastProgressValue + threshold)
+            {
+                action.LastProgressValue = progress;
+                action.LastProgressAt = now;
+                if (runtime.BrainV2?.ActiveGoal != null)
+                {
+                    runtime.BrainV2.ActiveGoal.LastProgressAt = now;
+                }
+            }
+
+            switch (action.ActionId)
+            {
+                case TacticalActionId.Heal:
+                    if (!runtime.V2Healing && runtime.V2LastMedicalUseAt >= action.StartedAt)
+                    {
+                        reason = "syringe_used";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    if (snapshot.health_fraction >= SyringeHealTargetFraction() - 0.015f)
+                    {
+                        reason = "health_restored";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    if (!snapshot.effective_cover && now >= action.MinimumCommitUntil && !runtime.V2MedicalUsed)
+                    {
+                        reason = "cover_compromised";
+                        return BrainActionStatusV2.Failed;
+                    }
+                    break;
+
+                case TacticalActionId.Reload:
+                    if (snapshot.ammo_fraction > 0.20f)
+                    {
+                        reason = "weapon_loaded";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    break;
+
+                case TacticalActionId.AcquireVisibleTarget:
+                    if (!snapshot.has_line_of_sight || !snapshot.has_primary_contact)
+                    {
+                        reason = "contact_lost";
+                        return BrainActionStatusV2.Failed;
+                    }
+                    if (now >= action.MinimumCommitUntil + 0.8f
+                        && (runtime.BurstShotsRemaining <= 0 || !runtime.CurrentBurstIsSustained))
+                    {
+                        reason = "fire_pulse_complete";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    break;
+
+                case TacticalActionId.Tuck:
+                    var tuckCompleteAt = runtime.CurrentTuckUntil > action.StartedAt
+                        ? runtime.CurrentTuckUntil
+                        : action.MinimumCommitUntil;
+                    if (now >= Math.Max(action.MinimumCommitUntil, tuckCompleteAt))
+                    {
+                        reason = "tuck_window_complete";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    break;
+
+                case TacticalActionId.PeekLeft:
+                case TacticalActionId.PeekRight:
+                case TacticalActionId.WideSwing:
+                    if (action.Destination == Vector3.zero)
+                    {
+                        reason = "missing_peek_destination";
+                        return BrainActionStatusV2.Failed;
+                    }
+                    if (now >= Math.Max(action.MinimumCommitUntil, runtime.CurrentPeekUntil))
+                    {
+                        reason = "peek_window_complete";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    break;
+
+                case TacticalActionId.ThrowGrenade:
+                case TacticalActionId.ThrowSmoke:
+                    if (botUtilityEntities.Any(entity => entity != null
+                        && string.Equals(entity.BotKey, runtime.BotKey, StringComparison.OrdinalIgnoreCase)
+                        && entity.SpawnedAt >= action.StartedAt - 0.05f))
+                    {
+                        reason = "utility_spawned";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    if (now - action.StartedAt >= 0.45f)
+                    {
+                        reason = "utility_not_spawned";
+                        return BrainActionStatusV2.Failed;
+                    }
+                    break;
+
+                case TacticalActionId.PlaceBarricade:
+                    if (runtime.LastBarricadePlacedAt >= action.StartedAt - 0.05f)
+                    {
+                        reason = "barricade_spawned";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    if (now - action.StartedAt >= 0.45f)
+                    {
+                        reason = "barricade_not_spawned";
+                        return BrainActionStatusV2.Failed;
+                    }
+                    break;
+
+                case TacticalActionId.AbandonTarget:
+                    if (action.TargetId == 0UL || !runtime.BrainV2.Contacts.ContainsKey(action.TargetId))
+                    {
+                        reason = "contact_abandoned";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    if (now - action.StartedAt >= 0.45f)
+                    {
+                        reason = "contact_still_present";
+                        return BrainActionStatusV2.Failed;
+                    }
+                    break;
+
+                case TacticalActionId.PushTarget:
+                    if (snapshot.has_primary_contact && snapshot.target_distance > 0f && snapshot.target_distance <= runtime.Combat.PreferredDistance + 3f)
+                    {
+                        reason = "preferred_range_reached";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    goto default;
+
+                case TacticalActionId.SearchLastKnown:
+                case TacticalActionId.InvestigateSound:
+                    if (snapshot.has_line_of_sight)
+                    {
+                        reason = "contact_reacquired";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    goto default;
+
+                case TacticalActionId.RegroupWithSquad:
+                    if (snapshot.squad_separation < 0.14f)
+                    {
+                        reason = "squad_rejoined";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    goto default;
+
+                default:
+                    var arrivalDistance = action.ActionId == TacticalActionId.RoamToPoint
+                        ? RoamArrivalDistance(runtime)
+                        : Math.Max(1.25f, config.AI.CoverArrivalDistance * 1.35f);
+                    if (action.Destination != Vector3.zero
+                        && Vector3.Distance(bot.transform.position, action.Destination) <= arrivalDistance)
+                    {
+                        reason = "destination_reached";
+                        return BrainActionStatusV2.Succeeded;
+                    }
+                    break;
+            }
+
+            if (IsMovementDestinationAction(action.ActionId)
+                && now - action.LastProgressAt >= config.BrainV2.NoProgressTimeoutSeconds)
+            {
+                reason = "action_no_progress";
+                return BrainActionStatusV2.Failed;
+            }
+
+            if (now >= action.TimeoutAt)
+            {
+                if (action.ActionId == TacticalActionId.AcquireVisibleTarget || action.ActionId == TacticalActionId.Tuck)
+                {
+                    reason = "action_window_complete";
+                    return BrainActionStatusV2.Succeeded;
+                }
+                reason = "action_timeout";
+                return BrainActionStatusV2.Failed;
+            }
+
+            return BrainActionStatusV2.Running;
+        }
+
+        private void CompleteBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainActionStatusV2 status, string reason, float now)
+        {
+            var action = runtime?.BrainV2?.ActiveAction;
+            if (action == null)
+            {
+                return;
+            }
+
+            action.Status = status;
+            action.ResultReason = reason ?? "complete";
+            RecordBrainEventV2(runtime, status == BrainActionStatusV2.Succeeded ? "action_success" : "action_failure",
+                $"{ActionIdString(action.ActionId)}:{action.ResultReason}", action.Destination, action.TargetId, now);
+
+            if (status == BrainActionStatusV2.Failed)
+            {
+                runtime.BrainV2.ActionFailures++;
+                runtime.BrainV2.LastFailure = $"{ActionIdString(action.ActionId)}:{action.ResultReason}";
+                if (runtime.BrainV2.ActiveGoal != null)
+                {
+                    runtime.BrainV2.ActiveGoal.FailureCount++;
+                }
+                v2Metrics.brain_v2_action_failures++;
+            }
+
+            if (action.ActionId == TacticalActionId.Heal && IsV2Actuating(runtime) && runtime.V2Healing && status != BrainActionStatusV2.Succeeded)
+            {
+                AbortV2Healing(bot, runtime, action.ResultReason, now, true);
+            }
+            if (action.ActionId == TacticalActionId.AcquireVisibleTarget && status != BrainActionStatusV2.Running)
+            {
+                StopBotAttack(bot, runtime);
+            }
+
+            runtime.BrainV2.ActiveAction = null;
+            runtime.BrainV2.NextActionEvaluationAt = now + 0.05f;
+            if (status == BrainActionStatusV2.Failed)
+            {
+                runtime.BrainV2.NextGoalEvaluationAt = now;
+            }
+        }
+
+        private void InterruptBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, string reason, float now)
+        {
+            var action = runtime?.BrainV2?.ActiveAction;
+            if (action == null)
+            {
+                return;
+            }
+
+            action.Status = BrainActionStatusV2.Interrupted;
+            action.ResultReason = reason ?? "interrupted";
+            RecordBrainEventV2(runtime, "action_interrupted", $"{ActionIdString(action.ActionId)}:{action.ResultReason}", action.Destination, action.TargetId, now);
+            if (action.ActionId == TacticalActionId.Heal && IsV2Actuating(runtime) && runtime.V2Healing)
+            {
+                AbortV2Healing(bot, runtime, action.ResultReason, now, true);
+            }
+            StopBotAttack(bot, runtime);
+            runtime.BrainV2.ActiveAction = null;
+            runtime.BrainV2.NextActionEvaluationAt = now;
+        }
+
+        private void UpdateBrainActionV2(BaseCombatEntity bot, BotRuntime runtime, BrainWorldSnapshotV2 snapshot, float now)
+        {
+            var action = runtime?.BrainV2?.ActiveAction;
+            if (action == null)
+            {
+                return;
+            }
+
+            var status = EvaluateBrainActionStatusV2(bot, runtime, action, snapshot, now, out var reason);
+            if (status == BrainActionStatusV2.Running)
+            {
+                MaintainBrainActionV2(bot, runtime, action, snapshot, now);
+                return;
+            }
+
+            CompleteBrainActionV2(bot, runtime, status, reason, now);
+        }
+
+        private bool TickBrainV2(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            try
+            {
+                return TickBrainV2Core(bot, runtime, now);
+            }
+            catch (Exception ex)
+            {
+                v2Metrics.brain_v2_errors++;
+                var failure = $"brain_exception:{ex.GetType().Name}";
+
+                if (runtime?.BrainV2 != null)
+                {
+                    runtime.BrainV2.LastFailure = failure;
+                    runtime.BrainV2.LastDecisionReason = failure;
+                }
+
+                try
+                {
+                    RecordBrainEventV2(runtime, "brain_error", ex.Message, bot == null ? Vector3.zero : bot.transform.position, 0UL, now);
+                    InterruptBrainActionV2(bot, runtime, failure, now);
+                }
+                catch
+                {
+                    StopBotAttack(bot, runtime);
+                }
+
+                DebugWarning($"brain-v2-error:{runtime?.BotKey ?? "unknown"}", $"Brain V2 failed for {runtime?.DisplayName ?? "unknown bot"}; holding V2 control because v1 fallback is retired: {ex.GetType().Name}: {ex.Message}", 5f);
+                return IsBrainV2Actuating(runtime);
+            }
+        }
+
+        private bool TickBrainV2Core(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            if (config?.BrainV2?.Enabled != true || runtime == null)
+            {
+                return false;
+            }
+
+            if (runtime.BrainV2 == null)
+            {
+                InitializeBrainRuntimeV2(runtime);
+            }
+            if (runtime.BrainV2.Mode == BrainV2RuntimeMode.Off)
+            {
+                return false;
+            }
+
+            v2Metrics.brain_v2_ticks++;
+            var snapshot = CaptureBrainSnapshotV2(bot, runtime, now);
+            runtime.BrainV2.Snapshot = snapshot;
+            EvaluateBrainGoalV2(bot, runtime, snapshot, now, false);
+
+            var executionReady = IsBrainV2ExecutionReady(runtime);
+            if (IsBrainV2Shadowing(runtime) || IsBrainV2Actuating(runtime) && !executionReady)
+            {
+                if (now >= runtime.BrainV2.NextActionEvaluationAt || runtime.BrainV2.LastActionScores.Count == 0)
+                {
+                    runtime.BrainV2.NextActionEvaluationAt = now + config.BrainV2.ActionTickSeconds;
+                    var randomState = UnityEngine.Random.state;
+                    var leashOutsideUntil = runtime.LeashOutsideUntil;
+                    try
+                    {
+                        var shadowAction = SelectBrainActionV2(bot, runtime, snapshot, now);
+                        var evaluationReason = shadowAction?.Reason ?? "no_shadow_action";
+                        runtime.BrainV2.LastDecisionReason = IsBrainV2Shadowing(runtime)
+                            ? evaluationReason
+                            : $"{BrainV2ExecutionStatus(runtime)}:{evaluationReason}";
+                    }
+                    finally
+                    {
+                        UnityEngine.Random.state = randomState;
+                        runtime.LeashOutsideUntil = leashOutsideUntil;
+                    }
+                }
+                MaybeQueueBrainTraceV2(runtime, now, true);
+                return false;
+            }
+
+            if (runtime.V2Healing)
+            {
+                UpdateBrainActionV2(bot, runtime, snapshot, now);
+                MaybeQueueBrainTraceV2(runtime, now, false);
+                return true;
+            }
+
+            if (TryBuildBrainReflexActionV2(bot, runtime, snapshot, now, out var reflex))
+            {
+                if (runtime.BrainV2.ActiveGoal?.GoalId != BrainGoalIdV2.Recover)
+                {
+                    var reflexGoal = CreateBrainGoalScoreV2(BrainGoalIdV2.Recover, 1f, true, "safety_reflex",
+                        new KeyValuePair<string, float>("danger", 1f));
+                    StartBrainGoalV2(bot, runtime, reflexGoal, snapshot, now, "safety_reflex");
+                }
+                if (runtime.BrainV2.ActiveAction == null
+                    || runtime.BrainV2.ActiveAction.ActionId != reflex.ActionId
+                    || Vector3.Distance(runtime.BrainV2.ActiveAction.Destination, reflex.Destination) > 2f)
+                {
+                    if (runtime.BrainV2.ActiveAction != null)
+                    {
+                        InterruptBrainActionV2(bot, runtime, "safety_reflex", now);
+                    }
+                    BeginBrainActionV2(bot, runtime, reflex, snapshot, now, "safety_reflex");
+                    v2Metrics.brain_v2_reflex_interrupts++;
+                }
+                UpdateBrainActionV2(bot, runtime, snapshot, now);
+                MaybeQueueBrainTraceV2(runtime, now, false);
+                return true;
+            }
+
+            if (TryTickRaidMemberBrainOverride(bot, runtime, snapshot, now))
+            {
+                MaybeQueueBrainTraceV2(runtime, now, false);
+                return true;
+            }
+
+            UpdateBrainActionV2(bot, runtime, snapshot, now);
+            if (runtime.BrainV2.ActiveAction == null && now >= runtime.BrainV2.NextActionEvaluationAt)
+            {
+                runtime.BrainV2.NextActionEvaluationAt = now + config.BrainV2.ActionTickSeconds;
+                var selected = SelectBrainActionV2(bot, runtime, snapshot, now);
+                if (selected != null)
+                {
+                    BeginBrainActionV2(bot, runtime, selected, snapshot, now);
+                }
+                else
+                {
+                    runtime.BrainV2.LastDecisionReason = "no_legal_action";
+                }
+            }
+
+            MaybeQueueBrainTraceV2(runtime, now, false);
+            return true;
+        }
+
+        private BrainWorldSnapshotV2 CloneBrainSnapshotV2(BrainWorldSnapshotV2 source)
+        {
+            if (source == null)
+            {
+                return new BrainWorldSnapshotV2();
+            }
+
+            return new BrainWorldSnapshotV2
+            {
+                schema_version = source.schema_version,
+                captured_at = source.captured_at,
+                position = source.position,
+                health_fraction = source.health_fraction,
+                health_need = source.health_need,
+                recent_damage_pressure = source.recent_damage_pressure,
+                own_exposure_fraction = source.own_exposure_fraction,
+                target_exposure_fraction = source.target_exposure_fraction,
+                exposure_risk = source.exposure_risk,
+                contact_confidence = source.contact_confidence,
+                evidence_freshness = source.evidence_freshness,
+                target_opportunity = source.target_opportunity,
+                target_distance = source.target_distance,
+                weapon_range_fit = source.weapon_range_fit,
+                ammo_fraction = source.ammo_fraction,
+                ammo_pressure = source.ammo_pressure,
+                cover_quality = source.cover_quality,
+                cover_reachability = source.cover_reachability,
+                local_force_balance = source.local_force_balance,
+                squad_separation = source.squad_separation,
+                teammate_contact_urgency = source.teammate_contact_urgency,
+                path_risk = source.path_risk,
+                objective_urgency = source.objective_urgency,
+                combat_readiness = source.combat_readiness,
+                nearby_allies = source.nearby_allies,
+                nearby_enemies = source.nearby_enemies,
+                primary_contact_id = source.primary_contact_id,
+                primary_contact_position = source.primary_contact_position,
+                has_primary_contact = source.has_primary_contact,
+                has_line_of_sight = source.has_line_of_sight,
+                has_loaded_weapon = source.has_loaded_weapon,
+                has_medical_item = source.has_medical_item,
+                at_cover = source.at_cover,
+                effective_cover = source.effective_cover,
+                inside_base_restriction = source.inside_base_restriction,
+                grenade_danger = source.grenade_danger,
+                movement_stuck = source.movement_stuck,
+                managed_objective = source.managed_objective
+            };
+        }
+
+        private void MaybeQueueBrainTraceV2(BotRuntime runtime, float now, bool shadow)
+        {
+            var brain = runtime?.BrainV2;
+            if (brain == null || config?.BrainV2?.TraceEnabled != true)
+            {
+                return;
+            }
+
+            var goal = BrainGoalIdStringV2(brain.ActiveGoal?.GoalId ?? BrainGoalIdV2.None);
+            var action = ActionIdString(brain.ActiveAction?.ActionId ?? TacticalActionId.None);
+            if (shadow && brain.LastActionScores.Count > 0)
+            {
+                action = brain.LastActionScores.Where(row => row.legal).OrderByDescending(row => row.score).FirstOrDefault()?.action ?? action;
+            }
+            var changed = !string.Equals(goal, brain.LastTraceGoal, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(action, brain.LastTraceAction, StringComparison.OrdinalIgnoreCase);
+            var heartbeat = brain.LastTraceAt <= 0f || now - brain.LastTraceAt >= config.BrainV2.TraceHeartbeatSeconds;
+            if (!changed && !heartbeat)
+            {
+                return;
+            }
+
+            brain.LastTraceAt = now;
+            brain.LastTraceGoal = goal;
+            brain.LastTraceAction = action;
+            pendingBrainV2Traces.Add(new BrainTraceV2
+            {
+                captured_at_utc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                captured_at = now,
+                bot_key = runtime.BotKey ?? "",
+                bot_name = runtime.DisplayName ?? "",
+                mode = BrainV2ModeKey(brain.Mode),
+                active_goal = goal,
+                selected_action = action,
+                decision_reason = brain.LastDecisionReason ?? "none",
+                action_status = brain.ActiveAction?.Status.ToString().ToLowerInvariant() ?? (shadow ? "shadow" : "none"),
+                action_result = brain.ActiveAction?.ResultReason ?? brain.LastFailure ?? "none",
+                snapshot = CloneBrainSnapshotV2(brain.Snapshot),
+                goals = brain.LastGoalScores.Select(row => new BrainGoalScoreV2
+                {
+                    GoalId = row.GoalId,
+                    goal = row.goal,
+                    score = row.score,
+                    valid = row.valid,
+                    reason = row.reason,
+                    considerations = new Dictionary<string, float>(row.considerations, StringComparer.OrdinalIgnoreCase)
+                }).ToList(),
+                actions = brain.LastActionScores.Select(row => new BrainActionScoreV2
+                {
+                    ActionId = row.ActionId,
+                    action = row.action,
+                    score = row.score,
+                    legal = row.legal,
+                    reason = row.reason,
+                    failure = row.failure,
+                    destination = row.destination,
+                    target_id = row.target_id,
+                    considerations = new Dictionary<string, float>(row.considerations, StringComparer.OrdinalIgnoreCase)
+                }).ToList(),
+                recent_events = brain.RecentEvents.Skip(Math.Max(0, brain.RecentEvents.Count - Math.Min(12, brain.RecentEvents.Count))).Select(row => new BrainEventV2
+                {
+                    time = row.time,
+                    type = row.type,
+                    detail = row.detail,
+                    position = row.position,
+                    entity_id = row.entity_id
+                }).ToList(),
+                goal_switches = brain.GoalSwitches,
+                action_switches = brain.ActionSwitches,
+                action_failures = brain.ActionFailures
+            });
+            v2Metrics.brain_v2_trace_rows++;
+
+            if (brainV2TraceSaveTimer == null || brainV2TraceSaveTimer.Destroyed)
+            {
+                brainV2TraceSaveTimer = timer.Once(5f, FlushBrainV2Traces);
+            }
+        }
+
+        private string BrainV2TraceDataPath()
+        {
+            return Path.Combine(Interface.Oxide.DataFileSystem.Directory, BrainV2TraceDataFile);
+        }
+
+        private void FlushBrainV2Traces()
+        {
+            brainV2TraceSaveTimer = null;
+            if (pendingBrainV2Traces.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var path = BrainV2TraceDataPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.AppendAllLines(path, pendingBrainV2Traces.Select(row => JsonConvert.SerializeObject(row, Formatting.None)).ToArray());
+                pendingBrainV2Traces.Clear();
+                MaybePruneBrainV2TraceFile(path, false);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not write Brain V2 traces: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        private void MaybePruneBrainV2TraceFile(string path, bool force)
+        {
+            if (config?.BrainV2 == null || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            if (!force && now - lastBrainV2TracePruneCheckAt < 60f)
+            {
+                return;
+            }
+            lastBrainV2TracePruneCheckAt = now;
+
+            var maxMegabytes = config.BrainV2.MaximumTraceFileMegabytes;
+            var maxLines = config.BrainV2.MaximumTraceLinesAfterPrune;
+            if (maxMegabytes <= 0 || maxLines <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var maxBytes = (long)maxMegabytes * 1024L * 1024L;
+                var fileLength = new FileInfo(path).Length;
+                if (!force && fileLength <= maxBytes)
+                {
+                    return;
+                }
+
+                // Retain newest rows while enforcing both line and byte ceilings.
+                // The 90% target leaves headroom for the next buffered flush.
+                var targetBytes = Math.Max(1024L * 1024L, maxBytes * 9L / 10L);
+                var retained = new Queue<string>();
+                long retainedBytes = 0L;
+                var newlineBytes = Encoding.UTF8.GetByteCount(Environment.NewLine);
+
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                    {
+                        continue;
+                    }
+
+                    retained.Enqueue(line);
+                    retainedBytes += Encoding.UTF8.GetByteCount(line) + newlineBytes;
+                    while (retained.Count > maxLines || retainedBytes > targetBytes)
+                    {
+                        var removed = retained.Dequeue();
+                        retainedBytes -= Encoding.UTF8.GetByteCount(removed) + newlineBytes;
+                    }
+                }
+
+                var tempPath = path + ".brainv2-prune.tmp";
+                File.WriteAllLines(tempPath, retained.ToArray());
+                File.Copy(tempPath, path, true);
+                File.Delete(tempPath);
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Could not prune Brain V2 traces: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         private DecisionRequest BuildDecisionRequest(BaseCombatEntity bot, BotRuntime runtime, float now)
@@ -19017,7 +27961,7 @@ namespace Oxide.Plugins
 
         private bool IsDecisionAdvisorHttpConfigured(string provider)
         {
-            if (config?.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled)
+            if (!ExternalAiCallsAllowed || config?.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled)
             {
                 return false;
             }
@@ -19076,6 +28020,12 @@ namespace Oxide.Plugins
 
         private void SendAdvisorPost(string url, string body, Action<int, string> callback, Dictionary<string, string> headers, float timeoutMilliseconds)
         {
+            if (!ExternalAiCallsAllowed)
+            {
+                callback?.Invoke(0, "external_ai_disabled_by_design");
+                return;
+            }
+
             webrequest.Enqueue(url, body, (code, response) => callback(code, response ?? ""), this, Oxide.Core.Libraries.RequestMethod.POST, headers, timeoutMilliseconds);
         }
 
@@ -19656,7 +28606,7 @@ namespace Oxide.Plugins
             }
 
             if (runtime.CurrentDestination == Vector3.zero
-                || Vector3.Distance(bot.transform.position, runtime.CurrentDestination) < 4f
+                || Vector3.Distance(bot.transform.position, runtime.CurrentDestination) <= RoamArrivalDistance(runtime)
                 || ShouldAvoidDestination(runtime, runtime.CurrentDestination, now))
             {
                 runtime.CurrentDestination = FindRoamDestination(runtime.HomePosition, runtime);
@@ -20804,7 +29754,7 @@ namespace Oxide.Plugins
 
         private bool ShouldAskAdvisor(BaseCombatEntity bot, BotRuntime runtime, DecisionRequest request, List<TacticalActionCandidate> candidates, float now)
         {
-            if (config.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled || runtime == null || candidates == null || candidates.Count <= 1)
+            if (!ExternalAiCallsAllowed || config.DecisionAdvisor == null || !config.DecisionAdvisor.Enabled || runtime == null || candidates == null || candidates.Count <= 1)
             {
                 return false;
             }
@@ -21192,6 +30142,38 @@ namespace Oxide.Plugins
                     FacePosition(bot, KnownThreatPosition(runtime));
                     break;
 
+                case TacticalActionId.Heal:
+                    SetState(runtime, TacticalState.FightFromCover, now);
+                    StopBotAttack(bot, runtime);
+                    runtime.LowHealthCoverAwareUntil = Math.Max(runtime.LowHealthCoverAwareUntil, now + config.AI.LowHealthCoverCommitmentSeconds);
+                    RequestCoverHealCrouch(bot, runtime, now);
+                    if (IsV2Actuating(runtime))
+                    {
+                        runtime.Intent.action = "covered_heal";
+                        runtime.Intent.motor_skill = MotorSkill.Heal;
+                        runtime.Intent.wants_fire = false;
+                        runtime.Intent.wants_reload = false;
+                        runtime.Intent.wants_crouch = true;
+                        runtime.Intent.reason = action.ReasonFromCode ?? "recover_goal";
+                    }
+                    else
+                    {
+                        UpdateMedicalHealing(bot, runtime, now);
+                    }
+                    break;
+
+                case TacticalActionId.Reload:
+                    StopBotAttack(bot, runtime);
+                    if (IsV2Actuating(runtime))
+                    {
+                        TryStartV2Reload(bot, runtime, ActiveBaseProjectile(bot), now);
+                    }
+                    else
+                    {
+                        EnsureBotWeaponLoaded(bot);
+                    }
+                    break;
+
                 case TacticalActionId.ThrowGrenade:
                     SetState(runtime, TacticalState.GrenadeFlush, now);
                     StopBotAttack(bot, runtime);
@@ -21275,6 +30257,10 @@ namespace Oxide.Plugins
                     return MotorSkill.Tuck;
                 case TacticalActionId.RetreatToCover:
                     return MotorSkill.RetreatFire;
+                case TacticalActionId.Heal:
+                    return MotorSkill.Heal;
+                case TacticalActionId.Reload:
+                    return MotorSkill.Reload;
                 case TacticalActionId.AcquireVisibleTarget:
                 case TacticalActionId.SuppressTarget:
                     return MotorSkill.Hold;
@@ -21307,6 +30293,7 @@ namespace Oxide.Plugins
             runtime.AimWarmupTargetUserId = 0UL;
             runtime.AimWarmupStartedAt = 0f;
             runtime.CurrentAimErrorDegrees = AimErrorDegreesAt(runtime, Time.realtimeSinceStartup);
+            ResetV2VisibleAimSettle(runtime);
         }
 
         private void QueueDecisionTrace(DecisionTrace trace)
@@ -21626,6 +30613,11 @@ namespace Oxide.Plugins
 
         private string AdvisorStatusLine()
         {
+            if (!ExternalAiCallsAllowed)
+            {
+                return "Raidlands roam bot advisor: remoteAI=disabled_by_design, provider=none, pending=0. Brain V2 decisions are local and deterministic.";
+            }
+
             PruneExpiredAdvisorRequests(Time.realtimeSinceStartup);
             var advisor = decisionAdvisor ?? new NullDecisionAdvisor();
             var decisionConfig = config.DecisionAdvisor;
@@ -21669,8 +30661,9 @@ namespace Oxide.Plugins
 
         private void ScheduleBodyPrepare(BaseCombatEntity bot)
         {
-            timer.Once(0.25f, () => PrepareBodyIfActive(bot, "initial"));
-            timer.Once(1.25f, () => PrepareBodyIfActive(bot, "followup"));
+            var runtime = RuntimeFor(bot);
+            ScheduleBotTimer(runtime, 0.25f, () => PrepareBodyIfActive(bot, "initial"));
+            ScheduleBotTimer(runtime, 1.25f, () => PrepareBodyIfActive(bot, "followup"));
         }
 
         private void PrepareBodyIfActive(BaseCombatEntity bot, string phase)
@@ -21687,7 +30680,8 @@ namespace Oxide.Plugins
 
             PrepareNpcBody(bot);
 
-            if (runtime.CurrentDestination != Vector3.zero)
+            if (runtime.CurrentDestination != Vector3.zero
+                && (!IsV2Actuating(runtime) || runtime.V2AuthoritativePrepared))
             {
                 MoveBotTo(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
             }
@@ -21704,7 +30698,25 @@ namespace Oxide.Plugins
 
             if (IsV2Actuating(runtime) && legacyScientistBodyAdapter != null)
             {
-                legacyScientistBodyAdapter.Prepare(bot, runtime, true);
+                if (runtime.V2BodyReadyForAuthority)
+                {
+                    if (runtime.V2AuthoritativePrepared)
+                    {
+                        legacyScientistBodyAdapter.Prepare(bot, runtime, true);
+                    }
+                    else
+                    {
+                        ScheduleV2AuthorityPreparationRetry(bot, runtime, "prepare_body_waiting_authority");
+                    }
+                }
+                else
+                {
+                    // During the spawn readiness window only suppress native player
+                    // targeting/audio. Do not disable BaseAIBrain until its state and
+                    // navigator containers have finished initializing.
+                    SuppressScientistBodyAudio(bot);
+                    SuppressBrainPlayerTargeting(bot);
+                }
                 return;
             }
 
@@ -21885,6 +30897,99 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            var requestedDestination = destination;
+            var commandDestination = destination;
+            var usingSafeTravelWaypoint = false;
+            if (IsV2Actuating(runtime)
+                && config?.SafeTravelGrid?.Enabled == true
+                && Distance2D(bot.transform.position, requestedDestination) >= config.SafeTravelGrid.RouteValidationMinimumDistance)
+            {
+                var sameTravelDestination = runtime.Movement.SafeTravelFinalDestination != Vector3.zero
+                    && Distance2D(runtime.Movement.SafeTravelFinalDestination, requestedDestination) <= 3f;
+                var continuingWaypoint = sameTravelDestination
+                    && runtime.Movement.SafeTravelWaypoint != Vector3.zero
+                    && Distance2D(bot.transform.position, runtime.Movement.SafeTravelWaypoint) > Math.Max(4f, config.AI.CoverArrivalDistance * 1.5f)
+                    && !ShouldAvoidDestination(runtime, runtime.Movement.SafeTravelWaypoint, now);
+                var pathReason = "path_unchecked";
+
+                if (continuingWaypoint)
+                {
+                    commandDestination = runtime.Movement.SafeTravelWaypoint;
+                    usingSafeTravelWaypoint = true;
+                }
+                else if (sameTravelDestination
+                    && runtime.Movement.SafeTravelHops >= config.SafeTravelGrid.MaximumWaypointHopsPerDestination)
+                {
+                    runtime.ConsecutiveFailedPaths++;
+                    runtime.Movement.SameActionFailures++;
+                    RememberBadDestination(runtime, requestedDestination, "safe_travel:hop_limit", now);
+                    runtime.Movement.SafeTravelFinalDestination = Vector3.zero;
+                    runtime.Movement.SafeTravelWaypoint = Vector3.zero;
+                    runtime.Movement.SafeTravelHops = 0;
+                    return false;
+                }
+                else
+                {
+                    // Rust's BaseNavigator can accept a complete path to a very
+                    // distant point and still lose its agent state while following
+                    // it. Keep every long command local to the cached safe-travel
+                    // surface. The final destination is only sent directly once it
+                    // is within one waypoint radius and its complete path has been
+                    // confirmed for this exact NPC agent.
+                    var shouldSegmentRoute = Distance2D(bot.transform.position, requestedDestination)
+                        > config.SafeTravelGrid.WaypointSearchRadius;
+                    var waypoint = Vector3.zero;
+                    var foundWaypoint = shouldSegmentRoute
+                        && TryFindSafeTravelWaypoint(bot, runtime, requestedDestination, now, out waypoint);
+
+                    if (foundWaypoint)
+                    {
+                        commandDestination = waypoint;
+                        usingSafeTravelWaypoint = true;
+                        if (runtime.Movement.SafeTravelFinalDestination == Vector3.zero
+                            || Distance2D(runtime.Movement.SafeTravelFinalDestination, requestedDestination) > 3f)
+                        {
+                            runtime.Movement.SafeTravelHops = 0;
+                        }
+                        runtime.Movement.SafeTravelFinalDestination = requestedDestination;
+                        runtime.Movement.SafeTravelWaypoint = waypoint;
+                    }
+                    else if (TryCalculateCompleteAgentPath(bot, runtime, requestedDestination, now, out pathReason)
+                        && !shouldSegmentRoute)
+                    {
+                        runtime.Movement.SafeTravelFinalDestination = Vector3.zero;
+                        runtime.Movement.SafeTravelWaypoint = Vector3.zero;
+                        runtime.Movement.SafeTravelHops = 0;
+                    }
+                    else if (!shouldSegmentRoute
+                        && TryFindSafeTravelWaypoint(bot, runtime, requestedDestination, now, out waypoint))
+                    {
+                        commandDestination = waypoint;
+                        usingSafeTravelWaypoint = true;
+                        if (runtime.Movement.SafeTravelFinalDestination == Vector3.zero
+                            || Distance2D(runtime.Movement.SafeTravelFinalDestination, requestedDestination) > 3f)
+                        {
+                            runtime.Movement.SafeTravelHops = 0;
+                        }
+                        runtime.Movement.SafeTravelFinalDestination = requestedDestination;
+                        runtime.Movement.SafeTravelWaypoint = waypoint;
+                    }
+                    else
+                    {
+                        runtime.ConsecutiveFailedPaths++;
+                        runtime.Movement.SameActionFailures++;
+                        RememberBadDestination(runtime, requestedDestination, $"safe_travel:{(shouldSegmentRoute ? "no_safe_segment" : pathReason)}", now);
+                        return false;
+                    }
+                }
+            }
+            else if (IsV2Actuating(runtime) && runtime.Movement.SafeTravelFinalDestination != Vector3.zero)
+            {
+                runtime.Movement.SafeTravelFinalDestination = Vector3.zero;
+                runtime.Movement.SafeTravelWaypoint = Vector3.zero;
+                runtime.Movement.SafeTravelHops = 0;
+            }
+
             PrepareNpcBody(bot);
             var npcCommanded = false;
             var navigatorCommanded = false;
@@ -21894,7 +30999,7 @@ namespace Oxide.Plugins
             {
                 try
                 {
-                    npc.SetDestination(destination);
+                    npc.SetDestination(commandDestination);
                     npcCommanded = true;
                 }
                 catch (Exception ex)
@@ -21908,11 +31013,12 @@ namespace Oxide.Plugins
 
             var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
             var previousDestination = runtime.CurrentDestination;
-            var destinationChanged = previousDestination == Vector3.zero || Vector3.Distance(previousDestination, destination) > 2f;
-            navigatorCommanded = CommandNavigator(bot, runtime, navigator, destination, speed);
-            runtime.CurrentDestination = destination;
+            var destinationChanged = previousDestination == Vector3.zero || Vector3.Distance(previousDestination, requestedDestination) > 2f;
+            var previousWaypoint = runtime.Movement.LastCommandDestination;
+            navigatorCommanded = CommandNavigator(bot, runtime, navigator, commandDestination, speed);
+            runtime.CurrentDestination = requestedDestination;
             runtime.Movement.LastCommandAt = now;
-            runtime.Movement.LastCommandDestination = destination;
+            runtime.Movement.LastCommandDestination = commandDestination;
 
             // Accepted bot prefabs always have a BaseNavigator. NPCPlayer's void
             // SetDestination method only means that the call did not throw; it does
@@ -21928,13 +31034,19 @@ namespace Oxide.Plugins
                     runtime.Movement.LastProgressAt = now;
                 }
 
-                RecordSquadDestinationClaim(runtime, destination);
+                if (usingSafeTravelWaypoint && (previousWaypoint == Vector3.zero || Distance2D(previousWaypoint, commandDestination) > 2f))
+                {
+                    runtime.Movement.SafeTravelHops++;
+                    safeTravelWaypointRoutes++;
+                }
+
+                RecordSquadDestinationClaim(runtime, requestedDestination);
             }
             else
             {
                 runtime.ConsecutiveFailedPaths++;
                 runtime.Movement.SameActionFailures++;
-                RememberBadDestination(runtime, destination, "nav_command_failed", now);
+                RememberBadDestination(runtime, commandDestination, "nav_command_failed", now);
             }
 
             return movedOk;
@@ -22051,15 +31163,29 @@ namespace Oxide.Plugins
                 var agentMoved = false;
                 var agent = bot?.GetComponent<NavMeshAgent>() ?? bot?.GetComponentInChildren<NavMeshAgent>();
 
-                if (!authoritative && agent != null && agent.enabled && agent.isOnNavMesh)
+                if (agent != null && agent.enabled && agent.isOnNavMesh)
                 {
                     agent.isStopped = false;
+                    if (authoritative)
+                    {
+                        agent.updateRotation = false;
+                    }
                     agentMoved = agent.SetDestination(destination);
                 }
 
                 TryInvoke(navigator, "Think", 0.1f);
                 TryInvoke(navigator, "UpdateNavigation", 0.1f);
                 TryInvoke(navigator, "UpdateMovement", 0.1f);
+
+                // A true BaseNavigator return value is not sufficient for the V2
+                // controller: some long or invalid commands detach the underlying
+                // Unity agent immediately. Surface that as a normal path failure so
+                // the existing repair/despawn pressure can act on it.
+                if (authoritative && (agent == null || !agent.enabled || !agent.isOnNavMesh))
+                {
+                    return false;
+                }
+
                 return moved || agentMoved;
             }
             catch (Exception ex)
@@ -22133,8 +31259,17 @@ namespace Oxide.Plugins
                 config.ControllerV2.AimTurnDegreesPerSecondCasual,
                 config.ControllerV2.AimTurnDegreesPerSecondAverage,
                 config.ControllerV2.AimTurnDegreesPerSecondDangerous);
-            var desired = Quaternion.LookRotation(flatDirection.normalized, Vector3.up);
-            bot.transform.rotation = Quaternion.RotateTowards(bot.transform.rotation, desired, Math.Max(1f, turnRate) * Math.Max(0.01f, deltaSeconds));
+            var maximumTurn = Math.Max(1f, turnRate) * Math.Max(0.01f, deltaSeconds);
+            var currentFlatForward = bot.transform.forward;
+            currentFlatForward.y = 0f;
+            if (currentFlatForward.sqrMagnitude <= 0.0001f)
+            {
+                currentFlatForward = flatDirection;
+            }
+
+            var currentBodyRotation = Quaternion.LookRotation(currentFlatForward.normalized, Vector3.up);
+            var desiredBodyRotation = Quaternion.LookRotation(flatDirection.normalized, Vector3.up);
+            var nextBodyRotation = Quaternion.RotateTowards(currentBodyRotation, desiredBodyRotation, maximumTurn);
 
             var navigator = bot.GetComponent<BaseNavigator>() ?? bot.GetComponentInChildren<BaseNavigator>();
             if (navigator != null)
@@ -22154,16 +31289,41 @@ namespace Oxide.Plugins
                 try
                 {
                     var fullAim = Quaternion.LookRotation(direction.normalized, Vector3.up);
-                    player.eyes.NetworkUpdate(bot.transform.rotation);
-                    player.eyes.rotation = Quaternion.RotateTowards(player.eyes.rotation, fullAim, Math.Max(1f, turnRate) * Math.Max(0.01f, deltaSeconds));
-                    player.OverrideViewAngles(player.eyes.rotation.eulerAngles);
+                    var currentAim = player.eyes.rotation;
+                    var nextAim = Quaternion.RotateTowards(currentAim, fullAim, maximumTurn);
+                    player.eyes.NetworkUpdate(nextAim);
+                    player.OverrideViewAngles(nextAim.eulerAngles);
+                    player.ServerRotation = nextAim;
                 }
                 catch
                 {
+                    bot.transform.rotation = nextBodyRotation;
                 }
+            }
+            else
+            {
+                bot.transform.rotation = nextBodyRotation;
             }
 
             bot.SendNetworkUpdate();
+        }
+
+        private void PublishV2ShotFacing(BaseCombatEntity bot, BotRuntime runtime, Vector3 aimPoint)
+        {
+            var player = bot as BasePlayer;
+            if (player?.eyes == null || runtime == null || aimPoint == Vector3.zero)
+            {
+                return;
+            }
+
+            // The projectile attack signal is sent immediately. Publish the already
+            // settled canonical player rotation first so observers do not receive a
+            // muzzle flash from the bot's previous network-facing direction.
+            var visibleAim = player.eyes.rotation;
+            player.eyes.NetworkUpdate(visibleAim);
+            player.OverrideViewAngles(visibleAim.eulerAngles);
+            player.ServerRotation = visibleAim;
+            player.SendNetworkUpdate_Position();
         }
 
         private bool StartBotAttack(BaseCombatEntity bot, BotRuntime runtime, BasePlayer target)
@@ -22262,6 +31422,9 @@ namespace Oxide.Plugins
                 }
 
                 runtime.BurstShotsRemaining = 0;
+                runtime.CurrentBurstShotsFired = 0;
+                runtime.CurrentBurstIsSustained = false;
+                runtime.BurstAccuracyBias = Vector2.zero;
                 legacyScientistBodyAdapter?.StopFire(bot, runtime);
                 return;
             }
@@ -22507,10 +31670,11 @@ namespace Oxide.Plugins
         {
             var rangeScore = WeaponRangeScore(runtime, distance);
             var exposure = Mathf.Clamp01(runtime?.Memory?.TargetExposureFraction ?? 0f);
-            var aimError = AimErrorDegreesAt(runtime, Time.realtimeSinceStartup);
+            var aimError = Math.Max(AimErrorDegreesAt(runtime, Time.realtimeSinceStartup), runtime?.CurrentAimErrorDegrees ?? 0f);
             var aimFactor = Mathf.Clamp01(1f - aimError / 12f);
-            var skillFactor = Mathf.Lerp(0.82f, 1.08f, SkillDiscipline(runtime));
-            return Mathf.Clamp(0.12f + exposure * 0.50f + rangeScore * 0.28f + aimFactor * 0.16f, 0.08f, 0.92f) * skillFactor;
+            var skillFactor = Mathf.Lerp(0.78f, 1.05f, SkillDiscipline(runtime));
+            var chance = (0.06f + exposure * 0.24f + rangeScore * 0.20f + aimFactor * 0.14f) * skillFactor;
+            return Mathf.Clamp(chance, 0.08f, 0.68f);
         }
 
         private float BotVsBotTacticalBulletDamage(BaseCombatEntity bot, BotRuntime runtime, BotRuntime targetRuntime, float distance)
@@ -22591,7 +31755,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            timer.Once(0.05f, () =>
+            ScheduleBotTimer(attackerRuntime, 0.05f, () =>
             {
                 if (attackerEntity == null
                     || victimEntity == null
@@ -22767,23 +31931,205 @@ namespace Oxide.Plugins
 
         private Vector3 FindRoamDestination(Vector3 origin, BotRuntime runtime = null)
         {
-            var radius = Math.Max(12f, config.Spawn.GroupSpawnRadius * 3f);
             var now = Time.realtimeSinceStartup;
+            var bot = RuntimeEntityFor(runtime);
+            var routeOrigin = bot == null ? origin : bot.transform.position;
 
-            for (var attempt = 0; attempt < 14; attempt++)
+            if (ShouldUseMonumentRoamLeg(runtime)
+                && TryFindMonumentRoamDestination(routeOrigin, runtime, now, out var monumentDestination))
             {
-                var attemptRadius = radius * UnityEngine.Random.Range(0.55f, 1.35f);
-                var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-                var candidate = origin + new Vector3(Mathf.Cos(angle) * attemptRadius, 0f, Mathf.Sin(angle) * attemptRadius);
-                candidate = ConstrainToManagedLeash(runtime, origin, candidate, now);
+                return ConstrainToManagedLeash(runtime, routeOrigin, monumentDestination, now);
+            }
 
-                if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+            if (runtime != null)
+            {
+                runtime.PreviousRoamMonumentKey = runtime.RoamMonumentKey;
+                runtime.RoamMonumentKey = "";
+                runtime.RoamMonumentName = "open_terrain";
+                runtime.RoamLegsCompleted++;
+            }
+
+            var minimumOpenDistance = config.AI.MinimumOpenTerrainRoamLegDistance;
+            var maximumOpenDistance = config.AI.MaximumOpenTerrainRoamLegDistance;
+            var routeIdentity = runtime?.TeamId > 0 ? $"team:{runtime.TeamId}" : runtime?.BotKey ?? "ambient";
+            var routeLeg = runtime?.RoamLegsCompleted ?? 0;
+            var radiusBucket = StableBucket($"{routeIdentity}:{routeLeg}:open-radius", 10000) / 9999f;
+            var radius = Mathf.Lerp(minimumOpenDistance, maximumOpenDistance, radiusBucket);
+            var forward = bot == null ? Vector3.forward : bot.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude <= 0.01f)
+            {
+                forward = Vector3.forward;
+            }
+
+            var angleOffset = runtime == null ? UnityEngine.Random.Range(0f, 360f) : StableBucket($"{runtime.BotKey}:{runtime.RoamLegsCompleted}:open", 3600) / 10f;
+            var angles = new[] { 0f, 35f, -35f, 70f, -70f, 110f, -110f, 150f, -150f, 180f };
+            var radiusScales = new[] { 1f, 0.72f, 0.48f, 0.28f };
+
+            foreach (var radiusScale in radiusScales)
+            {
+                foreach (var angle in angles)
                 {
-                    return ConstrainToManagedLeash(runtime, origin, sampled, now);
+                    var direction = Quaternion.Euler(0f, angleOffset + angle, 0f) * forward.normalized;
+                    var candidate = routeOrigin + direction * radius * radiusScale;
+                    candidate = ConstrainToManagedLeash(runtime, routeOrigin, candidate, now);
+
+                    if (!TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(6f, config.Spawn.NavmeshSampleDistance), now, out var sampled))
+                    {
+                        continue;
+                    }
+
+                    sampled = ConstrainToManagedLeash(runtime, routeOrigin, sampled, now);
+                    if (Distance2D(routeOrigin, sampled) >= Math.Max(10f, RoamArrivalDistance(runtime) + 2f)
+                        && TrySnapRoamPointToSafeTravelGrid(runtime, sampled, now, out var safeTravelSample))
+                    {
+                        return safeTravelSample;
+                    }
                 }
             }
 
-            return origin;
+            return routeOrigin;
+        }
+
+        private bool ShouldUseMonumentRoamLeg(BotRuntime runtime)
+        {
+            if (runtime == null || config?.AI?.PreferMonumentRoaming != true)
+            {
+                return false;
+            }
+
+            var chance = Mathf.Clamp01(config.AI.MonumentRoamLegChance);
+            if (chance <= 0f)
+            {
+                return false;
+            }
+            if (chance >= 1f)
+            {
+                return true;
+            }
+
+            var routeIdentity = runtime.TeamId > 0 ? $"team:{runtime.TeamId}" : runtime.BotKey;
+            var routeSeed = $"{routeIdentity}:{runtime.RoamLegsCompleted}:{runtime.RoamMonumentKey}:monument-leg";
+            return StableBucket(routeSeed, 10000) < Mathf.RoundToInt(chance * 10000f);
+        }
+
+        private bool TryFindMonumentRoamDestination(Vector3 origin, BotRuntime runtime, float now, out Vector3 destination)
+        {
+            destination = Vector3.zero;
+            if (runtime == null || config?.AI?.PreferMonumentRoaming != true
+                || TerrainMeta.Path?.Monuments == null || TerrainMeta.Path.Monuments.Count == 0)
+            {
+                return false;
+            }
+
+            var minimumDistance = config.AI.MinimumMonumentRoamLegDistance;
+            var maximumDistance = config.AI.MaximumMonumentRoamLegDistance;
+            var currentKey = runtime.RoamMonumentKey ?? "";
+            var previousKey = runtime.PreviousRoamMonumentKey ?? "";
+            var candidates = TerrainMeta.Path.Monuments
+                .Where(monument => monument != null && monument.shouldDisplayOnMap)
+                .Select(monument => new
+                {
+                    Monument = monument,
+                    Key = MonumentRoamKey(monument),
+                    Distance = Distance2D(origin, monument.transform.position)
+                })
+                .Where(row => row.Distance >= minimumDistance
+                    && row.Distance <= maximumDistance
+                    && !string.Equals(row.Key, currentKey, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(row => row.Distance)
+                .ToList();
+
+            var forwardCandidates = candidates
+                .Where(row => string.IsNullOrWhiteSpace(previousKey) || !string.Equals(row.Key, previousKey, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (forwardCandidates.Count > 0)
+            {
+                candidates = forwardCandidates;
+            }
+
+            var routeIdentity = runtime.TeamId > 0 ? $"team:{runtime.TeamId}" : runtime.BotKey;
+            var routeSeed = $"{routeIdentity}:{runtime.RoamLegsCompleted}:{currentKey}";
+            candidates = candidates
+                .Take(14)
+                .OrderBy(row => StableBucket($"{routeSeed}:{row.Key}", 100000))
+                .ThenBy(row => row.Distance)
+                .ToList();
+
+            foreach (var row in candidates)
+            {
+                if (!TrySampleMonumentRoamPoint(row.Monument, runtime, now, out var sampled))
+                {
+                    continue;
+                }
+
+                runtime.PreviousRoamMonumentKey = currentKey;
+                runtime.RoamMonumentKey = row.Key;
+                runtime.RoamMonumentName = MonumentRoamName(row.Monument);
+                if (!string.IsNullOrWhiteSpace(currentKey))
+                {
+                    runtime.RoamLegsCompleted++;
+                }
+                destination = sampled;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TrySampleMonumentRoamPoint(MonumentInfo monument, BotRuntime runtime, float now, out Vector3 sampled)
+        {
+            sampled = Vector3.zero;
+            if (monument == null)
+            {
+                return false;
+            }
+
+            var center = monument.transform.position;
+            var approachRadius = Mathf.Clamp(Math.Max(monument.Bounds.extents.x, monument.Bounds.extents.z) * 0.72f, 12f, 70f);
+            var monumentKey = MonumentRoamKey(monument);
+            var baseAngle = StableBucket($"{runtime?.BotKey}:{monumentKey}:{runtime?.RoamLegsCompleted ?? 0}:approach", 3600) / 10f;
+            for (var attempt = 0; attempt < 14; attempt++)
+            {
+                var radiusJitter = StableBucket($"{runtime?.BotKey}:{monumentKey}:{attempt}:radius", 1000) / 999f;
+                var radius = approachRadius * Mathf.Lerp(0.55f, 1.15f, radiusJitter);
+                var angle = baseAngle + attempt * 137.508f;
+                var candidate = center + Quaternion.Euler(0f, angle, 0f) * Vector3.forward * radius;
+                if (TrySampleTacticalPositionAvoidingStuck(runtime, candidate, Math.Max(10f, config.Spawn.NavmeshSampleDistance), now, out sampled)
+                    && TrySnapRoamPointToSafeTravelGrid(runtime, sampled, now, out var safeTravelSample))
+                {
+                    sampled = safeTravelSample;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string MonumentRoamKey(MonumentInfo monument)
+        {
+            var position = monument == null ? Vector3.zero : monument.transform.position;
+            return $"{monument?.name ?? "monument"}:{Mathf.RoundToInt(position.x)}:{Mathf.RoundToInt(position.z)}";
+        }
+
+        private string MonumentRoamName(MonumentInfo monument)
+        {
+            var displayName = monument?.displayPhrase?.english;
+            if (!string.IsNullOrWhiteSpace(displayName))
+            {
+                return displayName.Trim();
+            }
+
+            var name = monument?.name ?? "monument";
+            var separator = name.LastIndexOf('/');
+            return (separator >= 0 ? name.Substring(separator + 1) : name).Replace(".prefab", "");
+        }
+
+        private float RoamArrivalDistance(BotRuntime runtime)
+        {
+            return runtime != null && !string.IsNullOrWhiteSpace(runtime.RoamMonumentKey)
+                ? config.AI.MonumentRoamArrivalDistance
+                : Math.Max(4f, config.AI.CoverArrivalDistance * 1.35f);
         }
 
         private Vector3 ConstrainToManagedLeash(BotRuntime runtime, Vector3 origin, Vector3 destination, float now)
@@ -23141,6 +32487,12 @@ namespace Oxide.Plugins
             if (IsV2Actuating(runtime) || IsV2Shadowing(runtime))
             {
                 chance = Mathf.Clamp01(chance * Mathf.Lerp(0.7f, 1.3f, runtime.Style?.crouch_preference ?? 0.5f));
+            }
+
+            if (TrainingV2PolicyApplies(runtime, application => application.firing_posture))
+            {
+                chance = Mathf.Lerp(chance, trainingV2Policy.learned.crouch_while_firing_probability, trainingV2Policy.transfer_strength);
+                v2Metrics.training_policy_crouch_decisions++;
             }
 
             if (UnityEngine.Random.value > chance)
@@ -24446,10 +33798,17 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                var medicalItem = FindV2MedicalItem(player);
+                if (now < runtime.NextSyringeHealAt)
+                {
+                    runtime.Intent.reason = "heal_waiting_for_syringe_cooldown";
+                    runtime.Intent.motor_skill = MotorSkill.None;
+                    return;
+                }
+
+                var medicalItem = FindV2SyringeItem(player);
                 if (medicalItem == null)
                 {
-                    runtime.LastMedicalUseReason = "v2:no_native_medical_item";
+                    runtime.LastMedicalUseReason = "v2:no_syringe";
                     runtime.NextSyringeHealAt = now + 5f;
                     runtime.Intent.motor_skill = MotorSkill.None;
                     return;
@@ -24461,6 +33820,11 @@ namespace Oxide.Plugins
                 runtime.V2MedicalUsed = false;
                 runtime.V2Healing = true;
                 runtime.V2HealEquipReadyAt = now + 0.05f;
+                // The fire lock describes the animation after native use; it is
+                // not enough time by itself for a busy motor scheduler to revisit
+                // the bot after the MedicalTool deploys. Keep the attempt bounded,
+                // but allow a real equip/deploy window before declaring failure.
+                runtime.V2HealUseDeadlineAt = now + Math.Max(6f, config.AI.SyringeFireLockSeconds + 2f);
                 runtime.MotorSkill = MotorSkill.Heal;
                 runtime.MedicalFireLockedUntil = now + Math.Max(0.5f, config.AI.SyringeFireLockSeconds);
                 legacyScientistBodyAdapter?.StopFire(bot, runtime);
@@ -24491,6 +33855,13 @@ namespace Oxide.Plugins
                 return;
             }
 
+            if (now >= runtime.V2HealUseDeadlineAt)
+            {
+                runtime.NextSyringeHealAt = now + config.AI.SyringeCooldownSeconds;
+                AbortV2Healing(bot, runtime, "syringe_use_timeout", now, true);
+                return;
+            }
+
             var item = runtime.V2MedicalItem;
             if (item == null || item.amount <= 0)
             {
@@ -24508,7 +33879,6 @@ namespace Oxide.Plugins
             var tool = player.GetHeldEntity() as MedicalTool;
             if (tool == null
                 || tool.GetOwnerPlayer() != player
-                || !tool.IsDeployed()
                 || tool.HasAttackCooldown()
                 || item.info?.GetComponent<ItemModConsumable>() == null)
             {
@@ -24516,7 +33886,7 @@ namespace Oxide.Plugins
             }
 
             var amountBefore = item.amount;
-            var actionLock = Math.Max(0.25f, Math.Max(tool.repeatDelay, tool.healDurationSelf));
+            var actionLock = Math.Max(config.AI.SyringeFireLockSeconds, Math.Max(tool.repeatDelay, tool.healDurationSelf));
 
             try
             {
@@ -24531,11 +33901,13 @@ namespace Oxide.Plugins
 
             if (item.amount >= amountBefore)
             {
+                runtime.NextSyringeHealAt = now + config.AI.SyringeCooldownSeconds;
                 AbortV2Healing(bot, runtime, "native_use_not_consumed", now, true);
                 return;
             }
 
             runtime.V2MedicalUsed = true;
+            runtime.V2LastMedicalUseAt = now;
             runtime.V2HealLockedUntil = now + actionLock;
             runtime.MedicalFireLockedUntil = runtime.V2HealLockedUntil;
             runtime.NextSyringeHealAt = runtime.V2HealLockedUntil + config.AI.SyringeCooldownSeconds;
@@ -24578,7 +33950,7 @@ namespace Oxide.Plugins
             return true;
         }
 
-        private Item FindV2MedicalItem(BasePlayer player)
+        private Item FindV2SyringeItem(BasePlayer player)
         {
             if (player?.inventory == null)
             {
@@ -24602,6 +33974,7 @@ namespace Oxide.Plugins
             Func<Item, bool> isNativeMedical = candidate => candidate != null
                 && candidate.amount > 0
                 && (allowed.Count == 0 || allowed.Contains(candidate.info?.shortname ?? ""))
+                && IsSyringeMedicalItem(candidate.info?.shortname)
                 && candidate.info?.GetComponent<ItemModConsumable>() != null
                 && candidate.GetHeldEntity() is MedicalTool;
 
@@ -24620,6 +33993,88 @@ namespace Oxide.Plugins
             return null;
         }
 
+        private void UpdateV2NonSyringeHealing(BaseCombatEntity bot, BotRuntime runtime, float now)
+        {
+            if (bot == null
+                || runtime == null
+                || runtime.V2Healing
+                || IsMedicalFireLocked(runtime, now)
+                || config?.AI?.UseRealMedicalItemsForCoverHeal != true)
+            {
+                return;
+            }
+
+            var maxHealth = Math.Max(1f, BotMaxHealth(bot, runtime));
+            var targetHealth = maxHealth * config.AI.PassiveCombatHealTargetFraction;
+            if (bot.Health() >= targetHealth || now < runtime.NextNonSyringeHealAt)
+            {
+                return;
+            }
+
+            var player = bot as BasePlayer;
+            var item = FindV2NonSyringeMedicalItem(player);
+            if (item == null)
+            {
+                runtime.NextNonSyringeHealAt = now + 1f;
+                return;
+            }
+
+            var shortname = item.info?.shortname ?? "medical";
+            var amountBefore = item.amount;
+            item.UseItem(1);
+            if (item.amount >= amountBefore)
+            {
+                runtime.LastMedicalUseReason = $"non_syringe:consume_failed:{shortname}";
+                runtime.NextNonSyringeHealAt = now + 1f;
+                return;
+            }
+
+            bot.SetHealth(Math.Min(targetHealth, bot.Health() + config.AI.NonSyringeHealAmount));
+            runtime.LastMedicalUseReason = $"non_syringe:{shortname}";
+            runtime.NonSyringeHealingUntil = now + 0.25f;
+            runtime.NextNonSyringeHealAt = now + (IsBerryMedicalItem(shortname)
+                ? config.AI.BerrySpamIntervalSeconds
+                : config.AI.NonSyringeHealCooldownSeconds);
+            v2Metrics.real_medical_uses++;
+        }
+
+        private Item FindV2NonSyringeMedicalItem(BasePlayer player)
+        {
+            if (player?.inventory == null)
+            {
+                return null;
+            }
+
+            var allowed = AllowedBotMedicalShortnames();
+            return new[] { player.inventory.containerBelt, player.inventory.containerMain }
+                .Where(container => container?.itemList != null)
+                .SelectMany(container => container.itemList)
+                .Where(item => item != null
+                    && item.amount > 0
+                    && (allowed.Count == 0 || allowed.Contains(item.info?.shortname ?? ""))
+                    && !IsSyringeMedicalItem(item.info?.shortname)
+                    && item.info?.GetComponent<ItemModConsumable>() != null)
+                .OrderBy(item => IsBerryMedicalItem(item.info?.shortname) ? 0 : 1)
+                .FirstOrDefault();
+        }
+
+        private HashSet<string> AllowedBotMedicalShortnames()
+        {
+            var allowed = new HashSet<string>(config.AI.RealMedicalItemShortnames ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in config.AI.BotMedicalLoadout ?? new Dictionary<string, int>())
+            {
+                if (!string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    allowed.Add(entry.Key.Trim());
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(config.AI.BotMedicalItemShortname))
+            {
+                allowed.Add(config.AI.BotMedicalItemShortname.Trim());
+            }
+            return allowed;
+        }
+
         private void AbortV2Healing(BaseCombatEntity bot, BotRuntime runtime, string reason, float now, bool restoreImmediately)
         {
             if (runtime == null)
@@ -24636,16 +34091,22 @@ namespace Oxide.Plugins
                 return;
             }
 
+            var medicalWasUsed = runtime.V2MedicalUsed;
             RestoreV2PreviousWeapon(bot as BasePlayer, runtime);
             runtime.V2Healing = false;
             runtime.V2MedicalUsed = false;
             runtime.V2MedicalItem = null;
             runtime.V2PreviousActiveItem = null;
             runtime.V2HealEquipReadyAt = 0f;
+            runtime.V2HealUseDeadlineAt = 0f;
             runtime.V2HealLockedUntil = 0f;
             runtime.Intent.motor_skill = MotorSkill.None;
             runtime.MotorSkill = MotorSkill.None;
             runtime.NextSyringeHealAt = Math.Max(runtime.NextSyringeHealAt, now + 1f);
+            if (!medicalWasUsed || restoreImmediately)
+            {
+                runtime.MedicalFireLockedUntil = Math.Min(runtime.MedicalFireLockedUntil, now);
+            }
         }
 
         private void CompleteV2Healing(BaseCombatEntity bot, BotRuntime runtime, float now, string reason)
@@ -24656,12 +34117,16 @@ namespace Oxide.Plugins
             runtime.V2MedicalItem = null;
             runtime.V2PreviousActiveItem = null;
             runtime.V2HealEquipReadyAt = 0f;
+            runtime.V2HealUseDeadlineAt = 0f;
             runtime.V2HealLockedUntil = 0f;
             runtime.Intent.motor_skill = MotorSkill.None;
             runtime.Intent.wants_crouch = false;
             runtime.Intent.reason = $"heal_complete:{reason}";
             runtime.MotorSkill = MotorSkill.None;
-            runtime.LowHealthCoverAwareUntil = 0f;
+            var maxHealth = Math.Max(1f, BotMaxHealth(bot, runtime));
+            runtime.LowHealthCoverAwareUntil = bot != null && bot.Health() / maxHealth < SyringeHealTargetFraction()
+                ? Math.Max(runtime.LowHealthCoverAwareUntil, now + config.AI.LowHealthCoverCommitmentSeconds)
+                : 0f;
             ClearCrouchReason(bot, runtime, "cover-heal", "native-heal-complete", now);
             if (runtime.Memory.Target != null && IsEffectiveCover(bot, runtime, runtime.Memory.Target)
                 && (runtime.CurrentPeekLeftPoint != Vector3.zero || runtime.CurrentPeekRightPoint != Vector3.zero))
@@ -24937,6 +34402,13 @@ namespace Oxide.Plugins
         {
             shortname = (shortname ?? "").Trim();
             return shortname.IndexOf("syringe", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsBerryMedicalItem(string shortname)
+        {
+            shortname = (shortname ?? "").Trim();
+            return shortname.IndexOf("berry", StringComparison.OrdinalIgnoreCase) >= 0
+                || shortname.IndexOf("berries", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private Vector3 KnownThreatPosition(BotRuntime runtime)
@@ -26268,6 +35740,8 @@ namespace Oxide.Plugins
             }
 
             runtime.LastFireBlockReason = "ready";
+            runtime.FireObstructionStartedAt = 0f;
+            runtime.CurrentFiringLaneDestination = Vector3.zero;
             return true;
         }
 
@@ -26275,6 +35749,19 @@ namespace Oxide.Plugins
         {
             if (runtime != null)
             {
+                var now = Time.realtimeSinceStartup;
+                if (IsFiringLaneObstruction(reason))
+                {
+                    if (!IsFiringLaneObstruction(runtime.LastFireBlockReason) || runtime.FireObstructionStartedAt <= 0f)
+                    {
+                        runtime.FireObstructionStartedAt = now;
+                    }
+                }
+                else
+                {
+                    runtime.FireObstructionStartedAt = 0f;
+                    runtime.CurrentFiringLaneDestination = Vector3.zero;
+                }
                 runtime.LastFireBlockReason = reason;
             }
 
@@ -26296,6 +35783,13 @@ namespace Oxide.Plugins
             }
 
             return false;
+        }
+
+        private bool IsFiringLaneObstruction(string reason)
+        {
+            return string.Equals(reason, "foliage_occluded", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(reason, "muzzle_blocked", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(reason, "no_los", StringComparison.OrdinalIgnoreCase);
         }
 
         private string ActiveWeaponShortname(BaseCombatEntity bot)
@@ -26400,9 +35894,25 @@ namespace Oxide.Plugins
             var projectile = activeItem?.GetHeldEntity() as BaseProjectile;
             var magazine = projectile?.primaryMagazine;
 
-            if (IsV2Actuating(RuntimeFor(bot)))
+            if (player == null)
             {
-                return magazine != null && magazine.contents > 0;
+                return false;
+            }
+
+            if (IsV2Actuating(RuntimeFor(bot)) && magazine == null)
+            {
+                var weaponItem = player.inventory?.containerBelt?.itemList?
+                    .FirstOrDefault(item => (item?.GetHeldEntity() as BaseProjectile)?.primaryMagazine != null)
+                    ?? player.inventory?.containerMain?.itemList?
+                        .FirstOrDefault(item => (item?.GetHeldEntity() as BaseProjectile)?.primaryMagazine != null);
+
+                if (weaponItem != null)
+                {
+                    player.UpdateActiveItem(weaponItem.uid);
+                    activeItem = weaponItem;
+                    projectile = weaponItem.GetHeldEntity() as BaseProjectile;
+                    magazine = projectile?.primaryMagazine;
+                }
             }
 
             if (projectile == null || magazine == null)
@@ -26554,7 +36064,8 @@ namespace Oxide.Plugins
 
         private bool IsNonSyringeHealing(BotRuntime runtime, float now)
         {
-            return runtime != null && runtime.PendingNonSyringeHealRemaining > 0f;
+            return runtime != null
+                && (runtime.PendingNonSyringeHealRemaining > 0f || runtime.NonSyringeHealingUntil > now);
         }
 
         private int NearbyAllies(BaseCombatEntity bot, BotRuntime runtime)
@@ -26616,6 +36127,66 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private bool HandleNavigationFailurePressure(BaseCombatEntity bot, BotRuntime runtime, float now, bool forceRepair = false)
+        {
+            if (bot == null || runtime == null)
+            {
+                return false;
+            }
+
+            var repairThreshold = Math.Max(4, config?.ControllerV2?.PathFailuresBeforeRollback ?? 8);
+            if (!forceRepair && runtime.ConsecutiveFailedPaths < repairThreshold)
+            {
+                return false;
+            }
+
+            if (now < runtime.NextNavigationRepairAt)
+            {
+                runtime.NextDecisionAt = Math.Max(runtime.NextDecisionAt, runtime.NextNavigationRepairAt);
+                return true;
+            }
+
+            runtime.NextNavigationRepairAt = now + Math.Max(1f, config.AI.StuckRecoveryCooldownSeconds);
+            runtime.NavigationRepairAttempts++;
+            var repairedPosition = bot.transform.position;
+            if (TryValidateSpawnedBotOnOwnNavmesh(bot, ref repairedPosition))
+            {
+                runtime.LastNavigationRepairReason = "repaired_on_own_navmesh";
+                runtime.ConsecutiveFailedPaths = 0;
+                runtime.Movement.SameActionFailures = 0;
+                runtime.Movement.IsStuck = false;
+                runtime.Movement.StuckSince = 0f;
+                runtime.Movement.LastPosition = repairedPosition;
+                runtime.Movement.LastProgressAt = now;
+                runtime.CurrentDestination = Vector3.zero;
+                runtime.NextDecisionAt = now + 0.1f;
+                runtime.NextStuckRecoveryAt = now + config.AI.StuckRecoveryCooldownSeconds;
+                if (runtime.BrainV2?.ActiveAction != null)
+                {
+                    InterruptBrainActionV2(bot, runtime, "navigation_repaired", now);
+                }
+                if (IsV2Actuating(runtime))
+                {
+                    runtime.V2BodyReadyForAuthority = true;
+                    runtime.V2AuthoritativePrepared = false;
+                    runtime.V2AuthorityPrepareAttempts = 0;
+                    FinalizeV2BodyConformance(bot, runtime);
+                }
+                return true;
+            }
+
+            runtime.LastNavigationRepairReason = "repair_failed";
+            runtime.ConsecutiveFailedPaths++;
+            runtime.Movement.SameActionFailures++;
+            runtime.NextDecisionAt = Math.Max(runtime.NextDecisionAt, runtime.NextNavigationRepairAt);
+            var despawnThreshold = config.AI.HardStuckFailedPathsToDespawn;
+            if (despawnThreshold > 0 && runtime.ConsecutiveFailedPaths >= despawnThreshold)
+            {
+                DespawnBot(bot, $"unrecoverable navigation after {runtime.ConsecutiveFailedPaths} failed paths ({runtime.LastStuckMemoryReason})");
+            }
+            return true;
+        }
+
         private bool ShouldDespawnHardStuck(BaseCombatEntity bot, BotRuntime runtime, float now)
         {
             if (bot == null || runtime == null)
@@ -26625,7 +36196,10 @@ namespace Oxide.Plugins
 
             if (!runtime.Movement.IsStuck || runtime.Movement.StuckSince <= 0f)
             {
-                return false;
+                return config.AI.HardStuckFailedPathsToDespawn > 0
+                    && runtime.ConsecutiveFailedPaths >= config.AI.HardStuckFailedPathsToDespawn
+                    && runtime.Movement.LastProgressAt > 0f
+                    && now - runtime.Movement.LastProgressAt >= Math.Max(10f, config.AI.StuckDetectionSeconds * 3f);
             }
 
             var stuckSeconds = now - runtime.Movement.StuckSince;
@@ -26766,7 +36340,7 @@ namespace Oxide.Plugins
             RefreshCombatProfile(bot, runtime);
             CleanupBotPlacedEntityRefs();
             var now = Time.realtimeSinceStartup;
-            return $"type={runtime.EntityType}, state={runtime.State}, owner={BotOwnerStatus(runtime)}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, wake={ActionBlockStatus(runtime, now)}, learn={LearningRuntimeStatus(runtime)}, leash={ManagedLeashStatus(runtime)}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, crouch={CrouchStatus(runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot, runtime)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
+            return $"type={runtime.EntityType}, state={runtime.State}, owner={BotOwnerStatus(runtime)}, clan={runtime.ClanTag}, role={runtime.SquadRole}, los={runtime.Memory.HasLineOfSight}, exposure={runtime.Memory.TargetExposureFraction:0.00}({runtime.Memory.TargetVisibleProbePoints}/{runtime.Memory.TargetTotalProbePoints}), weapon={runtime.Combat.WeaponClass}:{runtime.Combat.WeaponShortname}, aim={AimStatus(runtime, now)}, wake={ActionBlockStatus(runtime, now)}, learn={LearningRuntimeStatus(runtime)}, leash={ManagedLeashStatus(runtime)}, roam={runtime.RoamMonumentName}#{runtime.RoamLegsCompleted}, cover={FormatVectorSafe(runtime.CurrentCover)}, flank={FormatVectorSafe(runtime.CurrentFlankPoint)}, base={runtime.IsInBaseRestrictedArea}, barricades={botPlacedEntities.Count}/{config.AI.MaxActiveBotBarricades}, protect={runtime.LastProtectionReason}, anchor={BarricadeAnchorStatus(runtime, now)}, utility={runtime.LastUtilityReason}, heal={MedicalStatus(bot, runtime, now)}, crouch={CrouchStatus(runtime, now)}, formation={runtime.LastFormationReason}, stuck={runtime.Movement.IsStuck}, badspots={ActiveStuckMemoryCount(runtime, now)}, nav={BotNavStatus(bot, runtime)}, target={BotTargetStatus(bot, runtime)}, prefab={ShortPrefab(runtime.Prefab)}";
         }
 
         private string ActionBlockStatus(BotRuntime runtime, float now)
@@ -26802,6 +36376,14 @@ namespace Oxide.Plugins
 
         private string BotTargetStatus(BaseCombatEntity bot, BotRuntime runtime)
         {
+            if (IsV2Actuating(runtime))
+            {
+                var action = runtime?.Intent?.action ?? "none";
+                return runtime?.Memory?.Target != null
+                    ? $"v2:{action}:{(runtime.Memory.HasLineOfSight ? "visible" : "memory")}"
+                    : $"v2:{action}";
+            }
+
             var npc = bot as NPCPlayer;
 
             if (npc != null)
@@ -26858,7 +36440,8 @@ namespace Oxide.Plugins
 
             if (navigator != null)
             {
-                return $"legacy:{navigator.GetType().Name},{LegacyNavDiagnostics(bot, runtime)}";
+                var owner = IsV2Actuating(runtime) ? ControllerModeKey(runtime.ControllerMode) : "legacy";
+                return $"{owner}:{navigator.GetType().Name},{LegacyNavDiagnostics(bot, runtime)}";
             }
 
             return "none";
@@ -26895,10 +36478,21 @@ namespace Oxide.Plugins
                 parts.Add($"agentOnMesh={SafeBool(() => agent.isOnNavMesh)}");
                 parts.Add($"agentPath={SafeBool(() => agent.hasPath)}");
                 parts.Add($"agentPending={SafeBool(() => agent.pathPending)}");
+                parts.Add($"agentStatus={SafeString(() => agent.pathStatus.ToString())}");
+                parts.Add($"remaining={(SafeBool(() => agent.enabled && agent.isOnNavMesh && agent.hasPath) ? SafeString(() => agent.remainingDistance.ToString("0.0", CultureInfo.InvariantCulture)) : "n/a")}");
             }
             else
             {
                 parts.Add("agent=missing");
+            }
+
+            if (runtime?.Movement != null)
+            {
+                parts.Add($"travel={runtime.Movement.LastPathValidationReason}");
+                if (runtime.Movement.SafeTravelWaypoint != Vector3.zero)
+                {
+                    parts.Add($"hop={runtime.Movement.SafeTravelHops}:{FormatVectorSafe(runtime.Movement.SafeTravelWaypoint)}");
+                }
             }
 
             parts.Add(AiConVarStatus());
@@ -26945,6 +36539,7 @@ namespace Oxide.Plugins
             if (brain != null)
             {
                 parts.Add($"brain={brain.GetType().Name}");
+                parts.Add($"brainEnabled={SafeBool(() => brain.enabled)}");
                 parts.Add($"state={SafeString(() => brain.CurrentState?.StateType.ToString() ?? "none")}");
                 parts.Add($"brainSleep={SafeBool(() => brain.sleeping)}");
 
@@ -27725,7 +37320,7 @@ namespace Oxide.Plugins
 
         private void HandleBotChatPlayerMessage(BasePlayer player, string message, string source)
         {
-            if (config?.BotChat?.Enabled != true || config.BotChat.AiRepliesEnabled != true)
+            if (!ExternalAiCallsAllowed || config?.BotChat?.Enabled != true || config.BotChat.AiRepliesEnabled != true)
             {
                 return;
             }
@@ -28056,7 +37651,7 @@ namespace Oxide.Plugins
 
         private void TrySubmitBotChatAiReply(BasePlayer player, BotChatConversation conversation, BotRuntime runtime, string incoming, bool mentionTriggered, bool recentFightTriggered, string source, float now)
         {
-            if (conversation == null || runtime == null || config?.BotChat?.AiRepliesEnabled != true)
+            if (!ExternalAiCallsAllowed || conversation == null || runtime == null || config?.BotChat?.AiRepliesEnabled != true)
             {
                 return;
             }
@@ -28107,7 +37702,7 @@ namespace Oxide.Plugins
 
         private bool IsBotChatOpenAiConfigured()
         {
-            if (config?.DecisionAdvisor == null || config.DecisionAdvisor.Provider != AdvisorProviderOpenAiCompatible)
+            if (!ExternalAiCallsAllowed || config?.DecisionAdvisor == null || config.DecisionAdvisor.Provider != AdvisorProviderOpenAiCompatible)
             {
                 return false;
             }
@@ -28118,6 +37713,11 @@ namespace Oxide.Plugins
 
         private bool TryReserveBotChatAiCall(DateTime utcNow)
         {
+            if (!ExternalAiCallsAllowed)
+            {
+                return false;
+            }
+
             PruneBotChatQuota(utcNow);
 
             if ((botChatQuota?.ai_call_utc_ticks?.Count ?? 0) >= Math.Max(0, config?.BotChat?.OpenAiCallsPerHour ?? 30))
@@ -28512,7 +38112,7 @@ namespace Oxide.Plugins
 
         private string BotChatStatusLine()
         {
-            return $"Roam bot chat: enabled={config.BotChat.Enabled}, ai={config.BotChat.AiRepliesEnabled}, banter={config.BotChat.DeterministicKillBanterEnabled}, quota={BotChatAiCallsInWindow()}/{config.BotChat.OpenAiCallsPerHour}/hour, pending={pendingBotChatAiRequests}/{config.BotChat.MaxConcurrentAiRequests}, contexts={botChatConversations.Count}, endpoint={(IsBotChatOpenAiConfigured() ? "configured" : "unconfigured")}.";
+            return $"Roam bot chat: enabled={config.BotChat.Enabled}, remoteAI=disabled_by_design, banter={config.BotChat.DeterministicKillBanterEnabled}, quota=0/0/hour, pending=0, contexts={botChatConversations.Count}.";
         }
 
         private string BotChatStatsLine()
@@ -28760,6 +38360,11 @@ namespace Oxide.Plugins
         {
             try
             {
+                if (IsA10AirstrikeHit(info))
+                {
+                    return "airstrike";
+                }
+
                 var damageType = info?.damageTypes?.GetMajorityDamageType();
                 var raw = damageType?.ToString();
 
@@ -28795,6 +38400,11 @@ namespace Oxide.Plugins
 
         private string KillWeaponName(HitInfo info, BaseCombatEntity killerEntity)
         {
+            if (IsA10AirstrikeHit(info))
+            {
+                return "A-10 Airstrike";
+            }
+
             var killer = killerEntity as BasePlayer;
             var item = info?.Weapon?.GetItem() ?? killer?.GetActiveItem();
             var displayName = item?.info?.displayName?.english;
@@ -28812,6 +38422,11 @@ namespace Oxide.Plugins
             }
 
             return KillMethodName(info);
+        }
+
+        private bool IsA10AirstrikeHit(HitInfo info)
+        {
+            return string.Equals(info?.WeaponPrefab?.ShortPrefabName, "f15e", StringComparison.OrdinalIgnoreCase);
         }
 
         private void TrackRecentBotDeath(BaseCombatEntity bot, BotRuntime runtime)
@@ -29423,7 +39038,11 @@ namespace Oxide.Plugins
                     config.BotChat.Enabled = !config.BotChat.Enabled;
                     return true;
                 case "bot_chat_ai":
-                    config.BotChat.AiRepliesEnabled = !config.BotChat.AiRepliesEnabled;
+                    // V2 is intentionally local-only. Preserve deterministic banter,
+                    // but never allow the admin UI to re-enable paid/network AI chat.
+                    config.BotChat.AiRepliesEnabled = false;
+                    config.BotChat.OpenAiCallsPerHour = 0;
+                    config.BotChat.MaxConcurrentAiRequests = 0;
                     return true;
                 case "bot_chat_banter":
                     config.BotChat.DeterministicKillBanterEnabled = !config.BotChat.DeterministicKillBanterEnabled;
@@ -29481,11 +39100,18 @@ namespace Oxide.Plugins
                     config.Debug.DebugConsoleLogs = !config.Debug.DebugConsoleLogs;
                     return true;
                 case "advisor_enabled":
-                    config.DecisionAdvisor.Enabled = !config.DecisionAdvisor.Enabled;
+                    // The remote decision advisor is retired for the local V2 brain.
+                    config.DecisionAdvisor.Enabled = false;
+                    config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                    config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                    config.DecisionAdvisor.ShadowMode = false;
                     refreshAdvisor = true;
                     return true;
                 case "advisor_shadow":
-                    config.DecisionAdvisor.ShadowMode = !config.DecisionAdvisor.ShadowMode;
+                    config.DecisionAdvisor.Enabled = false;
+                    config.DecisionAdvisor.Provider = AdvisorProviderNone;
+                    config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+                    config.DecisionAdvisor.ShadowMode = false;
                     refreshAdvisor = true;
                     return true;
                 case "advisor_fallback":
@@ -30167,43 +39793,19 @@ namespace Oxide.Plugins
 
         private void SetAdminAdvisorMode(string mode, ConsoleSystem.Arg arg)
         {
-            switch (NormalizeAdminKey(mode))
-            {
-                case "off":
-                    config.DecisionAdvisor.Enabled = false;
-                    config.DecisionAdvisor.Provider = AdvisorProviderNone;
-                    config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
-                    config.DecisionAdvisor.ShadowMode = true;
-                    SaveAdminConfigChange(false, false, true, false);
-                    Reply(arg, "Raidlands roam bot advisor disabled. Deterministic fallback remains active.");
-                    return;
-                case "fallback":
-                case "fallback_only":
-                    config.DecisionAdvisor.Enabled = true;
-                    config.DecisionAdvisor.Provider = AdvisorProviderNone;
-                    config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
-                    config.DecisionAdvisor.ShadowMode = true;
-                    SaveAdminConfigChange(false, false, true, false);
-                    Reply(arg, "Raidlands roam bot advisor set to fallback_only with provider none.");
-                    return;
-                case "shadow":
-                    config.DecisionAdvisor.Enabled = true;
-                    config.DecisionAdvisor.Mode = AdvisorModeShadow;
-                    config.DecisionAdvisor.ShadowMode = true;
-                    SaveAdminConfigChange(false, false, true, false);
-                    Reply(arg, $"Raidlands roam bot advisor set to shadow mode. Provider remains {config.DecisionAdvisor.Provider}.");
-                    return;
-                case "canary":
-                    config.DecisionAdvisor.Enabled = true;
-                    config.DecisionAdvisor.Mode = AdvisorModeCanary;
-                    config.DecisionAdvisor.ShadowMode = false;
-                    SaveAdminConfigChange(false, false, true, false);
-                    Reply(arg, "Raidlands roam bot advisor set to canary mode.");
-                    return;
-                default:
-                    Reply(arg, "Usage: advisor off|fallback|shadow|canary");
-                    return;
-            }
+            // Keep the legacy settings readable for migration/audit, but all V2
+            // decision-making is local and deterministic. No admin mode may turn
+            // the remote advisor back on.
+            config.DecisionAdvisor.Enabled = false;
+            config.DecisionAdvisor.Provider = AdvisorProviderNone;
+            config.DecisionAdvisor.Mode = AdvisorModeFallbackOnly;
+            config.DecisionAdvisor.ShadowMode = false;
+            config.DecisionAdvisor.EndpointUrl = "";
+            config.DecisionAdvisor.ApiKey = "";
+            config.DecisionAdvisor.Model = "";
+            config.DecisionAdvisor.MaxConcurrentRequests = 0;
+            SaveAdminConfigChange(false, false, true, false);
+            Reply(arg, "Remote decision advising is disabled by design. Brain V2 uses only local memory, goal, utility, and action logic.");
         }
 
         private bool CanAdmin(BasePlayer player)

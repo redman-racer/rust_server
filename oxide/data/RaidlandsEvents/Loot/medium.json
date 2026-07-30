@@ -1,0 +1,10 @@
+{
+  "Items": [
+    { "ShortName": "scrap", "MinimumAmount": 35, "MaximumAmount": 75, "Chance": 1.0 },
+    { "ShortName": "metal.refined", "MinimumAmount": 10, "MaximumAmount": 35, "Chance": 0.8 },
+    { "ShortName": "sulfur", "MinimumAmount": 500, "MaximumAmount": 1500, "Chance": 0.7 },
+    { "ShortName": "ammo.rifle", "MinimumAmount": 32, "MaximumAmount": 96, "Chance": 0.6 },
+    { "ShortName": "smg.2", "MinimumAmount": 1, "MaximumAmount": 1, "Chance": 0.2 },
+    { "ShortName": "targeting.computer", "MinimumAmount": 1, "MaximumAmount": 2, "Chance": 0.25 }
+  ]
+}

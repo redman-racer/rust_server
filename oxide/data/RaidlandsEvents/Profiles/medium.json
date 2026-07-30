@@ -1,0 +1,17 @@
+{
+  "SchemaVersion": 1,
+  "Id": "medium",
+  "DisplayName": "Medium Raid",
+  "Difficulty": "Medium",
+  "Enabled": true,
+  "BuildingFiles": [ "heizenberg-1", "justintoactive-1" ],
+  "LootFile": "medium",
+  "EventDurationMinutes": 180.0,
+  "AllowPVP": true,
+  "EventRadiusMeters": 100.0,
+  "MinimumItemsPerContainer": 3,
+  "MaximumItemsPerContainer": 5,
+  "PreventDuplicateItems": true,
+  "StackSizeLimit": 0,
+  "ContainerLootFiles": {}
+}

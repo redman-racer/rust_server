@@ -8,10 +8,61 @@
     "MinOnlinePlayers": 0
   },
   "Chat Prefix": "<color=#ce422b>[Raidlands]</color>",
+  "Raidable Bases Compatibility": {
+    "Enabled": true,
+    "Use Profiles For Automatic Events": true,
+    "Enabled Difficulties": [
+      "Easy",
+      "Medium",
+      "Hard",
+      "Nightmare"
+    ],
+    "Default Profile By Difficulty": {
+      "Easy": "easy",
+      "Medium": "medium",
+      "Hard": "hard",
+      "Nightmare": "nightmare"
+    },
+    "Difficulty Weights": {
+      "Easy": 40.0,
+      "Medium": 30.0,
+      "Hard": 20.0,
+      "Nightmare": 10.0
+    },
+    "Profile Event Duration Minutes": 180.0,
+    "RoamBot Guards": {
+      "Enabled": true,
+      "Spawn Delay Seconds": 3.0,
+      "Count By Difficulty": {
+        "Easy": 3,
+        "Medium": 5,
+        "Hard": 7,
+        "Nightmare": 10
+      },
+      "Health Multiplier By Difficulty": {
+        "Easy": 0.85,
+        "Medium": 1.0,
+        "Hard": 1.15,
+        "Nightmare": 1.35
+      },
+      "Leash Radius By Difficulty": {
+        "Easy": 55.0,
+        "Medium": 65.0,
+        "Hard": 75.0,
+        "Nightmare": 90.0
+      },
+      "Guard Profile": "raidguard",
+      "Allow Ambient Kit Selection": true,
+      "Authorize On Tool Cupboard": true,
+      "Authorize On Auto Turrets": true
+    },
+    "Debug Logging": false
+  },
   "Cleanup": {
     "Cleanup On Unload": true,
     "Completion Cleanup Delay Seconds": 60.0,
     "Despawn Pasted Entities": true,
+    "Entities Per Tick": 25,
     "Forced Cleanup Timeout Seconds": 10800.0,
     "Remove Markers": true
   },
@@ -39,8 +90,13 @@
         },
         {
           "Enabled": true,
-          "Layout Id": "plasma-1",
-          "Weight": 1.0
+          "Layout Id": "raidlands_kastro_mini_hard",
+          "Weight": 20.0
+        },
+        {
+          "Enabled": true,
+          "Layout Id": "raidlands_kastro_nightmare",
+          "Weight": 10.0
         }
       ],
       "Maximum Active Bases": 8,
@@ -55,7 +111,8 @@
       "ababmxking-1",
       "heizenberg-1",
       "justintoactive-1",
-      "plasma-1"
+      "raidlands_kastro_mini_hard",
+      "raidlands_kastro_nightmare"
     ],
     "IgnoredLayouts": [
       "raidlands_portafort",
@@ -192,6 +249,7 @@
   "Spawn Grid": {
     "Build Budget Milliseconds": 1.0,
     "Candidate Checks Per Slice": 25,
+    "Runtime Candidate Checks Per Spawn": 500,
     "Cell Size": 12.5,
     "Enabled": true,
     "Minimum Healthy Candidate Count": 1000,

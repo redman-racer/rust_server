@@ -1,0 +1,17 @@
+{
+  "SchemaVersion": 1,
+  "Id": "nightmare",
+  "DisplayName": "Nightmare Raid",
+  "Difficulty": "Nightmare",
+  "Enabled": true,
+  "BuildingFiles": [ "raidlands_kastro_nightmare" ],
+  "LootFile": "nightmare",
+  "EventDurationMinutes": 300.0,
+  "AllowPVP": true,
+  "EventRadiusMeters": 130.0,
+  "MinimumItemsPerContainer": 5,
+  "MaximumItemsPerContainer": 8,
+  "PreventDuplicateItems": true,
+  "StackSizeLimit": 0,
+  "ContainerLootFiles": {}
+}
