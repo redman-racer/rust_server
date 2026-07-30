@@ -2231,6 +2231,7 @@ namespace Oxide.Plugins
             public Dictionary<string, PlayerNpcStats> players = new Dictionary<string, PlayerNpcStats>(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, BotStats> bots = new Dictionary<string, BotStats>(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, BotClanStats> bot_clans = new Dictionary<string, BotClanStats>(StringComparer.OrdinalIgnoreCase);
+            public HashSet<ulong> debug_side_panel_hidden_viewers = new HashSet<ulong>();
         }
 
         private class RaidPersistenceData
@@ -7494,6 +7495,10 @@ namespace Oxide.Plugins
             if (data.bot_clans == null)
             {
                 data.bot_clans = new Dictionary<string, BotClanStats>(StringComparer.OrdinalIgnoreCase);
+            }
+            if (data.debug_side_panel_hidden_viewers == null)
+            {
+                data.debug_side_panel_hidden_viewers = new HashSet<ulong>();
             }
 
             MigrateLegacyRandomBotStats();
@@ -15802,6 +15807,38 @@ namespace Oxide.Plugins
             ShowLastBotInfo(player);
         }
 
+        [ChatCommand("botdebug")]
+        private void ChatBotDebug(BasePlayer player, string command, string[] args)
+        {
+            if (player == null || !CanAdmin(player))
+                return;
+
+            var visible = config?.Debug?.DebugBotSidePanel == true
+                          && !data.debug_side_panel_hidden_viewers.Contains(player.userID);
+            if (args != null && args.Length > 0)
+            {
+                var requested = (args[0] ?? string.Empty).Trim().ToLowerInvariant();
+                if (requested == "on" || requested == "show" || requested == "1" || requested == "true")
+                    visible = true;
+                else if (requested == "off" || requested == "hide" || requested == "0" || requested == "false")
+                    visible = false;
+                else
+                {
+                    player.ChatMessage("Usage: /botdebug [on|off]");
+                    return;
+                }
+            }
+            else
+            {
+                visible = !visible;
+            }
+
+            SetDebugSidePanelVisibleForPlayer(player, visible);
+            player.ChatMessage(visible
+                ? "RoamBot debug window enabled for you. Use /botdebug to hide it."
+                : "RoamBot debug window hidden for you. Use /botdebug to show it.");
+        }
+
         private void ShowLastBotInfo(BasePlayer player)
         {
             if (player == null)
@@ -19129,6 +19166,46 @@ namespace Oxide.Plugins
             if (!enabled)
                 DestroyDebugBotPanels();
             return config.Debug.DebugBotSidePanel;
+        }
+
+        [HookMethod("REBOT_GetDebugSidePanelVisible")]
+        public bool REBOT_GetDebugSidePanelVisible(ulong userId)
+        {
+            return config?.Debug?.DebugBotSidePanel == true
+                   && !data.debug_side_panel_hidden_viewers.Contains(userId);
+        }
+
+        [HookMethod("REBOT_SetDebugSidePanelVisible")]
+        public bool REBOT_SetDebugSidePanelVisible(ulong userId, bool visible)
+        {
+            var player = BasePlayer.FindByID(userId);
+            if (player == null || !player.IsConnected || !IsDebugUiViewer(player))
+                return false;
+            return SetDebugSidePanelVisibleForPlayer(player, visible);
+        }
+
+        private bool SetDebugSidePanelVisibleForPlayer(BasePlayer player, bool visible)
+        {
+            if (player == null)
+                return false;
+
+            if (visible)
+            {
+                if (config?.Debug?.DebugBotSidePanel != true)
+                {
+                    config.Debug.DebugBotSidePanel = true;
+                    SaveConfig();
+                    StartNameplateTimerIfEnabled();
+                }
+                data.debug_side_panel_hidden_viewers.Remove(player.userID);
+            }
+            else
+            {
+                data.debug_side_panel_hidden_viewers.Add(player.userID);
+                DestroyDebugBotPanel(player);
+            }
+            SaveData();
+            return visible;
         }
 
         [HookMethod("REBOT_GetControllerMode")]
@@ -22817,7 +22894,9 @@ namespace Oxide.Plugins
 
         private bool ShouldSuppressDebugBotSidePanel(BasePlayer viewer)
         {
-            if (viewer == null || adminPanelViewers.Contains(viewer.userID))
+            if (viewer == null
+                || adminPanelViewers.Contains(viewer.userID)
+                || data?.debug_side_panel_hidden_viewers?.Contains(viewer.userID) == true)
             {
                 return true;
             }

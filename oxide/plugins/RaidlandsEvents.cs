@@ -16,7 +16,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsEvents", "Raidlands", "0.6.2")]
+    [Info("RaidlandsEvents", "Raidlands", "0.6.3")]
     [Description("Raidlands raid-base event manager with automatic spawning, difficulty profiles, portable loot, durable rewards, history, and dedicated leaderboards.")]
     public class RaidlandsEvents : RustPlugin
     {
@@ -564,6 +564,12 @@ namespace Oxide.Plugins
 
             [JsonProperty("Maximum Lowering Meters")]
             public float MaximumLoweringMeters = 6f;
+
+            [JsonProperty("Large Layout Radius Threshold Meters")]
+            public float LargeLayoutRadiusThresholdMeters = 45f;
+
+            [JsonProperty("Large Layout Maximum Lowering Meters")]
+            public float LargeLayoutMaximumLoweringMeters = 15f;
 
             [JsonProperty("Raise Base Layer Above Water")]
             public bool RaiseBaseLayerAboveWater = true;
@@ -1877,6 +1883,11 @@ namespace Oxide.Plugins
                 config.Paste.AdaptiveFoundations.MaximumOriginAdjustmentMeters, 0f, 1.5f);
             config.Paste.AdaptiveFoundations.MaximumLoweringMeters = Mathf.Clamp(
                 config.Paste.AdaptiveFoundations.MaximumLoweringMeters, 1.5f, 30f);
+            config.Paste.AdaptiveFoundations.LargeLayoutRadiusThresholdMeters = Mathf.Clamp(
+                config.Paste.AdaptiveFoundations.LargeLayoutRadiusThresholdMeters, 15f, 150f);
+            config.Paste.AdaptiveFoundations.LargeLayoutMaximumLoweringMeters = Mathf.Clamp(
+                config.Paste.AdaptiveFoundations.LargeLayoutMaximumLoweringMeters,
+                config.Paste.AdaptiveFoundations.MaximumLoweringMeters, 30f);
             config.Paste.AdaptiveFoundations.WaterSurfaceClearanceMeters = Mathf.Clamp(
                 config.Paste.AdaptiveFoundations.WaterSurfaceClearanceMeters, 0.05f, 3f);
             config.Paste.AdaptiveFoundations.MaximumWaterDepthMeters = Mathf.Clamp(
@@ -4326,9 +4337,9 @@ namespace Oxide.Plugins
                         SendReply(player, $"{config.ChatPrefix} RaidlandsRoamBots is not loaded.");
                         break;
                     }
-                    var debugPanelEnabled = IsRoamBotDebugPanelEnabled();
-                    var debugPanelResult = RaidlandsRoamBots.Call("REBOT_SetDebugSidePanelEnabled", !debugPanelEnabled);
-                    SendReply(player, $"{config.ChatPrefix} RoamBot debug side panel is now {(Convert.ToBoolean(debugPanelResult) ? "enabled" : "disabled")}.");
+                    var debugPanelEnabled = IsRoamBotDebugPanelVisible(player.userID);
+                    var debugPanelResult = RaidlandsRoamBots.Call("REBOT_SetDebugSidePanelVisible", player.userID, !debugPanelEnabled);
+                    SendReply(player, $"{config.ChatPrefix} Your RoamBot debug side panel is now {(Convert.ToBoolean(debugPanelResult) ? "visible" : "hidden")}.");
                     break;
 
                 case "stop":
@@ -4814,11 +4825,11 @@ namespace Oxide.Plugins
                     : "0.96 0.62 0.30 1");
             AddUiLabel(container, body, CleanupProgressMessage(), 0.045f, 0.762f, 0.77f, 0.795f, 8, TextAnchor.MiddleLeft, cleanupRunning ? "0.68 0.86 0.96 1" : "0.52 0.60 0.68 1");
             var roamBotDebugAvailable = RaidlandsRoamBots != null && RaidlandsRoamBots.IsLoaded;
-            var roamBotDebugEnabled = roamBotDebugAvailable && IsRoamBotDebugPanelEnabled();
+            var roamBotDebugEnabled = roamBotDebugAvailable && IsRoamBotDebugPanelVisible(player.userID);
             AddUiButton(container, body,
                 roamBotDebugAvailable
-                    ? $"Bot Debug Panel: {(roamBotDebugEnabled ? "ON" : "OFF")}"
-                    : "Bot Debug Panel: Unavailable",
+                    ? $"My Bot Debug: {(roamBotDebugEnabled ? "VISIBLE" : "HIDDEN")}"
+                    : "My Bot Debug: Unavailable",
                 roamBotDebugAvailable ? "revents.ui botdebugpanel" : string.Empty,
                 0.785f, 0.758f, 0.955f, 0.797f,
                 !roamBotDebugAvailable ? UiMuted : roamBotDebugEnabled ? UiWarning : UiAccentAlt, 8);
@@ -6132,11 +6143,11 @@ namespace Oxide.Plugins
             return $"AUTO {(config.EventTypes.AutomaticBases.Enabled ? "ON" : "OFF")}  |  ACTIVE {ActiveEventCount()}  |  REWARDS {(config.Rewards.Enabled ? "ON" : "OFF")}{cleanup}";
         }
 
-        private bool IsRoamBotDebugPanelEnabled()
+        private bool IsRoamBotDebugPanelVisible(ulong userId)
         {
             if (RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
                 return false;
-            var result = RaidlandsRoamBots.Call("REBOT_GetDebugSidePanelEnabled");
+            var result = RaidlandsRoamBots.Call("REBOT_GetDebugSidePanelVisible", userId);
             return result is bool && (bool)result;
         }
 
@@ -6730,9 +6741,10 @@ namespace Oxide.Plugins
             }
         }
 
-        private Dictionary<string, object> BuildAdaptiveFoundationPasteOptions()
+        private Dictionary<string, object> BuildAdaptiveFoundationPasteOptions(LayoutScanEntry layout)
         {
             var adaptive = config?.Paste?.AdaptiveFoundations ?? new AdaptiveFoundationsConfig();
+            var maximumLowering = AdaptiveMaximumLowering(layout);
             return new Dictionary<string, object>
             {
                 ["Enabled"] = adaptive.Enabled,
@@ -6741,7 +6753,7 @@ namespace Oxide.Plugins
                 ["Maximum Foundation Embed Meters"] = adaptive.MaximumFoundationEmbedMeters,
                 ["Maximum Foundation Clearance Meters"] = adaptive.MaximumFoundationClearanceMeters,
                 ["Maximum Origin Adjustment Meters"] = adaptive.MaximumOriginAdjustmentMeters,
-                ["Maximum Lowering Meters"] = adaptive.MaximumLoweringMeters,
+                ["Maximum Lowering Meters"] = maximumLowering,
                 ["Raise Base Layer Above Water"] = adaptive.RaiseBaseLayerAboveWater,
                 ["Water Surface Clearance Meters"] = adaptive.WaterSurfaceClearanceMeters,
                 ["Maximum Water Depth Meters"] = adaptive.MaximumWaterDepthMeters,
@@ -6869,7 +6881,7 @@ namespace Oxide.Plugins
 
             var pasteResult = CopyPaste.Call("API_RaidlandsTryTrackedPasteAtPosition", instanceId, layout.LayoutId,
                 FormatVector(pasteOrigin), config.Paste.CopyPasteArguments, rotationDegrees,
-                BuildAdaptiveFoundationPasteOptions());
+                BuildAdaptiveFoundationPasteOptions(layout));
 
             if (!IsPasteStartSuccess(pasteResult))
             {
@@ -7078,22 +7090,87 @@ namespace Oxide.Plugins
         private List<Vector3> BuildEventGuardSpawnPoints(ActiveRaidBase active, int count)
         {
             var result = new List<Vector3>();
+            if (active == null || count <= 0)
+                return result;
+
             var center = EventCenter(active);
-            LayoutScanEntry layout;
-            var footprintRadius = data.Layouts.TryGetValue(active.LayoutId, out layout) && layout != null
-                ? Mathf.Max(4f, layout.GroundFootprintRadius)
-                : 12f;
-            var ringRadius = Mathf.Clamp(footprintRadius + 4f, 8f, 32f);
-            for (var index = 0; index < count; index++)
+            var candidates = (active.EntityIds ?? new List<ulong>())
+                .Where(id => id != 0)
+                .Select(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as BuildingBlock)
+                .Where(block => block != null
+                                && !block.IsDestroyed
+                                && (IsFoundationPrefab(block.PrefabName) || IsFloorPrefab(block.PrefabName)))
+                .Select(block =>
+                {
+                    var position = GuardSpawnPositionOnBlock(block);
+                    return new
+                    {
+                        Position = position,
+                        InteriorScore = GuardInteriorScore(position),
+                        IsFoundation = IsFoundationPrefab(block.PrefabName),
+                        CenterDistance = Vector3.Distance(position, center)
+                    };
+                })
+                .OrderByDescending(candidate => candidate.InteriorScore)
+                .ThenByDescending(candidate => candidate.IsFoundation)
+                .ThenBy(candidate => candidate.CenterDistance)
+                .ToList();
+
+            // Prefer positions with walls or a roof around them. Open foundation/floor
+            // positions remain valid fallbacks for unusually sparse CopyPaste layouts.
+            var enclosed = candidates.Where(candidate => candidate.InteriorScore >= 2).ToList();
+            var source = enclosed.Count >= Math.Min(count, 2) ? enclosed : candidates;
+            var minimumSpacing = source.Count >= count ? 3.5f : 1.5f;
+            foreach (var candidate in source)
             {
-                var ring = index % 2 == 0 ? ringRadius : Mathf.Max(5f, ringRadius * 0.65f);
-                var angle = active.RotationDegrees + index * (360f / Math.Max(1, count));
-                var offset = Quaternion.Euler(0f, angle, 0f) * Vector3.forward * ring;
-                var position = center + offset;
-                position.y = TerrainMeta.HeightMap.GetHeight(position) + 0.35f;
-                result.Add(position);
+                if (result.Any(existing => Vector3.Distance(existing, candidate.Position) < minimumSpacing))
+                    continue;
+                result.Add(candidate.Position);
+                if (result.Count >= count)
+                    break;
             }
+
+            // If spacing removed too many otherwise-valid interior nodes, reuse the best
+            // remaining building surfaces before falling back to the event center.
+            foreach (var candidate in source)
+            {
+                if (result.Count >= count)
+                    break;
+                if (!result.Any(existing => Vector3.Distance(existing, candidate.Position) < 0.5f))
+                    result.Add(candidate.Position);
+            }
+
+            if (result.Count == 0)
+            {
+                center.y = TerrainMeta.HeightMap.GetHeight(center) + 0.35f;
+                result.Add(center);
+            }
+
+            while (result.Count < count)
+                result.Add(result[result.Count % Math.Max(1, result.Count)]);
+
             return result;
+        }
+
+        private Vector3 GuardSpawnPositionOnBlock(BuildingBlock block)
+        {
+            var position = block.transform.position;
+            var colliders = block.GetComponentsInChildren<Collider>();
+            if (colliders != null && colliders.Length > 0)
+                position.y = colliders.Max(collider => collider.bounds.max.y) + 0.15f;
+            else
+                position.y += IsFoundationPrefab(block.PrefabName) ? 0.85f : 0.25f;
+            return position;
+        }
+
+        private int GuardInteriorScore(Vector3 position)
+        {
+            var origin = position + Vector3.up * 0.35f;
+            var score = Physics.Raycast(origin, Vector3.up, 5f, PlayerBaseLayer, QueryTriggerInteraction.Ignore) ? 2 : 0;
+            foreach (var direction in new[] { Vector3.forward, Vector3.back, Vector3.left, Vector3.right })
+                if (Physics.Raycast(origin, direction, 9f, PlayerBaseLayer, QueryTriggerInteraction.Ignore))
+                    score++;
+            return score;
         }
 
         private bool TryReadRoamBotResponse(object response, out bool success, out string groupId,
@@ -10320,14 +10397,14 @@ namespace Oxide.Plugins
 
             if (AdaptiveFoundationTerrainEnabled())
             {
-                if (search.MaximumTerrainHeight - search.MinimumTerrainHeight > MaximumAdaptiveTerrainVariance() + 0.001f)
+                if (search.MaximumTerrainHeight - search.MinimumTerrainHeight > MaximumAdaptiveTerrainVariance(search.Layout) + 0.001f)
                 {
                     reason = "footprint exceeds adaptive terrain range";
                     return false;
                 }
 
                 var sourceClearance = -supportDelta;
-                if (sourceClearance > MaximumAdaptiveSourceClearance() + 0.001f)
+                if (sourceClearance > MaximumAdaptiveSourceClearance(search.Layout) + 0.001f)
                 {
                     reason = "footprint exceeds adaptive support depth";
                     return false;
@@ -10742,20 +10819,31 @@ namespace Oxide.Plugins
                    && config.Paste.AdaptiveFoundations.RaiseBaseLayerAboveWater;
         }
 
-        private float MaximumAdaptiveSourceClearance()
+        private float AdaptiveMaximumLowering(LayoutScanEntry layout)
         {
             var adaptive = config?.Paste?.AdaptiveFoundations;
-            return adaptive == null
-                ? config.LocationRules.MaxFlatnessDelta
-                : adaptive.MaximumLoweringMeters + adaptive.MaximumFoundationClearanceMeters;
+            if (adaptive == null)
+                return config.LocationRules.MaxFlatnessDelta;
+            return layout != null
+                   && layout.GroundFootprintRadius >= adaptive.LargeLayoutRadiusThresholdMeters
+                ? adaptive.LargeLayoutMaximumLoweringMeters
+                : adaptive.MaximumLoweringMeters;
         }
 
-        private float MaximumAdaptiveTerrainVariance()
+        private float MaximumAdaptiveSourceClearance(LayoutScanEntry layout)
         {
             var adaptive = config?.Paste?.AdaptiveFoundations;
             return adaptive == null
                 ? config.LocationRules.MaxFlatnessDelta
-                : adaptive.MaximumLoweringMeters
+                : AdaptiveMaximumLowering(layout) + adaptive.MaximumFoundationClearanceMeters;
+        }
+
+        private float MaximumAdaptiveTerrainVariance(LayoutScanEntry layout)
+        {
+            var adaptive = config?.Paste?.AdaptiveFoundations;
+            return adaptive == null
+                ? config.LocationRules.MaxFlatnessDelta
+                : AdaptiveMaximumLowering(layout)
                   + adaptive.MaximumFoundationClearanceMeters
                   + adaptive.MaximumFoundationEmbedMeters;
         }

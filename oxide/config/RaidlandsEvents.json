@@ -172,6 +172,8 @@
       "Maximum Foundation Clearance Meters": 1.25,
       "Maximum Foundation Embed Meters": 0.25,
       "Maximum Lowering Meters": 6.0,
+      "Large Layout Radius Threshold Meters": 45.0,
+      "Large Layout Maximum Lowering Meters": 15.0,
       "Maximum Origin Adjustment Meters": 0.75,
       "Maximum Water Depth Meters": 3.0,
       "Raise Base Layer Above Water": true,
