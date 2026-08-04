@@ -1,5 +1,5 @@
 {
-  "ConfigVersion": 3,
+  "ConfigVersion": 4,
   "Title": "LiveAdmin",
   "AccentColor": "0.12 0.58 0.55 1",
   "WarningColor": "0.96 0.62 0.18 1",
@@ -7,6 +7,24 @@
   "SuccessColor": "0.24 0.68 0.36 1",
   "PlayersPerPage": 10,
   "LogsPerPage": 12,
+  "HistoricalStorage": {
+    "Enabled": true,
+    "FlushIntervalSeconds": 5.0,
+    "MaximumBufferedRecords": 25,
+    "AuditRetentionDays": 365,
+    "ConsoleRetentionDays": 90,
+    "ChatRetentionDays": 90,
+    "SessionRetentionDays": 180,
+    "MetricsRetentionDays": 30,
+    "PersistPlayerIpAddresses": true
+  },
+  "ManagedRoles": {
+    "Enabled": true,
+    "SynchronizeGroupsOnStartup": true,
+    "ChatModeratorGroup": "liveadmin_chatmod",
+    "StaffGroup": "liveadmin_staff",
+    "AdminGroup": "liveadmin_admin"
+  },
   "ManagedPlugins": [
     "Kits",
     "BetterChat",
@@ -62,7 +80,13 @@
     "liveadmin.chat.manage",
     "liveadmin.server.maintenance",
     "liveadmin.server.maintenance.bypass",
-    "liveadmin.server.restart"
+    "liveadmin.server.restart",
+    "liveadmin.bans.view",
+    "liveadmin.bans.create",
+    "liveadmin.bans.temporary",
+    "liveadmin.bans.revoke",
+    "liveadmin.cases.view",
+    "liveadmin.cases.manage"
   ],
   "ProtectedGroups": [
     "admin",
@@ -125,6 +149,7 @@
   "AutoWipeSecondWeekday": "Monday",
   "AutoWipeForceFirstWeekday": true,
   "AutoWipeIntervalDays": 7,
+  "AutoWipeMaximumLatenessMinutes": 15,
   "AutoWipeTimeUtc": "18:00",
   "AutoWipeMap": true,
   "AutoWipeBlueprints": false,
@@ -236,7 +261,15 @@
         "liveadmin.plugins.config.edit",
         "liveadmin.plugins.config.restore",
         "liveadmin.audit.view",
-        "liveadmin.audit.manage"
+        "liveadmin.audit.manage",
+        "liveadmin.chat.view",
+        "liveadmin.chat.manage",
+        "liveadmin.bans.view",
+        "liveadmin.bans.create",
+        "liveadmin.bans.temporary",
+        "liveadmin.bans.revoke",
+        "liveadmin.cases.view",
+        "liveadmin.cases.manage"
       ]
     },
     {
@@ -263,7 +296,13 @@
         "liveadmin.plugins.reload",
         "liveadmin.server.quickactions",
         "liveadmin.server.maintenance.bypass",
-        "liveadmin.audit.view"
+        "liveadmin.audit.view",
+        "liveadmin.bans.view",
+        "liveadmin.bans.create",
+        "liveadmin.bans.temporary",
+        "liveadmin.bans.revoke",
+        "liveadmin.cases.view",
+        "liveadmin.cases.manage"
       ]
     },
     {
@@ -282,7 +321,10 @@
         "liveadmin.stafftools.view",
         "liveadmin.stafftools.actions",
         "liveadmin.stafftools.tickets",
-        "liveadmin.server.maintenance.bypass"
+        "liveadmin.server.maintenance.bypass",
+        "liveadmin.bans.view",
+        "liveadmin.cases.view",
+        "liveadmin.cases.manage"
       ]
     },
     {
@@ -295,7 +337,9 @@
         "liveadmin.reports.view",
         "liveadmin.stafftools.view",
         "liveadmin.stafftools.actions",
-        "liveadmin.stafftools.tickets"
+        "liveadmin.stafftools.tickets",
+        "liveadmin.bans.view",
+        "liveadmin.cases.view"
       ]
     },
     {
@@ -308,7 +352,9 @@
         "liveadmin.plugins.view",
         "liveadmin.groups.view",
         "liveadmin.permissions.view",
-        "liveadmin.audit.view"
+        "liveadmin.audit.view",
+        "liveadmin.bans.view",
+        "liveadmin.cases.view"
       ]
     },
     {
@@ -342,7 +388,13 @@
         "liveadmin.server.wipe.view",
         "liveadmin.audit.view",
         "liveadmin.chat.view",
-        "liveadmin.chat.manage"
+        "liveadmin.chat.manage",
+        "liveadmin.bans.view",
+        "liveadmin.bans.create",
+        "liveadmin.bans.temporary",
+        "liveadmin.bans.revoke",
+        "liveadmin.cases.view",
+        "liveadmin.cases.manage"
       ]
     },
     {
@@ -363,7 +415,10 @@
         "liveadmin.stafftools.tickets",
         "liveadmin.server.maintenance.bypass",
         "liveadmin.chat.view",
-        "liveadmin.chat.manage"
+        "liveadmin.chat.manage",
+        "liveadmin.bans.view",
+        "liveadmin.cases.view",
+        "liveadmin.cases.manage"
       ]
     }
   ],

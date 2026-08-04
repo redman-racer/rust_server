@@ -17,7 +17,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.7.4")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.8.0")]
     [Description("Spawns player-like roaming NPCs with a local, goal-driven utility brain, Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -2138,6 +2138,9 @@ namespace Oxide.Plugins
             [JsonProperty("Default Leash Chase Grace Seconds")]
             public float DefaultLeashChaseGraceSeconds = 12f;
 
+            [JsonProperty("RaidlandsEvents Guard Accuracy")]
+            public RaidGuardAccuracyConfig RaidGuardAccuracy = new RaidGuardAccuracyConfig();
+
             [JsonProperty("Difficulty Skill Tiers")]
             public Dictionary<string, string> DifficultySkillTiers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -2160,6 +2163,30 @@ namespace Oxide.Plugins
                 ["heavyscientist"] = "dangerous",
                 ["warlord"] = "dangerous",
                 ["boss"] = "dangerous"
+            };
+        }
+
+        private class RaidGuardAccuracyConfig
+        {
+            public bool Enabled = true;
+            [JsonProperty("Maximum Engagement Range")]
+            public float MaximumEngagementRange = 125f;
+            [JsonProperty("Long Range Threshold")]
+            public float LongRangeThreshold = 60f;
+            [JsonProperty("Long Range Maximum Burst Shots")]
+            public int LongRangeMaximumBurstShots = 3;
+            [JsonProperty("Disable Sustained Bursts At Long Range")]
+            public bool DisableSustainedBurstsAtLongRange = true;
+            [JsonProperty("Distance Error Degrees")]
+            public Dictionary<string, float> DistanceErrorDegrees = new Dictionary<string, float>
+            {
+                ["20"] = 0.5f, ["40"] = 1f, ["60"] = 2f, ["80"] = 3.5f,
+                ["100"] = 5f, ["125"] = 6.5f
+            };
+            [JsonProperty("Difficulty Error Multipliers")]
+            public Dictionary<string, float> DifficultyErrorMultipliers = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["easy"] = 1.35f, ["medium"] = 1.15f, ["hard"] = 1f, ["nightmare"] = 0.85f
             };
         }
 
@@ -6196,6 +6223,16 @@ namespace Oxide.Plugins
             {
                 config.ManagedApi = defaults.ManagedApi;
             }
+            if (config.ManagedApi.RaidGuardAccuracy == null)
+                config.ManagedApi.RaidGuardAccuracy = defaults.ManagedApi.RaidGuardAccuracy;
+            var raidAccuracy = config.ManagedApi.RaidGuardAccuracy;
+            raidAccuracy.MaximumEngagementRange = Mathf.Clamp(raidAccuracy.MaximumEngagementRange, 40f, 250f);
+            raidAccuracy.LongRangeThreshold = Mathf.Clamp(raidAccuracy.LongRangeThreshold, 20f, raidAccuracy.MaximumEngagementRange);
+            raidAccuracy.LongRangeMaximumBurstShots = Clamp(raidAccuracy.LongRangeMaximumBurstShots, 1, 12);
+            if (raidAccuracy.DistanceErrorDegrees == null || raidAccuracy.DistanceErrorDegrees.Count == 0)
+                raidAccuracy.DistanceErrorDegrees = defaults.ManagedApi.RaidGuardAccuracy.DistanceErrorDegrees;
+            if (raidAccuracy.DifficultyErrorMultipliers == null || raidAccuracy.DifficultyErrorMultipliers.Count == 0)
+                raidAccuracy.DifficultyErrorMultipliers = defaults.ManagedApi.RaidGuardAccuracy.DifficultyErrorMultipliers;
 
             config.ManagedApi.DefaultOwnerPlugin = string.IsNullOrWhiteSpace(config.ManagedApi.DefaultOwnerPlugin) ? defaults.ManagedApi.DefaultOwnerPlugin : CleanName(config.ManagedApi.DefaultOwnerPlugin);
             config.ManagedApi.AllowedCallerPlugins = (config.ManagedApi.AllowedCallerPlugins ?? defaults.ManagedApi.AllowedCallerPlugins)
@@ -20427,7 +20464,46 @@ namespace Oxide.Plugins
             var baseError = Mathf.Clamp(skill?.AimErrorDegrees ?? 0f, 0f, 45f);
             var warmupExtra = Mathf.Clamp(skill?.AimWarmupInitialExtraDegrees ?? 0f, 0f, 45f);
             var progress = AimWarmupProgress(runtime, now);
-            return Mathf.Clamp(baseError + warmupExtra * (1f - progress), 0f, 45f);
+            var error = baseError + warmupExtra * (1f - progress);
+            if (IsRaidlandsEventGuard(runtime) && config?.ManagedApi?.RaidGuardAccuracy?.Enabled == true)
+            {
+                var target = runtime.Memory?.Target;
+                var bot = RuntimeEntityFor(runtime);
+                var distance = target == null || bot == null ? 0f : Vector3.Distance(bot.transform.position, target.transform.position);
+                var multiplier = 1f;
+                config.ManagedApi.RaidGuardAccuracy.DifficultyErrorMultipliers.TryGetValue((runtime.RequestedDifficulty ?? "medium").ToLowerInvariant(), out multiplier);
+                if (multiplier <= 0f) multiplier = 1f;
+                error += RaidGuardDistanceError(distance) * multiplier;
+            }
+            return Mathf.Clamp(error, 0f, 45f);
+        }
+
+        private bool IsRaidlandsEventGuard(BotRuntime runtime)
+        {
+            return runtime != null && string.Equals(runtime.OwnerPlugin, "RaidlandsEvents", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private float RaidGuardDistanceError(float distance)
+        {
+            var source = config?.ManagedApi?.RaidGuardAccuracy?.DistanceErrorDegrees;
+            if (source == null || source.Count == 0) return 0f;
+            var points = new List<KeyValuePair<float, float>>();
+            foreach (var entry in source)
+            {
+                float range;
+                if (float.TryParse(entry.Key, NumberStyles.Float, CultureInfo.InvariantCulture, out range))
+                    points.Add(new KeyValuePair<float, float>(range, Mathf.Clamp(entry.Value, 0f, 20f)));
+            }
+            points = points.OrderBy(point => point.Key).ToList();
+            if (points.Count == 0) return 0f;
+            var previousRange = 0f; var previousError = 0f;
+            foreach (var point in points)
+            {
+                if (distance <= point.Key)
+                    return Mathf.Lerp(previousError, point.Value, Mathf.InverseLerp(previousRange, point.Key, distance));
+                previousRange = point.Key; previousError = point.Value;
+            }
+            return points[points.Count - 1].Value;
         }
 
         private string AimStatus(BotRuntime runtime, float now)
@@ -21832,6 +21908,13 @@ namespace Oxide.Plugins
                 runtime.CurrentBurstIsSustained = ShouldUseSustainedBurst(runtime, profile, target);
                 var minimumBurst = runtime.CurrentBurstIsSustained ? profile.MinimumSustainedBurstShots : profile.MinimumBurstShots;
                 var maximumBurst = runtime.CurrentBurstIsSustained ? profile.MaximumSustainedBurstShots : profile.MaximumBurstShots;
+                if (IsRaidlandsEventGuard(runtime) && target != null && config.ManagedApi.RaidGuardAccuracy.Enabled
+                    && Vector3.Distance(bot.transform.position, target.transform.position) >= config.ManagedApi.RaidGuardAccuracy.LongRangeThreshold)
+                {
+                    runtime.CurrentBurstIsSustained = false;
+                    minimumBurst = Math.Min(minimumBurst, config.ManagedApi.RaidGuardAccuracy.LongRangeMaximumBurstShots);
+                    maximumBurst = Math.Min(profile.MaximumBurstShots, config.ManagedApi.RaidGuardAccuracy.LongRangeMaximumBurstShots);
+                }
                 maximumBurst = Math.Min(maximumBurst, magazine.contents);
                 minimumBurst = Math.Min(minimumBurst, Math.Max(1, maximumBurst));
                 runtime.CurrentBurstSize = UnityEngine.Random.Range(Math.Max(1, minimumBurst), Math.Max(minimumBurst, maximumBurst) + 1);
@@ -22076,6 +22159,10 @@ namespace Oxide.Plugins
 
             var bot = RuntimeEntityFor(runtime);
             var distance = bot == null ? runtime.Combat.IdealRange : Vector3.Distance(bot.transform.position, target.transform.position);
+            if (IsRaidlandsEventGuard(runtime) && config.ManagedApi.RaidGuardAccuracy.Enabled
+                && config.ManagedApi.RaidGuardAccuracy.DisableSustainedBurstsAtLongRange
+                && distance >= config.ManagedApi.RaidGuardAccuracy.LongRangeThreshold)
+                return false;
             var distanceMultiplier = distance <= runtime.Combat.PreferredDistance ? 1.18f
                 : distance <= runtime.Combat.IdealRange ? 1f
                 : distance <= runtime.Combat.HarassRange ? 0.72f
@@ -35886,6 +35973,12 @@ namespace Oxide.Plugins
 
             var profile = RefreshCombatProfile(bot, runtime);
             var distance = Vector3.Distance(bot.transform.position, target.transform.position);
+
+            if (IsRaidlandsEventGuard(runtime) && config?.ManagedApi?.RaidGuardAccuracy?.Enabled == true
+                && distance > config.ManagedApi.RaidGuardAccuracy.MaximumEngagementRange)
+            {
+                return BlockFire(runtime, "raid_guard_engagement_limit");
+            }
 
             if (distance > profile.MaxRange)
             {

@@ -12,7 +12,7 @@ using Network;
 using UnityEngine;
 namespace Oxide.Plugins
 {
-[Info("LiveAdmin", "Codex", "0.16.1")]
+[Info("LiveAdmin", "Codex", "0.17.3")]
 [Description("A live in-game staff admin panel for Rust/uMod servers.")]
 public class LiveAdmin : RustPlugin
 {
@@ -46,6 +46,7 @@ private const string PermPlayersMute = "liveadmin.players.mute";
 private const string PermPlayersNotes = "liveadmin.players.notes";
 private const string PermPlayersInventoryView = "liveadmin.players.inventory.view";
 private const string PermPlayersInventoryModify = "liveadmin.players.inventory.modify";
+private const string PermPlayersSensitiveView = "liveadmin.players.sensitive.view";
 private const string PermStaffToolsActions = "liveadmin.stafftools.actions";
 private const string PermStaffToolsInventory = "liveadmin.stafftools.inventory";
 private const string PermStaffToolsGroups = "liveadmin.stafftools.groups";
@@ -72,6 +73,14 @@ private const string PermBansTemporary = "liveadmin.bans.temporary";
 private const string PermBansRevoke = "liveadmin.bans.revoke";
 private const string PermCasesView = "liveadmin.cases.view";
 private const string PermCasesManage = "liveadmin.cases.manage";
+private const string PermInterfaceAdmin = "liveadmin.interface.admin";
+private const string PermInterfaceStaff = "liveadmin.interface.staff";
+private const string PermInterfaceChatMod = "liveadmin.interface.chatmod";
+private const string PermRolesView = "liveadmin.roles.view";
+private const string PermRolesAssignChatMod = "liveadmin.roles.assign.chatmod";
+private const string PermRolesAssignStaff = "liveadmin.roles.assign.staff";
+private const string PermRolesAssignAdmin = "liveadmin.roles.assign.admin";
+private const string PermRolesRemove = "liveadmin.roles.remove";
 private StoredData storedData;
 private PluginConfig config;
 private readonly Dictionary<ulong, PanelState> states = new Dictionary<ulong, PanelState>();
@@ -84,18 +93,22 @@ private readonly HashSet<ulong> openPanels = new HashSet<ulong>();
 private readonly List<ResourceSnapshot> resourceHistory = new List<ResourceSnapshot>();
 private readonly List<ConsoleLine> liveConsoleBuffer = new List<ConsoleLine>();
 private readonly Dictionary<string, DateTime> rateLimits = new Dictionary<string, DateTime>();
+private readonly List<ArchiveRecord> archiveBuffer = new List<ArchiveRecord>();
+private long nextArchiveId;
 private Process currentProcess;
 private DateTime lastResourceSampleAt = DateTime.MinValue;
 private TimeSpan lastCpuTime = TimeSpan.Zero;
 private DateTime lastDashboardRefreshAt = DateTime.MinValue;
+private DateTime lastMetricArchiveAt = DateTime.MinValue;
 private string activeWipeSeed;
 private DateTime lastDiskSampleAt = DateTime.MinValue;
 private float cachedDiskGiB;
 private UiSkin activeSkin;
 private int lastRestartAnnouncementSecond = -1;
-private readonly string[] tabs = { "dashboard", "console", "players", "staff", "chat", "reports", "manage", "convars", "wipe", "appearance", "settings", "logs" };
+private readonly string[] tabs = { "dashboard", "console", "players", "staff", "chat", "reports", "manage", "roles", "convars", "wipe", "appearance", "settings", "logs" };
 private class PanelState
 {
+public string Surface = "admin";
 public string Tab = "dashboard";
 public string SubTab = "plugins";
 public string PlayerDetailTab = "overview";
@@ -120,6 +133,13 @@ public int TicketPage;
 public int ChatPage;
 public int BanPage;
 public int CasePage;
+public int HistoryPage;
+public int ConsoleHistoryPage;
+public bool ConsoleHistoryMode;
+public string ConsoleHistoryDate = string.Empty;
+public string HistoryCategory = "all";
+public string HistoryDate = string.Empty;
+public string HistoryFilter = string.Empty;
 public string SelectedPlayerId;
 public string SelectedChatId;
 public string SelectedGroup;
@@ -184,7 +204,7 @@ public string PendingMessage;
 }
 private class PluginConfig
 {
-public int ConfigVersion = 3;
+public int ConfigVersion = 4;
 public string Title = "LiveAdmin";
 public string AccentColor = "0.12 0.58 0.55 1";
 public string WarningColor = "0.96 0.62 0.18 1";
@@ -192,6 +212,8 @@ public string DangerColor = "0.82 0.20 0.18 1";
 public string SuccessColor = "0.24 0.68 0.36 1";
 public int PlayersPerPage = 10;
 public int LogsPerPage = 12;
+public HistoricalStorageConfig HistoricalStorage = new HistoricalStorageConfig();
+public ManagedRolesConfig ManagedRoles = new ManagedRolesConfig();
 public List<string> ManagedPlugins = new List<string> { "Kits", "BetterChat", "ZoneManager" };
 public List<string> CommonGroups = new List<string> { "admin", "moderator", "vip", "default" };
 public List<string> CommonPermissions = new List<string>
@@ -269,6 +291,7 @@ public string AutoWipeWeekday = "Thursday";
 public string AutoWipeSecondWeekday = "Monday";
 public bool AutoWipeForceFirstWeekday = true;
 public int AutoWipeIntervalDays = 7;
+public int AutoWipeMaximumLatenessMinutes = 15;
 public string AutoWipeTimeUtc = "17:00";
 public bool AutoWipeMap = true;
 public bool AutoWipeBlueprints = false;
@@ -334,6 +357,49 @@ public string Name;
 public string Description;
 public List<string> Permissions = new List<string>();
 }
+private class HistoricalStorageConfig
+{
+public bool Enabled = true;
+public float FlushIntervalSeconds = 5f;
+public int MaximumBufferedRecords = 25;
+public int AuditRetentionDays = 365;
+public int ConsoleRetentionDays = 90;
+public int ChatRetentionDays = 90;
+public int SessionRetentionDays = 180;
+public int MetricsRetentionDays = 30;
+public bool PersistPlayerIpAddresses = true;
+}
+private class ManagedRolesConfig
+{
+public bool Enabled = true;
+public bool SynchronizeGroupsOnStartup = true;
+public string ChatModeratorGroup = "liveadmin_chatmod";
+public string StaffGroup = "liveadmin_staff";
+public string AdminGroup = "liveadmin_admin";
+}
+private class ArchiveRecord
+{
+public int SchemaVersion = 1;
+public long Id;
+public string TimestampUtc;
+public string Stream;
+public string Category;
+public string Severity;
+public string Source;
+public string ActorId;
+public string ActorName;
+public string TargetId;
+public string TargetName;
+public string Action;
+public string Result;
+public string Message;
+}
+private class ArchiveDay
+{
+public int SchemaVersion = 1;
+public string DateUtc;
+public List<ArchiveRecord> Records = new List<ArchiveRecord>();
+}
 private class StoredData
 {
 public List<ReportEntry> Reports = new List<ReportEntry>();
@@ -363,6 +429,7 @@ public string ScheduledRestartBy;
 public int NextReportId = 1;
 public int NextBanId = 1;
 public int NextCaseId = 1;
+public int ArchiveMigrationVersion;
 }
 private class PlayerProfile
 {
@@ -575,9 +642,9 @@ return result;
 }
 private void EnsureConfigDefaults()
 {
-if (config.ConfigVersion < 3)
+if (config.ConfigVersion < 4)
 {
-config.ConfigVersion = 3;
+config.ConfigVersion = 4;
 }
 if (config.ManagedPlugins == null || config.ManagedPlugins.Count == 0)
 {
@@ -690,6 +757,7 @@ if (config.AutoWipeIntervalDays <= 0)
 {
 config.AutoWipeIntervalDays = 7;
 }
+config.AutoWipeMaximumLatenessMinutes = Math.Max(1, Math.Min(120, config.AutoWipeMaximumLatenessMinutes));
 config.AutoWipeCadence = NormalizeWipeCadence(config.AutoWipeCadence, config.AutoWipeUseWeeklySchedule);
 config.AutoWipeUseWeeklySchedule = !config.AutoWipeCadence.Equals("Interval", StringComparison.OrdinalIgnoreCase);
 if (!TryParseWeekday(config.AutoWipeWeekday, out _))
@@ -792,8 +860,12 @@ MigrateModerationPresetPermissions();
 private void MigrateConfig()
 {
 if (config == null) return;
-if (config.ConfigVersion < 3) config.ConfigVersion = 3;
+if (config.ConfigVersion < 4) config.ConfigVersion = 4;
 if (config.CommonPermissions == null) config.CommonPermissions = new List<string>();
+if (config.HistoricalStorage == null) config.HistoricalStorage = new HistoricalStorageConfig();
+if (config.ManagedRoles == null) config.ManagedRoles = new ManagedRolesConfig();
+config.HistoricalStorage.FlushIntervalSeconds = Mathf.Clamp(config.HistoricalStorage.FlushIntervalSeconds, 1f, 60f);
+config.HistoricalStorage.MaximumBufferedRecords = Math.Max(1, config.HistoricalStorage.MaximumBufferedRecords);
 AddMissingCommonPermissions();
 if (config.RolePresets == null || config.RolePresets.Count == 0) config.RolePresets = DefaultRolePresets();
 MigratePlayerActions();
@@ -945,6 +1017,7 @@ private void Init()
 RegisterPermissions();
 storedData = Interface.Oxide.DataFileSystem.ReadObject<StoredData>(Name);
 EnsureDataDefaults();
+MigrateExistingAuditToArchive();
 Application.logMessageReceived += OnUnityLogMessage;
 StartMuteTimer();
 StartBanTimer();
@@ -953,6 +1026,8 @@ StartAutoWipeTimer();
 StartSpinTimer();
 StartOperationsTimer();
 StartConsoleRefreshTimer();
+timer.Every(Math.Max(1f, config.HistoricalStorage.FlushIntervalSeconds), FlushArchiveBuffer);
+timer.Every(3600f, PruneHistoricalArchives);
 }
 private void Loaded()
 {
@@ -961,6 +1036,7 @@ RegisterPermissions();
 private void OnServerInitialized()
 {
 RegisterPermissions();
+SynchronizeManagedRoleGroups();
 ProcessExpiredMutes();
 ProcessExpiredBans();
 SyncNativeBans();
@@ -972,9 +1048,20 @@ foreach (var player in BasePlayer.activePlayerList)
 UpdatePlayerProfile(player, true);
 }
 }
+private void OnNewSave(string filename)
+{
+if (storedData == null || !string.IsNullOrEmpty(storedData.PendingWipeMode)) return;
+var now = DateTime.UtcNow;
+storedData.LastWipeUtc = now.ToString("yyyy-MM-dd HH:mm:ss");
+storedData.NextAutoWipeUtc = CalculateNextAutoWipe(now).ToString("yyyy-MM-dd HH:mm:ss");
+SaveData();
+Puts($"External/manual wipe detected from new save '{filename}'. Advanced the next automatic wipe to {storedData.NextAutoWipeUtc} UTC.");
+RefreshWipeViews();
+}
 private void Unload()
 {
 Application.logMessageReceived -= OnUnityLogMessage;
+FlushArchiveBuffer();
 foreach (var player in BasePlayer.activePlayerList)
 {
 CuiHelper.DestroyUi(player, UiRoot);
@@ -1130,7 +1217,7 @@ PermReportsView, PermReportsManage, PermPluginsView, PermPluginsManage,
 PermGroupsView, PermGroupsManage, PermPermissionsView, PermPermissionsManage,
 PermServerActions, PermStaffToolsView, PermStaffToolsModerate, PermStaffToolsFun,
 PermStaffToolsDangerous, PermPlayersKick, PermPlayersBan, PermPlayersMute,
-PermPlayersNotes, PermPlayersInventoryView, PermPlayersInventoryModify,
+PermPlayersNotes, PermPlayersInventoryView, PermPlayersInventoryModify, PermPlayersSensitiveView,
 PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups,
 PermStaffToolsTickets, PermServerInfo, PermServerQuickActions,
 PermServerWipeView, PermServerWipeManage, PermServerWipeForce,
@@ -1138,12 +1225,111 @@ PermPluginsReload, PermPluginsConfigView, PermPluginsConfigEdit,
 PermPluginsConfigRestore, PermAuditView, PermAuditManage, PermChatView, PermChatManage,
 PermServerMaintenance, PermServerMaintenanceBypass, PermServerRestart,
 PermBansView, PermBansCreate, PermBansTemporary, PermBansRevoke,
-PermCasesView, PermCasesManage
+PermCasesView, PermCasesManage, PermInterfaceAdmin, PermInterfaceStaff,
+PermInterfaceChatMod, PermRolesView, PermRolesAssignChatMod,
+PermRolesAssignStaff, PermRolesAssignAdmin, PermRolesRemove
 };
 }
 private void SaveData()
 {
 Interface.Oxide.DataFileSystem.WriteObject(Name, storedData);
+}
+private void QueueArchive(string stream, string category, string severity, string source, string actorId, string actorName, string targetId, string targetName, string action, string result, string message)
+{
+if (config?.HistoricalStorage?.Enabled != true) return;
+archiveBuffer.Add(new ArchiveRecord
+{
+Id = ++nextArchiveId,
+TimestampUtc = DateTime.UtcNow.ToString("o"),
+Stream = string.IsNullOrEmpty(stream) ? "audit" : stream.ToLowerInvariant(),
+Category = category ?? string.Empty,
+Severity = severity ?? "Info",
+Source = source ?? Name,
+ActorId = actorId ?? string.Empty,
+ActorName = actorName ?? string.Empty,
+TargetId = targetId ?? string.Empty,
+TargetName = targetName ?? string.Empty,
+Action = action ?? string.Empty,
+Result = result ?? string.Empty,
+Message = message ?? string.Empty
+});
+if (archiveBuffer.Count >= config.HistoricalStorage.MaximumBufferedRecords) FlushArchiveBuffer();
+}
+private void FlushArchiveBuffer()
+{
+if (archiveBuffer.Count == 0) return;
+var pending = archiveBuffer.ToList();
+archiveBuffer.Clear();
+try
+{
+foreach (var group in pending.GroupBy(record => new { record.Stream, Day = ParseArchiveTimestamp(record.TimestampUtc).ToString("yyyy-MM-dd") }))
+{
+var file = $"LiveAdmin/history/{group.Key.Stream}/{group.Key.Day}";
+ArchiveDay day;
+try { day = Interface.Oxide.DataFileSystem.ReadObject<ArchiveDay>(file) ?? new ArchiveDay(); }
+catch { day = new ArchiveDay(); }
+day.DateUtc = group.Key.Day;
+if (day.Records == null) day.Records = new List<ArchiveRecord>();
+day.Records.AddRange(group);
+Interface.Oxide.DataFileSystem.WriteObject(file, day);
+}
+}
+catch (Exception ex)
+{
+archiveBuffer.InsertRange(0, pending);
+PrintWarning($"Historical archive flush failed; {pending.Count} record(s) retained in memory: {ex.Message}");
+}
+}
+private DateTime ParseArchiveTimestamp(string value)
+{
+DateTime parsed;
+return DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out parsed) ? parsed.ToUniversalTime() : DateTime.UtcNow;
+}
+private List<ArchiveRecord> ReadArchive(string stream, string date)
+{
+date = string.IsNullOrEmpty(date) ? DateTime.UtcNow.ToString("yyyy-MM-dd") : date;
+try
+{
+var day = Interface.Oxide.DataFileSystem.ReadObject<ArchiveDay>($"LiveAdmin/history/{stream}/{date}");
+return day?.Records ?? new List<ArchiveRecord>();
+}
+catch { return new List<ArchiveRecord>(); }
+}
+private void PruneHistoricalArchives()
+{
+if (config?.HistoricalStorage?.Enabled != true) return;
+try
+{
+var root = Path.Combine(Interface.Oxide.DataFileSystem.Directory, "LiveAdmin", "history");
+if (!Directory.Exists(root)) return;
+foreach (var file in Directory.GetFiles(root, "*.json", SearchOption.AllDirectories))
+{
+DateTime day;
+if (!DateTime.TryParse(Path.GetFileNameWithoutExtension(file), out day)) continue;
+var stream = new DirectoryInfo(Path.GetDirectoryName(file)).Name.ToLowerInvariant();
+var retention = stream == "console" ? config.HistoricalStorage.ConsoleRetentionDays
+: stream == "chat" ? config.HistoricalStorage.ChatRetentionDays
+: stream == "session" ? config.HistoricalStorage.SessionRetentionDays
+: stream == "metrics" ? config.HistoricalStorage.MetricsRetentionDays
+: config.HistoricalStorage.AuditRetentionDays;
+if (retention > 0 && day.Date < DateTime.UtcNow.Date.AddDays(-retention)) File.Delete(file);
+}
+}
+catch (Exception ex) { PrintWarning("Historical archive retention failed: " + ex.Message); }
+}
+private void MigrateExistingAuditToArchive()
+{
+if (storedData.ArchiveMigrationVersion >= 1 || config?.HistoricalStorage?.Enabled != true) return;
+foreach (var log in storedData.Logs ?? new List<ActionLog>())
+{
+if (log == null) continue;
+DateTime legacyTime;
+if (!DateTime.TryParse(log.Time, out legacyTime)) legacyTime = DateTime.UtcNow;
+archiveBuffer.Add(new ArchiveRecord { Id = ++nextArchiveId, TimestampUtc = DateTime.SpecifyKind(legacyTime, DateTimeKind.Utc).ToString("o"), Stream = "audit", Category = log.Category, Severity = log.Result == "Failed" || log.Result == "Blocked" ? "Warning" : "Info", Source = Name, ActorId = log.ActorId, ActorName = log.ActorName, TargetId = log.Target, TargetName = log.TargetName, Action = log.Action, Result = log.Result, Message = log.Details });
+}
+storedData.ArchiveMigrationVersion = 1;
+FlushArchiveBuffer();
+SaveData();
 }
 private void EnsureDataDefaults()
 {
@@ -1236,6 +1422,8 @@ AddLiveConsoleLine("plugins", plugin.Name, "Plugin unloaded", "plugins");
 }
 private void AddLiveConsoleLine(string kind, string source, string message, string origin)
 {
+QueueArchive("console", origin, kind == "errors" ? "Error" : kind == "warnings" ? "Warning" : "Info", source,
+"server", "Server", string.Empty, string.Empty, "ConsoleLine", "Observed", message);
 liveConsoleBuffer.Add(new ConsoleLine
 {
 Id = "runtime:" + DateTime.UtcNow.Ticks,
@@ -1407,7 +1595,7 @@ arg.ReplyWith(ScheduleRestart(player, minutes, reason) ? $"Restart scheduled in 
 [ChatCommand("admin")]
 private void AdminCommand(BasePlayer player, string command, string[] args)
 {
-if (!Can(player, PermUse))
+if (!Can(player, PermUse) || !CanAny(player, PermOwner, PermInterfaceAdmin))
 {
 Reply(player, "You do not have access to LiveAdmin.");
 return;
@@ -1417,11 +1605,25 @@ if (args.Length > 0 && args[0].Equals("close", StringComparison.OrdinalIgnoreCas
 Close(player);
 return;
 }
-GetState(player).Tab = args.Length > 0 ? CleanTab(args[0]) : "dashboard";
+var state = GetState(player);
+state.Surface = "admin";
+state.Tab = args.Length > 0 ? CleanTab(args[0]) : "dashboard";
+if (!CanSeeTab(player, state.Tab)) state.Tab = "dashboard";
 Draw(player);
 }
 [ChatCommand("staff")]
-private void StaffCommand(BasePlayer player, string command, string[] args) => AdminCommand(player, command, args);
+private void StaffCommand(BasePlayer player, string command, string[] args)
+{
+if (!Can(player, PermUse) || !CanAny(player, PermInterfaceStaff, PermStaffToolsView, PermPlayersModerate)) { Reply(player, "You do not have access to Staff Operations."); return; }
+var state = GetState(player); state.Surface = "staff"; state.Tab = args.Length > 0 ? CleanTab(args[0]) : "players";
+if (!CanSeeTab(player, state.Tab)) state.Tab = "players"; Draw(player);
+}
+[ChatCommand("chatmod")]
+private void ChatModCommand(BasePlayer player, string command, string[] args)
+{
+if (!Can(player, PermUse) || !CanAny(player, PermInterfaceChatMod, PermChatView, PermChatManage)) { Reply(player, "You do not have access to Chat Moderation."); return; }
+var state = GetState(player); state.Surface = "chatmod"; state.Tab = "chat"; Draw(player);
+}
 [ChatCommand("ap")]
 private void ApCommand(BasePlayer player, string command, string[] args) => AdminCommand(player, command, args);
 [ChatCommand("report")]
@@ -1655,11 +1857,24 @@ if (!CanAny(player, PermOwner, PermAuditManage))
 Reply(player, "You do not have access to LiveAdmin diagnostics.");
 return;
 }
-Reply(player, $"Version 0.16.0 | Config v{config.ConfigVersion} | Perms {registeredPermissions.Count}");
+Reply(player, $"Version 0.17.3 | Config v{config.ConfigVersion} | Perms {registeredPermissions.Count}");
 Reply(player, $"Reports {storedData.Reports.Count} | Cases {storedData.Cases.Count} | Bans {storedData.Bans.Count(item => item.Active)} | Logs {storedData.Logs.Count} | Mutes {storedData.ActiveMutes.Count} | Panels {openPanels.Count}");
 Reply(player, $"Frozen {frozenPositions.Count} | Passive {passivePlayers.Count} | Spinning {spinningPlayers.Count}");
 Reply(player, $"Backpacks {(Backpacks == null ? "missing" : "loaded")} | InventoryViewer {(InventoryViewer == null ? "missing" : "loaded")} | Vanish {(Vanish == null ? "missing" : "loaded")} | Godmode {(Godmode == null ? "missing" : "loaded")}");
 Reply(player, $"AutoWipe {config.AutoWipeEnabled} | Next {storedData.NextAutoWipeUtc} | SafeMode {config.SafeMode} | CommandSafety {config.EnableCommandSafety} | ForceDryRun {config.ForceWipeDryRunDefault}");
+}
+[ChatCommand("lahistoryexport")]
+private void HistoryExportCommand(BasePlayer player, string command, string[] args)
+{
+if (!CanSeeTab(player, "logs")) { Reply(player, "You do not have access to historical exports."); return; }
+var state = GetState(player); if (string.IsNullOrEmpty(state.HistoryDate)) state.HistoryDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
+var stream = AllowedHistoryStream(state);
+var records = ReadArchive(stream, state.HistoryDate);
+if (!string.IsNullOrEmpty(state.HistoryFilter)) records = records.Where(record => MatchesFilter(record.Message, state.HistoryFilter) || MatchesFilter(record.Action, state.HistoryFilter) || MatchesFilter(record.ActorName, state.HistoryFilter) || MatchesFilter(record.TargetName, state.HistoryFilter)).ToList();
+var exportName = $"LiveAdmin/exports/{DateTime.UtcNow:yyyyMMdd-HHmmss}-{stream}";
+Interface.Oxide.DataFileSystem.WriteObject(exportName, new ArchiveDay { DateUtc = state.HistoryDate, Records = records });
+LogSuccess(player, "Audit", "HistoryExport", stream, state.HistoryDate, $"records={records.Count}; file={exportName}.json");
+Reply(player, $"Exported {records.Count} record(s) to oxide/data/{exportName}.json");
 }
 [ConsoleCommand("liveadmin.ui")]
 private void UiCommand(ConsoleSystem.Arg arg)
@@ -1673,7 +1888,8 @@ var action = args[0].ToLowerInvariant();
 switch (action)
 {
 case "tab":
-state.Tab = CleanTab(Get(args, 1, "dashboard"));
+var requestedTab = CleanTab(Get(args, 1, "dashboard"));
+if (CanSeeTab(player, requestedTab)) state.Tab = requestedTab;
 break;
 case "subtab":
 state.SubTab = Get(args, 1, "plugins").ToLowerInvariant();
@@ -1704,6 +1920,20 @@ break;
 case "consoletab":
 state.ConsoleTab = CleanConsoleTab(Get(args, 1, "all"));
 state.Tab = "console";
+state.ConsoleHistoryPage = 0;
+break;
+case "consolemode":
+state.ConsoleHistoryMode = string.Equals(Get(args, 1, "live"), "history", StringComparison.OrdinalIgnoreCase);
+if (string.IsNullOrEmpty(state.ConsoleHistoryDate)) state.ConsoleHistoryDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
+state.ConsoleHistoryPage = 0;
+break;
+case "consolehistoryday":
+if (!CanUseQuickActions(player)) break;
+DateTime consoleHistoryDay;
+if (!DateTime.TryParse(state.ConsoleHistoryDate, out consoleHistoryDay)) consoleHistoryDay = DateTime.UtcNow.Date;
+state.ConsoleHistoryDate = consoleHistoryDay.AddDays(ToInt(Get(args, 1, "0"))).ToString("yyyy-MM-dd");
+state.ConsoleHistoryMode = true;
+state.ConsoleHistoryPage = 0;
 break;
 case "consolewrap":
 state.ConsoleWrap = !state.ConsoleWrap;
@@ -1753,6 +1983,11 @@ case "select":
 state.SelectedPlayerId = Get(args, 1, null);
 state.Tab = "players";
 state.PlayerCupboardPage = 0;
+break;
+case "roleselect":
+if (!CanSeeTab(player, "roles")) break;
+state.SelectedPlayerId = Get(args, 1, null);
+state.Tab = "roles";
 break;
 case "staffselect":
 state.SelectedPlayerId = Get(args, 1, null);
@@ -2196,6 +2431,28 @@ if (!staffOnDuty.Add(player.userID)) staffOnDuty.Remove(player.userID);
 LogSuccess(player, "Staff", staffOnDuty.Contains(player.userID) ? "DutyStarted" : "DutyEnded", player.UserIDString, player.displayName, "Staff duty toggle");
 RefreshOpenPanels("staff");
 RefreshOpenPanels("dashboard");
+break;
+case "roleassign":
+AssignManagedRole(player, target, value, false);
+break;
+case "rolereplace":
+AssignManagedRole(player, target, value, true);
+break;
+case "roleremove":
+RemoveManagedRole(player, target, value);
+break;
+case "historyday":
+if (!CanSeeTab(player, "logs")) break;
+DateTime historyDay;
+if (!DateTime.TryParse(state.HistoryDate, out historyDay)) historyDay = DateTime.UtcNow.Date;
+state.HistoryDate = historyDay.AddDays(ToInt(target, 0)).ToString("yyyy-MM-dd");
+state.HistoryPage = 0;
+break;
+case "historystream":
+if (!CanSeeTab(player, "logs")) break;
+state.HistoryCategory = target;
+state.HistoryCategory = AllowedHistoryStream(state);
+state.HistoryPage = 0;
 break;
 case "kick":
 if (!CanKick(player) || BlockedBySafeMode(player, "kick", "Moderation") || IsRateLimited(player, "kick:" + target, 2.0) || !CanTargetPlayer(player, target, "kick")) return;
@@ -2721,8 +2978,8 @@ Panel(container, $"{UiRoot}.Top", UiRoot, "0.08 0.09 0.10 0.98", "0 0.91", "1 0.
 Panel(container, $"{UiRoot}.Top.Brand", $"{UiRoot}.Top", activeSkin.Accent, "0.014 0.19", "0.052 0.81");
 Label(container, $"{UiRoot}.Top.BrandText", $"{UiRoot}.Top.Brand", "LA", 10, "0 0", "1 1", TextAnchor.MiddleCenter);
 Panel(container, $"{UiRoot}.Top.BrandStatus", $"{UiRoot}.Top", activeSkin.AccentAlt, "0.047 0.68", "0.056 0.82");
-Label(container, $"{UiRoot}.Top.Title", $"{UiRoot}.Top", config.Title, 13, "0.065 0.42", "0.32 0.82", TextAnchor.MiddleLeft);
-Label(container, $"{UiRoot}.Top.Subtitle", $"{UiRoot}.Top", "RUST SERVER CONTROL CENTER", 7, "0.065 0.15", "0.32 0.43", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Top.Title", $"{UiRoot}.Top", state.Surface == "chatmod" ? "Chat Moderation" : state.Surface == "staff" ? "Staff Operations" : config.Title, 13, "0.065 0.42", "0.32 0.82", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Top.Subtitle", $"{UiRoot}.Top", state.Surface == "admin" ? "RUST SERVER CONTROL CENTER" : "ROLE-FOCUSED OPERATIONS", 7, "0.065 0.15", "0.32 0.43", TextAnchor.MiddleLeft);
 Panel(container, $"{UiRoot}.Top.Accent", $"{UiRoot}.Top", activeSkin.Accent, "0 0", "0.72 0.018");
 Panel(container, $"{UiRoot}.Top.AccentAlt", $"{UiRoot}.Top", activeSkin.AccentAlt, "0.72 0", "1 0.018");
 DrawTopSearch(container, state);
@@ -2742,6 +2999,7 @@ else if (state.Tab == "staff") DrawStaffTools(container, player, state);
 else if (state.Tab == "chat") DrawChat(container, player, state);
 else if (state.Tab == "reports") DrawReports(container, player, state);
 else if (state.Tab == "manage") DrawManage(container, player, state);
+else if (state.Tab == "roles") DrawRoleAccess(container, player, state);
 else if (state.Tab == "convars") DrawConVars(container, player, state);
 else if (state.Tab == "wipe") DrawWipe(container, player);
 else if (state.Tab == "appearance") DrawAppearance(container, player);
@@ -2753,28 +3011,56 @@ CuiHelper.AddUi(player, container);
 }
 private void DrawNav(CuiElementContainer container, BasePlayer player, PanelState state)
 {
-Label(container, $"{UiRoot}.Nav.MainLabel", $"{UiRoot}.Nav", "MAIN", 7, "0.08 0.880", "0.92 0.920", TextAnchor.MiddleLeft);
-DrawNavItem(container, player, state, "dashboard", "assets/icons/info.png", "Dashboard", 0.825);
-DrawNavItem(container, player, state, "console", "assets/icons/broadcast.png", "Live Console", 0.765);
-DrawNavItem(container, player, state, "players", "assets/icons/occupied.png", "Players", 0.705, BasePlayer.activePlayerList.Count.ToString());
-DrawNavItem(container, player, state, "chat", "assets/icons/broadcast.png", "Chat", 0.645, ChatBadgeText());
-Label(container, $"{UiRoot}.Nav.ToolsLabel", $"{UiRoot}.Nav", "TOOLS", 7, "0.08 0.585", "0.92 0.625", TextAnchor.MiddleLeft);
-DrawNavItem(container, player, state, "staff", "assets/icons/authorize.png", "Staff Tools", 0.530);
-DrawNavItem(container, player, state, "reports", "assets/icons/warning.png", "Moderation", 0.470, (storedData.Reports.Count(r => r.Status != "Resolved") + storedData.Cases.Count(c => c != null && c.Status != "Closed")).ToString());
-DrawNavItem(container, player, state, "wipe", "assets/icons/refresh.png", "Wipe", 0.410);
-Label(container, $"{UiRoot}.Nav.ManageLabel", $"{UiRoot}.Nav", "MANAGEMENT", 7, "0.08 0.350", "0.92 0.390", TextAnchor.MiddleLeft);
-DrawNavItem(container, player, state, "manage", "assets/icons/workshop.png", "Manage", 0.295);
-DrawNavItem(container, player, state, "convars", "assets/icons/level_metal.png", "ConVars", 0.235);
-DrawNavItem(container, player, state, "appearance", "assets/icons/brush.png", "Appearance", 0.175);
-DrawNavItem(container, player, state, "settings", "assets/icons/gear.png", "Settings", 0.115);
-DrawNavItem(container, player, state, "logs", "assets/icons/info.png", "Logs", 0.055);
+var y = 0.94;
+DrawNavSection(container, player, state, "Main", new[]
+{
+new[] { "dashboard", "assets/icons/info.png", "Dashboard" },
+new[] { "console", "assets/icons/broadcast.png", "Live Console" },
+new[] { "players", "assets/icons/occupied.png", "Players" },
+new[] { "chat", "assets/icons/broadcast.png", "Chat" }
+}, ref y);
+DrawNavSection(container, player, state, "Tools", new[]
+{
+new[] { "staff", "assets/icons/authorize.png", "Staff Tools" },
+new[] { "reports", "assets/icons/warning.png", "Moderation" },
+new[] { "wipe", "assets/icons/refresh.png", "Wipe" }
+}, ref y);
+DrawNavSection(container, player, state, "Management", new[]
+{
+new[] { "manage", "assets/icons/workshop.png", "Manage" },
+new[] { "roles", "assets/icons/authorize.png", "Role Access" },
+new[] { "convars", "assets/icons/level_metal.png", "ConVars" },
+new[] { "appearance", "assets/icons/brush.png", "Appearance" },
+new[] { "settings", "assets/icons/gear.png", "Settings" },
+new[] { "logs", "assets/icons/info.png", "History" }
+}, ref y);
+}
+private void DrawNavSection(CuiElementContainer container, BasePlayer player, PanelState state, string title, string[][] definitions, ref double y)
+{
+var visible = definitions.Where(item => item != null && item.Length >= 3 && CanSeeTab(player, item[0])).ToList();
+if (visible.Count == 0) return;
+Label(container, $"{UiRoot}.Nav.Section.{SafeName(title)}", $"{UiRoot}.Nav", title.ToUpperInvariant(), 7, $"0.08 {y - 0.028:0.000}", $"0.92 {y:0.000}", TextAnchor.MiddleLeft);
+y -= 0.078;
+foreach (var item in visible)
+{
+DrawNavItem(container, player, state, item[0], item[1], item[2], y, NavBadge(item[0]));
+y -= 0.054;
+}
+y -= 0.018;
+}
+private string NavBadge(string tab)
+{
+if (tab == "players") return BasePlayer.activePlayerList.Count.ToString();
+if (tab == "chat") return ChatBadgeText();
+if (tab == "reports") return (storedData.Reports.Count(r => r.Status != "Resolved") + storedData.Cases.Count(c => c != null && c.Status != "Closed")).ToString();
+return null;
 }
 private void DrawNavItem(CuiElementContainer container, BasePlayer player, PanelState state, string tab, string iconSprite, string label, double y, string badge = null)
 {
 if (!CanSeeTab(player, tab)) return;
 var selected = state.Tab == tab;
 var row = $"{UiRoot}.Nav.{tab}";
-Panel(container, row, $"{UiRoot}.Nav", selected ? activeSkin.PanelAlt : "0 0 0 0", $"0.055 {y}", $"0.945 {y + 0.055}");
+Panel(container, row, $"{UiRoot}.Nav", selected ? activeSkin.PanelAlt : "0 0 0 0", $"0.055 {y:0.000}", $"0.945 {y + 0.047:0.000}");
 if (selected) Panel(container, $"{row}.Accent", row, activeSkin.Accent, "0 0.16", "0.012 0.84");
 Panel(container, $"{row}.IconTile", row, selected ? activeSkin.Accent : activeSkin.Button, "0.055 0.16", "0.175 0.84");
 SpriteImage(container, $"{row}.Icon", $"{row}.IconTile", iconSprite, selected ? "1 1 1 1" : activeSkin.Text, "0.21 0.21", "0.79 0.79");
@@ -2797,9 +3083,11 @@ Input(container, $"{UiRoot}.Top.Search.Input", $"{UiRoot}.Top.Search", value, $"
 private string CurrentFilterKey(PanelState state)
 {
 if (state.Tab == "players") return "players";
+if (state.Tab == "roles") return "roles";
 if (state.Tab == "staff") return state.StaffSubTab == "groups" ? "staffgroups" : "staffplayers";
 if (state.Tab == "chat") return "chat";
 if (state.Tab == "console") return "console";
+if (state.Tab == "logs") return "history";
 if (state.Tab == "reports") return state.ModerationSubTab == "bans" ? "bans" : state.ModerationSubTab == "cases" ? "cases" : "reports";
 if (state.Tab == "convars") return "convars";
 if (state.Tab == "manage" && state.SubTab == "groups") return "groups";
@@ -2809,9 +3097,10 @@ return "players";
 }
 private string CurrentFilterValue(PanelState state)
 {
-if (state.Tab == "players" || state.Tab == "staff") return state.PlayerFilter;
+if (state.Tab == "players" || state.Tab == "staff" || state.Tab == "roles") return state.PlayerFilter;
 if (state.Tab == "chat") return state.ChatFilter;
 if (state.Tab == "console") return state.ConsoleFilter;
+if (state.Tab == "logs") return state.HistoryFilter;
 if (state.Tab == "reports") return state.ModerationSubTab == "bans" ? state.BanFilter : state.ModerationSubTab == "cases" ? state.CaseFilter : state.ReportFilter;
 if (state.Tab == "convars") return state.ConVarFilter;
 if (state.Tab == "manage" && state.SubTab == "groups") return state.GroupFilter;
@@ -2939,8 +3228,14 @@ DrawConsoleCategoryButton(container, state, "connections", "Connections", 0.535,
 Panel(container, $"{UiRoot}.Body.Console.Toolbar.Search", $"{UiRoot}.Body.Console.Toolbar", "0.02 0.025 0.03 0.98", "0.64 0.20", "0.94 0.78");
 Input(container, $"{UiRoot}.Body.Console.Toolbar.Search.Input", $"{UiRoot}.Body.Console.Toolbar.Search", state.ConsoleFilter, "liveadmin.filter console", 8, "0.03 0", "0.97 1");
 Panel(container, $"{UiRoot}.Body.Console.Feed", $"{UiRoot}.Body", "0.045 0.05 0.055 0.96", "0.04 0.26", "0.96 0.76");
-var lines = GetConsoleLines(state.ConsoleTab, state.ConsoleFilter).Take(state.ConsoleWrap ? 8 : 11).ToList();
-Label(container, $"{UiRoot}.Body.Console.Feed.Status", $"{UiRoot}.Body.Console.Feed", $"{(state.ConsolePaused ? "PAUSED" : "LIVE 30s")}   Runtime {liveConsoleBuffer.Count}   Plugins {liveConsoleBuffer.Count(l => l.Origin == "plugins")}   Errors {liveConsoleBuffer.Count(l => l.Kind == "errors")}   Warnings {liveConsoleBuffer.Count(l => l.Kind == "warnings")}", 7, "0.52 0.955", "0.975 0.995", TextAnchor.MiddleRight);
+if (string.IsNullOrEmpty(state.ConsoleHistoryDate)) state.ConsoleHistoryDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
+var allLines = state.ConsoleHistoryMode ? GetHistoricalConsoleLines(state.ConsoleHistoryDate, state.ConsoleTab, state.ConsoleFilter) : GetConsoleLines(state.ConsoleTab, state.ConsoleFilter);
+var pageSize = state.ConsoleWrap ? 7 : 9;
+var maxPage = Math.Max(0, (allLines.Count - 1) / pageSize);
+state.ConsoleHistoryPage = state.ConsoleHistoryMode ? Math.Min(state.ConsoleHistoryPage, maxPage) : 0;
+var lines = (state.ConsoleHistoryMode ? allLines.Skip(state.ConsoleHistoryPage * pageSize) : allLines).Take(pageSize).ToList();
+var status = state.ConsoleHistoryMode ? $"ARCHIVE  {state.ConsoleHistoryDate} UTC   {allLines.Count} entries" : $"{(state.ConsolePaused ? "PAUSED" : "LIVE")}   Runtime {liveConsoleBuffer.Count}   Plugins {liveConsoleBuffer.Count(l => l.Origin == "plugins")}   Errors {liveConsoleBuffer.Count(l => l.Kind == "errors")}   Warnings {liveConsoleBuffer.Count(l => l.Kind == "warnings")}";
+Label(container, $"{UiRoot}.Body.Console.Feed.Status", $"{UiRoot}.Body.Console.Feed", status, 7, "0.35 0.955", "0.975 0.995", TextAnchor.MiddleRight);
 var y = 0.88;
 if (lines.Count == 0)
 {
@@ -2951,6 +3246,7 @@ foreach (var line in lines)
 DrawConsoleLine(container, $"{UiRoot}.Body.Console.Feed", line, y, state.ConsoleWrap);
 y -= state.ConsoleWrap ? 0.105 : 0.075;
 }
+if (state.ConsoleHistoryMode) MiniPager(container, $"{UiRoot}.Body.Console.HistoryPager", $"{UiRoot}.Body.Console.Feed", state.ConsoleHistoryPage, allLines.Count, pageSize, "consolehistory", "0.39 0.01", "0.61 0.075");
 Panel(container, $"{UiRoot}.Body.Console.Command", $"{UiRoot}.Body", "0.075 0.08 0.09 1", "0.04 0.08", "0.70 0.235");
 Label(container, $"{UiRoot}.Body.Console.Command.Title", $"{UiRoot}.Body.Console.Command", "Run Command", 12, "0.035 0.68", "0.35 0.94", TextAnchor.MiddleLeft);
 Panel(container, $"{UiRoot}.Body.Console.Command.Box", $"{UiRoot}.Body.Console.Command", "0.02 0.025 0.03 0.98", "0.035 0.18", "0.76 0.58");
@@ -2961,7 +3257,15 @@ Button(container, $"{UiRoot}.Body.Console.Pause", $"{UiRoot}.Body.Console.Option
 Button(container, $"{UiRoot}.Body.Console.Wrap", $"{UiRoot}.Body.Console.Options", state.ConsoleWrap ? "Wrap ON" : "Wrap OFF", "liveadmin.ui consolewrap", state.ConsoleWrap ? config.SuccessColor : "0.12 0.13 0.14 1", "0.29 0.55", "0.52 0.84", 7);
 Button(container, $"{UiRoot}.Body.Console.Export", $"{UiRoot}.Body.Console.Options", "Export", "liveadmin.ui act consoleexport", config.AccentColor, "0.54 0.55", "0.76 0.84", 7);
 Button(container, $"{UiRoot}.Body.Console.Clear", $"{UiRoot}.Body.Console.Options", "Clear", "liveadmin.ui act consoleclear", config.DangerColor, "0.78 0.55", "0.96 0.84", 7);
-Button(container, $"{UiRoot}.Body.Console.Mini", $"{UiRoot}.Body.Console.Options", state.ConsoleMiniOpen ? "Mini ON" : "Mini Console", "liveadmin.ui consolemini", state.ConsoleMiniOpen ? config.SuccessColor : config.WarningColor, "0.25 0.12", "0.75 0.42", 7);
+Button(container, $"{UiRoot}.Body.Console.LiveMode", $"{UiRoot}.Body.Console.Options", "Live", "liveadmin.ui consolemode live", !state.ConsoleHistoryMode ? config.SuccessColor : "0.12 0.13 0.14 1", "0.04 0.12", "0.20 0.42", 7);
+Button(container, $"{UiRoot}.Body.Console.HistoryMode", $"{UiRoot}.Body.Console.Options", "Archive", "liveadmin.ui consolemode history", state.ConsoleHistoryMode ? config.AccentColor : "0.12 0.13 0.14 1", "0.22 0.12", "0.40 0.42", 7);
+if (state.ConsoleHistoryMode)
+{
+Button(container, $"{UiRoot}.Body.Console.HistoryPrev", $"{UiRoot}.Body.Console.Options", "<", "liveadmin.ui consolehistoryday -1", "0.12 0.13 0.14 1", "0.43 0.12", "0.53 0.42", 7);
+Label(container, $"{UiRoot}.Body.Console.HistoryDate", $"{UiRoot}.Body.Console.Options", state.ConsoleHistoryDate, 7, "0.54 0.12", "0.84 0.42", TextAnchor.MiddleCenter);
+Button(container, $"{UiRoot}.Body.Console.HistoryNext", $"{UiRoot}.Body.Console.Options", ">", "liveadmin.ui consolehistoryday 1", "0.12 0.13 0.14 1", "0.86 0.12", "0.96 0.42", 7);
+}
+else Button(container, $"{UiRoot}.Body.Console.Mini", $"{UiRoot}.Body.Console.Options", state.ConsoleMiniOpen ? "Mini ON" : "Mini Console", "liveadmin.ui consolemini", state.ConsoleMiniOpen ? config.SuccessColor : config.WarningColor, "0.50 0.12", "0.94 0.42", 7);
 }
 private void DrawConsoleCategoryButton(CuiElementContainer container, PanelState state, string key, string label, double x, double width)
 {
@@ -3061,6 +3365,54 @@ return lines
 .OrderByDescending(l => l.Time)
 .ToList();
 }
+private List<ConsoleLine> GetHistoricalConsoleLines(string date, string category, string filter)
+{
+category = CleanConsoleTab(category);
+var lines = new List<ConsoleLine>();
+foreach (var record in ReadArchive("console", date).Concat(archiveBuffer.Where(item => item != null && item.Stream == "console" && item.TimestampUtc.StartsWith(date))))
+{
+if (record == null) continue;
+var severity = (record.Severity ?? string.Empty).ToLowerInvariant();
+var origin = (record.Category ?? string.Empty).ToLowerInvariant();
+lines.Add(new ConsoleLine
+{
+Id = "archive:console:" + record.Id,
+Time = ParseArchiveTimestamp(record.TimestampUtc).ToString("yyyy-MM-dd HH:mm:ss"),
+Kind = severity == "error" ? "errors" : severity == "warning" ? "warnings" : origin == "plugins" ? "plugins" : "server",
+Origin = origin,
+Source = string.IsNullOrEmpty(record.Source) ? "Server" : record.Source,
+Text = record.Message ?? string.Empty
+});
+}
+foreach (var record in ReadArchive("audit", date).Concat(archiveBuffer.Where(item => item != null && item.Stream == "audit" && item.TimestampUtc.StartsWith(date))))
+{
+if (record == null) continue;
+var audit = new ActionLog { Category = record.Category, Result = record.Result, Action = record.Action, Target = record.TargetId, TargetName = record.TargetName, Details = record.Message };
+lines.Add(new ConsoleLine
+{
+Id = "archive:audit:" + record.Id,
+Time = ParseArchiveTimestamp(record.TimestampUtc).ToString("yyyy-MM-dd HH:mm:ss"),
+Kind = ConsoleKind(audit),
+Origin = string.Equals(record.Category, "Plugin", StringComparison.OrdinalIgnoreCase) ? "plugins" : "audit",
+Source = string.IsNullOrEmpty(record.ActorName) ? "Server" : record.ActorName,
+Text = ConsoleLogText(audit)
+});
+}
+foreach (var record in ReadArchive("chat", date).Concat(archiveBuffer.Where(item => item != null && item.Stream == "chat" && item.TimestampUtc.StartsWith(date))))
+{
+if (record == null) continue;
+lines.Add(new ConsoleLine
+{
+Id = "archive:chat:" + record.Id,
+Time = ParseArchiveTimestamp(record.TimestampUtc).ToString("yyyy-MM-dd HH:mm:ss"),
+Kind = string.Equals(record.Result, "Blocked", StringComparison.OrdinalIgnoreCase) ? "errors" : "chat",
+Origin = "chat",
+Source = string.IsNullOrEmpty(record.ActorName) ? "Unknown" : record.ActorName,
+Text = record.Message ?? string.Empty
+});
+}
+return lines.Where(line => ConsoleCategoryMatches(category, line)).Where(line => ConsoleTextMatches(line, filter)).OrderByDescending(line => line.Time).ToList();
+}
 private string ConsoleLogText(ActionLog log)
 {
 var result = string.IsNullOrEmpty(log.Result) ? "Success" : log.Result;
@@ -3098,10 +3450,10 @@ return value == "server" || value == "plugins" || value == "warnings" || value =
 private void ExportConsoleLog(BasePlayer player)
 {
 var state = GetState(player);
-var lines = GetConsoleLines(state.ConsoleTab, state.ConsoleFilter);
+var lines = state.ConsoleHistoryMode ? GetHistoricalConsoleLines(state.ConsoleHistoryDate, state.ConsoleTab, state.ConsoleFilter) : GetConsoleLines(state.ConsoleTab, state.ConsoleFilter);
 var folder = Path.Combine(Interface.Oxide.RootDirectory, "logs", "LiveAdmin");
 Directory.CreateDirectory(folder);
-var file = Path.Combine(folder, $"console-{DateTime.UtcNow:yyyyMMdd-HHmmss}.txt");
+var file = Path.Combine(folder, state.ConsoleHistoryMode ? $"console-{state.ConsoleHistoryDate}-{DateTime.UtcNow:HHmmss}.txt" : $"console-{DateTime.UtcNow:yyyyMMdd-HHmmss}.txt");
 File.WriteAllLines(file, lines.Select(l => $"{l.Time} [{l.Kind}] {l.Source}: {l.Text}").ToArray());
 Reply(player, $"Console exported: {file}");
 Log(player, "ConsoleExport", state.ConsoleTab, $"{lines.Count} lines");
@@ -3180,7 +3532,7 @@ var profile = GetPlayerProfile(selected.UserIDString);
 var groups = permission.GetUserGroups(selected.UserIDString);
 var openReports = storedData.Reports.Count(r => r.TargetId == selected.UserIDString && r.Status != "Resolved");
 var warnings = storedData.Warnings.Count(w => w != null && w.TargetId == selected.UserIDString);
-var address = selected.IsConnected ? GetPlayerAddress(selected) : profile?.LastIp ?? "n/a";
+var address = CanViewSensitivePlayerData(player) ? (selected.IsConnected ? GetPlayerAddress(selected) : profile?.LastIp ?? "n/a") : "hidden";
 DrawInfoCardIn(container, $"{UiRoot}.Body.Detail", "Connection", $"IP {address}", $"Ping {GetPlayerPing(selected)}", $"Session {GetConnectionAge(selected)}", 0.04, 0.65, 0.33, 0.78);
 DrawInfoCardIn(container, $"{UiRoot}.Body.Detail", "Account", $"First {ShortDate(profile?.FirstSeen)}", $"Connections {profile?.Connections ?? 0}", $"Auth {selected.net?.connection?.authLevel ?? 0}", 0.355, 0.65, 0.645, 0.78);
 DrawInfoCardIn(container, $"{UiRoot}.Body.Detail", "Staff Record", $"Reports {openReports}", $"Warnings {warnings}", $"Notes {GetNotes(selected.UserIDString).Count}", 0.67, 0.65, 0.96, 0.78);
@@ -3386,7 +3738,7 @@ Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Title", $"{UiRoot}.Body.St
 Label(container, $"{UiRoot}.Body.StaffDetail.Identity.SteamLabel", $"{UiRoot}.Body.StaffDetail.Identity", "Steam ID", 8, "0.03 0.12", "0.16 0.55", TextAnchor.MiddleLeft);
 Panel(container, $"{UiRoot}.Body.StaffDetail.Identity.SteamBox", $"{UiRoot}.Body.StaffDetail.Identity", "0.02 0.025 0.03 0.98", "0.17 0.16", "0.54 0.54");
 Input(container, $"{UiRoot}.Body.StaffDetail.Identity.SteamInput", $"{UiRoot}.Body.StaffDetail.Identity.SteamBox", selected.UserIDString, "liveadmin.noop", 8, "0.03 0", "0.97 1");
-Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Ip", $"{UiRoot}.Body.StaffDetail.Identity", $"IP {GetPlayerAddress(selected)}", 8, "0.58 0.36", "0.97 0.72", TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Ip", $"{UiRoot}.Body.StaffDetail.Identity", $"IP {(CanViewSensitivePlayerData(player) ? GetPlayerAddress(selected) : "hidden")}", 8, "0.58 0.36", "0.97 0.72", TextAnchor.MiddleLeft);
 Label(container, $"{UiRoot}.Body.StaffDetail.Identity.Seen", $"{UiRoot}.Body.StaffDetail.Identity", $"First {ShortDate(profile?.FirstSeen)}   Last {ShortDate(profile?.LastSeen)}", 7, "0.58 0.04", "0.97 0.34", TextAnchor.MiddleLeft);
 Panel(container, $"{UiRoot}.Body.StaffDetail.GroupsBox", $"{UiRoot}.Body.StaffDetail", "0.055 0.06 0.07 0.96", "0.04 0.42", "0.96 0.56");
 Label(container, $"{UiRoot}.Body.StaffDetail.GroupsBox.Title", $"{UiRoot}.Body.StaffDetail.GroupsBox", "Groups", 10, "0.02 0.58", "0.98 0.96", TextAnchor.MiddleLeft);
@@ -4381,19 +4733,125 @@ DrawSettingsToggle(container, player, "Safe Mode", "Blocks high-risk actions whi
 DrawSettingsToggle(container, player, "Command Safety", "Blocks unsafe command patterns and protected prefixes.", config.EnableCommandSafety, "settingscommandsafety", 0.44);
 DrawSettingsToggle(container, player, "Global Chat Announcements", "Allows configured mute/unmute announcements to global chat.", config.AllowGlobalChatAnnouncements, "settingschatannounce", 0.26);
 }
+private Dictionary<string, string[]> ManagedRolePermissions()
+{
+return new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+{
+["chatmod"] = new[] { PermUse, PermInterfaceChatMod, PermChatView, PermChatManage, PermPlayersView, PermPlayersMute, PermPlayersNotes, PermReportsView, PermCasesView },
+["staff"] = new[] { PermUse, PermInterfaceStaff, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermPlayersSensitiveView, PermReportsView, PermReportsManage, PermCasesView, PermCasesManage, PermStaffToolsView, PermStaffToolsActions, PermStaffToolsTickets, PermChatView, PermChatManage },
+["admin"] = new[] { PermUse, PermInterfaceAdmin, PermPlayersView, PermPlayersModerate, PermPlayersKick, PermPlayersBan, PermPlayersMute, PermPlayersNotes, PermPlayersTeleport, PermPlayersInventoryView, PermPlayersInventoryModify, PermPlayersSensitiveView, PermReportsView, PermReportsManage, PermCasesView, PermCasesManage, PermBansView, PermBansCreate, PermBansTemporary, PermBansRevoke, PermPluginsView, PermPluginsReload, PermPluginsConfigView, PermGroupsView, PermPermissionsView, PermServerInfo, PermServerQuickActions, PermServerMaintenance, PermServerRestart, PermServerWipeView, PermAuditView, PermChatView, PermChatManage, PermRolesView, PermRolesAssignChatMod, PermRolesAssignStaff, PermRolesRemove }
+};
+}
+private string ManagedRoleGroup(string role)
+{
+if (string.Equals(role, "chatmod", StringComparison.OrdinalIgnoreCase)) return config.ManagedRoles.ChatModeratorGroup;
+if (string.Equals(role, "staff", StringComparison.OrdinalIgnoreCase)) return config.ManagedRoles.StaffGroup;
+if (string.Equals(role, "admin", StringComparison.OrdinalIgnoreCase)) return config.ManagedRoles.AdminGroup;
+return string.Empty;
+}
+private void SynchronizeManagedRoleGroups()
+{
+if (config?.ManagedRoles?.Enabled != true || !config.ManagedRoles.SynchronizeGroupsOnStartup) return;
+foreach (var role in ManagedRolePermissions())
+{
+var group = ManagedRoleGroup(role.Key);
+if (string.IsNullOrEmpty(group)) continue;
+if (!permission.GroupExists(group)) permission.CreateGroup(group, "LiveAdmin " + role.Key, role.Key == "admin" ? 10 : role.Key == "staff" ? 20 : 30);
+foreach (var perm in role.Value) if (!permission.GroupHasPermission(group, perm)) permission.GrantGroupPermission(group, perm, this);
+}
+}
+private bool CanAssignManagedRole(BasePlayer actor, string role)
+{
+if (role == "admin") return Can(actor, PermOwner) || IsAuthLevel2(actor);
+if (role == "staff") return CanAny(actor, PermOwner, PermRolesAssignStaff);
+return role == "chatmod" && CanAny(actor, PermOwner, PermRolesAssignChatMod);
+}
+private void AssignManagedRole(BasePlayer actor, string targetId, string role, bool replace)
+{
+role = (role ?? string.Empty).ToLowerInvariant();
+if (!CanAssignManagedRole(actor, role) || string.IsNullOrEmpty(targetId)) { LogBlocked(actor, "Role", "RoleAssign", targetId, NameOf(targetId), role); return; }
+var group = ManagedRoleGroup(role);
+if (string.IsNullOrEmpty(group)) return;
+if (replace)
+foreach (var existing in new[] { config.ManagedRoles.ChatModeratorGroup, config.ManagedRoles.StaffGroup, config.ManagedRoles.AdminGroup })
+if (!string.Equals(existing, group, StringComparison.OrdinalIgnoreCase) && permission.UserHasGroup(targetId, existing)) permission.RemoveUserGroup(targetId, existing);
+permission.AddUserGroup(targetId, group);
+LogSuccess(actor, "Role", replace ? "RoleReplaced" : "RoleAssigned", targetId, NameOf(targetId), $"role={role}; group={group}");
+SaveData();
+}
+private void RemoveManagedRole(BasePlayer actor, string targetId, string role)
+{
+if (!CanAny(actor, PermOwner, PermRolesRemove) || string.IsNullOrEmpty(targetId)) return;
+var group = ManagedRoleGroup(role);
+if (string.IsNullOrEmpty(group) || (role == "admin" && !Can(actor, PermOwner) && !IsAuthLevel2(actor))) return;
+permission.RemoveUserGroup(targetId, group);
+LogSuccess(actor, "Role", "RoleRemoved", targetId, NameOf(targetId), $"role={role}; group={group}");
+SaveData();
+}
+private void DrawRoleAccess(CuiElementContainer container, BasePlayer player, PanelState state)
+{
+Header(container, "Role Access");
+if (!CanAny(player, PermOwner, PermRolesView)) { NoAccess(container); return; }
+var players = storedData.PlayerProfiles.Values.Where(profile => profile != null && (MatchesFilter(profile.Name, state.PlayerFilter) || MatchesFilter(profile.Id, state.PlayerFilter))).OrderByDescending(profile => profile.LastSeen).Take(7).ToList();
+var y = 0.79;
+foreach (var profile in players)
+{
+var selected = state.SelectedPlayerId == profile.Id;
+Button(container, $"{UiRoot}.Body.Role.Player.{profile.Id}", $"{UiRoot}.Body", $"{profile.Name}  {profile.Id}", $"liveadmin.ui roleselect {profile.Id}", selected ? config.AccentColor : "0.12 0.13 0.14 1", $"0.04 {y}", $"0.40 {y + 0.055}", 8, TextAnchor.MiddleLeft);
+y -= 0.065;
+}
+if (string.IsNullOrEmpty(state.SelectedPlayerId)) { Label(container, $"{UiRoot}.Body.Role.Hint", $"{UiRoot}.Body", "Select a player to manage role access.", 12, "0.45 0.60", "0.94 0.72", TextAnchor.MiddleCenter); return; }
+Label(container, $"{UiRoot}.Body.Role.Selected", $"{UiRoot}.Body", $"Selected: {NameOf(state.SelectedPlayerId)} ({state.SelectedPlayerId})", 12, "0.45 0.83", "0.94 0.90", TextAnchor.MiddleLeft);
+var roles = new[] { "chatmod", "staff", "admin" }; y = 0.68;
+foreach (var role in roles)
+{
+var group = ManagedRoleGroup(role); var assigned = permission.UserHasGroup(state.SelectedPlayerId, group); var count = ManagedRolePermissions()[role].Length;
+Label(container, $"{UiRoot}.Body.Role.{role}", $"{UiRoot}.Body", $"{role.ToUpperInvariant()}  |  {count} permissions  |  {(assigned ? "ASSIGNED" : "not assigned")}", 10, $"0.46 {y}", $"0.73 {y + 0.06}", TextAnchor.MiddleLeft);
+Button(container, $"{UiRoot}.Body.Role.{role}.Add", $"{UiRoot}.Body", assigned ? "Assigned" : "Assign", assigned ? string.Empty : $"liveadmin.ui act roleassign {state.SelectedPlayerId} {role}", assigned ? "0.16 0.30 0.18 1" : config.SuccessColor, $"0.74 {y}", $"0.82 {y + 0.055}", 8);
+Button(container, $"{UiRoot}.Body.Role.{role}.Replace", $"{UiRoot}.Body", "Replace", $"liveadmin.ui act rolereplace {state.SelectedPlayerId} {role}", config.AccentColor, $"0.83 {y}", $"0.90 {y + 0.055}", 8);
+Button(container, $"{UiRoot}.Body.Role.{role}.Remove", $"{UiRoot}.Body", "Remove", assigned ? $"liveadmin.ui act roleremove {state.SelectedPlayerId} {role}" : string.Empty, config.DangerColor, $"0.91 {y}", $"0.97 {y + 0.055}", 8);
+y -= 0.13;
+}
+}
+private string AllowedHistoryStream(PanelState state)
+{
+var requested = string.IsNullOrEmpty(state?.HistoryCategory) || state.HistoryCategory == "all" ? "audit" : state.HistoryCategory.ToLowerInvariant();
+if (state?.Surface == "chatmod") return "chat";
+if (state?.Surface == "staff") return requested == "chat" || requested == "session" ? requested : "audit";
+return requested == "console" || requested == "chat" || requested == "session" || requested == "metrics" ? requested : "audit";
+}
 private void DrawLogs(CuiElementContainer container, BasePlayer player, PanelState state)
 {
-Header(container, "Logs");
-if (!CanAny(player, PermOwner, PermAuditView)) { NoAccess(container); return; }
-var logs = storedData.Logs.OrderByDescending(l => l.Time).Take(config.LogsPerPage).ToList();
+Header(container, "Historical Records");
+if (!CanSeeTab(player, "logs")) { NoAccess(container); return; }
+if (string.IsNullOrEmpty(state.HistoryDate)) state.HistoryDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
+var historyStream = AllowedHistoryStream(state);
+var logs = ReadArchive(historyStream, state.HistoryDate).Concat(archiveBuffer.Where(record => record.Stream == historyStream && record.TimestampUtc.StartsWith(state.HistoryDate))).OrderByDescending(record => record.TimestampUtc).ToList();
+if (!string.IsNullOrEmpty(state.HistoryFilter)) logs = logs.Where(record => MatchesFilter(record.Category, state.HistoryFilter) || MatchesFilter(record.Severity, state.HistoryFilter) || MatchesFilter(record.Source, state.HistoryFilter) || MatchesFilter(record.ActorName, state.HistoryFilter) || MatchesFilter(record.ActorId, state.HistoryFilter) || MatchesFilter(record.TargetName, state.HistoryFilter) || MatchesFilter(record.TargetId, state.HistoryFilter) || MatchesFilter(record.Action, state.HistoryFilter) || MatchesFilter(record.Result, state.HistoryFilter) || MatchesFilter(record.Message, state.HistoryFilter)).ToList();
+if (state.Surface == "chatmod") logs = logs.Where(record => record.Category == "Chat" || record.Action.IndexOf("Chat", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+else if (state.Surface == "staff") logs = logs.Where(record => record.Category == "Moderation" || record.Category == "Report" || record.Category == "Connection" || record.Category == "Role" || record.Category == "Chat").ToList();
+var pageSize = Math.Max(5, config.LogsPerPage); var maxPage = Math.Max(0, (logs.Count - 1) / pageSize); state.HistoryPage = Math.Min(state.HistoryPage, maxPage);
+var historyTotal = logs.Count;
+Button(container, $"{UiRoot}.Body.History.PrevDay", $"{UiRoot}.Body", "< Day", "liveadmin.ui act historyday -1", "0.12 0.13 0.14 1", "0.04 0.85", "0.12 0.90", 8);
+Label(container, $"{UiRoot}.Body.History.Date", $"{UiRoot}.Body", $"{state.HistoryDate} UTC  |  {logs.Count} records", 10, "0.13 0.85", "0.35 0.90", TextAnchor.MiddleCenter);
+Button(container, $"{UiRoot}.Body.History.NextDay", $"{UiRoot}.Body", "Day >", "liveadmin.ui act historyday 1", "0.12 0.13 0.14 1", "0.36 0.85", "0.44 0.90", 8);
+if (state.Surface != "chatmod")
+{
+var streamX = 0.48;
+foreach (var stream in (state.Surface == "admin" ? new[] { "audit", "console", "chat", "session", "metrics" } : new[] { "audit", "chat", "session" }))
+{
+Button(container, $"{UiRoot}.Body.History.Stream.{stream}", $"{UiRoot}.Body", stream.ToUpperInvariant(), $"liveadmin.ui act historystream {stream}", historyStream == stream ? config.AccentColor : "0.12 0.13 0.14 1", $"{streamX:0.00} 0.85", $"{streamX + 0.085:0.00} 0.90", 7);
+streamX += 0.095;
+}
+}
+logs = logs.Skip(state.HistoryPage * pageSize).Take(pageSize).ToList();
 var y = 0.78;
 foreach (var log in logs)
 {
-var result = string.IsNullOrEmpty(log.Result) ? "Success" : log.Result;
-var category = string.IsNullOrEmpty(log.Category) ? CategorizeAction(log.Action) : log.Category;
-Label(container, $"{UiRoot}.Body.Log.{y}", $"{UiRoot}.Body", $"{log.Time}  [{result}/{category}]  {log.ActorName}  {log.Action}  {log.Target}  {log.Details}", 9, "0.04 " + y, "0.94 " + (y + 0.045), TextAnchor.MiddleLeft);
+Label(container, $"{UiRoot}.Body.Log.{log.Id}", $"{UiRoot}.Body", $"{log.TimestampUtc}  [{log.Result}/{log.Category}]  {log.ActorName}  {log.Action}  {log.TargetName}  {log.Message}", 8, "0.04 " + y, "0.94 " + (y + 0.045), TextAnchor.MiddleLeft);
 y -= 0.055;
 }
+MiniPager(container, $"{UiRoot}.Body.History.Pager", $"{UiRoot}.Body", state.HistoryPage, historyTotal, pageSize, "history", "0.40 0.02", "0.62 0.08");
 }
 private void DrawConfirm(CuiElementContainer container, PanelState state)
 {
@@ -4823,6 +5281,7 @@ private bool CanEditPluginConfig(BasePlayer player) => Can(player, PermOwner) ||
 private bool CanRestorePluginConfig(BasePlayer player) => Can(player, PermOwner) || Can(player, PermPluginsConfigRestore);
 private bool CanViewInventory(BasePlayer player) => CanAny(player, PermOwner, PermPlayersInventoryView, PermStaffToolsInventory);
 private bool CanModifyInventory(BasePlayer player) => CanAny(player, PermOwner, PermPlayersInventoryModify);
+private bool CanViewSensitivePlayerData(BasePlayer player) => GetState(player).Surface != "chatmod" && CanAny(player, PermOwner, PermPlayersSensitiveView);
 private bool CanManageStaffGroups(BasePlayer player) => CanAny(player, PermOwner, PermGroupsManage, PermStaffToolsGroups);
 private bool CanManageTickets(BasePlayer player) => CanAny(player, PermOwner, PermReportsManage, PermStaffToolsTickets);
 private bool CanViewChat(BasePlayer player) => CanAny(player, PermOwner, PermChatView, PermChatManage);
@@ -4872,6 +5331,10 @@ return true;
 }
 private bool CanSeeTab(BasePlayer player, string tab)
 {
+var surface = GetState(player).Surface ?? "admin";
+if (surface == "chatmod" && tab != "chat" && tab != "players" && tab != "reports" && tab != "logs") return false;
+if (surface == "staff" && tab != "dashboard" && tab != "players" && tab != "staff" && tab != "chat" && tab != "reports" && tab != "logs" && tab != "appearance") return false;
+if (tab == "roles") return surface == "admin" && CanAny(player, PermOwner, PermRolesView);
 if (tab == "console") return CanUseQuickActions(player);
 if (tab == "players") return Can(player, PermPlayersView);
 if (tab == "staff") return CanAny(player, PermStaffToolsView, PermStaffToolsModerate, PermStaffToolsActions, PermStaffToolsInventory, PermStaffToolsGroups, PermStaffToolsTickets, PermStaffToolsFun, PermStaffToolsDangerous, PermPlayersInventoryView, PermPlayersNotes);
@@ -4882,7 +5345,9 @@ if (tab == "convars") return CanEditServerInfo(player);
 if (tab == "wipe") return CanViewWipe(player);
 if (tab == "appearance") return Can(player, PermUse);
 if (tab == "settings") return Can(player, PermOwner);
-if (tab == "logs") return CanAny(player, PermOwner, PermAuditView);
+if (tab == "logs") return surface == "chatmod" ? CanViewChat(player)
+: surface == "staff" ? CanAny(player, PermAuditView, PermReportsView, PermPlayersView)
+: CanAny(player, PermOwner, PermAuditView);
 return true;
 }
 private PanelState GetState(BasePlayer player)
@@ -4897,6 +5362,7 @@ return state;
 private bool SetFilter(PanelState state, string target, string value)
 {
 if (target == "player") target = "players";
+if (target == "roleplayer") target = "roles";
 if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
@@ -4904,6 +5370,7 @@ if (target == "ban") target = "bans";
 if (target == "case") target = "cases";
 if (target == "chatmessage" || target == "chats") target = "chat";
 if (target == "console") target = "console";
+if (target == "log" || target == "logs") target = "history";
 if (target == "convar") target = "convars";
 if (target == "plugin") target = "plugins";
 if (target == "config" || target == "configvalue") target = "configvalues";
@@ -4966,6 +5433,20 @@ state.Tab = "manage";
 state.SubTab = "plugins";
 return true;
 }
+if (target == "roles")
+{
+state.PlayerFilter = value;
+state.HistoryPage = 0;
+state.Tab = "roles";
+return true;
+}
+if (target == "history")
+{
+state.HistoryFilter = value;
+state.HistoryPage = 0;
+state.Tab = "logs";
+return true;
+}
 if (target == "bans")
 {
 state.BanFilter = value;
@@ -4978,6 +5459,7 @@ if (target == "cases")
 {
 state.CaseFilter = value;
 state.CasePage = 0;
+state.HistoryPage = 0;
 state.Tab = "reports";
 state.ModerationSubTab = "cases";
 return true;
@@ -5020,6 +5502,7 @@ return false;
 private void ClearFilter(PanelState state, string target)
 {
 if (target == "player") target = "players";
+if (target == "roleplayer") target = "roles";
 if (target == "staffplayer") target = "staffplayers";
 if (target == "staffgroup") target = "staffgroups";
 if (target == "report" || target == "ticket") target = "reports";
@@ -5047,10 +5530,11 @@ state.ConfigFilter = string.Empty;
 state.GroupFilter = string.Empty;
 state.GroupDropdownFilter = string.Empty;
 state.PermissionFilter = string.Empty;
+state.HistoryFilter = string.Empty;
 ResetPages(state);
 return;
 }
-if (target == "players" || target == "staffplayers" || (target == "current" && (state.Tab == "players" || state.Tab == "staff")))
+if (target == "players" || target == "staffplayers" || target == "roles" || (target == "current" && (state.Tab == "players" || state.Tab == "staff" || state.Tab == "roles")))
 {
 state.PlayerFilter = string.Empty;
 state.PlayerPage = 0;
@@ -5098,6 +5582,12 @@ state.ChatPage = 0;
 else if (target == "console" || (target == "current" && state.Tab == "console"))
 {
 state.ConsoleFilter = string.Empty;
+state.ConsoleHistoryPage = 0;
+}
+else if (target == "history" || target == "logs" || (target == "current" && state.Tab == "logs"))
+{
+state.HistoryFilter = string.Empty;
+state.HistoryPage = 0;
 }
 else if (target == "convars" || (target == "current" && state.Tab == "convars"))
 {
@@ -5129,6 +5619,7 @@ state.TicketPage = 0;
 state.ChatPage = 0;
 state.BanPage = 0;
 state.CasePage = 0;
+state.ConsoleHistoryPage = 0;
 }
 private void ChangePage(PanelState state, string pageKey, int delta)
 {
@@ -5138,6 +5629,8 @@ else if (pageKey == "tickets") state.TicketPage = Math.Max(0, state.TicketPage +
 else if (pageKey == "bans") state.BanPage = Math.Max(0, state.BanPage + delta);
 else if (pageKey == "cases") state.CasePage = Math.Max(0, state.CasePage + delta);
 else if (pageKey == "chat") state.ChatPage = Math.Max(0, state.ChatPage + delta);
+else if (pageKey == "history") state.HistoryPage = Math.Max(0, state.HistoryPage + delta);
+else if (pageKey == "consolehistory") state.ConsoleHistoryPage = Math.Max(0, state.ConsoleHistoryPage + delta);
 else if (pageKey == "plugins") state.PluginPage = Math.Max(0, state.PluginPage + delta);
 else if (pageKey == "config") state.ConfigPage = Math.Max(0, state.ConfigPage + delta);
 else if (pageKey == "groups") state.GroupPage = Math.Max(0, state.GroupPage + delta);
@@ -5301,6 +5794,9 @@ return lowerCommand.StartsWith("oxide.grant group ") || lowerCommand.StartsWith(
 private void AddChatEntry(BasePlayer player, string message, string channel, bool blocked, string matchedWord)
 {
 EnsureDataDefaults();
+QueueArchive("chat", channel, blocked ? "Warning" : "Info", "Chat", player.UserIDString, player.displayName,
+player.UserIDString, player.displayName, blocked ? "ChatBlocked" : "ChatMessage", blocked ? "Blocked" : "Observed",
+string.IsNullOrEmpty(matchedWord) ? message : $"{message} | matched={matchedWord}");
 storedData.Chat.Add(new ChatEntry
 {
 Id = DateTime.UtcNow.Ticks + ":" + player.UserIDString,
@@ -5614,6 +6110,11 @@ var memory = currentProcess.WorkingSet64 / 1024f / 1024f;
 var disk = GetDiskUsedGiB();
 resourceHistory.Add(new ResourceSnapshot { Cpu = cpu, MemoryMb = memory, StorageUsed = disk, DiskGiB = disk, Time = Now() });
 if (resourceHistory.Count > 60) resourceHistory.RemoveRange(0, resourceHistory.Count - 60);
+if ((now - lastMetricArchiveAt).TotalSeconds >= 60)
+{
+lastMetricArchiveAt = now;
+QueueArchive("metrics", "Resources", "Info", Name, "server", "Server", string.Empty, string.Empty, "ResourceSample", "Observed", $"cpu={cpu:0.00}; memory_mb={memory:0.0}; disk_gib={disk:0.00}");
+}
 if (refreshDashboard && (now - lastDashboardRefreshAt).TotalSeconds >= 30)
 {
 lastDashboardRefreshAt = now;
@@ -5868,10 +6369,22 @@ var parsedNext = ParseStoredWipeUtc(storedData.NextAutoWipeUtc);
 if (!parsedNext.HasValue) return;
 var next = parsedNext.Value;
 if (DateTime.UtcNow < next) return;
-var mode = ScheduledWipeMode(next);
-if (!RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : config.AutoWipeCommands)) return;
+var lateness = DateTime.UtcNow - next;
+if (lateness > TimeSpan.FromMinutes(config.AutoWipeMaximumLatenessMinutes))
+{
 storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
 SaveData();
+Puts($"Skipped stale automatic wipe slot {next:yyyy-MM-dd HH:mm:ss} UTC ({lateness.TotalMinutes:0} minutes late). Next wipe: {storedData.NextAutoWipeUtc} UTC.");
+RefreshWipeViews();
+return;
+}
+var mode = ScheduledWipeMode(next);
+storedData.NextAutoWipeUtc = CalculateNextAutoWipe(DateTime.UtcNow).ToString("yyyy-MM-dd HH:mm:ss");
+SaveData();
+if (!RunWipeCommands(null, mode, mode == "ForceWipe" ? config.ForceWipeCommands : config.AutoWipeCommands))
+{
+LogFailed(null, "Wipe", mode + "Preparation", "server", string.Empty, $"Scheduled slot {next:yyyy-MM-dd HH:mm:ss} UTC failed and will not be retried automatically; next={storedData.NextAutoWipeUtc} UTC");
+}
 RefreshWipeViews();
 }
 private bool RunWipeCommands(BasePlayer actor, string action, List<string> commands)
@@ -5899,12 +6412,6 @@ if (!PrepareNextWorld(action, wipeSeed))
 activeWipeSeed = null;
 return false;
 }
-if (force && config.ForceWipeOfflineCleanup && !WriteForceWipeMarker(wipeSeed))
-{
-LogFailed(actor, "Wipe", action, "server", string.Empty, "Offline force-wipe marker could not be written; shutdown was cancelled.");
-activeWipeSeed = null;
-return false;
-}
 foreach (var command in (commands ?? new List<string>()).Where(c => !string.IsNullOrEmpty(c)))
 {
 var formatted = FormatWipeText(command);
@@ -5916,30 +6423,32 @@ activeWipeSeed = null;
 RefreshConsoleViews();
 return true;
 }
-private bool WriteForceWipeMarker(string wipeSeed)
+private bool WriteWipeMarker(string action, string wipeSeed)
 {
 try
 {
 if (!int.TryParse(wipeSeed, out var seed) || seed <= 0) return false;
+var force = string.Equals(action, "ForceWipe", StringComparison.OrdinalIgnoreCase);
 var root = GetWipeRoot();
 Directory.CreateDirectory(root);
 var marker = Path.Combine(root, ".liveadmin-force-wipe.pending");
 var lines = new[]
 {
 "version=1",
-"mode=force",
+"mode=" + (force ? "force" : "auto"),
 "seed=" + seed,
 "worldsize=" + Math.Max(1000, Math.Min(6000, config.AutoWipeMapSize)),
+"levelurl=" + (config.AutoWipeCustomMapUrl ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty),
 "wipe_map=" + (config.AutoWipeMap ? "1" : "0"),
-"wipe_blueprints=" + (config.ForceWipeBlueprints ? "1" : "0")
+"wipe_blueprints=" + ((force ? config.ForceWipeBlueprints : config.AutoWipeBlueprints) ? "1" : "0")
 };
 File.WriteAllLines(marker, lines);
-Puts("Offline force-wipe marker written. The startup wrapper will remove map and blueprint files while Rust is stopped.");
+Puts($"Offline {action} marker written. The startup wrapper will apply the next-world settings while Rust is stopped.");
 return true;
 }
 catch (Exception ex)
 {
-Puts("Failed to write offline force-wipe marker: " + ex.Message);
+Puts("Failed to write offline wipe marker: " + ex.Message);
 return false;
 }
 }
@@ -5959,9 +6468,9 @@ ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.seed " + seed);
 ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.worldsize " + size);
 ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.levelurl " + ConsoleArg(levelUrl));
 ConsoleSystem.Run(ConsoleSystem.Option.Server, "server.writecfg");
-if (!WriteNextWorldServerConfig(seed, size, levelUrl))
+if (!WriteWipeMarker(action, wipeSeed))
 {
-LogFailed(null, "Wipe", action, "server", string.Empty, "Could not persist the next world settings to cfg/server.cfg.");
+LogFailed(null, "Wipe", action, "server", string.Empty, "Could not write the startup wipe marker; shutdown was cancelled.");
 return false;
 }
 
@@ -5973,38 +6482,6 @@ storedData.PendingWipeLevelUrl = levelUrl;
 SaveData();
 Puts($"{action} prepared: next world seed={seed}, size={size}. Waiting for restart verification.");
 return true;
-}
-
-private bool WriteNextWorldServerConfig(int seed, int size, string levelUrl)
-{
-try
-{
-var cfgDirectory = Path.Combine(GetWipeRoot(), "cfg");
-Directory.CreateDirectory(cfgDirectory);
-var cfgPath = Path.Combine(cfgDirectory, "server.cfg");
-var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-{
-{ "server.seed", "server.seed " + seed },
-{ "server.worldsize", "server.worldsize " + size },
-{ "server.levelurl", "server.levelurl " + ConsoleArg(levelUrl ?? string.Empty) }
-};
-var lines = File.Exists(cfgPath) ? File.ReadAllLines(cfgPath).ToList() : new List<string>();
-for (var i = lines.Count - 1; i >= 0; i--)
-{
-var trimmed = (lines[i] ?? string.Empty).TrimStart();
-var key = replacements.Keys.FirstOrDefault(k => trimmed.Equals(k, StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith(k + " ", StringComparison.OrdinalIgnoreCase));
-if (key == null) continue;
-lines.RemoveAt(i);
-}
-lines.AddRange(replacements.Values);
-File.WriteAllLines(cfgPath, lines.ToArray());
-return true;
-}
-catch (Exception ex)
-{
-Puts("Failed to persist next-world server.cfg settings: " + ex.Message);
-return false;
-}
 }
 
 private void VerifyPendingWipe()
@@ -7192,7 +7669,9 @@ private void LogPlayerActivity(BasePlayer player, string action, string details)
 {
 var id = player?.UserIDString ?? string.Empty;
 var name = player?.displayName ?? id;
-WriteAudit(player, "Success", "Connection", action, id, name, details);
+var safeDetails = config?.HistoricalStorage?.PersistPlayerIpAddresses == false && action == "PlayerJoin" ? "Address redacted by retention policy" : details;
+WriteAudit(player, "Success", "Connection", action, id, name, safeDetails);
+QueueArchive("session", "Connection", "Info", Name, id, name, id, name, action, "Success", safeDetails);
 }
 private void LogSuccess(BasePlayer actor, string category, string action, string target, string targetName, string details)
 {
@@ -7226,6 +7705,8 @@ Result = result,
 TargetName = targetName,
 Category = category
 });
+QueueArchive("audit", category, result == "Failed" || result == "Blocked" ? "Warning" : "Info", Name,
+actor?.UserIDString ?? "server", actor?.displayName ?? "Server", target, targetName, action, result, details);
 if (storedData.Logs.Count > 500)
 {
 storedData.Logs.RemoveRange(0, storedData.Logs.Count - 500);
