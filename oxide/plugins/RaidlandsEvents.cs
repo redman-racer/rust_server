@@ -16,7 +16,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsEvents", "Raidlands", "0.6.3")]
+    [Info("RaidlandsEvents", "Raidlands", "0.6.9")]
     [Description("Raidlands raid-base event manager with automatic spawning, difficulty profiles, portable loot, durable rewards, history, and dedicated leaderboards.")]
     public class RaidlandsEvents : RustPlugin
     {
@@ -43,6 +43,7 @@ namespace Oxide.Plugins
         private const string CopyPasteDirectory = "copypaste/";
         private const string GenericRadiusMapMarkerPrefab = "assets/prefabs/tools/map/genericradiusmarker.prefab";
         private const string EventsManagerUi = "RaidlandsEvents.EventsManagerUi";
+        private static readonly int BagGuardPatrolCollisionMask = LayerMask.GetMask(new[] { "Construction", "Deployed", "Clutter", "World" });
         private const string EventsManagerAutomaticUi = "RaidlandsEvents.EventsManagerUi.Automatic";
         private const string EventsManagerWorkspaceUi = "RaidlandsEvents.EventsManagerUi.Workspace";
         private const string UiAccent = "0.12 0.58 0.55 1";
@@ -225,6 +226,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("Weight")]
             public float Weight = 1f;
+
+            [JsonProperty("Guard Bag Count")]
+            public int GuardBagCount;
         }
 
         private class RaidableBasesCompatibilityConfig
@@ -312,6 +316,27 @@ namespace Oxide.Plugins
 
             [JsonProperty("Authorize On Auto Turrets")]
             public bool AuthorizeOnAutoTurrets = true;
+
+            [JsonProperty("Bag Guard Respawn Delay Seconds")]
+            public float BagGuardRespawnDelaySeconds = 20f;
+
+            [JsonProperty("Bag Guard Reconcile Seconds")]
+            public float BagGuardReconcileSeconds = 2f;
+
+            [JsonProperty("Bag Guards Can Operate Doors")]
+            public bool BagGuardsCanOperateDoors = true;
+
+            [JsonProperty("Bag Guard Door Close Delay Seconds")]
+            public float BagGuardDoorCloseDelaySeconds = 3f;
+
+            [JsonProperty("Bag Guard Indoor Patrol Enabled")]
+            public bool BagGuardIndoorPatrolEnabled = true;
+
+            [JsonProperty("Bag Guard Indoor Patrol Speed")]
+            public float BagGuardIndoorPatrolSpeed = 2.2f;
+
+            [JsonProperty("Bag Guard Patrol Pause Seconds")]
+            public float BagGuardPatrolPauseSeconds = 2f;
         }
 
         private class RaidBaseProfile
@@ -543,6 +568,24 @@ namespace Oxide.Plugins
 
             [JsonProperty("Pasted Turret Survival Audit Delays Seconds")]
             public float[] PastedTurretSurvivalAuditDelaysSeconds = { 0.25f, 1.5f, 5f };
+
+            [JsonProperty("Default Turret Loadout")]
+            public TurretLoadoutConfig DefaultTurretLoadout = new TurretLoadoutConfig();
+        }
+
+        private class TurretLoadoutConfig
+        {
+            [JsonProperty("Enabled")]
+            public bool Enabled = true;
+
+            [JsonProperty("Weapon Short Name")]
+            public string WeaponShortName = "lmg.m249";
+
+            [JsonProperty("Ammo Short Name")]
+            public string AmmoShortName = "ammo.rifle.incendiary";
+
+            [JsonProperty("Rounds Per Turret")]
+            public int RoundsPerTurret = 500;
         }
 
         private class AdaptiveFoundationsConfig
@@ -826,7 +869,7 @@ namespace Oxide.Plugins
             public bool DespawnPastedEntities = true;
 
             [JsonProperty("Cleanup On Unload")]
-            public bool CleanupOnUnload = true;
+            public bool CleanupOnUnload = false;
 
             [JsonProperty("Completion Cleanup Delay Seconds")]
             public float CompletionCleanupDelaySeconds = 60f;
@@ -954,6 +997,9 @@ namespace Oxide.Plugins
             [JsonProperty("AutoTurretCount")]
             public int AutoTurretCount;
 
+            [JsonProperty("SleepingBagCount")]
+            public int SleepingBagCount;
+
             [JsonProperty("HasToolCupboard")]
             public bool HasToolCupboard;
 
@@ -1040,6 +1086,9 @@ namespace Oxide.Plugins
 
             [JsonProperty("RoamBotGuardEntityIds")]
             public List<ulong> RoamBotGuardEntityIds = new List<ulong>();
+
+            [JsonProperty("GuardBagBindings")]
+            public List<GuardBagBinding> GuardBagBindings = new List<GuardBagBinding>();
 
             [JsonProperty("HadToolCupboardInLayout")]
             public bool HadToolCupboardInLayout;
@@ -1136,6 +1185,43 @@ namespace Oxide.Plugins
 
             [JsonProperty("Adaptive Maximum Water Depth Meters")]
             public float AdaptiveMaximumWaterDepthMeters;
+        }
+
+        private class GuardBagBinding
+        {
+            [JsonProperty("BagEntityId")]
+            public ulong BagEntityId;
+
+            [JsonProperty("GuardEntityId")]
+            public ulong GuardEntityId;
+
+            [JsonProperty("GroupId")]
+            public string GroupId;
+
+            [JsonProperty("Destroyed")]
+            public bool Destroyed;
+
+            [JsonProperty("RespawnDueUnix")]
+            public double RespawnDueUnix;
+        }
+
+        private class BagGuardDefencePatrol : MonoBehaviour
+        {
+            public RaidlandsEvents Plugin;
+            public string InstanceId;
+            public ulong BagEntityId;
+            public Vector3 Destination;
+            public float PausedUntil;
+
+            private void FixedUpdate()
+            {
+                Plugin?.TickBagGuardDefencePatrol(this);
+            }
+
+            private void OnDestroy()
+            {
+                Plugin = null;
+            }
         }
 
         private class CleanupJob
@@ -1822,7 +1908,8 @@ namespace Oxide.Plugins
                 {
                     LayoutId = layout.LayoutId.Trim(),
                     Enabled = layout.Enabled,
-                    Weight = Mathf.Clamp(layout.Weight, 0.01f, 1000f)
+                    Weight = Mathf.Clamp(layout.Weight, 0.01f, 1000f),
+                    GuardBagCount = Mathf.Clamp(layout.GuardBagCount, 0, 20)
                 })
                 .GroupBy(layout => layout.LayoutId, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
@@ -1864,6 +1951,15 @@ namespace Oxide.Plugins
 
             if (config.Paste.CopyPasteArguments == null)
                 config.Paste.CopyPasteArguments = defaults.Paste.CopyPasteArguments;
+            if (config.Paste.DefaultTurretLoadout == null)
+                config.Paste.DefaultTurretLoadout = defaults.Paste.DefaultTurretLoadout;
+            if (string.IsNullOrWhiteSpace(config.Paste.DefaultTurretLoadout.WeaponShortName))
+                config.Paste.DefaultTurretLoadout.WeaponShortName = defaults.Paste.DefaultTurretLoadout.WeaponShortName;
+            if (string.IsNullOrWhiteSpace(config.Paste.DefaultTurretLoadout.AmmoShortName))
+                config.Paste.DefaultTurretLoadout.AmmoShortName = defaults.Paste.DefaultTurretLoadout.AmmoShortName;
+            config.Paste.DefaultTurretLoadout.WeaponShortName = config.Paste.DefaultTurretLoadout.WeaponShortName.Trim().ToLowerInvariant();
+            config.Paste.DefaultTurretLoadout.AmmoShortName = config.Paste.DefaultTurretLoadout.AmmoShortName.Trim().ToLowerInvariant();
+            config.Paste.DefaultTurretLoadout.RoundsPerTurret = Mathf.Clamp(config.Paste.DefaultTurretLoadout.RoundsPerTurret, 1, 100000);
             SetCopyPasteArgument("stability", "false");
             config.Paste.RandomRotationDegreesStep = Mathf.Max(0f, config.Paste.RandomRotationDegreesStep);
             config.Paste.GroundClearance = Mathf.Clamp(config.Paste.GroundClearance, 0f, 1.4f);
@@ -2001,6 +2097,11 @@ namespace Oxide.Plugins
                 defaults.RaidableBasesCompatibility.RoamBotGuards.HealthMultiplierByDifficulty, 0.1f, 5f);
             guards.LeashRadiusByDifficulty = NormalizeDifficultyFloatMap(guards.LeashRadiusByDifficulty,
                 defaults.RaidableBasesCompatibility.RoamBotGuards.LeashRadiusByDifficulty, 15f, 250f);
+            guards.BagGuardRespawnDelaySeconds = Mathf.Clamp(guards.BagGuardRespawnDelaySeconds, 5f, 600f);
+            guards.BagGuardReconcileSeconds = Mathf.Clamp(guards.BagGuardReconcileSeconds, 0.5f, 30f);
+            guards.BagGuardDoorCloseDelaySeconds = Mathf.Clamp(guards.BagGuardDoorCloseDelaySeconds, 1f, 30f);
+            guards.BagGuardIndoorPatrolSpeed = Mathf.Clamp(guards.BagGuardIndoorPatrolSpeed, 0.5f, 4f);
+            guards.BagGuardPatrolPauseSeconds = Mathf.Clamp(guards.BagGuardPatrolPauseSeconds, 0f, 30f);
         }
 
         private static Dictionary<string, int> NormalizeDifficultyIntMap(Dictionary<string, int> source,
@@ -2078,6 +2179,7 @@ namespace Oxide.Plugins
             ScheduleAutoSpawn();
             ScheduleAutomaticLocationSearch();
             StartExpiryTimer();
+            timer.Every(config.RaidableBasesCompatibility.RoamBotGuards.BagGuardReconcileSeconds, ReconcileActiveBagGuards);
             ResumeCompletedInstanceCleanup();
             timer.Once(5f, () => RetryRewardTransactions(null, false));
             timer.Once(7f, () => RetryPendingPurchaseRefunds());
@@ -2111,6 +2213,8 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
+            foreach (var patrol in UnityEngine.Object.FindObjectsOfType<BagGuardDefencePatrol>())
+                UnityEngine.Object.Destroy(patrol);
             autoSpawnTimer?.Destroy();
             automaticSearchTimer?.Destroy();
             spawnGridBuildTimer?.Destroy();
@@ -2124,8 +2228,13 @@ namespace Oxide.Plugins
             else
             {
                 DestroyAllMarkers();
-                SaveData();
+                SaveAllEventData();
             }
+        }
+
+        private void OnServerSave()
+        {
+            SaveAllEventData();
         }
 
         private void OnPlayerDisconnected(BasePlayer player, string reason)
@@ -2271,6 +2380,8 @@ namespace Oxide.Plugins
                 active.EntityIds = new List<ulong>();
             if (active.RoamBotGuardEntityIds == null)
                 active.RoamBotGuardEntityIds = new List<ulong>();
+            if (active.GuardBagBindings == null)
+                active.GuardBagBindings = new List<GuardBagBinding>();
             if (active.Scores == null)
                 active.Scores = new Dictionary<string, RaidBaseScoreEntry>(StringComparer.OrdinalIgnoreCase);
             if (active.PaidRewards == null)
@@ -4074,6 +4185,8 @@ namespace Oxide.Plugins
                         uiManagerPanels[player.userID] = requestedPanel == "load"
                                                          || requestedPanel == "rewards"
                                                          || requestedPanel == "automation"
+                                                         || requestedPanel == "turrets"
+                                                         || requestedPanel == "guards"
                             ? requestedPanel
                             : "active";
                     }
@@ -4163,6 +4276,26 @@ namespace Oxide.Plugins
                             string settingMessage;
                             AdjustAutomaticBaseSetting(args[1], delta, out settingMessage);
                             SendReply(player, $"{config.ChatPrefix} {settingMessage}");
+                        }
+                    }
+                    break;
+
+                case "turretsetting":
+                    string turretMessage;
+                    HandleTurretLoadoutUiAction(args.Skip(1).ToArray(), out turretMessage);
+                    if (!string.IsNullOrWhiteSpace(turretMessage))
+                        SendReply(player, $"{config.ChatPrefix} {turretMessage}");
+                    break;
+
+                case "guardbags":
+                    if (args.Length >= 3)
+                    {
+                        int delta;
+                        if (int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out delta))
+                        {
+                            string guardBagMessage;
+                            AdjustLayoutGuardBagCount(args[1], delta, out guardBagMessage);
+                            SendReply(player, $"{config.ChatPrefix} {guardBagMessage}");
                         }
                     }
                     break;
@@ -4428,6 +4561,55 @@ namespace Oxide.Plugins
             return true;
         }
 
+        private bool HandleTurretLoadoutUiAction(string[] args, out string message)
+        {
+            var loadout = config.Paste.DefaultTurretLoadout;
+            var action = args != null && args.Length > 0 ? args[0].ToLowerInvariant() : string.Empty;
+            switch (action)
+            {
+                case "toggle":
+                    loadout.Enabled = !loadout.Enabled;
+                    message = $"Default turret loadouts are now {(loadout.Enabled ? "enabled" : "disabled")}.";
+                    break;
+                case "amount":
+                    int delta;
+                    if (args.Length < 2 || !int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out delta))
+                    {
+                        message = "A valid rounds adjustment is required.";
+                        return false;
+                    }
+                    loadout.RoundsPerTurret = Mathf.Clamp(loadout.RoundsPerTurret + delta, 1, 100000);
+                    message = $"Default turret ammunition is now {loadout.RoundsPerTurret} rounds in one slot.";
+                    break;
+                case "reset":
+                    loadout.RoundsPerTurret = 500;
+                    message = "Default turret ammunition reset to 500 rounds in one slot.";
+                    break;
+                case "ammo":
+                    var ammunition = new[] { "ammo.rifle.incendiary", "ammo.rifle", "ammo.rifle.hv", "ammo.rifle.explosive" };
+                    var current = Array.FindIndex(ammunition, value => value.Equals(loadout.AmmoShortName, StringComparison.OrdinalIgnoreCase));
+                    loadout.AmmoShortName = ammunition[(current + 1 + ammunition.Length) % ammunition.Length];
+                    message = $"Default turret ammunition is now {loadout.AmmoShortName}.";
+                    break;
+                case "apply":
+                    var configured = 0;
+                    foreach (var active in data.ActiveRaidBases.Values.Where(value => value != null && value.Status != "cleaning"))
+                    {
+                        var result = ConfigureDefaultTurretLoadouts(active.EntityIds);
+                        if (!result.Equals("disabled", StringComparison.OrdinalIgnoreCase))
+                            configured++;
+                    }
+                    message = $"Applied the default turret loadout to {configured} active raid-base event(s).";
+                    break;
+                default:
+                    message = $"Unknown turret loadout action '{action}'.";
+                    return false;
+            }
+
+            SaveConfig();
+            return true;
+        }
+
         private bool AdjustAutomaticLayoutWeight(string layoutId, float delta, out string message)
         {
             var weighted = config.EventTypes.AutomaticBases.Layouts
@@ -4441,6 +4623,39 @@ namespace Oxide.Plugins
             weighted.Weight = Mathf.Clamp(weighted.Weight + delta, 0.1f, 1000f);
             SaveConfig();
             message = $"Automatic Bases layout {weighted.LayoutId} weight is now {weighted.Weight:0.#}.";
+            return true;
+        }
+
+        private bool AdjustLayoutGuardBagCount(string layoutId, int delta, out string message)
+        {
+            var weighted = config.EventTypes.AutomaticBases.Layouts.FirstOrDefault(entry => entry != null
+                && string.Equals(entry.LayoutId, layoutId, StringComparison.OrdinalIgnoreCase));
+            LayoutScanEntry scanned;
+            if (weighted == null || !data.Layouts.TryGetValue(layoutId, out scanned) || scanned == null)
+            {
+                message = $"Layout '{layoutId}' was not found.";
+                return false;
+            }
+            weighted.GuardBagCount = Mathf.Clamp(weighted.GuardBagCount + delta, 0, Math.Min(20, scanned.SleepingBagCount));
+            SaveConfig();
+            foreach (var active in data.ActiveRaidBases.Values.Where(value => value != null
+                         && string.Equals(value.LayoutId, layoutId, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                if (weighted.GuardBagCount > 0)
+                {
+                    InitializeAndReconcileBagGuards(active);
+                    continue;
+                }
+                foreach (var binding in active.GuardBagBindings ?? new List<GuardBagBinding>())
+                    if (!string.IsNullOrWhiteSpace(binding.GroupId))
+                        RaidlandsRoamBots?.Call("REBOT_DespawnGroup", binding.GroupId, "bag guards disabled in event manager");
+                active.GuardBagBindings.Clear();
+                active.RoamBotGuardEntityIds.Clear();
+                SaveData();
+            }
+            message = weighted.GuardBagCount == 0
+                ? $"Bag guards are disabled for {layoutId}."
+                : $"{layoutId} now appoints {weighted.GuardBagCount}/{scanned.SleepingBagCount} sleeping bags to guards.";
             return true;
         }
 
@@ -4803,7 +5018,7 @@ namespace Oxide.Plugins
                 RectTransform = { AnchorMin = "0.198 0.015", AnchorMax = "0.992 0.915" }
             }, panel);
 
-            AddUiSection(container, body, workspace == "automation" ? "Automation Controls" : "Event Operations", 0.03f, 0.865f, 0.97f, 0.91f);
+            AddUiSection(container, body, workspace == "automation" ? "Automation Controls" : workspace == "turrets" ? "Turret Defaults" : workspace == "guards" ? "Guard Bag Appointments" : "Event Operations", 0.03f, 0.865f, 0.97f, 0.91f);
             AddUiButton(container, body, "Scan Layouts", "revents.ui scan", 0.045f, 0.802f, 0.17f, 0.85f, UiAccentAlt, 10);
             AddUiButton(container, body, config.EventTypes.AutomaticBases.Enabled ? "Automatic: Enabled" : "Automatic: Disabled", config.EventTypes.AutomaticBases.Enabled ? "revents.ui auto off" : "revents.ui auto on", 0.18f, 0.802f, 0.36f, 0.85f, config.EventTypes.AutomaticBases.Enabled ? UiSuccess : UiMuted, 9);
             var cleanupRunning = cleanupJob != null;
@@ -4909,16 +5124,17 @@ namespace Oxide.Plugins
             AddManagerNavItem(container, panel, workspace, "active", $"Overview  ({ActiveEventCount()})", 0.83f);
             AddManagerNavItem(container, panel, workspace, "automation", "Automation", 0.75f);
             AddManagerNavItem(container, panel, workspace, "load", "Bases & Loot", 0.67f);
-            AddManagerNavItem(container, panel, workspace, "rewards", $"Rewards  ({rewardProfiles.Count})", 0.59f);
+            AddManagerNavItem(container, panel, workspace, "guards", "Guard Bags", 0.59f);
+            AddManagerNavItem(container, panel, workspace, "turrets", "Turret Defaults", 0.51f);
+            AddManagerNavItem(container, panel, workspace, "rewards", $"Rewards  ({rewardProfiles.Count})", 0.43f);
 
-            AddUiLabel(container, panel, "STATUS", 0.08f, 0.48f, 0.92f, 0.53f, 8, TextAnchor.MiddleLeft, "0.48 0.57 0.62 1");
+            AddUiLabel(container, panel, "STATUS", 0.08f, 0.32f, 0.92f, 0.37f, 8, TextAnchor.MiddleLeft, "0.48 0.57 0.62 1");
             AddUiStatusCard(container, panel, "Automatic", config.EventTypes.AutomaticBases.Enabled ? "ENABLED" : "DISABLED",
-                config.EventTypes.AutomaticBases.Enabled, 0.39f);
+                config.EventTypes.AutomaticBases.Enabled, 0.23f);
             AddUiStatusCard(container, panel, "Spawn Grid", spawnGridReady ? "READY" : spawnGridBuilding ? "BUILDING" : "OFFLINE",
-                spawnGridReady, 0.30f);
+                spawnGridReady, 0.14f);
             AddUiStatusCard(container, panel, "Configuration", ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase) ? "VALID" : "CHECK",
-                ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase), 0.21f);
-            AddUiLabel(container, panel, "Changes are applied immediately and saved by the existing event systems.", 0.08f, 0.045f, 0.92f, 0.15f, 7, TextAnchor.UpperLeft, "0.45 0.53 0.58 1");
+                ValidateRaidableCompatibility(false).StartsWith("valid", StringComparison.OrdinalIgnoreCase), 0.05f);
         }
 
         private void AddManagerNavItem(CuiElementContainer container, string parent, string workspace,
@@ -5023,10 +5239,89 @@ namespace Oxide.Plugins
 
             if (workspace == "load")
                 BuildLayoutsUi(container, panel, player);
+            else if (workspace == "guards")
+                BuildGuardBagsUi(container, panel, player);
+            else if (workspace == "turrets")
+                BuildTurretDefaultsUi(container, panel);
             else if (workspace == "rewards")
                 BuildRewardsUi(container, panel, player);
             else
                 BuildActiveEventsUi(container, panel, player);
+        }
+
+        private void BuildGuardBagsUi(CuiElementContainer container, string panel, BasePlayer player)
+        {
+            AddUiSection(container, panel, "Sleeping-Bag Guard Anchors", 0.03f, 0.68f, 0.97f, 0.73f);
+            AddUiLabel(container, panel,
+                "Appoint copied sleeping bags to guard slots. Each bag owns one guard respawn lane until players destroy it.",
+                0.045f, 0.625f, 0.95f, 0.67f, 9, TextAnchor.MiddleLeft, "0.62 0.70 0.78 1");
+            var layouts = data.Layouts.Values.Where(value => value != null && value.SleepingBagCount > 0)
+                .OrderBy(value => value.LayoutId).ToList();
+            int page;
+            uiLayoutPages.TryGetValue(player.userID, out page);
+            var pages = Math.Max(1, Mathf.CeilToInt(layouts.Count / 5f));
+            page = Mathf.Clamp(page, 0, pages - 1);
+            uiLayoutPages[player.userID] = page;
+            AddUiButton(container, panel, "<", "revents.ui layoutpage -1", 0.80f, 0.625f, 0.84f, 0.665f, UiMuted, 8);
+            AddUiLabel(container, panel, $"{page + 1}/{pages}", 0.845f, 0.625f, 0.91f, 0.665f, 8, TextAnchor.MiddleCenter, "0.62 0.68 0.74 1");
+            AddUiButton(container, panel, ">", "revents.ui layoutpage 1", 0.915f, 0.625f, 0.955f, 0.665f, UiMuted, 8);
+            var y = 0.55f;
+            foreach (var layout in layouts.Skip(page * 5).Take(5))
+            {
+                var configured = config.EventTypes.AutomaticBases.Layouts.FirstOrDefault(value => value != null
+                    && string.Equals(value.LayoutId, layout.LayoutId, StringComparison.OrdinalIgnoreCase));
+                var count = configured?.GuardBagCount ?? 0;
+                AddUiRowBackground(container, panel, 0.045f, y, 0.955f, y + 0.065f);
+                AddUiLabel(container, panel, ShortUiText(layout.LayoutId, 34), 0.065f, y + 0.01f, 0.39f, y + 0.055f, 9, TextAnchor.MiddleLeft, "0.90 0.94 0.97 1");
+                AddUiLabel(container, panel, $"{count}/{layout.SleepingBagCount} appointed", 0.40f, y + 0.01f, 0.57f, y + 0.055f, 9, TextAnchor.MiddleLeft, count > 0 ? "0.48 0.88 0.58 1" : "0.62 0.68 0.74 1");
+                AddUiButton(container, panel, "-", $"revents.ui guardbags {layout.LayoutId} -1", 0.64f, y + 0.008f, 0.70f, y + 0.057f, UiWarning, 10);
+                AddUiButton(container, panel, "+", $"revents.ui guardbags {layout.LayoutId} 1", 0.71f, y + 0.008f, 0.77f, y + 0.057f, UiSuccess, 10);
+                AddUiButton(container, panel, "None", $"revents.ui guardbags {layout.LayoutId} -20", 0.78f, y + 0.008f, 0.86f, y + 0.057f, UiMuted, 8);
+                AddUiButton(container, panel, "All", $"revents.ui guardbags {layout.LayoutId} 20", 0.87f, y + 0.008f, 0.94f, y + 0.057f, UiAccentAlt, 8);
+                y -= 0.078f;
+            }
+            if (layouts.Count == 0)
+                AddUiLabel(container, panel, "No sleeping bags were found in scanned CopyPaste layouts. Add bags and run Scan Layouts.", 0.08f, 0.36f, 0.92f, 0.46f, 10, TextAnchor.MiddleCenter, "0.92 0.58 0.42 1");
+            AddUiLabel(container, panel,
+                $"Respawn delay: {config.RaidableBasesCompatibility.RoamBotGuards.BagGuardRespawnDelaySeconds:0.#}s  |  Guards open nearby event doors and close them after passing.",
+                0.045f, 0.08f, 0.95f, 0.135f, 8, TextAnchor.MiddleLeft, "0.62 0.70 0.78 1");
+        }
+
+        private void BuildTurretDefaultsUi(CuiElementContainer container, string panel)
+        {
+            var loadout = config.Paste.DefaultTurretLoadout;
+            AddUiSection(container, panel, "CopyPaste Turret Loadout", 0.03f, 0.66f, 0.97f, 0.71f);
+            AddUiLabel(container, panel,
+                "Applied automatically to every auto-turret when any discovered CopyPaste raid base is spawned.",
+                0.045f, 0.61f, 0.95f, 0.65f, 9, TextAnchor.MiddleLeft, "0.62 0.70 0.78 1");
+
+            AddUiRowBackground(container, panel, 0.045f, 0.50f, 0.955f, 0.59f);
+            AddUiLabel(container, panel, "Provisioning", 0.065f, 0.525f, 0.19f, 0.57f, 9, TextAnchor.MiddleLeft, "0.88 0.92 0.95 1");
+            AddUiButton(container, panel, loadout.Enabled ? "ENABLED" : "DISABLED", "revents.ui turretsetting toggle",
+                0.20f, 0.52f, 0.33f, 0.57f, loadout.Enabled ? UiSuccess : UiMuted, 9);
+            AddUiLabel(container, panel, "Weapon", 0.37f, 0.525f, 0.44f, 0.57f, 8, TextAnchor.MiddleRight, "0.52 0.60 0.68 1");
+            AddUiLabel(container, panel, loadout.WeaponShortName, 0.45f, 0.525f, 0.61f, 0.57f, 9, TextAnchor.MiddleLeft, "0.88 0.92 0.95 1");
+            AddUiLabel(container, panel, "Other inventory slots remain empty", 0.65f, 0.525f, 0.93f, 0.57f, 8, TextAnchor.MiddleRight, "0.52 0.60 0.68 1");
+
+            AddUiRowBackground(container, panel, 0.045f, 0.36f, 0.955f, 0.47f);
+            AddUiLabel(container, panel, "Ammo type", 0.065f, 0.405f, 0.16f, 0.445f, 9, TextAnchor.MiddleLeft, "0.88 0.92 0.95 1");
+            AddUiButton(container, panel, loadout.AmmoShortName, "revents.ui turretsetting ammo",
+                0.17f, 0.395f, 0.43f, 0.45f, UiAccentAlt, 9);
+            AddUiLabel(container, panel, "Click to cycle incendiary / standard / HV / explosive", 0.45f, 0.405f, 0.93f, 0.445f, 8, TextAnchor.MiddleLeft, "0.52 0.60 0.68 1");
+
+            AddUiRowBackground(container, panel, 0.045f, 0.20f, 0.955f, 0.33f);
+            AddUiLabel(container, panel, "Rounds per turret", 0.065f, 0.265f, 0.20f, 0.31f, 9, TextAnchor.MiddleLeft, "0.88 0.92 0.95 1");
+            AddUiLabel(container, panel, $"<b>{loadout.RoundsPerTurret}</b> in one ammo slot", 0.21f, 0.25f, 0.42f, 0.315f, 13, TextAnchor.MiddleLeft, "0.96 0.98 1 1");
+            AddUiButton(container, panel, "-100", "revents.ui turretsetting amount -100", 0.45f, 0.245f, 0.54f, 0.305f, UiWarning, 9);
+            AddUiButton(container, panel, "-10", "revents.ui turretsetting amount -10", 0.55f, 0.245f, 0.63f, 0.305f, UiWarning, 9);
+            AddUiButton(container, panel, "+10", "revents.ui turretsetting amount 10", 0.64f, 0.245f, 0.72f, 0.305f, UiSuccess, 9);
+            AddUiButton(container, panel, "+100", "revents.ui turretsetting amount 100", 0.73f, 0.245f, 0.82f, 0.305f, UiSuccess, 9);
+            AddUiButton(container, panel, "Reset 500", "revents.ui turretsetting reset", 0.83f, 0.245f, 0.94f, 0.305f, UiAccentAlt, 8);
+
+            AddUiLabel(container, panel, "Changes affect future spawns. Use Apply To Active to replace the loadout in currently running raid bases.",
+                0.045f, 0.105f, 0.72f, 0.165f, 8, TextAnchor.MiddleLeft, "0.62 0.70 0.78 1");
+            AddUiButton(container, panel, "Apply To Active", "revents.ui turretsetting apply",
+                0.76f, 0.105f, 0.955f, 0.165f, UiDanger, 9);
         }
 
         private void BuildRewardsUi(CuiElementContainer container, string panel, BasePlayer player)
@@ -6328,6 +6623,8 @@ namespace Oxide.Plugins
                         entry.HasCrateLikeEntity = true;
                     if (IsAutoTurretPrefab(prefab))
                         entry.AutoTurretCount++;
+                    if (IsSleepingBagPrefab(prefab))
+                        entry.SleepingBagCount++;
 
                     Vector3 relativePosition;
                     if (!TryGetRelativePosition(entity, out relativePosition))
@@ -6928,6 +7225,7 @@ namespace Oxide.Plugins
             var profileLootSummary = ApplyProfileLoot(active);
             var overrideSummary = ApplyLayoutLootOverrides(active);
             var kastroDefenses = ConfigureKastroDefenses(active.LayoutId, active.EntityIds);
+            var turretLoadouts = ConfigureDefaultTurretLoadouts(active.EntityIds);
             var normalizedTurrets = NormalizePastedTurretsAttackAll(active.EntityIds);
             var managedSentries = ManageEventSentries(active.EntityIds);
             ScheduleEventGuards(active);
@@ -6936,6 +7234,7 @@ namespace Oxide.Plugins
             var survivingAutoTurrets = CountLivePastedAutoTurrets(active.EntityIds);
             ScheduleEventSanitizationReapply(active.EntityIds);
             ScheduleKastroDefenseReapply(active.LayoutId, active.EntityIds);
+            ScheduleDefaultTurretLoadoutReapply(active.EntityIds);
             SchedulePastedTurretAttackAllReapply(active.EntityIds);
             SchedulePastedTurretSurvivalAudit(active.InstanceId, active.EntityIds, expectedAutoTurrets);
             if (active.IsAnnounced)
@@ -6948,7 +7247,7 @@ namespace Oxide.Plugins
                 var startMessage = $"{config.ChatPrefix} {active.PublicName} has appeared on the map. Bring boom and fight for it.";
                 Server.Broadcast(startMessage);
             }
-            Puts($"Raid base event {active.InstanceId} active: type={active.EventTypeId}, layout={active.LayoutId}, profile={active.ProfileId ?? "none"}, difficulty={active.Difficulty ?? "none"}, announced={active.IsAnnounced}, entities={active.EntityIds.Count}, tc={active.ToolCupboardId}, adaptiveFoundations={adaptiveSummary}, sanitized={sanitized.Entities}, cupboards={sanitized.Cupboards}, locks={sanitized.Locks}, sams={sanitized.Sams}, traps={sanitized.Traps}, removedSteamIds={sanitized.RemovedSteamIds}, kastroDefenses={kastroDefenses}, profileLoot={profileLootSummary}, lootOverrides={overrideSummary}, turretsAttackAll={normalizedTurrets}, managedSentries={managedSentries}, autoTurrets={survivingAutoTurrets}/{expectedAutoTurrets}.");
+            Puts($"Raid base event {active.InstanceId} active: type={active.EventTypeId}, layout={active.LayoutId}, profile={active.ProfileId ?? "none"}, difficulty={active.Difficulty ?? "none"}, announced={active.IsAnnounced}, entities={active.EntityIds.Count}, tc={active.ToolCupboardId}, adaptiveFoundations={adaptiveSummary}, sanitized={sanitized.Entities}, cupboards={sanitized.Cupboards}, locks={sanitized.Locks}, sams={sanitized.Sams}, traps={sanitized.Traps}, removedSteamIds={sanitized.RemovedSteamIds}, kastroDefenses={kastroDefenses}, turretLoadouts={turretLoadouts}, profileLoot={profileLootSummary}, lootOverrides={overrideSummary}, turretsAttackAll={normalizedTurrets}, managedSentries={managedSentries}, autoTurrets={survivingAutoTurrets}/{expectedAutoTurrets}.");
         }
 
         private int ManageActiveEventSentries()
@@ -6991,7 +7290,12 @@ namespace Oxide.Plugins
                 if (data.ActiveRaidBases.TryGetValue(instanceId, out current)
                     && current != null
                     && string.Equals(current.Status, "active", StringComparison.OrdinalIgnoreCase))
-                    SpawnEventGuards(current, false);
+                {
+                    if (ConfiguredGuardBagCount(current) > 0)
+                        InitializeAndReconcileBagGuards(current);
+                    else
+                        SpawnEventGuards(current, false);
+                }
             });
         }
 
@@ -7006,12 +7310,380 @@ namespace Oxide.Plugins
                          .Where(value => value != null && string.Equals(value.Status, "active", StringComparison.OrdinalIgnoreCase))
                          .ToList())
             {
+                if (ConfiguredGuardBagCount(active) > 0)
+                {
+                    InitializeAndReconcileBagGuards(active);
+                    continue;
+                }
                 var hasLiveGuard = (active.RoamBotGuardEntityIds ?? new List<ulong>())
                     .Any(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) != null);
                 if (!hasLiveGuard)
                     SpawnEventGuards(active, true);
                 else
                     AuthorizeEventGuards(active);
+            }
+        }
+
+        private void ReconcileActiveBagGuards()
+        {
+            if (config?.RaidableBasesCompatibility?.RoamBotGuards?.Enabled != true
+                || RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded
+                || data?.ActiveRaidBases == null)
+                return;
+
+            foreach (var active in data.ActiveRaidBases.Values
+                         .Where(value => value != null
+                                         && string.Equals(value.Status, "active", StringComparison.OrdinalIgnoreCase)
+                                         && ConfiguredGuardBagCount(value) > 0)
+                         .ToList())
+                InitializeAndReconcileBagGuards(active);
+        }
+
+        private int ConfiguredGuardBagCount(ActiveRaidBase active)
+        {
+            if (active == null)
+                return 0;
+            var layout = config.EventTypes.AutomaticBases.Layouts.FirstOrDefault(value => value != null
+                && string.Equals(value.LayoutId, active.LayoutId, StringComparison.OrdinalIgnoreCase));
+            return layout == null ? 0 : Math.Max(0, layout.GuardBagCount);
+        }
+
+        private void InitializeAndReconcileBagGuards(ActiveRaidBase active)
+        {
+            if (active == null || RaidlandsRoamBots == null || !RaidlandsRoamBots.IsLoaded)
+                return;
+
+            var desired = ConfiguredGuardBagCount(active);
+            if (desired <= 0)
+                return;
+
+            if (active.GuardBagBindings == null)
+                active.GuardBagBindings = new List<GuardBagBinding>();
+
+            if (active.GuardBagBindings.Count == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(active.RoamBotGuardGroupId)
+                    || (active.RoamBotGuardEntityIds != null && active.RoamBotGuardEntityIds.Count > 0))
+                {
+                    RaidlandsRoamBots.Call("REBOT_DespawnForEvent", active.InstanceId, "migrating event guards to sleeping-bag anchors");
+                    active.RoamBotGuardGroupId = null;
+                    active.RoamBotGuardEntityIds.Clear();
+                }
+                var bags = (active.EntityIds ?? new List<ulong>())
+                    .Select(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as SleepingBag)
+                    .Where(bag => bag != null && !bag.IsDestroyed && bag.net != null)
+                    .OrderBy(bag => bag.transform.position.y)
+                    .ThenBy(bag => bag.transform.position.x)
+                    .ThenBy(bag => bag.transform.position.z)
+                    .Take(desired)
+                    .ToList();
+                foreach (var bag in bags)
+                    active.GuardBagBindings.Add(new GuardBagBinding { BagEntityId = bag.net.ID.Value, RespawnDueUnix = NowUnix() - 0.01d });
+                SaveData();
+                Puts($"Raid base {active.InstanceId} appointed {bags.Count}/{desired} sleeping bags as guard respawn anchors.");
+            }
+
+            if (active.GuardBagBindings.Count > desired)
+            {
+                foreach (var removed in active.GuardBagBindings.Skip(desired).ToList())
+                    if (!string.IsNullOrWhiteSpace(removed.GroupId))
+                        RaidlandsRoamBots.Call("REBOT_DespawnGroup", removed.GroupId, "guard bag appointment removed");
+                active.GuardBagBindings = active.GuardBagBindings.Take(desired).ToList();
+                SaveData();
+            }
+            else if (active.GuardBagBindings.Count < desired)
+            {
+                var appointed = new HashSet<ulong>(active.GuardBagBindings.Select(binding => binding.BagEntityId));
+                var additional = (active.EntityIds ?? new List<ulong>())
+                    .Select(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) as SleepingBag)
+                    .Where(bag => bag != null && !bag.IsDestroyed && bag.net != null && !appointed.Contains(bag.net.ID.Value))
+                    .OrderBy(bag => bag.transform.position.y)
+                    .ThenBy(bag => bag.transform.position.x)
+                    .ThenBy(bag => bag.transform.position.z)
+                    .Take(desired - active.GuardBagBindings.Count)
+                    .ToList();
+                foreach (var bag in additional)
+                    active.GuardBagBindings.Add(new GuardBagBinding { BagEntityId = bag.net.ID.Value, RespawnDueUnix = NowUnix() - 0.01d });
+                if (additional.Count > 0)
+                    SaveData();
+            }
+
+            var changed = false;
+            var now = NowUnix();
+            foreach (var binding in active.GuardBagBindings)
+            {
+                var bag = BaseNetworkable.serverEntities.Find(new NetworkableId(binding.BagEntityId)) as SleepingBag;
+                if (bag == null || bag.IsDestroyed)
+                {
+                    if (!binding.Destroyed)
+                    {
+                        binding.Destroyed = true;
+                        binding.RespawnDueUnix = 0d;
+                        changed = true;
+                    }
+                    continue;
+                }
+
+                var guard = binding.GuardEntityId == 0 ? null
+                    : BaseNetworkable.serverEntities.Find(new NetworkableId(binding.GuardEntityId)) as BasePlayer;
+                if (guard != null && !guard.IsDestroyed)
+                {
+                    EnsureBagGuardDefencePatrol(active, binding, guard);
+                    OperateNearbyGuardDoors(active, guard);
+                    continue;
+                }
+
+                if (binding.RespawnDueUnix <= 0d)
+                {
+                    binding.RespawnDueUnix = now + config.RaidableBasesCompatibility.RoamBotGuards.BagGuardRespawnDelaySeconds;
+                    changed = true;
+                    continue;
+                }
+                if (binding.RespawnDueUnix > now)
+                    continue;
+
+                if (SpawnBagGuard(active, binding, bag.transform.position + Vector3.up * 0.2f))
+                    changed = true;
+                else
+                    binding.RespawnDueUnix = now + 5d;
+            }
+
+            active.RoamBotGuardEntityIds = active.GuardBagBindings
+                .Where(binding => binding.GuardEntityId != 0)
+                .Select(binding => binding.GuardEntityId)
+                .Where(id => BaseNetworkable.serverEntities.Find(new NetworkableId(id)) != null)
+                .Distinct()
+                .ToList();
+            if (changed)
+                SaveData();
+            AuthorizeEventGuards(active);
+        }
+
+        private bool SpawnBagGuard(ActiveRaidBase active, GuardBagBinding binding, Vector3 position)
+        {
+            var guards = config.RaidableBasesCompatibility.RoamBotGuards;
+            var difficulty = NormalizeDifficulty(active.Difficulty) ?? "Easy";
+            float healthMultiplier;
+            float leashRadius;
+            guards.HealthMultiplierByDifficulty.TryGetValue(difficulty, out healthMultiplier);
+            guards.LeashRadiusByDifficulty.TryGetValue(difficulty, out leashRadius);
+            var request = new Dictionary<string, object>
+            {
+                ["OwnerPlugin"] = Name,
+                ["EventInstanceId"] = active.InstanceId,
+                ["GroupKey"] = "bag_guard_" + binding.BagEntityId,
+                ["Profile"] = guards.Profile,
+                ["Difficulty"] = difficulty,
+                ["HealthMultiplier"] = healthMultiplier,
+                ["AllowAmbientKitSelection"] = guards.AllowAmbientKitSelection,
+                ["SpawnMode"] = "spawnpoints",
+                ["SpawnPoints"] = new List<Vector3> { position },
+                ["LeashCenter"] = EventCenter(active),
+                ["LeashRadius"] = leashRadius,
+                ["TeamKey"] = active.InstanceId + "_guards"
+            };
+            var response = RaidlandsRoamBots.Call("REBOT_SpawnSingle", request);
+            bool success;
+            string groupId;
+            List<ulong> entityIds;
+            string detail;
+            if (!TryReadRoamBotResponse(response, out success, out groupId, out entityIds, out detail) || !success || entityIds.Count == 0)
+            {
+                PrintWarning($"Raid base {active.InstanceId} bag guard spawn failed for bag {binding.BagEntityId}: {detail}");
+                return false;
+            }
+            binding.GroupId = groupId;
+            binding.GuardEntityId = entityIds[0];
+            binding.RespawnDueUnix = 0d;
+            return true;
+        }
+
+        private void EnsureBagGuardDefencePatrol(ActiveRaidBase active, GuardBagBinding binding, BasePlayer guard)
+        {
+            if (active == null || binding == null || guard == null || guard.IsDestroyed)
+                return;
+            var patrol = guard.GetComponent<BagGuardDefencePatrol>();
+            if (config.RaidableBasesCompatibility.RoamBotGuards.BagGuardIndoorPatrolEnabled != true)
+            {
+                if (patrol != null)
+                    UnityEngine.Object.Destroy(patrol);
+                return;
+            }
+            if (patrol == null)
+                patrol = guard.gameObject.AddComponent<BagGuardDefencePatrol>();
+            patrol.Plugin = this;
+            patrol.InstanceId = active.InstanceId;
+            patrol.BagEntityId = binding.BagEntityId;
+        }
+
+        private void TickBagGuardDefencePatrol(BagGuardDefencePatrol patrol)
+        {
+            if (patrol == null || patrol.Plugin != this)
+                return;
+            var guard = patrol.GetComponent<BasePlayer>();
+            ActiveRaidBase active;
+            if (guard == null || guard.IsDestroyed || guard.IsDead()
+                || !data.ActiveRaidBases.TryGetValue(patrol.InstanceId ?? string.Empty, out active)
+                || active == null || active.Status == "cleaning")
+            {
+                UnityEngine.Object.Destroy(patrol);
+                return;
+            }
+
+            var binding = (active.GuardBagBindings ?? new List<GuardBagBinding>())
+                .FirstOrDefault(value => value != null && value.BagEntityId == patrol.BagEntityId && !value.Destroyed);
+            var homeBag = binding == null ? null
+                : BaseNetworkable.serverEntities.Find(new NetworkableId(binding.BagEntityId)) as SleepingBag;
+            if (homeBag == null || homeBag.IsDestroyed)
+            {
+                UnityEngine.Object.Destroy(patrol);
+                return;
+            }
+
+            var points = (active.GuardBagBindings ?? new List<GuardBagBinding>())
+                .Where(value => value != null && !value.Destroyed)
+                .Select(value => BaseNetworkable.serverEntities.Find(new NetworkableId(value.BagEntityId)) as SleepingBag)
+                .Where(bag => bag != null && !bag.IsDestroyed)
+                .Select(bag => bag.transform.position + Vector3.up * 0.2f)
+                .ToList();
+            var position = guard.transform.position;
+            if (points.Count == 0)
+                return;
+
+            // A pasted building has no scientist NavMesh. The bag network is our
+            // trusted indoor patrol graph; never permit a guard to drift onto the
+            // terrain outside it.
+            if (points.Min(point => Vector3.Distance(position, point)) > 14f)
+            {
+                guard.Teleport(homeBag.transform.position + Vector3.up * 0.2f);
+                guard.SendNetworkUpdateImmediate();
+                patrol.Destination = Vector3.zero;
+                patrol.PausedUntil = Time.realtimeSinceStartup + 1f;
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            if (now < patrol.PausedUntil || guard.IsWounded())
+                return;
+            if (patrol.Destination == Vector3.zero || Vector3.Distance(position, patrol.Destination) <= 0.55f)
+            {
+                var candidates = points
+                    .Where(point => Vector3.Distance(position, point) > 1.25f
+                        && Vector3.Distance(position, point) <= 12f
+                        && Math.Abs(point.y - position.y) <= 1.75f
+                        && CanBagGuardPatrolSegment(active, position, point))
+                    .OrderBy(_ => UnityEngine.Random.value)
+                    .ToList();
+                Vector3 localDestination;
+                patrol.Destination = candidates.Count > 0
+                    ? candidates[0]
+                    : (TryFindLocalBagGuardPatrolDestination(active, position, out localDestination)
+                        ? localDestination
+                        : Vector3.zero);
+                patrol.PausedUntil = now + config.RaidableBasesCompatibility.RoamBotGuards.BagGuardPatrolPauseSeconds;
+                return;
+            }
+
+            OperateNearbyGuardDoors(active, guard);
+            var direction = patrol.Destination - position;
+            direction.y = 0f;
+            if (direction.sqrMagnitude <= 0.01f)
+            {
+                patrol.Destination = Vector3.zero;
+                return;
+            }
+            direction.Normalize();
+            var distance = config.RaidableBasesCompatibility.RoamBotGuards.BagGuardIndoorPatrolSpeed * Time.fixedDeltaTime;
+            RaycastHit hit;
+            if (Physics.SphereCast(position + Vector3.up, 0.3f, direction, out hit, distance + 0.15f, BagGuardPatrolCollisionMask, QueryTriggerInteraction.Ignore))
+            {
+                var door = hit.GetEntity() as Door;
+                if (door != null && (active.EntityIds ?? new List<ulong>()).Contains(door.net.ID.Value))
+                {
+                    if (!door.IsOpen())
+                    {
+                        door.SetOpen(true, true);
+                        door.SendNetworkUpdate();
+                    }
+                    patrol.PausedUntil = now + 0.25f;
+                    return;
+                }
+                patrol.Destination = Vector3.zero;
+                patrol.PausedUntil = now + 0.5f;
+                return;
+            }
+
+            var next = Vector3.MoveTowards(position, patrol.Destination, distance);
+            next.y = Mathf.Lerp(position.y, patrol.Destination.y, Mathf.Clamp01(distance));
+            guard.MovePosition(next);
+            guard.modelState.onground = true;
+        }
+
+        private bool CanBagGuardPatrolSegment(ActiveRaidBase active, Vector3 from, Vector3 to)
+        {
+            RaycastHit hit;
+            var direction = to - from;
+            var distance = direction.magnitude;
+            if (distance <= 0.1f || !Physics.SphereCast(from + Vector3.up, 0.3f, direction.normalized, out hit,
+                    distance, BagGuardPatrolCollisionMask, QueryTriggerInteraction.Ignore))
+                return true;
+            var door = hit.GetEntity() as Door;
+            return door != null && door.net != null
+                && (active.EntityIds ?? new List<ulong>()).Contains(door.net.ID.Value);
+        }
+
+        private bool TryFindLocalBagGuardPatrolDestination(ActiveRaidBase active, Vector3 origin, out Vector3 destination)
+        {
+            destination = Vector3.zero;
+            if (active == null)
+                return false;
+            var eventEntities = new HashSet<ulong>(active.EntityIds ?? new List<ulong>());
+            for (var attempt = 0; attempt < 16; attempt++)
+            {
+                var angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+                var radius = UnityEngine.Random.Range(1.75f, 5f);
+                var sample = origin + new Vector3(Mathf.Cos(angle) * radius, 2f, Mathf.Sin(angle) * radius);
+                RaycastHit floorHit;
+                if (!Physics.Raycast(sample, Vector3.down, out floorHit, 4.5f, BagGuardPatrolCollisionMask, QueryTriggerInteraction.Ignore))
+                    continue;
+                var floorEntity = floorHit.GetEntity();
+                if (!(floorEntity is BuildingBlock) || floorEntity.net == null || !eventEntities.Contains(floorEntity.net.ID.Value))
+                    continue;
+                var point = floorHit.point + Vector3.up * 0.2f;
+                if (Math.Abs(point.y - origin.y) > 1.25f || !CanBagGuardPatrolSegment(active, origin, point))
+                    continue;
+                destination = point;
+                return true;
+            }
+            return false;
+        }
+
+        private void OperateNearbyGuardDoors(ActiveRaidBase active, BasePlayer guard)
+        {
+            var guards = config?.RaidableBasesCompatibility?.RoamBotGuards;
+            if (active == null || guard == null || guards?.BagGuardsCanOperateDoors != true)
+                return;
+            foreach (var entityId in active.EntityIds ?? new List<ulong>())
+            {
+                var door = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as Door;
+                if (door == null || door.IsDestroyed || door.IsOpen() || Vector3.Distance(guard.transform.position, door.transform.position) > 2.25f)
+                    continue;
+                door.SetOpen(true, true);
+                door.SendNetworkUpdate();
+                var doorId = entityId;
+                timer.Once(guards.BagGuardDoorCloseDelaySeconds, () =>
+                {
+                    var current = BaseNetworkable.serverEntities.Find(new NetworkableId(doorId)) as Door;
+                    if (current == null || current.IsDestroyed || !current.IsOpen())
+                        return;
+                    var occupied = BasePlayer.activePlayerList.Any(player => player != null && !player.IsDestroyed
+                        && Vector3.Distance(player.transform.position, current.transform.position) < 1.75f);
+                    if (!occupied)
+                    {
+                        current.SetOpen(false, true);
+                        current.SendNetworkUpdate();
+                    }
+                });
             }
         }
 
@@ -7111,8 +7783,10 @@ namespace Oxide.Plugins
                         CenterDistance = Vector3.Distance(position, center)
                     };
                 })
+                .Where(candidate => IsGuardSpawnAboveWater(candidate.Position))
                 .OrderByDescending(candidate => candidate.InteriorScore)
-                .ThenByDescending(candidate => candidate.IsFoundation)
+                .ThenBy(candidate => candidate.IsFoundation)
+                .ThenByDescending(candidate => candidate.Position.y)
                 .ThenBy(candidate => candidate.CenterDistance)
                 .ToList();
 
@@ -7150,6 +7824,19 @@ namespace Oxide.Plugins
                 result.Add(result[result.Count % Math.Max(1, result.Count)]);
 
             return result;
+        }
+
+        private bool IsGuardSpawnAboveWater(Vector3 position)
+        {
+            try
+            {
+                var waterSurface = WaterLevel.GetWaterSurface(position, true, true, null);
+                return !WaterLevel.Test(position, true, true) && position.y >= waterSurface + 0.1f;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private Vector3 GuardSpawnPositionOnBlock(BuildingBlock block)
@@ -7561,7 +8248,6 @@ namespace Oxide.Plugins
                 var turret = entity as AutoTurret;
                 if (turret != null)
                 {
-                    ProvisionKastroTurret(turret);
                     turrets++;
                 }
 
@@ -7595,28 +8281,53 @@ namespace Oxide.Plugins
             return $"hqm={hqmBlocks}, upgraded={upgradedBlocks}, turrets={turrets}, sams={sams}, doors={doors}, locks={locks}";
         }
 
-        private void ProvisionKastroTurret(AutoTurret turret)
+        private string ConfigureDefaultTurretLoadouts(List<ulong> entityIds)
+        {
+            var loadout = config?.Paste?.DefaultTurretLoadout;
+            if (entityIds == null || loadout?.Enabled != true)
+                return "disabled";
+
+            var configured = 0;
+            foreach (var entityId in entityIds.Where(id => id != 0).Distinct())
+            {
+                var turret = BaseNetworkable.serverEntities.Find(new NetworkableId(entityId)) as AutoTurret;
+                if (turret == null || turret.IsDestroyed)
+                    continue;
+
+                if (ProvisionDefaultTurretLoadout(turret))
+                    configured++;
+            }
+
+            return $"configured={configured}, weapon={loadout.WeaponShortName}, ammo={loadout.AmmoShortName}, rounds={loadout.RoundsPerTurret}";
+        }
+
+        private bool ProvisionDefaultTurretLoadout(AutoTurret turret)
         {
             if (turret == null || turret.IsDestroyed || turret.inventory == null)
-                return;
+                return false;
+
+            var loadout = config?.Paste?.DefaultTurretLoadout;
+            if (loadout?.Enabled != true)
+                return false;
+
+            var weaponDefinition = ItemManager.FindItemDefinition(loadout.WeaponShortName);
+            var ammoDefinition = ItemManager.FindItemDefinition(loadout.AmmoShortName);
+            if (weaponDefinition == null || ammoDefinition == null)
+            {
+                PrintWarning($"Default turret loadout was not applied: weapon={loadout.WeaponShortName}, ammo={loadout.AmmoShortName}.");
+                return false;
+            }
 
             foreach (var existing in turret.inventory.itemList.ToList())
                 existing.Remove();
 
-            var weapon = ItemManager.CreateByName("lmg.m249", 1);
+            var weapon = ItemManager.Create(weaponDefinition, 1);
             if (weapon != null && !weapon.MoveToContainer(turret.inventory, 0, false))
                 weapon.Remove();
 
-            var ammoDefinition = ItemManager.FindItemDefinition("ammo.rifle.incendiary");
-            if (ammoDefinition != null)
-            {
-                for (var slot = 1; slot < turret.inventory.capacity; slot++)
-                {
-                    var ammo = ItemManager.Create(ammoDefinition, ammoDefinition.stackable);
-                    if (ammo != null && !ammo.MoveToContainer(turret.inventory, slot, false))
-                        ammo.Remove();
-                }
-            }
+            var ammo = ItemManager.Create(ammoDefinition, loadout.RoundsPerTurret);
+            if (ammo != null && !ammo.MoveToContainer(turret.inventory, 1, false))
+                ammo.Remove();
 
             turret.inventory.MarkDirty();
             turret.UpdateAttachedWeapon();
@@ -7626,6 +8337,18 @@ namespace Oxide.Plugins
             turret.SetIsOnline(true);
             DisableTurretPeacekeeperMode(turret);
             turret.SendNetworkUpdate();
+            return true;
+        }
+
+        private void ScheduleDefaultTurretLoadoutReapply(List<ulong> entityIds)
+        {
+            if (entityIds == null || config?.Paste?.DefaultTurretLoadout?.Enabled != true)
+                return;
+
+            var ids = entityIds.Where(id => id != 0).Distinct().ToList();
+            foreach (var delay in config.Paste.PastedTurretAttackAllReapplyDelaysSeconds ?? Array.Empty<float>())
+                if (delay >= 0f)
+                    timer.Once(delay, () => ConfigureDefaultTurretLoadouts(ids));
         }
 
         private void ScheduleKastroDefenseReapply(string layoutId, List<ulong> entityIds)
@@ -12450,6 +13173,12 @@ namespace Oxide.Plugins
         {
             return !string.IsNullOrWhiteSpace(prefab)
                    && prefab.IndexOf("/autoturret/autoturret_deployed.prefab", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool IsSleepingBagPrefab(string prefab)
+        {
+            return !string.IsNullOrWhiteSpace(prefab)
+                   && prefab.IndexOf("sleepingbag", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private bool IsCrateLikePrefab(string prefab)

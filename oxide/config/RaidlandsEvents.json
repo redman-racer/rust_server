@@ -31,6 +31,13 @@
     },
     "Profile Event Duration Minutes": 180.0,
     "RoamBot Guards": {
+      "Bag Guard Door Close Delay Seconds": 3.0,
+      "Bag Guard Indoor Patrol Enabled": true,
+      "Bag Guard Indoor Patrol Speed": 2.2,
+      "Bag Guard Patrol Pause Seconds": 2.0,
+      "Bag Guard Reconcile Seconds": 2.0,
+      "Bag Guard Respawn Delay Seconds": 20.0,
+      "Bag Guards Can Operate Doors": true,
       "Enabled": true,
       "Spawn Delay Seconds": 3.0,
       "Count By Difficulty": {
@@ -59,7 +66,7 @@
     "Debug Logging": false
   },
   "Cleanup": {
-    "Cleanup On Unload": true,
+    "Cleanup On Unload": false,
     "Completion Cleanup Delay Seconds": 60.0,
     "Despawn Pasted Entities": true,
     "Entities Per Tick": 25,
@@ -74,43 +81,42 @@
       "Hard Lifetime Hours": 24.0,
       "Layouts": [
         {
-          "Enabled": true,
+          "Enabled": false,
           "Layout Id": "ababmxking-1",
           "Weight": 1.0
         },
         {
-          "Enabled": true,
+          "Enabled": false,
           "Layout Id": "heizenberg-1",
           "Weight": 1.0
         },
         {
-          "Enabled": true,
+          "Enabled": false,
           "Layout Id": "justintoactive-1",
           "Weight": 1.0
         },
         {
           "Enabled": true,
+          "Guard Bag Count": 7,
           "Layout Id": "raidlands_kastro_mini_hard",
           "Weight": 20.0
         },
         {
           "Enabled": true,
+          "Guard Bag Count": 7,
           "Layout Id": "raidlands_kastro_nightmare",
           "Weight": 10.0
         }
       ],
-      "Maximum Active Bases": 8,
-      "Maximum Spawns Per Check": 2,
-      "Minimum Active Bases": 4,
-      "Minimum Online Players": 0,
+      "Maximum Active Bases": 1,
+      "Maximum Spawns Per Check": 1,
+      "Minimum Active Bases": 1,
+      "Minimum Online Players": 2,
       "Percentage To Announce": 25.0
     }
   },
   "LayoutRotation": {
     "EnabledLayouts": [
-      "ababmxking-1",
-      "heizenberg-1",
-      "justintoactive-1",
       "raidlands_kastro_mini_hard",
       "raidlands_kastro_nightmare"
     ],
@@ -175,7 +181,7 @@
       "Large Layout Radius Threshold Meters": 45.0,
       "Large Layout Maximum Lowering Meters": 15.0,
       "Maximum Origin Adjustment Meters": 0.75,
-      "Maximum Water Depth Meters": 3.0,
+      "Maximum Water Depth Meters": 4.0,
       "Raise Base Layer Above Water": true,
       "Stability Audit Delay Seconds": 1.0,
       "Water Surface Clearance Meters": 0.25
@@ -200,6 +206,12 @@
       "enablesaving",
       "false"
     ],
+    "Default Turret Loadout": {
+      "Ammo Short Name": "ammo.rifle.incendiary",
+      "Enabled": true,
+      "Rounds Per Turret": 500,
+      "Weapon Short Name": "lmg.m249"
+    },
     "Force Pasted Turrets Attack All": true,
     "GroundClearance": 0.25,
     "Pasted Turret Attack All Reapply Delays Seconds": [

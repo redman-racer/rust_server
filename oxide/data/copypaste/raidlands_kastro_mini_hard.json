@@ -12925,14 +12925,14 @@
     {
       "items": [],
       "pos": {
-        "x": "-7.853981",
-        "y": "12.606",
-        "z": "4.460993"
+        "x": "-13.995",
+        "y": "2.123",
+        "z": "21.54"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "5.759586",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0
@@ -12940,9 +12940,9 @@
     {
       "items": [],
       "pos": {
-        "x": "-12.45898",
-        "y": "12.606",
-        "z": "8.066995"
+        "x": "-4.299",
+        "y": "5.123",
+        "z": "15.942"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
@@ -12955,14 +12955,14 @@
     {
       "items": [],
       "pos": {
-        "x": "-7.973981",
-        "y": "-0.897",
-        "z": "10.72199"
+        "x": "-18.753",
+        "y": "8.123",
+        "z": "7.596"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "3.665191",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0
@@ -12970,24 +12970,9 @@
     {
       "items": [],
       "pos": {
-        "x": "-6.974981",
-        "y": "-0.897",
-        "z": "5.039992"
-      },
-      "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "5.759586",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "-12.43198",
-        "y": "-0.897",
-        "z": "8.120994"
+        "x": "-13.641",
+        "y": "11.123",
+        "z": "12.444"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
@@ -13000,14 +12985,14 @@
     {
       "items": [],
       "pos": {
-        "x": "-7.832982",
-        "y": "12.606",
-        "z": "10.69799"
+        "x": "-9.897",
+        "y": "14.123",
+        "z": "-2.25"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "3.665191",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0
@@ -13015,9 +13000,9 @@
     {
       "items": [],
       "pos": {
-        "x": "-12.44098",
-        "y": "12.606",
-        "z": "7.148993"
+        "x": "-8.25",
+        "y": "17.123",
+        "z": "7.593"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
@@ -13030,74 +13015,14 @@
     {
       "items": [],
       "pos": {
-        "x": "-6.998981",
-        "y": "-0.897",
-        "z": "10.20299"
-      },
-      "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "3.665191",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "-7.067981",
-        "y": "12.606",
-        "z": "4.931994"
-      },
-      "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "5.759586",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "-12.39298",
-        "y": "-0.897",
-        "z": "7.016994"
+        "x": "-3.951",
+        "y": "20.123",
+        "z": "8.343"
       },
       "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
       "rot": {
         "x": "0",
         "y": "1.570796",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "-7.910982",
-        "y": "-0.897",
-        "z": "4.457994"
-      },
-      "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "5.759586",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "-7.031981",
-        "y": "12.606",
-        "z": "10.25099"
-      },
-      "prefabname": "assets/prefabs/deployable/sleeping bag/sleepingbag_leather_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "3.665191",
         "z": "0"
       },
       "skinid": 0

@@ -207,14 +207,14 @@
     {
       "items": [],
       "pos": {
-        "x": "-5.177986",
-        "y": "5.133",
-        "z": "-2.17495"
+        "x": "-10.608",
+        "y": "2.153",
+        "z": "-21.42"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "6.021386",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0
@@ -222,14 +222,14 @@
     {
       "items": [],
       "pos": {
-        "x": "6.309015",
-        "y": "5.133",
-        "z": "-5.231947"
+        "x": "10.425",
+        "y": "5.153",
+        "z": "2.793"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "3.926991",
+        "y": "1.570796",
         "z": "0"
       },
       "skinid": 0
@@ -237,14 +237,14 @@
     {
       "items": [],
       "pos": {
-        "x": "4.533015",
-        "y": "5.133",
-        "z": "5.89805"
+        "x": "-6.259",
+        "y": "8.153",
+        "z": "-8.095"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "1.832596",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0
@@ -252,14 +252,14 @@
     {
       "items": [],
       "pos": {
-        "x": "5.349014",
-        "y": "5.133",
-        "z": "-6.203951"
+        "x": "1.836",
+        "y": "11.153",
+        "z": "-1.836"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "3.926991",
+        "y": "1.570796",
         "z": "0"
       },
       "skinid": 0
@@ -267,14 +267,14 @@
     {
       "items": [],
       "pos": {
-        "x": "3.213015",
-        "y": "5.133",
-        "z": "6.243052"
+        "x": "-2.823",
+        "y": "14.153",
+        "z": "9.756"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "1.832596",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0
@@ -282,14 +282,14 @@
     {
       "items": [],
       "pos": {
-        "x": "1.920014",
-        "y": "5.133",
-        "z": "6.597053"
+        "x": "-4.812",
+        "y": "17.153",
+        "z": "-10.605"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "1.832596",
+        "y": "1.570796",
         "z": "0"
       },
       "skinid": 0
@@ -297,44 +297,14 @@
     {
       "items": [],
       "pos": {
-        "x": "-4.835986",
-        "y": "5.133",
-        "z": "-3.470947"
+        "x": "7.14",
+        "y": "20.153",
+        "z": "4.242"
       },
       "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
       "rot": {
         "x": "0",
-        "y": "6.021386",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "-5.537986",
-        "y": "5.133",
-        "z": "-0.8579493"
-      },
-      "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "6.021386",
-        "z": "0"
-      },
-      "skinid": 0
-    },
-    {
-      "items": [],
-      "pos": {
-        "x": "7.260015",
-        "y": "5.133",
-        "z": "-4.289949"
-      },
-      "prefabname": "assets/prefabs/deployable/bed/bed_deployed.prefab",
-      "rot": {
-        "x": "0",
-        "y": "3.926991",
+        "y": "0",
         "z": "0"
       },
       "skinid": 0

@@ -17,7 +17,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("RaidlandsRoamBots", "Raidlands", "0.7.0")]
+    [Info("RaidlandsRoamBots", "Raidlands", "0.7.4")]
     [Description("Spawns player-like roaming NPCs with a local, goal-driven utility brain, Raidlands kits, separate NPC stats, and admin controls.")]
     public class RaidlandsRoamBots : RustPlugin
     {
@@ -9937,9 +9937,12 @@ namespace Oxide.Plugins
                     continue;
                 }
 
-                if (IsBlockedLandPosition(position))
+                var managedBagGuard = managedContext != null
+                    && !string.IsNullOrWhiteSpace(managedContext.GroupKey)
+                    && managedContext.GroupKey.StartsWith("bag_guard_", StringComparison.OrdinalIgnoreCase);
+                if (managedBagGuard ? IsBagGuardSpawnBlocked(position) : IsBlockedLandPosition(position))
                 {
-                    ThrottledWarning($"spawn-blocked:{prefab}", $"Prefab {prefab} spawned at {FormatVector(position)}, but that position is blocked by terrain, water, or safe-zone rules; trying the next candidate.");
+                    ThrottledWarning($"spawn-blocked:{prefab}", $"Prefab {prefab} spawned at {FormatVector(position)}, but that position is blocked by terrain, water, or safe-zone rules ({PositionDiagnostics(position)}); trying the next candidate.");
                     SafeKillSpawnAttempt(bot);
                     continue;
                 }
@@ -10004,6 +10007,27 @@ namespace Oxide.Plugins
                 }
 
                 var position = bot.transform.position;
+
+                // CopyPaste building interiors do not expose a scientist NavMesh.
+                // Never let a sleeping-bag guard's wide recovery search relocate it
+                // to the nearest terrain polygon outside the raid base.
+                if (IsManagedBagGuard(runtime))
+                {
+                    var anchoredNow = Time.realtimeSinceStartup;
+                    runtime.SpawnPosition = position;
+                    runtime.HomePosition = position;
+                    runtime.CurrentDestination = position;
+                    runtime.Movement.LastPosition = position;
+                    runtime.Movement.LastProgressAt = anchoredNow;
+                    runtime.Movement.IsStuck = false;
+                    runtime.Movement.StuckSince = 0f;
+                    runtime.ConsecutiveFailedPaths = 0;
+                    runtime.V2BodyReadyForAuthority = true;
+                    StopBotAttack(bot, runtime);
+                    FinalizeV2BodyConformance(bot, runtime);
+                    bot.SendNetworkUpdateImmediate();
+                    return;
+                }
 
                 if (!TryValidateSpawnedBotOnOwnNavmesh(bot, ref position))
                 {
@@ -10373,7 +10397,7 @@ namespace Oxide.Plugins
             runtime.RollbackReason = "none";
             runtime.ControllerModeReason = $"{ControllerModeKey(runtime.ControllerMode)}:ready";
             runtime.LastControllerInvariant = "authority_ready";
-            if (runtime.CurrentDestination != Vector3.zero)
+            if (!IsManagedBagGuard(runtime) && runtime.CurrentDestination != Vector3.zero)
             {
                 MoveBotToRaw(bot, runtime, runtime.CurrentDestination, BaseNavigator.NavigationSpeed.Fast);
             }
@@ -10397,7 +10421,8 @@ namespace Oxide.Plugins
             runtime.BodyCapabilities = legacyScientistBodyAdapter?.Inspect(bot, runtime)
                 ?? new BodyCapabilities { failure_reason = "adapter_missing" };
 
-            if (!runtime.BodyCapabilities.supports_authoritative_movement)
+            var bagGuard = IsManagedBagGuard(runtime);
+            if (!bagGuard && !runtime.BodyCapabilities.supports_authoritative_movement)
             {
                 var repairedPosition = bot.transform.position;
                 if (TryValidateSpawnedBotOnOwnNavmesh(bot, ref repairedPosition))
@@ -10421,7 +10446,7 @@ namespace Oxide.Plugins
                     ?? new BodyCapabilities { failure_reason = "adapter_missing" };
             }
 
-            var ready = runtime.BodyCapabilities.supports_authoritative_movement
+            var ready = (bagGuard || runtime.BodyCapabilities.supports_authoritative_movement)
                 && runtime.BodyCapabilities.supports_authoritative_fire;
             reason = ready ? "ready" : runtime.BodyCapabilities.failure_reason;
             return ready;
@@ -12110,6 +12135,24 @@ namespace Oxide.Plugins
                 }
             }
 
+            // Reject managed teammates before projectile authorization. Otherwise
+            // a friendly shot is blocked as unauthorized before target memory can
+            // be cleared, causing the NPC to keep firing harmless rounds.
+            if (victimRuntime != null && attackerRuntime != null
+                && !IsEnemyBot(victimRuntime, attackerRuntime))
+            {
+                info.damageTypes?.ScaleAll(0f);
+                var friendlyVictimId = CombatTargetId(victimPlayer);
+                RecordDamageHookDiagnostics(victimRuntime, attackerRuntime, damageTotal, "same_team_block", now);
+                if (friendlyVictimId != 0UL && attackerRuntime.Memory.TargetUserId == friendlyVictimId)
+                {
+                    attackerRuntime.LastFireBlockReason = "same_team_bot";
+                    StopBotAttack(attackerEntity, attackerRuntime);
+                    ClearTargetMemory(attackerRuntime);
+                }
+                return true;
+            }
+
             if (attackerRuntime != null
                 && IsProjectileHitInfo(info)
                 && !IsExplosionDamage(info)
@@ -12157,21 +12200,6 @@ namespace Oxide.Plugins
 
             if (victimRuntime != null && attackerRuntime != null)
             {
-                if (!IsEnemyBot(victimRuntime, attackerRuntime))
-                {
-                    var victimBotId = CombatTargetId(victimPlayer);
-                    RecordDamageHookDiagnostics(victimRuntime, attackerRuntime, damageTotal, "same_clan_block", now);
-
-                    if (victimBotId != 0UL && attackerRuntime.Memory.TargetUserId == victimBotId)
-                    {
-                        attackerRuntime.LastFireBlockReason = "same_clan_bot";
-                        StopBotAttack(attackerEntity, attackerRuntime);
-                        ClearTargetMemory(attackerRuntime);
-                    }
-
-                    return true;
-                }
-
                 var attackerBot = attackerEntity as BasePlayer;
                 if (!v2AuthorizedProjectile && !IsV2Actuating(attackerRuntime))
                 {
@@ -19378,7 +19406,7 @@ namespace Oxide.Plugins
                 var bot = TrySpawnBot(position, teamId, preferredPrefab, context);
                 if (bot == null)
                 {
-                    warnings.Add($"Managed RoamBot spawn failed at {FormatVector(position)}.");
+                    warnings.Add($"Managed RoamBot spawn failed at {FormatVector(position)} ({PositionDiagnostics(position)}).");
                     continue;
                 }
 
@@ -20840,6 +20868,19 @@ namespace Oxide.Plugins
                 return false;
             }
 
+            // RaidlandsEvents sleeping-bag guards are intentionally stationed inside
+            // their event base. Their managed leash defines the only base area where
+            // the normal ambient-bot base avoidance rule must not apply.
+            if (managedBotGroups.Values.Any(group => group != null
+                    && string.Equals(group.OwnerPlugin, "RaidlandsEvents", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(group.GroupKey)
+                    && group.GroupKey.StartsWith("bag_guard_", StringComparison.OrdinalIgnoreCase)
+                    && group.LeashRadius > 0f
+                    && Vector3.Distance(position, group.LeashCenter) <= group.LeashRadius))
+            {
+                return false;
+            }
+
             var now = Time.realtimeSinceStartup;
             const float cellSize = 2f;
             var cacheKey = new Vector3Int(
@@ -21022,10 +21063,35 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            return IsUnderWater(bot.transform.position)
+            BotRuntime runtime;
+            var bagGuard = activeBots.TryGetValue(bot, out runtime) && IsManagedBagGuard(runtime);
+            return (bagGuard ? IsBagGuardSpawnBlocked(bot.transform.position) : IsUnderWater(bot.transform.position)
                 || IsBelowTerrain(bot.transform.position)
                 || IsBelowPhysicalSurface(bot.transform.position)
-                || IsNavigatorOffNavmesh(bot);
+                || IsBlockedSafeZoneSpawn(bot.transform.position))
+                || (!bagGuard && IsNavigatorOffNavmesh(bot));
+        }
+
+        private bool IsManagedBagGuard(BotRuntime runtime)
+        {
+            return runtime != null
+                   && !string.IsNullOrWhiteSpace(runtime.GroupKey)
+                   && runtime.GroupKey.StartsWith("bag_guard_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsBagGuardSpawnBlocked(Vector3 position)
+        {
+            if (IsBelowTerrain(position) || IsBelowPhysicalSurface(position) || IsBlockedSafeZoneSpawn(position))
+                return true;
+
+            try
+            {
+                return WaterLevel.Test(position, true, true);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool EnsureBotPositionUsable(BaseCombatEntity bot, BotRuntime runtime, float now)
@@ -30906,6 +30972,14 @@ namespace Oxide.Plugins
 
         private bool MoveBotTo(BaseCombatEntity bot, BotRuntime runtime, Vector3 destination, BaseNavigator.NavigationSpeed speed)
         {
+            if (IsManagedBagGuard(runtime))
+            {
+                runtime.CurrentDestination = runtime.SpawnPosition;
+                runtime.Movement.LastCommandDestination = runtime.SpawnPosition;
+                runtime.Movement.LastProgressAt = Time.realtimeSinceStartup;
+                return true;
+            }
+
             if (IsV2Actuating(runtime) && legacyScientistBodyAdapter != null)
             {
                 return legacyScientistBodyAdapter.Move(bot, runtime, destination, speed);
@@ -38734,6 +38808,16 @@ namespace Oxide.Plugins
             if (left == null || right == null)
             {
                 return false;
+            }
+
+            // Managed groups created for one raid can be separate spawn groups
+            // (one group per sleeping bag) while still sharing a TeamKey. That
+            // explicit owner-provided team must take precedence over the ambient
+            // clan randomly assigned to each spawned body.
+            if (!string.IsNullOrWhiteSpace(left.TeamKey) && !string.IsNullOrWhiteSpace(right.TeamKey)
+                && string.Equals(left.TeamKey, right.TeamKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
             }
 
             if (!string.IsNullOrWhiteSpace(left.ClanKey) && !string.IsNullOrWhiteSpace(right.ClanKey))
